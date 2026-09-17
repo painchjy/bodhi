@@ -1,0 +1,78 @@
+# =====================================================================
+# bodhi2 · 拓扑 B：本仓库自持的 Neo4j 图库（本体投影 + WeKnora 实例同库）
+# ---------------------------------------------------------------------
+# 用法（在 deploy/ 目录下执行）：
+#   Copy-Item .env.example .env          # 首次，然后按需改密码
+#   docker compose up -d                 # 起库 + 自动灌本体投影
+#
+# 说明：
+#   - 本文件只负责「图库」。WeKnora 的 app / postgres / minio 等仍由上游
+#     自己的 docker-compose.yml 启动，其 .env 里 NEO4J_URI 指向本库
+#     （见 deploy/README.md「拓扑 B」）。
+#   - 不要用 -f 把本文件与上游 docker-compose.yml 合并：两边都有名为 neo4j
+#     的服务，Compose 会把它们合并成一个，语义不可控。叠加请改用
+#     deploy/docker-compose.weknora.yml。
+#   - 需要 Docker Compose v2（顶层 name 需 v2.3.3+）。
+# =====================================================================
+name: bodhi2
+
+services:
+  neo4j:
+    image: ${NEO4J_IMAGE:-neo4j:5-community}
+    container_name: bodhi2-neo4j
+    restart: unless-stopped
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"   # Neo4j Browser（浏览器里看图谱）
+      - "${NEO4J_BOLT_PORT:-7687}:7687"   # Bolt（WeKnora / cypher-shell）
+    environment:
+      # 官方镜像的认证协议：NEO4J_AUTH=neo4j/<password>；=none 表示关闭认证
+      # （本健康检查不支持 none：它要靠 NEO4J_AUTH 拆出密码）。
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:?请先复制 deploy/.env.example 为 deploy/.env 并设置 NEO4J_PASSWORD}
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    healthcheck:
+      # 判断「bolt 就绪 + 认证可用」。
+      # 密码只从 NEO4J_AUTH 拆：镜像入口脚本会把未被保留的 NEO4J_* 变量写进
+      # neo4j.conf，所以不要把 NEO4J_PASSWORD 传进本容器。
+      # $$ 是 Compose 的转义，容器里的 sh 才会展开。
+      test:
+        - CMD-SHELL
+        - 'CS=$$(command -v cypher-shell || echo /var/lib/neo4j/bin/cypher-shell); P=$${NEO4J_AUTH#*/}; "$$CS" -a bolt://localhost:7687 -u $${NEO4J_AUTH%%/*} -p "$$P" "RETURN 1;" >/dev/null 2>&1'
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - bodhi2-net
+
+  # 一次性灌库：00_constraints.cypher -> 10_ontology.cypher（幂等，跑完即退出）
+  # 本体变更后重灌：docker compose up -d --force-recreate bodhi-ontology
+  bodhi-ontology:
+    image: ${NEO4J_IMAGE:-neo4j:5-community}
+    container_name: bodhi2-ontology-bootstrap
+    restart: "no"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    # 只用到 neo4j 镜像里的 cypher-shell；入口脚本被覆盖，故镜像不会去读这些变量
+    entrypoint: ["/bin/sh", "/bodhi-deploy/bootstrap-neo4j.sh"]
+    environment:
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?请先复制 deploy/.env.example 为 deploy/.env 并设置 NEO4J_PASSWORD}
+      - BODHI_CYPHER_DIR=/bootstrap
+    volumes:
+      - ./bootstrap-neo4j.sh:/bodhi-deploy/bootstrap-neo4j.sh:ro
+      # 编译产物，不入库：先跑 python tools/ontology-compiler/compile.py compile
+      - ${BODHI_NEO4J_CYPHER_DIR:-../artifacts/neo4j}:/bootstrap:ro
+    networks:
+      - bodhi2-net
+
+volumes:
+  neo4j-data:
+  neo4j-logs:
+
+networks:
+  bodhi2-net:
+    driver: bridge

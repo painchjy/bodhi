@@ -1,0 +1,170 @@
+@prefix :       <http://example.org/bodhi/ext/ea-ownership#> .
+@prefix ea:     <http://example.org/bmm-EA-ext#> .
+@prefix bmm:    <http://example.org/bmm#> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<http://example.org/bodhi/ext/ea-ownership> rdf:type owl:Ontology ;
+    rdfs:label "EA 所有权与控制关系扩展本体（股权 / 控制 / 穿透）"@zh ;
+    rdfs:comment "在 EA 完整版之上补充法人主体、自然人、股权关系与控制关系语义。目的：支撑『持股比例 → 控制关系 → 实际控制人/受益所有人』的规则化穿透推理（含时间点口径 asOfDate）。"@zh ;
+    owl:imports <http://example.org/bmm-EA-ext> , <http://example.org/bmm> ;
+    owl:versionIRI <http://example.org/bodhi/ext/ea-ownership/1.0> .
+
+# ============================================================
+# 一、类定义
+# ============================================================
+
+### 法人主体（企业客户/同业机构等）
+:LegalEntity rdf:type owl:Class ;
+    rdfs:label "法人主体"@zh ;
+    rdfs:comment "具有独立法律身份的机构主体，如企业客户、同业机构、集团母公司。继承 EA 业务实体。"@zh ;
+    rdfs:subClassOf ea:BusinessEntity .
+
+### 自然人
+:Person rdf:type owl:Class ;
+    rdfs:label "自然人"@zh ;
+    rdfs:comment "自然人（法定代表人、股东、实际控制人、受益所有人）。自然人不是业务实体，不参与客户级流程，只作为控制关系端点。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+### 股权关系（具名化，承载比例与时间口径）
+:OwnershipRelation rdf:type owl:Class ;
+    rdfs:label "股权关系"@zh ;
+    rdfs:comment "具名化的持股关系：由主体（holder）、客体（investee）、持股比例与时间点构成，便于携带比例数值与溯源信息（把二元关系提升为可赋属性的实体）。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+### 控制关系（协议控制、人事控制、表决权控制等）
+:ControlRelation rdf:type owl:Class ;
+    rdfs:label "控制关系"@zh ;
+    rdfs:comment "不依赖持股比例的控制关系：协议控制、人事任免、表决权委托、财务并表等。与股权关系并列，共同决定实际控制人。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+# ============================================================
+# 二、对象属性
+# ============================================================
+
+:holdsShare rdf:type owl:ObjectProperty ;
+    rdfs:label "持有股权关系"@zh ;
+    rdfs:domain :LegalEntity ;
+    rdfs:range :OwnershipRelation ;
+    rdfs:comment "主体作为持股方参与某项股权关系。"@zh .
+
+:shareIn rdf:type owl:ObjectProperty ;
+    rdfs:label "投资于"@zh ;
+    rdfs:domain :OwnershipRelation ;
+    rdfs:range :LegalEntity ;
+    rdfs:comment "股权关系所指向的被投资主体。"@zh .
+
+:owns rdf:type owl:ObjectProperty ;
+    rdfs:label "持股"@zh ;
+    rdfs:domain :LegalEntity ;
+    rdfs:range :LegalEntity ;
+    rdfs:comment "法律实体之间的直接持股（由 holdsShare/shareIn 具名关系归纳得到，用于穿透计算的简化视图）。"@zh .
+
+:controls rdf:type owl:ObjectProperty ;
+    rdfs:label "控制"@zh ;
+    rdfs:domain :LegalEntity ;
+    rdfs:range :LegalEntity ;
+    rdfs:comment "一个法人主体对另一个法人主体构成控制（含股权控制与协议/人事控制）。"@zh .
+
+:controlledBy rdf:type owl:ObjectProperty ;
+    rdfs:label "被控制"@zh ;
+    rdfs:domain :LegalEntity ;
+    rdfs:range :LegalEntity ;
+    rdfs:comment "控制关系的逆方向。"@zh ;
+    owl:inverseOf :controls .
+
+:hasControlRelation rdf:type owl:ObjectProperty ;
+    rdfs:label "具有控制关系"@zh ;
+    rdfs:domain :LegalEntity ;
+    rdfs:range :ControlRelation ;
+    rdfs:comment "主体作为控制方参与某项控制关系。"@zh .
+
+:controlTarget rdf:type owl:ObjectProperty ;
+    rdfs:label "控制对象"@zh ;
+    rdfs:domain :ControlRelation ;
+    rdfs:range :LegalEntity ;
+    rdfs:comment "控制关系所指向的被控制主体。"@zh .
+
+### 穿透结果的落点：最终控制人 / 受益所有人（法人或自然人）
+:ultimateController rdf:type owl:ObjectProperty ;
+    rdfs:label "最终控制人"@zh ;
+    rdfs:domain :LegalEntity ;
+    rdfs:range [
+        rdf:type owl:Class ;
+        owl:unionOf ( :LegalEntity :Person )
+    ] ;
+    rdfs:comment "沿控制/持股链路穿透得到的最终控制人，可以是法人主体或自然人。"@zh .
+
+:beneficialOwner rdf:type owl:ObjectProperty ;
+    rdfs:label "受益所有人"@zh ;
+    rdfs:domain :LegalEntity ;
+    rdfs:range [
+        rdf:type owl:Class ;
+        owl:unionOf ( :LegalEntity :Person )
+    ] ;
+    rdfs:comment "按受益所有人口径（通常为最终持股/表决权超过阈值）识别的自然人。"@zh .
+
+# ============================================================
+# 三、数据属性
+# ============================================================
+
+:ownershipPercent rdf:type owl:DatatypeProperty ;
+    rdfs:label "持股比例"@zh ;
+    rdfs:domain :OwnershipRelation ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "持股比例，取值 0~100（百分数口径，如 51.5 表示 51.5%）。"@zh .
+
+:ownershipKind rdf:type owl:DatatypeProperty ;
+    rdfs:label "持股类型"@zh ;
+    rdfs:domain :OwnershipRelation ;
+    rdfs:range xsd:string ;
+    rdfs:comment "持股类型取值建议：equity（股权） / nominal（代持） / pledge（质押）。"@zh .
+
+:controlKind rdf:type owl:DatatypeProperty ;
+    rdfs:label "控制类型"@zh ;
+    rdfs:domain :ControlRelation ;
+    rdfs:range xsd:string ;
+    rdfs:comment "控制类型取值建议：equity（股权控制） / agreement（协议控制） / personnel（人事控制） / voting（表决权控制）。"@zh .
+
+:asOfDate rdf:type owl:DatatypeProperty ;
+    rdfs:label "口径日期"@zh ;
+    rdfs:domain :OwnershipRelation ;
+    rdfs:range xsd:date ;
+    rdfs:comment "该股权关系生效/采集的时间点，穿透计算必须按同一 asOfDate 口径进行。"@zh .
+
+:isControlling rdf:type owl:DatatypeProperty ;
+    rdfs:label "是否构成控制"@zh ;
+    rdfs:domain :ControlRelation ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "该关系是否构成控制（供穿透推理与人工复核使用）。"@zh .
+
+# ============================================================
+# 四、公理约束（TBox）
+# ============================================================
+
+:OwnershipRelation rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :ownershipPercent ;
+    owl:cardinality 1 ;
+    rdfs:comment "每条股权关系必须且只能有一个持股比例"@zh
+] .
+
+:OwnershipRelation rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :shareIn ;
+    owl:cardinality 1 ;
+    rdfs:comment "每条股权关系必须且只能指向一个被投资主体"@zh
+] .
+
+:ControlRelation rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :controlTarget ;
+    owl:minCardinality 1 ;
+    rdfs:comment "每条控制关系必须指向至少一个被控制主体"@zh
+] .
+
+# 说明：此处刻意不声明 :LegalEntity -> :owns 的基数约束。
+# 「法人主体可以不持股」属于 minCardinality 0，对 SHACL/校验没有任何约束力，
+# 反而会在生成物里产生噪声；真正的约束在 ontology/shapes/ownership.shapes.ttl 中表达。

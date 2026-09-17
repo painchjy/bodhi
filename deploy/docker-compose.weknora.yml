@@ -1,0 +1,42 @@
+# =====================================================================
+# bodhi2 · 叠加层：给「上游 WeKnora 自带 neo4j 服务」灌本体投影
+# ---------------------------------------------------------------------
+# 拓扑 A（推荐，最省事）：Neo4j 由上游 `--profile neo4j` 提供，本文件只**新增**
+# 一个一次性服务 bodhi-ontology，不改上游任何服务、不新增网络、不定义 neo4j。
+#
+# 用法（PowerShell，在【上游 WeKnora 仓库根目录】执行；<BODHI2> 换成本仓库绝对路径）：
+#   python <BODHI2>\tools\ontology-compiler\compile.py compile
+#   $env:BODHI_DEPLOY_DIR       = '<BODHI2>/deploy'
+#   $env:BODHI_NEO4J_CYPHER_DIR = '<BODHI2>/artifacts/neo4j'
+#   docker compose -f docker-compose.yml `
+#     -f <BODHI2>/deploy/docker-compose.weknora.yml `
+#     --profile neo4j --profile bodhi up -d
+#
+# 注意：
+#   - 两个 profile 必须一起启用：neo4j 由上游定义，bodhi 是本服务。
+#   - 连接参数（NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD）直接复用上游 .env
+#     的值（上游 docs/KnowledgeGraph.md 给的默认值是 bolt://neo4j:7687）。
+#   - 这里**不写** depends_on：上游 neo4j 在 profile 下、健康检查未知，
+#     等待就绪由 bootstrap-neo4j.sh 的重试完成（默认 60 次 × 2s）。
+#   - BODHI_* 两个变量没有默认值是故意的：叠加模式下相对路径会以上游仓库
+#     目录为基准解析，必须显式给绝对路径（用正斜杠，Docker Desktop 接受 C:/...）。
+# =====================================================================
+services:
+  bodhi-ontology:
+    image: ${NEO4J_IMAGE:-neo4j:5-community}
+    container_name: bodhi2-ontology-bootstrap
+    restart: "no"
+    profiles:
+      - bodhi
+    # 只用到 neo4j 镜像里的 cypher-shell；入口脚本被覆盖，故镜像不会去读这些变量
+    entrypoint: ["/bin/sh", "/bodhi-deploy/bootstrap-neo4j.sh"]
+    environment:
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?上游 .env 里必须已设置 NEO4J_PASSWORD}
+      - BODHI_CYPHER_DIR=/bootstrap
+    volumes:
+      - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/bootstrap-neo4j.sh:/bodhi-deploy/bootstrap-neo4j.sh:ro
+      - ${BODHI_NEO4J_CYPHER_DIR:?请先设置 BODHI_NEO4J_CYPHER_DIR=<本仓库>/artifacts/neo4j}:/bootstrap:ro
+    networks:
+      - WeKnora-network

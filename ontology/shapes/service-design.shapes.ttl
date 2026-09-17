@@ -1,0 +1,128 @@
+@prefix :       <http://example.org/bodhi/shapes/service#> .
+@prefix sh:     <http://www.w3.org/ns/shacl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix ow:     <http://www.w3.org/2002/07/owl#> .
+
+<http://example.org/bodhi/shapes/service> rdf:type ow:Ontology ;
+    rdfs:label "BODHI2 服务设计语义校验规则（人工编写）"@zh ;
+    rdfs:comment "机器可从 TBox 生成的 SHACL（基数、值域、枚举）说明『结构对不对』；本文件说明『设计好不好』——幂等、副作用、服务边界（高内聚）、函数依赖与契约的一致性。这两类规则都由 ontology-compiler 收集到 artifacts/shacl/ 下，由 ke-core 在 Python 侧用 pyshacl 统一校验。严重级别约定：sh:Violation 判为『违反本体』→ pending_human；sh:Warning 仍判 validated 但打标进入人工抽检。"@zh ;
+    ow:versionIRI <http://example.org/bodhi/shapes/service/1.0> .
+
+# ============================================================
+# S1 写操作契约必须有幂等键（Violation）
+# ============================================================
+:WriteContractIdempotencyShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-service#ServiceContract> ;
+    sh:name "写操作契约的幂等键要求"@zh ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "写操作契约（isReadOnly=false）必须声明 idempotencyKey，否则重试会产生重复业务动作"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                $this <http://example.org/bodhi/ext/ea-service#isReadOnly> false .
+                OPTIONAL { $this <http://example.org/bodhi/ext/ea-service#idempotencyKey> ?value . }
+                FILTER ( !bound(?value) )
+            }
+        """ ;
+    ] .
+
+# ============================================================
+# S2 只读契约不得声明副作用（Violation）
+# ============================================================
+:ReadOnlyContractNoSideEffectShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-service#ServiceContract> ;
+    sh:name "只读契约的副作用要求"@zh ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "只读契约（isReadOnly=true）不得声明 contractProducesEffect 副作用"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                $this <http://example.org/bodhi/ext/ea-service#isReadOnly> true ;
+                      <http://example.org/bodhi/ext/ea-service#contractProducesEffect> ?value .
+            }
+        """ ;
+    ] .
+
+# ============================================================
+# S3 服务边界（高内聚）：一个契约只应操作一个业务实体（Violation）
+# ============================================================
+:ContractCohesionShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-service#ServiceContract> ;
+    sh:name "服务契约高内聚"@zh ;
+    sh:property [
+        sh:path <http://example.org/bodhi/ext/ea-service#contractOperatesOn> ;
+        sh:name "操作业务实体"@zh ;
+        sh:maxCount 1 ;
+        sh:message "一个服务契约只应操作一个业务实体（聚合根）；跨多个实体说明服务边界过宽，应拆分或改为编排"@zh ;
+    ] .
+
+# ============================================================
+# S4 幂等键必须有函数依赖支撑（Violation）
+# ============================================================
+:IdempotencyKeyNeedsDependencyShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-service#ServiceContract> ;
+    sh:name "幂等键与函数依赖的一致性"@zh ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "契约声明了 idempotencyKey，但未通过 contractDependsOn 关联任何函数依赖，无法证明幂等键的决定性"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                $this <http://example.org/bodhi/ext/ea-service#idempotencyKey> ?value .
+                FILTER NOT EXISTS { $this <http://example.org/bodhi/ext/ea-service#contractDependsOn> ?fd . }
+            }
+        """ ;
+    ] .
+
+# ============================================================
+# S5 契约必须覆盖其遵循规则所约束的属性（Violation）
+# ============================================================
+:ContractCoversRuleAttributeShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-service#ServiceContract> ;
+    sh:name "契约对规则属性覆盖度"@zh ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "契约遵循的业务规则所约束的业务属性，必须出现在契约的输入或输出属性中，否则契约无法在执行层落实该规则"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                $this <http://example.org/bodhi/ext/ea-service#contractEnforcesRule> ?rule .
+                ?rule <http://example.org/bodhi/ext/bmm-fd#ruleConstrainsAttribute> ?value .
+                FILTER NOT EXISTS {
+                    { $this <http://example.org/bodhi/ext/ea-service#contractHasInput> ?value . }
+                    UNION
+                    { $this <http://example.org/bodhi/ext/ea-service#contractHasOutput> ?value . }
+                }
+            }
+        """ ;
+    ] .
+
+# ============================================================
+# S6 写操作契约应声明版本（Warning）
+# ============================================================
+:WriteContractVersionShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-service#ServiceContract> ;
+    sh:name "写操作契约版本"@zh ;
+    sh:severity sh:Warning ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "写操作契约建议声明 contractVersion，便于执行层做灰度与回滚（Warning）"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                $this <http://example.org/bodhi/ext/ea-service#isReadOnly> false .
+                OPTIONAL { $this <http://example.org/bodhi/ext/ea-service#contractVersion> ?value . }
+                FILTER ( !bound(?value) )
+            }
+        """ ;
+    ] .

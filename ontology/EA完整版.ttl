@@ -1,0 +1,301 @@
+@prefix :       <http://example.org/bmm-EA-ext#> .
+@prefix bmm:    <http://example.org/bmm#> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<http://example.org/bmm-EA-ext> rdf:type owl:Ontology ;
+    rdfs:label "企业架构框架本体（与BMM扩展本体协同）"@zh ;
+    owl:imports <http://example.org/bmm> ;
+    owl:versionIRI <http://example.org/bmm-EA-ext/1.0> .
+
+
+
+# ============================================================
+# 2. 业务层核心类
+# ============================================================
+
+:Activity           rdf:type owl:Class ;
+    rdfs:label "活动"@zh ;
+    rdfs:comment "活动，对任务的编排，完成业务上特定的目标" .
+
+:Task               rdf:type owl:Class ;
+    rdfs:label "任务"@zh ;
+    rdfs:comment "任务，某个岗位或角色连续执行的操作" .
+
+:Step               rdf:type owl:Class ;
+    rdfs:label "步骤"@zh ;
+    rdfs:comment "步骤，对单个或一组紧耦合业务实体的操作" .
+
+:BusinessRole       rdf:type owl:Class ;
+    rdfs:label "业务角色"@zh ;
+    rdfs:comment "业务角色或岗位" .
+
+:BusinessEntity     rdf:type owl:Class ;
+    rdfs:label "业务实体"@zh ;
+    rdfs:comment "业务实体，如客户、合同、账户、申请单等" .
+:Customer    rdf:type owl:Class ;
+    rdfs:subClassOf :BusinessEntity ;
+    rdfs:label "客户"@zh ;
+    rdfs:comment "客户实体，个人客户" .
+
+# 对外交付物/产品/业务服务/即将到期的产品 已迁移至 BMM 完整版（bmm:Offering / bmm:Product / bmm:BusinessService / bmm:ExpiringProduct）
+
+# 有到期产品的客户（等价于持有至少一个 ExpiringProduct 的客户）
+:CustomerWithExpiringProduct rdf:type owl:Class ;
+                             owl:equivalentClass [ owl:intersectionOf ( :Customer
+                                                                        [ rdf:type owl:Restriction ;
+                                                                          owl:onProperty :holdsProduct ;
+                                                                          owl:someValuesFrom bmm:ExpiringProduct
+                                                                        ]
+                                                                      ) ;
+                                                   rdf:type owl:Class
+                                                 ] ;
+                             rdfs:label "有到期产品的客户"@zh .
+
+# 无到期产品的客户（等价于不持有任何 ExpiringProduct 的客户）
+:CustomerWithoutExpiringProduct rdf:type owl:Class ;
+    rdfs:label "无到期产品的客户"@zh ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            :Customer
+            [ a owl:Class ;
+              owl:complementOf [
+                  a owl:Restriction ;
+                  owl:onProperty :holdsProduct ;
+                  owl:someValuesFrom bmm:ExpiringProduct
+              ] ]
+        )
+    ] .
+
+# ============================================================
+# 3. IT 资产与 IT 服务
+# ============================================================
+:ITAsset            rdf:type owl:Class ;
+    rdfs:subClassOf bmm:Resource ;          # IT 资产是 BMM 资源的子类
+    rdfs:label "IT资产"@zh ;
+    rdfs:comment "IT 资产，如硬件、软件系统等" .
+
+:Application        rdf:type owl:Class ;
+    rdfs:subClassOf :ITAsset ;
+    rdfs:label "应用系统"@zh ;
+    rdfs:comment "应用（或称为子系统），软件资产" .
+
+:HardwareAsset      rdf:type owl:Class ;
+    rdfs:subClassOf :ITAsset ;
+    rdfs:label "硬件资产"@zh ;
+    rdfs:comment "硬件资产" .
+
+# ------------------------------------------------------------
+# IT 服务层已暂缓下线（2026-09-17），待与 WeKnora 的 API / MCP 对接方式一起重做。
+# 本次移除的术语（原声明位置在本段）：
+#   类：:Service（IT服务）、:APIService、:MCPService、:SkillService
+#   对象属性：:applicationProvidesService、:stepUsesService
+#            （连带 :Step / :Application 上的两条 someValuesFrom 约束）
+#   数据属性：:ai_skill
+# 连带影响：ea-service 扩展的 easvc:ServiceContract 暂挂顶层，进入 Q5 待拍板清单；
+#          ontology/lexicon/ea.keywords.yaml 的对应词表项已同步删除。
+# 重做时：把术语补回本文件与词表，再跑一次 compile。
+# ------------------------------------------------------------
+
+
+# ============================================================
+# 4. 关系属性
+# ============================================================
+
+# --- 流程组成关系 ---
+:businessProcessHasActivity   rdf:type owl:ObjectProperty ;
+    rdfs:domain bmm:BusinessProcess ;
+    rdfs:range :Activity ;
+    rdfs:label "包含活动"@zh ;
+    rdfs:comment "业务流程包含活动" .
+
+:activityHasTask              rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range :Task ;
+    rdfs:label "包含任务"@zh ;
+    rdfs:comment "活动包含任务" .
+
+:taskHasStep                  rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range :Step ;
+    rdfs:label "包含步骤"@zh ;
+    rdfs:comment "任务包含步骤" .
+
+# --- 执行与操作关系 ---
+:taskPerformedByRole          rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range :BusinessRole ;
+    rdfs:label "由角色执行"@zh ;
+    rdfs:comment "任务由业务角色执行" .
+
+:stepOperatesOnEntity         rdf:type owl:ObjectProperty ;
+    rdfs:domain :Step ;
+    rdfs:range :BusinessEntity ;
+    rdfs:label "操作业务实体"@zh ;
+    rdfs:comment "步骤操作业务实体" .
+
+# --- 规则约束 ---
+:taskGovernedByRule           rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range bmm:BusinessRule ;
+    rdfs:label "受规则约束"@zh ;
+    rdfs:comment "任务受业务规则约束" .
+
+# --- IT 资源支撑 ---
+:stepSupportedByAsset         rdf:type owl:ObjectProperty ;
+    rdfs:domain :Step ;
+    rdfs:range :ITAsset ;
+    rdfs:label "由IT资产支撑"@zh ;
+    rdfs:comment "步骤由 IT 资产支撑" .
+
+# （原 :applicationProvidesService / :stepUsesService 随 IT 服务层暂缓下线，见「类定义」一节注释）
+
+# --- 目标与交付 ---
+:activityDelivers             rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range bmm:Offering ;
+    rdfs:label "交付"@zh ;
+    rdfs:comment "活动交付某个产品或业务服务" .
+
+:taskDelivers                 rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range bmm:Offering ;
+    rdfs:label "交付"@zh ;
+    rdfs:comment "任务交付某个产品或业务服务" .
+
+:activityAchievesDesiredResult   rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range bmm:DesiredResult ;
+    rdfs:label "实现预期成果"@zh ;
+    rdfs:comment "活动实现某个预期成果" .
+
+:activityRealizesActionPlan   rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range bmm:CourseOfAction ;
+    rdfs:label "实现行动方案"@zh ;
+    rdfs:comment "活动实现某个行动方案" .
+
+:businessProcessRealizesActionPlan rdf:type owl:ObjectProperty ;
+    rdfs:domain bmm:BusinessProcess ;
+    rdfs:range bmm:CourseOfAction ;
+    rdfs:label "实现行动方案"@zh ;
+    rdfs:comment "业务流程实现某个行动方案" .
+
+# --- 客户与产品 ---    
+:holdsProduct        rdf:type owl:ObjectProperty ;  # 客户持有产品（Product 已迁移至 BMM）
+    rdfs:domain :Customer ;
+    rdfs:range bmm:Product ;
+    rdfs:label "持有"@zh ;
+    rdfs:comment "客户持有产品" .
+# ============================================================
+# 4.5 数据属性（Datatype Properties）
+# ============================================================
+
+# 本模块暂无数据属性：原先唯一的 :ai_skill（IT 服务技能定义）
+# 随 IT 服务层一起暂缓下线（见「类定义」一节注释）。
+
+# ============================================================
+# 5. 公理约束（TBox）
+# ============================================================
+
+# 业务流程至少包含一个活动
+bmm:BusinessProcess rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :businessProcessHasActivity ;
+    owl:someValuesFrom :Activity
+] .
+
+# 活动至少包含一个任务
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityHasTask ;
+    owl:someValuesFrom :Task
+] .
+
+# 任务至少包含一个步骤
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskHasStep ;
+    owl:someValuesFrom :Step
+] .
+
+# 任务必须由至少一个角色执行
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskPerformedByRole ;
+    owl:someValuesFrom :BusinessRole
+] .
+
+# 步骤必须至少操作一个业务实体
+:Step rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :stepOperatesOnEntity ;
+    owl:someValuesFrom :BusinessEntity
+] .
+
+# 步骤必须至少由一个 IT 资产支撑
+:Step rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :stepSupportedByAsset ;
+    owl:someValuesFrom :ITAsset
+] .
+
+# 任务必须至少受一条业务规则约束
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskGovernedByRule ;
+    owl:someValuesFrom bmm:BusinessRule
+] .
+
+# 活动必须交付至少一个产品或业务服务
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityDelivers ;
+    owl:someValuesFrom bmm:Offering
+] .
+
+# 任务必须交付至少一个产品或业务服务
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskDelivers ;
+    owl:someValuesFrom bmm:Offering
+] .
+
+# 活动必须实现至少一个预期成果
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityAchievesDesiredResult ;
+    owl:someValuesFrom bmm:DesiredResult
+] .
+
+# 活动必须实现至少一个行动方案
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityRealizesActionPlan ;
+    owl:someValuesFrom bmm:CourseOfAction
+] .
+
+# 业务流程必须实现至少一个行动方案
+bmm:BusinessProcess rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :businessProcessRealizesActionPlan ;
+    owl:someValuesFrom bmm:CourseOfAction
+] .
+
+# ============================================================
+# 6. 说明注释
+# ============================================================
+# 本扩展模型在 BMM 四大支柱基础上：
+#   - 将业务流程（BusinessProcess）视为 BMM 行动方案（CourseOfAction）的一种，
+#     活动、任务、步骤作为其组成部分；
+#   - IT 资产（ITAsset）是 BMM 资源（Resource）的子类，
+#     应用（Application）提供 IT 服务，步骤通过 IT 服务实现；
+#   - 活动/任务必须交付具体产品或业务服务；
+#   - 活动必须实现预期成果（DesiredResult）和行动方案（CourseOfAction）；
+#   - 业务流程必须实现行动方案（CourseOfAction）。
+#
+# 实际使用时，请将 bmm: 命名空间指向标准 BMM 本体 URI，
+# 并确保与已有的 BMM 实例数据整合。

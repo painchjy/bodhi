@@ -1,0 +1,16 @@
+# 编译器产物：全部可从 ontology/*.ttl 重建（唯一真源是 TTL）。
+# 见 tools/ontology-compiler/README.md「真源与可重建物」。
+# 注意：manifest.json 也在此目录内，所以产物差异是「工作区状态」，不随仓库分发。
+artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# 虚拟环境与编辑器
+.venv/
+.idea/
+.vscode/
+
+# 部署本地配置：含图库密码，只入库模板 deploy/.env.example
+deploy/.env

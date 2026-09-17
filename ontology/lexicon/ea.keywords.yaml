@@ -1,0 +1,132 @@
+# BODHI2 · EA 抽取词表（人工维护，编译器合并进抽取提示词）
+#
+# 说明同 bmm.keywords.yaml：本文件只承载「词表/启发式」，本体结构来自
+#   ontology/EA完整版.ttl 与 ontology/extensions/ea-*.ttl。
+
+module: ea
+ontology_version: "1.0"
+namespace: "http://example.org/bmm-EA-ext#"
+
+type_keywords:
+  - keywords: ["业务流程", "端到端流程", "价值链流程"]
+    type: BusinessProcess
+    note: "EA 与 BMM 共享 BusinessProcess（IRI 在 bmm 命名空间）"
+  - keywords: ["活动", "环节", "阶段"]
+    type: Activity
+    note: "活动的编排者；至少包含一个任务"
+  - keywords: ["任务", "工单", "作业"]
+    type: Task
+    note: "某个岗位或角色连续执行的操作"
+  - keywords: ["步骤", "操作", "点击", "录入"]
+    type: Step
+    note: "对单个或一组紧耦合业务实体的操作；必须由 IT 资产支撑"
+  - keywords: ["岗位", "角色", "经办", "复核", "授权人"]
+    type: BusinessRole
+    note: "任务的执行角色"
+  - keywords: ["客户", "对公客户", "个人客户", "账户", "合同", "申请单"]
+    type: BusinessEntity
+    note: "个人客户抽 Customer（BusinessEntity 子类）"
+  - keywords: ["法人", "公司", "集团", "机构"]
+    type: LegalEntity
+    note: "eaown:LegalEntity，BusinessEntity 子类（所有权扩展）"
+  - keywords: ["自然人", "法定代表人", "股东", "实际控制人"]
+    type: Person
+    note: "eaown:Person（所有权扩展）"
+  - keywords: ["股权", "持股", "出资比例", "穿透"]
+    type: OwnershipRelation
+    note: "具名化股权关系，须带 ownershipPercent 与 asOfDate"
+  - keywords: ["协议控制", "表决权委托", "人事任免权", "一致行动"]
+    type: ControlRelation
+    note: "非股权控制关系"
+  - keywords: ["系统", "平台", "应用", "子系统", "主机", "设备"]
+    type: Application
+    note: "应用系统抽 Application；硬件抽 HardwareAsset；二者都是 ITAsset"
+  # （原 Service / APIService / MCPService / SkillService 词表项随 IT 服务层暂缓下线，2026-09-17）
+  - keywords: ["契约", "幂等", "重试", "幂等键", "超时"]
+    type: ServiceContract
+    note: "easvc:ServiceContract，需声明 isReadOnly、幂等键、副作用"
+  - keywords: ["字段", "属性", "要素", "证件号", "客户号"]
+    type: BusinessAttribute
+    note: "easvc:BusinessAttribute（字段级语义）"
+  - keywords: ["函数依赖", "唯一确定", "由...唯一决定"]
+    type: FunctionalDependency
+    note: "easvc:FunctionalDependency，X -> Y"
+  - keywords: ["副作用", "状态变更", "写入", "扣减", "通知"]
+    type: SideEffect
+    note: "easvc:SideEffect，只读契约不得声明"
+
+relation_keywords:
+  - keywords: ["包含环节", "分解为活动"]
+    predicate: businessProcessHasActivity
+    note: "业务流程 -> 活动"
+  - keywords: ["包含任务", "拆分为任务"]
+    predicate: activityHasTask
+    note: "活动 -> 任务"
+  - keywords: ["包含步骤", "操作步骤"]
+    predicate: taskHasStep
+    note: "任务 -> 步骤"
+  - keywords: ["由...执行", "岗位职责"]
+    predicate: taskPerformedByRole
+    note: "任务 -> 业务角色"
+  - keywords: ["操作对象", "对...操作"]
+    predicate: stepOperatesOnEntity
+    note: "步骤 -> 业务实体"
+  - keywords: ["由...系统支撑", "系统承载"]
+    predicate: stepSupportedByAsset
+    note: "步骤 -> IT 资产"
+  # （原 stepUsesService / applicationProvidesService 词表项随 IT 服务层暂缓下线，2026-09-17）
+  - keywords: ["受规则约束", "遵循...规则"]
+    predicate: taskGovernedByRule
+    note: "任务 -> 业务规则（BMM）"
+  - keywords: ["交付", "产出", "对外提供"]
+    predicate: activityDelivers
+    note: "活动/任务 -> 对外交付物（Offering）"
+  - keywords: ["实现目标成果"]
+    predicate: activityAchievesDesiredResult
+    note: "活动 -> 预期成果（BMM）"
+  - keywords: ["持有产品"]
+    predicate: holdsProduct
+    note: "客户 -> 产品（BMM Product）"
+  - keywords: ["持有股权", "股东为"]
+    predicate: holdsShare
+    note: "法人主体 -> 股权关系"
+  - keywords: ["投资于", "被投资方"]
+    predicate: shareIn
+    note: "股权关系 -> 法人主体"
+  - keywords: ["控制", "实际控制"]
+    predicate: controls
+    note: "法人主体 -> 法人主体；持股 >= 50% 时推定成立"
+  - keywords: ["最终控制人", "穿透至"]
+    predicate: ultimateController
+    note: "法人主体 -> 法人主体/自然人"
+  - keywords: ["受益所有人", "最终受益人"]
+    predicate: beneficialOwner
+    note: "法人主体 -> 法人主体/自然人"
+  - keywords: ["契约操作对象"]
+    predicate: contractOperatesOn
+    note: "服务契约 -> 业务实体（一个契约只应有一个）"
+  - keywords: ["幂等键", "去重键"]
+    predicate: idempotencyKey
+    note: "数据属性；写操作契约必填"
+  - keywords: ["决定", "唯一确定"]
+    predicate: hasDeterminant
+    note: "函数依赖 -> 业务属性（左侧）"
+
+enum_keywords:
+  isReadOnly:
+    "true": ["查询", "明细", "下载", "预览", "只读"]
+    "false": ["新增", "修改", "删除", "提交", "扣减", "转账"]
+  retryPolicy:
+    none: ["不可重试", "不自动重试"]
+    at-least-once: ["至少一次", "可重试"]
+    exponential-backoff: ["指数退避", "退避重试"]
+
+anti_patterns:
+  - "不要把『步骤』抽成『活动』：活动的粒度是跨角色的环节编排，步骤是单角色系统操作"
+  - "步骤必须挂到某个任务下，孤立步骤说明流程层级抽取不完整"
+  - "IT 服务必须由某个应用提供：无归属应用的服务需标记为 proposed，等待人工确认"
+  - "股权比例必须落在 0~100 的百分数区间，不要抽成小数或倍数"
+
+traceability_rules:
+  - "每个实体/关系都要带 chunk 溯源；穿透类结论必须带 asOfDate"
+  - "同一法人主体在不同文档中的名称差异（简称/全称）应合并为同一实体并保留别名"

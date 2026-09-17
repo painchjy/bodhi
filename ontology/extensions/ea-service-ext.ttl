@@ -1,0 +1,211 @@
+@prefix :       <http://example.org/bodhi/ext/ea-service#> .
+@prefix ea:     <http://example.org/bmm-EA-ext#> .
+@prefix bmm:    <http://example.org/bmm#> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<http://example.org/bodhi/ext/ea-service> rdf:type owl:Ontology ;
+    rdfs:label "EA 服务契约扩展本体（业务属性 / 函数依赖 / 幂等 / 副作用）"@zh ;
+    rdfs:comment "在 EA 完整版之上补充『服务契约 ServiceContract、业务属性 BusinessAttribute、函数依赖 FunctionalDependency、副作用 SideEffect』四类语义。目的：把文档里描述的服务能力编译为可校验（SHACL）、可执行（API/MCP）、带溯源的知识点，并支撑『函数依赖 -> 幂等性 -> 高内聚』的跨层推理。"@zh ;
+    owl:imports <http://example.org/bmm-EA-ext> , <http://example.org/bmm> ;
+    owl:versionIRI <http://example.org/bodhi/ext/ea-service/1.0> .
+
+# ============================================================
+# 一、类定义
+# ============================================================
+
+### 业务属性：实体上具名、可被契约引用的字段级语义（如「客户.证件号」）
+:BusinessAttribute rdf:type owl:Class ;
+    rdfs:label "业务属性"@zh ;
+    rdfs:comment "业务实体或服务契约上一个具名、可被引用与约束的属性（字段级语义），例如『客户.证件号』『客户.客户号』。函数依赖以业务属性为左右两端。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+### 函数依赖：X -> Y
+:FunctionalDependency rdf:type owl:Class ;
+    rdfs:label "函数依赖"@zh ;
+    rdfs:comment "一组决定属性（determinant）唯一确定一组被决定属性（dependent）的约束，记作 X -> Y。用于推导数据一致性要求、幂等键选择与服务边界（高内聚）。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+### 服务契约：对外可执行能力的正式声明
+# 2026-09-17：ea:Service（IT 服务）层已暂缓下线，本类因此暂挂顶层，会出现在
+# Q5「没有父类的类（待拍板/待扩展项）」清单里；IT 服务层重做时把下面这行
+# 加回来即可（这是本类与本模块的唯一改动点）：
+#     rdfs:subClassOf ea:Service ;
+:ServiceContract rdf:type owl:Class ;
+    rdfs:label "服务契约"@zh ;
+    rdfs:comment "对外可执行能力的正式声明：输入/输出业务属性、操作对象、幂等性、副作用、重试与超时策略、所遵循的业务规则与所实现的步骤。可执行层（API/MCP/DB 网关）据此生成技能定义。"@zh .
+
+### 副作用：服务调用造成的可观察状态变更
+:SideEffect rdf:type owl:Class ;
+    rdfs:label "副作用"@zh ;
+    rdfs:comment "服务调用对业务实体状态产生的可观察变更（新增/修改/删除/外部通知）。只读契约不应声明副作用；声明副作用但无幂等键的契约视为高风险。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+# ============================================================
+# 二、对象属性
+# ============================================================
+
+:hasBusinessAttribute rdf:type owl:ObjectProperty ;
+    rdfs:label "具有业务属性"@zh ;
+    rdfs:domain ea:BusinessEntity ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "业务实体拥有一个业务属性。"@zh .
+
+:attributeOf rdf:type owl:ObjectProperty ;
+    rdfs:label "属性属于"@zh ;
+    rdfs:domain :BusinessAttribute ;
+    rdfs:range ea:BusinessEntity ;
+    rdfs:comment "业务属性归属于某个业务实体。"@zh ;
+    owl:inverseOf :hasBusinessAttribute .
+
+:hasDeterminant rdf:type owl:ObjectProperty ;
+    rdfs:label "决定属性"@zh ;
+    rdfs:domain :FunctionalDependency ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "函数依赖左侧（决定方 determinant）。"@zh .
+
+:hasDependent rdf:type owl:ObjectProperty ;
+    rdfs:label "被决定属性"@zh ;
+    rdfs:domain :FunctionalDependency ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "函数依赖右侧（被决定方 dependent）。"@zh .
+
+:contractOperatesOn rdf:type owl:ObjectProperty ;
+    rdfs:label "操作业务实体"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range ea:BusinessEntity ;
+    rdfs:comment "服务契约作用于哪个业务实体。一个契约应只围绕一个聚合根实体（高内聚），多于一个即触发服务边界告警。"@zh .
+
+:contractHasInput rdf:type owl:ObjectProperty ;
+    rdfs:label "契约输入属性"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "契约请求参数所对应的业务属性。幂等键必须取自契约输入属性。"@zh .
+
+:contractHasOutput rdf:type owl:ObjectProperty ;
+    rdfs:label "契约输出属性"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "契约响应结果所对应的业务属性。"@zh .
+
+:contractProducesEffect rdf:type owl:ObjectProperty ;
+    rdfs:label "产生副作用"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range :SideEffect ;
+    rdfs:comment "契约调用会产生的副作用。只读契约（isReadOnly=true）不得声明副作用。"@zh .
+
+:effectOnEntity rdf:type owl:ObjectProperty ;
+    rdfs:label "影响实体"@zh ;
+    rdfs:domain :SideEffect ;
+    rdfs:range ea:BusinessEntity ;
+    rdfs:comment "副作用变更了哪个业务实体。"@zh .
+
+:contractEnforcesRule rdf:type owl:ObjectProperty ;
+    rdfs:label "遵循业务规则"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range bmm:BusinessRule ;
+    rdfs:comment "契约在实现上必须遵循的业务规则（跨层桥：执行层 -> BMM 指导规范）。"@zh .
+
+:contractRealizesStep rdf:type owl:ObjectProperty ;
+    rdfs:label "实现步骤"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range ea:Step ;
+    rdfs:comment "契约实现的业务步骤（跨层桥：IT 服务 -> EA 流程步骤）。"@zh .
+
+:contractDependsOn rdf:type owl:ObjectProperty ;
+    rdfs:label "依赖函数依赖"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range :FunctionalDependency ;
+    rdfs:comment "契约在数据一致性上依赖的函数依赖。声明了幂等键的契约必须至少依赖一条函数依赖，否则无法证明幂等键的决定性（幂等键应取自 determinant 属性集合）。"@zh .
+
+# ============================================================
+# 三、数据属性
+# ============================================================
+
+:idempotencyKey rdf:type owl:DatatypeProperty ;
+    rdfs:label "幂等键"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range xsd:string ;
+    rdfs:comment "重试安全的幂等键表达式，取值应来自函数依赖的决定属性集合（determinant），例如『客户.证件号 + 业务日期』。无幂等键的写操作契约不允许自动重试。"@zh .
+
+:isReadOnly rdf:type owl:DatatypeProperty ;
+    rdfs:label "只读"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "是否为只读契约（true=不产生副作用，可安全重试）。每个契约必须且只能声明一次。"@zh .
+
+:contractVersion rdf:type owl:DatatypeProperty ;
+    rdfs:label "契约版本"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range xsd:string ;
+    rdfs:comment "契约版本号，如 v1、2026-03。"@zh .
+
+:retryPolicy rdf:type owl:DatatypeProperty ;
+    rdfs:label "重试策略"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range xsd:string ;
+    rdfs:comment "重试策略取值建议：none / at-least-once / exponential-backoff。非幂等契约不得使用自动重试。"@zh .
+
+:timeoutMs rdf:type owl:DatatypeProperty ;
+    rdfs:label "超时毫秒"@zh ;
+    rdfs:domain :ServiceContract ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "服务调用超时（毫秒）。"@zh .
+
+:dependencyExpression rdf:type owl:DatatypeProperty ;
+    rdfs:label "依赖表达式"@zh ;
+    rdfs:domain :FunctionalDependency ;
+    rdfs:range xsd:string ;
+    rdfs:comment "函数依赖的形式化表达，如『客户.证件号 -> 客户.客户号』。"@zh .
+
+:dependencyType rdf:type owl:DatatypeProperty ;
+    rdfs:label "依赖类型"@zh ;
+    rdfs:domain :FunctionalDependency ;
+    rdfs:range xsd:string ;
+    rdfs:comment "依赖类型取值建议：strict（严格成立） / probabilistic（统计成立）。"@zh .
+
+# ============================================================
+# 四、公理约束（TBox）
+# ============================================================
+
+# 契约必须作用于至少一个业务实体
+:ServiceContract rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :contractOperatesOn ;
+    owl:minCardinality 1 ;
+    rdfs:comment "服务契约必须声明至少一个被操作的业务实体"@zh
+] .
+
+# 契约必须且只能声明一次是否只读
+:ServiceContract rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :isReadOnly ;
+    owl:cardinality 1 ;
+    rdfs:comment "每个服务契约必须恰好声明一次 isReadOnly"@zh
+] .
+
+# 函数依赖必须有决定方与被决定方
+:FunctionalDependency rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :hasDeterminant ;
+    owl:minCardinality 1 ;
+    rdfs:comment "函数依赖必须至少有一个决定属性"@zh
+] .
+
+:FunctionalDependency rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :hasDependent ;
+    owl:minCardinality 1 ;
+    rdfs:comment "函数依赖必须至少有一个被决定属性"@zh
+] .
+
+# 业务属性必须归属于某个业务实体
+:BusinessAttribute rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :attributeOf ;
+    owl:minCardinality 1 ;
+    rdfs:comment "业务属性必须归属于至少一个业务实体"@zh
+] .
+

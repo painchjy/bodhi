@@ -1,0 +1,102 @@
+@prefix :       <http://example.org/bodhi/shapes/ownership#> .
+@prefix sh:     <http://www.w3.org/ns/shacl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix ow:     <http://www.w3.org/2002/07/owl#> .
+
+<http://example.org/bodhi/shapes/ownership> rdf:type ow:Ontology ;
+    rdfs:label "BODHI2 所有权穿透语义校验规则（人工编写）"@zh ;
+    rdfs:comment "把『持股比例阈值 → 推定控制 → 实际控制人/受益所有人』的监管口径写成可执行规则，并对穿透计算的时间口径（asOfDate）提出要求。"@zh ;
+    ow:versionIRI <http://example.org/bodhi/shapes/ownership/1.0> .
+
+# ============================================================
+# O1 持股比例越界（Violation）
+# ============================================================
+:OwnershipPercentRangeShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-ownership#OwnershipRelation> ;
+    sh:name "持股比例取值区间"@zh ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "持股比例 ownershipPercent 必须在 0~100 之间（百分数口径）"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                $this <http://example.org/bodhi/ext/ea-ownership#ownershipPercent> ?value .
+                FILTER ( ?value < 0 || ?value > 100 )
+            }
+        """ ;
+    ] .
+
+# ============================================================
+# O2 超过 50% 推定控制（Violation）：持股方必须对客体建立控制关系
+# ============================================================
+:MajorityOwnershipImpliesControlShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-ownership#LegalEntity> ;
+    sh:name "多数持股推定控制"@zh ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "持股比例 >= 50 时，持股方必须对客体存在 controls 控制关系（可由规则推导后补全）"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                $this <http://example.org/bodhi/ext/ea-ownership#holdsShare> ?rel .
+                ?rel <http://example.org/bodhi/ext/ea-ownership#ownershipPercent> ?value .
+                ?rel <http://example.org/bodhi/ext/ea-ownership#shareIn> ?investee .
+                FILTER ( ?value >= 50 )
+                FILTER NOT EXISTS { $this <http://example.org/bodhi/ext/ea-ownership#controls> ?investee . }
+            }
+        """ ;
+    ] .
+
+# ============================================================
+# O3 穿透结果应可追溯（Warning）：法人主体宜有最终控制人结论
+# ============================================================
+:UltimateControllerExpectedShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-ownership#LegalEntity> ;
+    sh:name "最终控制人结论"@zh ;
+    sh:severity sh:Warning ;
+    sh:property [
+        sh:path <http://example.org/bodhi/ext/ea-ownership#ultimateController> ;
+        sh:name "最终控制人"@zh ;
+        sh:minCount 1 ;
+        sh:message "法人主体尚未给出最终控制人穿透结论（Warning，进入人工抽检队列）"@zh ;
+    ] .
+
+# ============================================================
+# O4 穿透计算的时间口径（Warning）：股权关系宜标注 asOfDate
+# ============================================================
+:AsOfDateExpectedShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-ownership#OwnershipRelation> ;
+    sh:name "股权关系时间口径"@zh ;
+    sh:severity sh:Warning ;
+    sh:property [
+        sh:path <http://example.org/bodhi/ext/ea-ownership#asOfDate> ;
+        sh:name "口径日期"@zh ;
+        sh:minCount 1 ;
+        sh:message "股权关系未标注 asOfDate，穿透结论无法对齐时间口径（Warning）"@zh ;
+    ] .
+
+# ============================================================
+# O5 不得自持股（Violation）：股权关系的持股方与客体不得相同
+# ============================================================
+:NoSelfOwnershipShape
+    rdf:type sh:NodeShape ;
+    sh:targetClass <http://example.org/bodhi/ext/ea-ownership#OwnershipRelation> ;
+    sh:name "自持股检查"@zh ;
+    sh:sparql [
+        rdf:type sh:SPARQLConstraint ;
+        sh:message "股权关系的持股方与客体不得为同一主体（自持股数据异常）"@zh ;
+        sh:select """
+            SELECT $this ?value
+            WHERE {
+                ?holder <http://example.org/bodhi/ext/ea-ownership#holdsShare> $this .
+                $this <http://example.org/bodhi/ext/ea-ownership#shareIn> ?value .
+                FILTER ( ?holder = ?value )
+            }
+        """ ;
+    ] .

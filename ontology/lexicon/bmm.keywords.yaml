@@ -1,0 +1,118 @@
+# BODHI2 · BMM 抽取词表（人工维护，编译器合并进抽取提示词）
+#
+# 作用：把「中文业务表述 -> 本体类型/关系」的判定知识集中放在一处，
+#       由 ontology-compiler 合并进：
+#         - artifacts/prompts/bmm_extraction.md
+#         - artifacts/weknora/extract_config.*.json 的 text 段
+#         - artifacts/mapping/label_map.json 的 by_alias 段
+# 注意：本文件只放「词表/启发式」，不放本体结构；本体结构一律来自 ontology/*.ttl。
+
+module: bmm
+ontology_version: "1.2"
+namespace: "http://example.org/bmm#"
+
+type_keywords:
+  - keywords: ["愿景", "成为", "打造", "长期定位", "持续"]
+    type: Goal
+    note: "长期、定性、普遍性、持续性的期望状态"
+  - keywords: ["达到", "提升至", "X%", "ms 以内", "个月内", "指标", "同比增长"]
+    type: Objective
+    note: "短期、定量、具体、可度量的期望结果"
+  - keywords: ["战略", "策略", "长期规划", "蓝图"]
+    type: CourseOfAction
+    note: "行动方案中的战略级方案（CourseOfActionlevel=战略级）"
+  - keywords: ["方案", "计划", "措施", "行动", "试点", "专项"]
+    type: CourseOfAction
+    note: "行动方案中的战术级方案（CourseOfActionlevel=战术级）"
+  - keywords: ["政策", "方针", "原则", "指引", "管理办法"]
+    type: BusinessPolicy
+    note: "不具备直接强制执行性的指导规范"
+  - keywords: ["必须", "应当", "禁止", "不得", "规则", "校验"]
+    type: BusinessRule
+    note: "原子化、可判定、使用标准业务术语的指导规范"
+  - keywords: ["唯一", "外键", "非空", "取值区间", "恒真"]
+    type: StructuralBusinessRule
+    note: "无执行级别的结构性业务规则；可细化扩展为 bmmfd:DataQualityRule"
+  - keywords: ["严格执行", "强制", "不得例外"]
+    type: OperativeBusinessRule
+    note: "执行级别 EnforcementLevel=Strict"
+  - keywords: ["经审批可例外", "可覆盖", "特批"]
+    type: OperativeBusinessRule
+    note: "执行级别 EnforcementLevel=Override"
+  - keywords: ["建议", "推荐", "宜", "优先"]
+    type: OperativeBusinessRule
+    note: "执行级别 EnforcementLevel=Advisory"
+  - keywords: ["监管", "法规", "竞争", "市场", "技术趋势", "外部环境"]
+    type: ExternalInfluencer
+    note: "必须以中立、客观、无定性形容词的方式表述"
+  - keywords: ["存量系统", "资源", "团队", "惯例", "假设", "基础设施", "管理层权限"]
+    type: InternalInfluencer
+    note: "同上：中性表述，不带『好/差』评价"
+  - keywords: ["评估", "判断", "SWOT", "分析结论"]
+    type: Assessment
+    note: "必须标注 hasAssessmentType（Strength/Weakness/Opportunity/Threat）"
+  - keywords: ["流程", "端到端过程", "业务流程"]
+    type: BusinessProcess
+    note: "跨组织或组织内的一组活动"
+  - keywords: ["部门", "中心", "分行", "事业部", "组织"]
+    type: OrganizationUnit
+    note: "组织机构的组成单元"
+  - keywords: ["产品", "服务目录", "对外交付物", "规格说明"]
+    type: Offering
+    note: "具体产品抽 Product，对外业务服务抽 BusinessService"
+  - keywords: ["即将到期", "到期日临近", "存续期将满"]
+    type: ExpiringProduct
+    note: "Offering 下的特殊关注对象"
+  - keywords: ["债务", "义务", "承诺", "赔偿责任", "担保"]
+    type: Liability
+    note: "企业承担的义务或债务"
+
+relation_keywords:
+  - keywords: ["为了实现", "支撑...目标", "服务于"]
+    predicate: realizes
+    note: "手段 -> 预期成果"
+  - keywords: ["管辖", "受...约束", "依据", "遵循"]
+    predicate: isGovernedBy
+    note: "行动方案 -> 指导规范"
+  - keywords: ["来源于", "由...制定", "政策依据"]
+    predicate: isSourceOf
+    note: "指导规范 -> 行动方案"
+  - keywords: ["由...实现", "落地方式"]
+    predicate: realizedBy
+    note: "行动方案 -> 业务流程"
+  - keywords: ["规则指导流程", "流程须遵循"]
+    predicate: guides
+    note: "业务规则 -> 业务流程"
+  - keywords: ["影响", "导致", "带来", "不利于", "促进"]
+    predicate: influences
+    note: "影响因素 -> 预期成果；若指向手段用 influencesMeans"
+  - keywords: ["由...定义", "责任部门"]
+    predicate: definedBy
+    note: "预期成果 -> 组织机构（minCardinality 1）"
+  - keywords: ["发布", "印发", "版本发布"]
+    predicate: publishes
+    note: "组织机构 -> 来源文档"
+  - keywords: ["原文依据", "出自", "摘录自"]
+    predicate: fromSource
+    note: "原文摘录 -> 来源文档（溯源必填）"
+
+enum_keywords:
+  EnforcementLevel:
+    Strict: ["必须", "不得", "禁止", "强制"]
+    Override: ["经审批可例外", "可覆盖", "特批"]
+    Advisory: ["建议", "推荐", "宜"]
+  AssessmentType:
+    Strength: ["优势", "有利条件", "卓越能力"]
+    Weakness: ["劣势", "短板", "不足"]
+    Opportunity: ["机会", "有利趋势"]
+    Threat: ["威胁", "风险", "挑战"]
+
+anti_patterns:
+  - "影响因素表述中不得包含定性形容词（『重大』『严重』等），否则说明已被评估，应改为 Assessment"
+  - "不要把一段包含多条并列要求的句子抽成一条 BusinessRule，应拆分为原子规则"
+  - "业务政策不可直接强制执行：能直接判定违规的表述应抽成 BusinessRule"
+  - "同一个实体在文档中多次出现时复用同一 id，不要新建重复实体"
+
+traceability_rules:
+  - "每个节点与关系都必须给出原文摘录（quote）与其所在 chunk 标识（source_chunk_id）"
+  - "跨文档冲突时保留全部来源，不要覆盖，交由人工裁决"

@@ -1,0 +1,4 @@
+# 换行策略：只锁「必须在 Linux 容器里执行」的脚本。
+# deploy/bootstrap-neo4j.sh 由 neo4j 镜像里的 sh 执行，CRLF 会让 \r 变成命令内容
+# 而报错，所以强制工作区 LF（与仓库其余手写文件的 CRLF 约定不冲突）。
+*.sh text eol=lf
