@@ -197,12 +197,24 @@ jsDelivr 的 GitHub 只读镜像（`cdn.jsdelivr.net/gh/Tencent/WeKnora@main/...
 
 ## 10. 已知限制
 
-- **本机未实跑**：编写环境无 Docker、无 git，`docker compose config` 与真实灌库都没有
-  跑过；两个 compose 文件只做了 YAML 结构、变量引用与挂载路径的静态校验。首次使用时
-  请在目标机先 `docker compose config` 过一遍。
-- **镜像仓库与源码可达性**：编写环境实测官方 `registry-1.docker.io` / `hub.docker.com` 超时，
-  但 `docker.m.daocloud.io`、`docker.1ms.run` 能正常解析本栈全部镜像，故 Docker 需先配
-  `registry-mirrors`；同时 `github.com` / `codeload` 不可达，拿不到上游源码时**必须**用
+- **已在真机实跑（2026-09-18 更新）**：原先「本机未实跑」的限制已解除。实测环境：
+  Windows 11 → WSL2 Ubuntu 26.04（Docker Engine 29.1.3 + Compose v2.40.3，`docker.io` 来自 Ubuntu 源，
+  `download.docker.com` 不可达）。真实起栈 + 真实灌库结果：
+
+  | 项 | 实测 |
+  | --- | --- |
+  | 灌库容器 | `bodhi2-ontology-bootstrap` 首次运行经 3 次重试等到 neo4j 就绪，随后应用 `00_constraints.cypher` + `10_ontology.cypher`，**`Exited (0)`** |
+  | 投影规模 | `BodhiModule 5` / `BodhiOntClass 53` / `BodhiOntProperty 90` / `BodhiRestriction 26` / `BodhiEnumValue 7`（181 节点），与 `bootstrap-neo4j.sh` 打印的预期**逐项一致** |
+  | 关系 | 407 条：`BODHI_DECLARES 137` / `BODHI_RANGE 92` / `BODHI_DOMAIN 90` / `BODHI_HAS_RESTRICTION 26` / `BODHI_ON_PROPERTY 26` / `BODHI_SUBCLASS_OF 24` / `BODHI_ENUM_MEMBER 7` / `BODHI_INVERSE_OF 5` |
+  | 约束 | 5 条 `UNIQUENESS`（各投影标签的 `iri`） |
+  | 叠加层契约 | `docker compose --profile neo4j --profile bodhi up -d --no-build` 全程无需改动上游服务；`--no-build` 必需（无源码） |
+  | 环境侧闸门① | `WeKnora-app` 容器内 `NEO4J_ENABLE=true`、`NEO4J_URI=bolt://neo4j:7687`，日志 `Successfully connected to Neo4j after 12 attempts` |
+
+  注意：投影属性名只有 `bodhi_projection` 带前缀，其余是普通名（`module`/`label`/`comment`/
+  `property_kind` 等），且布尔值是字符串（`external = 'True'`，不能写 `= true`）。
+- **镜像仓库与源码可达性**：`registry-1.docker.io` / `hub.docker.com` / `download.docker.com` 超时，
+  必需 `registry-mirrors`（实测 `docker.m.daocloud.io`、`docker.1ms.run` 可解析本栈全部镜像）且
+  镜像要预拉；`github.com` / `codeload` 在宿主不可达，拿不到上游源码时**必须**
   `docker compose up -d --no-build`（上游 6 个服务带 `build:`，一旦镜像缺失，Compose 会
   退化成本地构建并失败在缺构建上下文上）。
 - `neo4j:5-community` 是官方滚动 tag；产物语法要求 Neo4j 5+，与上游 `neo4j` 主版本

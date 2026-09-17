@@ -4,13 +4,23 @@
 # 拓扑 A（推荐，最省事）：Neo4j 由上游 `--profile neo4j` 提供，本文件只**新增**
 # 一个一次性服务 bodhi-ontology，不改上游任何服务、不新增网络、不定义 neo4j。
 #
-# 用法（PowerShell，在【上游 WeKnora 仓库根目录】执行；<BODHI2> 换成本仓库绝对路径）：
-#   python <BODHI2>\tools\ontology-compiler\compile.py compile
-#   $env:BODHI_DEPLOY_DIR       = '<BODHI2>/deploy'
-#   $env:BODHI_NEO4J_CYPHER_DIR = '<BODHI2>/artifacts/neo4j'
-#   docker compose -f docker-compose.yml `
-#     -f <BODHI2>/deploy/docker-compose.weknora.yml `
-#     --profile neo4j --profile bodhi up -d
+# 用法（在【上游 WeKnora 仓库根目录】执行；<BODHI2> 换成本仓库绝对路径）：
+#
+#   A) WSL (Ubuntu) 里的 Docker Engine —— 2026-09-18 起生效的方式：
+#     bash <BODHI2>/tools/ontology-compiler/compile.py  # 编译在 Windows 侧跑也可以
+#     export BODHI_DEPLOY_DIR=/mnt/c/Users/PHJY/source/bodhi2/deploy
+#     export BODHI_NEO4J_CYPHER_DIR=/mnt/c/Users/PHJY/source/bodhi2/artifacts/neo4j
+#     docker compose -f docker-compose.yml \
+#       -f <BODHI2>/deploy/docker-compose.weknora.yml \
+#       --profile neo4j --profile bodhi up -d --no-build
+#
+#   B) Windows PowerShell + Docker Desktop（已废弃，仅留参考）：
+#     python <BODHI2>\tools\ontology-compiler\compile.py compile
+#     $env:BODHI_DEPLOY_DIR       = '<BODHI2>/deploy'
+#     $env:BODHI_NEO4J_CYPHER_DIR = '<BODHI2>/artifacts/neo4j'
+#     docker compose -f docker-compose.yml `
+#       -f <BODHI2>/deploy/docker-compose.weknora.yml `
+#       --profile neo4j --profile bodhi up -d --no-build
 #
 # 注意：
 #   - 两个 profile 必须一起启用：neo4j 由上游定义，bodhi 是本服务。
@@ -19,7 +29,10 @@
 #   - 这里**不写** depends_on：上游 neo4j 在 profile 下、健康检查未知，
 #     等待就绪由 bootstrap-neo4j.sh 的重试完成（默认 60 次 × 2s）。
 #   - BODHI_* 两个变量没有默认值是故意的：叠加模式下相对路径会以上游仓库
-#     目录为基准解析，必须显式给绝对路径（用正斜杠，Docker Desktop 接受 C:/...）。
+#     目录为基准解析，必须显式给绝对路径。写法按运行环境选（都用正斜杠）：
+#       WSL 里的 Docker Engine      -> /mnt/c/Users/PHJY/source/bodhi2/...
+#       Windows + Docker Desktop    -> C:/Users/PHJY/source/bodhi2/...
+#     （2026-09-18 起本机跑的是前者，见 deploy/README.md §10 实测记录）
 # =====================================================================
 services:
   bodhi-ontology:
