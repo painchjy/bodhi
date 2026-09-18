@@ -35,6 +35,21 @@
 #     （2026-09-18 起本机跑的是前者，见 deploy/README.md §10 实测记录）
 # =====================================================================
 services:
+  # ---------------------------------------------------------------------
+  # app：挂载「本体知识提取」的 preset 与系统提示词模板（零重建 A1）
+  # ---------------------------------------------------------------------
+  # 上游 app 启动时从容器内 /app/config/ **读文件**加载 agent-type preset 与 prompt
+  # 模板（非 go:embed，见 docs/weknora-fork.md §10.11）。因此只要把改好的两个文件
+  # 挂进去、重建 app 容器即可生效，**不需要改 Go、不需要重建镜像**。
+  #
+  # 文件由 deploy/weknora-fork/gen_agent_config.py 从本体产物生成：
+  #   config/agent_type_presets.yaml                        预设 ontology-extract-bmm / -ea
+  #   config/agent_system_prompt.yaml                       模板 ontology_extract_agent_bmm / -ea
+  app:
+    volumes:
+      - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/weknora-fork/config/agent_type_presets.yaml:/app/config/agent_type_presets.yaml:ro
+      - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/weknora-fork/config/agent_system_prompt.yaml:/app/config/prompt_templates/agent_system_prompt.yaml:ro
+
   bodhi-ontology:
     image: ${NEO4J_IMAGE:-neo4j:5-community}
     container_name: bodhi2-ontology-bootstrap

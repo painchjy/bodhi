@@ -453,7 +453,63 @@ wiki 页面类型分布：`bmm:CourseOfAction 5`、`bmm:OrganizationUnit 5`、`b
 页面 id 用 `uuid5(slug)` 稳定生成；SQL 留档 `logs/ontology_wiki_*.sql`，报告 `logs/ontology_sync_*.json`。
 
 
-### 10.10 方案 A1 实施细节（2026-09-19，源码已核实到文件/行）
+### 10.10 方案 A1 落地（零重建，2026-09-19 实测）
+
+**关键结论：原本计划的 Go 工具 `extract_ontology_knowledge` 不需要写。** 两条源码/实测依据：
+
+1. `IsValidWikiPageType` **只被 HTTP handler 调用**（`handler/wiki_page.go:372`、`:514`）；
+   `wiki_write_page` 工具（只校验 slug 与非空）与 `wikiPageService.CreatePage`
+   **都不校验 `page_type`**，repository 层也没有 → **agent 的工具路径本来就能写本体类型页面**。
+2. app 容器启动时从 `/app/config/` **读文件**加载 preset 与 prompt 模板（无 `go:embed`；
+   `loadPromptTemplates` 只认固定文件名，所以新模板必须追加进 `agent_system_prompt.yaml`），
+   而 `config.yaml` 原本就是挂载的 → **加两个挂载即可生效，无需重建镜像**。
+
+落地物（本仓库）：
+
+| 文件 | 作用 |
+| --- | --- |
+| `deploy/weknora-fork/gen_agent_config.py` | 由本体产物生成下面两个文件（幂等；`--check` 校验是否最新） |
+| `deploy/weknora-fork/baseline/*.yaml` | 从运行中的容器 `docker cp` 出来的基线（升级版本时替换） |
+| `deploy/weknora-fork/config/agent_type_presets.yaml` | 基线 + 预设 `ontology-extract-bmm` / `ontology-extract-ea` |
+| `deploy/weknora-fork/config/agent_system_prompt.yaml` | 基线 + 模板 `ontology_extract_agent_bmm` / `_ea` |
+| `deploy/docker-compose.weknora.yml` | app 服务新增两个 `:ro` 挂载（overlay，不动上游） |
+
+生成与生效：
+
+```bash
+python deploy/weknora-fork/gen_agent_config.py           # 生成（读 artifacts/weknora/ontology_index.json）
+python deploy/weknora-fork/gen_agent_config.py --check    # 与产物是否一致
+cd <上游 WeKnora 部署目录>                                  # 本机：c:\Users\PHJY\source\WeKnora
+export BODHI_DEPLOY_DIR=<本仓库>/deploy
+docker compose -f docker-compose.yml \
+  -f $BODHI_DEPLOY_DIR/docker-compose.weknora.yml \
+  --profile neo4j --profile bodhi up -d --no-build        # 重建 app 容器
+```
+
+**实测**：app 容器 `Recreated → Healthy`；容器内 `agent_type_presets.yaml` 12230B（preset 命中 2）、
+`agent_system_prompt.yaml` 92259B（模板命中 2）✓；启动日志无错误。
+
+**预设内容**：`temperature 0.1`、`max_iterations 40`、
+`allowed_tools = [grep_chunks, list_knowledge_chunks, get_document_info, wiki_search, wiki_read_page,
+wiki_write_page, todo_write, thinking]`、`kb_selection_mode = selected`；
+系统提示词 = 专家角色 + 本体轻量版 + 可用类型（BMM 26 / EA 11）+ 可用关系（BMM 33 / EA 21）+
+五步工作流（先读片段 → 抽取 → 写页 → **关系双向落页** → 汇报）+ 硬约束（禁止自造类型/逐字引用/未归类不硬塞）。
+
+两个细节：
+
+- **slug 可以带中文**：`normalizeAndValidateWikiSlug` 放行 CJK（`U+4E00–U+9FFF`），
+  所以提示词里直接要求 `bmm/目标/逐步提升落标覆盖率` 这种可读 slug，**不需要拼音库**；
+- 页面类型用 `bmm:Class` 形式写进 `page_type`（**不要用 entity/concept**），上游 UI 之外的消费方（图谱、检索）都能用。
+
+**仍未做（下一步）**：让 wiki 列表页展示本体分类页面 —— 前端那 4 个固定筛选（§4.1 ④）
+需要重建 UI 镜像（`frontend/Dockerfile` 只 `COPY dist`，必须先 `pnpm build`）。
+
+
+### 10.11 原始实施细节（已被 §10.10 取代，仅留档）
+
+> 下面这版计划（新增 Go 工具 + 注册 + 重建镜像）在 2026-09-19 被证伪：
+> 工具路径本来就能写本体类型页面、preset/提示词可从挂载文件加载，
+> 所以 **不需要动 Go、不需要重建 app 镜像**。此处留档备查。
 
 **分工原则**：Go 侧负责"平台内的事"（拿片段、写 wiki 页面），Python 侧负责"本体抽取"（组提示词、调 LLM、校验）。
 
