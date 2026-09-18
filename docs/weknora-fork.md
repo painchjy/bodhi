@@ -505,7 +505,35 @@ wiki_write_page, todo_write, thinking]`、`kb_selection_mode = selected`；
 需要重建 UI 镜像（`frontend/Dockerfile` 只 `COPY dist`，必须先 `pnpm build`）。
 
 
-### 10.11 原始实施细节（已被 §10.10 取代，仅留档）
+### 10.11 踩坑记录：重建 app 后前端会全 502（2026-09-19 实测）
+
+**症状**（用户报）：知识库管理为空、创建智能体页为空且有报错、会话建立失败，
+但对话里还能看到"企业知识库"（前端已加载的旧状态）。
+
+**根因**：不是配置改动，而是 **app 容器重建后 IP 变了，而前端 nginx 缓存了旧 IP**。
+
+```
+frontend nginx: proxy_pass http://app:8080;   # 服务名，但 nginx 只在启动时解析一次
+日志: connect() failed (113: Host is unreachable) while connecting to upstream,
+      request: "POST /api/v1/sessions HTTP/1.1", upstream: "http://172.18.0.5:8080/api/v1/sessions" → 502
+实测: app 重建后 IP 172.18.0.5 → 172.18.0.8，前端仍打 .5
+```
+
+**排查要点**：`docker logs WeKnora-frontend 2>&1 | grep 'Host is unreachable'` 一眼可辨；
+**数据层没丢**（`knowledge_bases=1 / custom_agents=1 / sessions=1 / wiki_pages=29`）。
+
+**修复**：`docker restart WeKnora-frontend` → 重新解析 → `/health=200`、
+`/api/v1/*=401`（通了，只是未登录）、新 502 计数为 0 ✓。
+
+**预防**：`deploy/weknora-fork/apply.sh` 把「重建 app」和「重启 frontend」绑在一起，
+以后应用配置一律走这个脚本，不要单独 `up -d app`。
+
+> 备选（更彻底）：给前端挂一个带 `resolver 127.0.0.11 valid=10s;` 的 nginx 配置，
+> 让 `proxy_pass` 用变量、每次请求重解析。代价是 nginx 在 `proxy_pass` 带变量时
+> **不再自动透传原始 URI**，需要显式 `$request_uri`，容易改错 —— 当前先用"重启前端"这个简单方案。
+
+
+### 10.12 原始实施细节（已被 §10.10 取代，仅留档）
 
 > 下面这版计划（新增 Go 工具 + 注册 + 重建镜像）在 2026-09-19 被证伪：
 > 工具路径本来就能写本体类型页面、preset/提示词可从挂载文件加载，
