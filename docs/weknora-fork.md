@@ -170,3 +170,58 @@ WEKNORA_EXISTING_LIMIT=180        # 存量注入条数上限（与现有实现�
 - 不动认证、租户、组织、共享等与知识生成无关的模块。
 - 不改 Neo4j 之外的其他检索后端（Milvus/Qdrant/Weaviate 等 profile 门控组件）。
 
+## 8. 设计确认（2026-09-18，用户口径）与源码依据
+
+### 8.1 「上传后自动生成 wiki，那在哪个点选本体？」→ 有两级选择点
+
+上游**本来就支持两级配置**（源码证据）：
+
+| 级别 | 落点 | 证据 |
+| --- | --- | --- |
+| **知识库默认** | KB 的 `WikiConfig` / `ExtractConfig` | `internal/types/wiki_page.go:524` `WikiConfig{ExtractionGranularity, ContentInstructions, ExtractionInstructions, Ingest*}`；`internal/types/knowledgebase.go:120` `WikiConfig *WikiConfig`（json 列） |
+| **单文档覆盖** | 上传时传 `process_config`（`KnowledgeProcessOverrides`），存进该文档的 metadata（键 `process_overrides`） | `internal/handler/knowledge.go:430`（上传请求体 `process_config`）、`internal/types/knowledge.go:433` `metadataKeyProcessOverrides = "process_overrides"`、`internal/types/knowledge.go:436` `Knowledge.ProcessOverrides()`、`internal/application/service/knowledge_process.go:2552` `ValidateProcessOverrides(...)`、`ResolveProcessConfig(kb, overrides)` |
+
+**结论**：本体模型 + 专家角色的选择放在 **①知识库设置（默认，供自动流水线用）**，
+并在 **②上传/重解析时用 `process_config` 覆盖（单文档）**。自动生成 wiki 的链路不变，
+只是链路内部读的是"该文档生效的本体模型"。
+
+### 8.2 抽取引擎：Python 组织提示词，输出对齐 WeKnora
+
+- **路线定为 B**：Python 侧组织 system/user 提示词并调用 LLM，产出的 JSON **按 WeKnora 的形态**返回。
+- **不让 LLM 判断 create/merge**：LLM 只产出候选要素/关系；**由 WeKnora 的向量/身份去重决定新增页面还是合并**
+  （证据：`internal/application/service/wiki_ingest_dedup.go` 的 `selectDedupCandidatePages`、
+  `normalizeWikiIdentityTitle`、`stabilizeExtractedIdentities`、`claimWikiIdentitySlug`）。
+  → 我方 JSON **去掉 `action` / `existing_id`**。
+- **与源文的关联**：改用 WeKnora 的引用机制（`wiki_ingest_cite.go` 的 chunk 引用、
+  `wiki_page_revisions`），即输出里带上 **chunk_id / knowledge_id**，而不是我们自己的 excerpt_id。
+- **与存量 wiki 的关联**：存量喂给提示词的应是 **既有 Wiki 页面的 slug/标题/摘要**（`wiki_page` 表 + `wiki_linkify.go` 的链接规则），
+  输出里的链接也用 WeKnora 的页面引用形式，而不是我们的 `./kn/类型/名称`。
+
+### 8.3 多源文档与「唯一权威定义」
+
+`src` 侧已支持"一个知识由多份文档的多个片段提及或定义"，并要求**只允许一个权威定义**
+（`SourceInfo.is_authoritative`、`graph_service.set_authoritative_source`）。
+在 WeKnora 里对应：**一个 slug 一个页面**（多源汇入同一页面的 citations），
+权威定义标记需要落在页面上（本轮新增字段），这样"文档更新 → 驱动知识更新"有明确入口。
+
+### 8.4 页面类型 = 一个本体 class 一个类型，前缀取模块简称
+
+- 现状枚举是 6 个常量：`summary / entity / concept / index / synthesis / comparison`
+  （`internal/types/wiki_page.go:138-152`），`IsValidWikiPageType`（同文件 168 行）做白名单。
+- 改为：页面类型取值形如 **`bmm:Goal`、`ea:Activity`、`easvc:ServiceContract`**
+  （前缀 = 模块简称：bmm / ea / easvc / eaown / bmmfd）。
+
+### 8.5 提示词用「轻量版」，不加载完整 TTL
+
+- 上游/我方提示词**不注入完整 TTL**，用轻量版内容（现有 `ontology/BMM轻量版.md` 7.6KB；
+  其余模块由编译器产出的 `artifacts/prompts/<模块>_extraction.md` 充当轻量版）。
+- **专家角色移入 TTL 定义**（不再写死在 `config.py`）。
+
+### 8.6 `extract_config.*.json` 的角色变更
+
+用户口径：**不再需要**该 JSON——fork 只需要
+**「所有本体模型的 class」**（知识分类枚举）与 **「relationType」**（关系类型枚举）。
+→ 保留产物（仍有 SHACL/Neo4j/JSON Schema 等消费者），但**不再作为与 fork 的接口**；
+新的接口产物是**枚举目录**（class + relationType + 模块前缀），见 `emitters/ontology_index.py` 的后续调整。
+
+

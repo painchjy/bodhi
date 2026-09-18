@@ -23,6 +23,7 @@ import rdflib
 from rdflib import BNode, Graph, Literal, URIRef
 
 from ontology_compiler.config import (
+    EXPERT_ROLE,
     GENERATED_AT_ENV,
     NS,
     OWL,
@@ -486,6 +487,27 @@ def resolved_generated_at(explicit: str | None = None) -> str:
     return pinned.strip() if pinned and pinned.strip() else utcnow_iso()
 
 
+def extract_expert_roles(graphs: dict[str, Graph], mods: dict[str, ModuleSpec]) -> dict[str, str]:
+    """读每个模块 `owl:Ontology` 上的 `bodhi:expertRole`（专家角色）。
+
+    角色属于本体的语义，因此定义在 TTL 而不是代码里（docs/weknora-fork.md §8.5）：
+    换角色、加模块都不需要改编译器。缺注解的模块不出现在返回值里，由消费方决定是否报错。
+    """
+    predicate = URIRef(EXPERT_ROLE)
+    roles: dict[str, str] = {}
+    for key, spec in mods.items():
+        graph = graphs.get(key)
+        if graph is None:
+            continue
+        value = graph.value(URIRef(spec.ontology_iri), predicate)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            roles[key] = text
+    return roles
+
+
 def load_ontology(
     modules: dict[str, ModuleSpec] | None = None,
     generated_at: str | None = None,
@@ -522,6 +544,7 @@ def load_ontology(
         restrictions=restrictions,
         generated_at=resolved_generated_at(generated_at),
         source_files=source_files,
+        expert_roles=extract_expert_roles(graphs, mods),
     )
 
 

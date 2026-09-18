@@ -3,10 +3,21 @@
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix bodhi: <http://example.org/bodhi#> .
 
 <http://example.org/bmm> rdf:type owl:Ontology ;
     rdfs:label "BMM 扩展本体（含信息来源追踪与枚举类型）"@zh ;
-    owl:versionIRI <http://example.org/bmm/1.2> .
+    owl:versionIRI <http://example.org/bmm/1.2> ;
+    bodhi:expertRole "企业架构分析专家，精通 BMM 业务动机模型"@zh .
+
+# ------------------------------------------------------------
+# 跨模块共享注解：专家角色
+#   WeKnora 二次开发侧的抽取界面用它作为「专家角色」选项（docs/weknora-fork.md §8.5）；
+#   编译器读入后随本体目录下发，不再写死在 config.py。
+# ------------------------------------------------------------
+bodhi:expertRole rdf:type owl:AnnotationProperty ;
+    rdfs:label "专家角色"@zh ;
+    rdfs:comment "定义在某模块 owl:Ontology 上的专家角色描述：抽取时模型应扮演的角色"@zh .
 
 # ============================================================
 # 一、类定义（Class Definitions）

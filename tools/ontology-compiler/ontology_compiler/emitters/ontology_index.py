@@ -95,6 +95,13 @@ def relation_entry(prop: OntProperty, prefix_map: dict[str, str]) -> dict:
 
 def model_entry(bundle, view, prefix_map: dict[str, str]) -> dict:
     spec = view.spec
+    # 专家角色来自 TTL 的 bodhi:expertRole（单一真源）；缺失就报错，不允许产出半成品目录
+    expert_role = bundle.expert_roles.get(view.key) or spec.expert_role
+    if not expert_role:
+        raise ValueError(
+            "模块 %r 缺少专家角色：请在 %s 的 owl:Ontology 上补 bodhi:expertRole"
+            "（见 docs/weknora-fork.md §8.5）" % (view.key, " 或 ".join(spec.rel_files()))
+        )
     enum_classes = [c for c in view.classes if c.is_enum]
     plain_classes = [c for c in view.classes if not c.is_enum]
     bridges = [p for p in bundle.cross_module_bridges() if p.module == view.key]
@@ -102,7 +109,7 @@ def model_entry(bundle, view, prefix_map: dict[str, str]) -> dict:
         "key": view.key,
         "label": spec.label,
         "short_label": spec.short_label,
-        "expert_role": spec.expert_role,
+        "expert_role": expert_role,
         "kind": spec.kind,
         "namespace": spec.namespace,
         "ontology_iri": spec.ontology_iri,

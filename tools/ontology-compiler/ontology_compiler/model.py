@@ -192,6 +192,8 @@ class OntologyBundleView:
     restrictions: list[Restriction]
     generated_at: str
     source_files: dict[str, list[str]]
+    # 模块 -> 专家角色（读自各模块 owl:Ontology 上的 bodhi:expertRole，见 config.EXPERT_ROLE）
+    expert_roles: dict[str, str] = field(default_factory=dict)
 
     # ---- 基本集合 --------------------------------------------------------
     def all_properties(self) -> list[OntProperty]:

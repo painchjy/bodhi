@@ -6,12 +6,14 @@
 @prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix bodhi:  <http://example.org/bodhi#> .
 
 <http://example.org/bodhi/ext/bmm-fd> rdf:type owl:Ontology ;
     rdfs:label "BMM 规则可执行化扩展本体（数据质量规则 / 访问控制规则）"@zh ;
     rdfs:comment "把 BMM 的指导规范落到可执行、可校验的形态：结构性与操作性业务规则细分为『数据质量规则』与『访问控制规则』，并提供规则->实体/属性/契约的跨层引用关系，使 BMM 规则可以被执行层网关与校验器直接消费。"@zh ;
     owl:imports <http://example.org/bmm> , <http://example.org/bmm-EA-ext> , <http://example.org/bodhi/ext/ea-service> ;
-    owl:versionIRI <http://example.org/bodhi/ext/bmm-fd/1.0> .
+    owl:versionIRI <http://example.org/bodhi/ext/bmm-fd/1.0> ;
+    bodhi:expertRole "业务规则可执行化专家，精通函数依赖与规则判定"@zh .
 
 # ============================================================
 # 一、类定义
