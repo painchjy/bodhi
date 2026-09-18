@@ -105,6 +105,8 @@ def model_entry(bundle, view, prefix_map: dict[str, str]) -> dict:
     enum_classes = [c for c in view.classes if c.is_enum]
     plain_classes = [c for c in view.classes if not c.is_enum]
     bridges = [p for p in bundle.cross_module_bridges() if p.module == view.key]
+    # 轻量版：提取提示词用它，不注入完整 TTL；没有轻量版的模块不应出现在界面可选列表里
+    light_source = spec.rel_light() if spec.light_ready() else ""
     return {
         "key": view.key,
         "label": spec.label,
@@ -115,6 +117,9 @@ def model_entry(bundle, view, prefix_map: dict[str, str]) -> dict:
         "ontology_iri": spec.ontology_iri,
         "source_files": spec.rel_files(),
         "affects": list(spec.affects),
+        "light_available": bool(light_source),
+        "light_source": light_source,
+        "light_prompt": ("artifacts/prompts/%s_light.md" % view.key) if light_source else "",
         "stats": {
             "classes": len(plain_classes),
             "enums": len(enum_classes),

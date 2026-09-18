@@ -31,6 +31,7 @@ class Emitter(Protocol):
 
 from ontology_compiler.emitters.json_schema import JsonSchemaEmitter  # noqa: E402
 from ontology_compiler.emitters.label_map import LabelMapEmitter  # noqa: E402
+from ontology_compiler.emitters.light_prompts import LightPromptEmitter  # noqa: E402
 from ontology_compiler.emitters.neo4j import Neo4jEmitter  # noqa: E402
 from ontology_compiler.emitters.ontology_index import OntologyIndexEmitter  # noqa: E402
 from ontology_compiler.emitters.prompts import PromptEmitter  # noqa: E402
@@ -40,6 +41,7 @@ from ontology_compiler.emitters.weknora_config import WeKnoraConfigEmitter  # no
 EMITTERS = (
     WeKnoraConfigEmitter(),
     OntologyIndexEmitter(),
+    LightPromptEmitter(),
     ShaclEmitter(),
     Neo4jEmitter(),
     JsonSchemaEmitter(),
@@ -52,6 +54,7 @@ __all__ = [
     "Emitter",
     "JsonSchemaEmitter",
     "LabelMapEmitter",
+    "LightPromptEmitter",
     "Neo4jEmitter",
     "OntologyIndexEmitter",
     "PromptEmitter",

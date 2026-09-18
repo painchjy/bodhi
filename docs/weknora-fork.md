@@ -213,9 +213,19 @@ WEKNORA_EXISTING_LIMIT=180        # 存量注入条数上限（与现有实现�
 
 ### 8.5 提示词用「轻量版」，不加载完整 TTL
 
-- 上游/我方提示词**不注入完整 TTL**，用轻量版内容（现有 `ontology/BMM轻量版.md` 7.6KB；
-  其余模块由编译器产出的 `artifacts/prompts/<模块>_extraction.md` 充当轻量版）。
-- **专家角色移入 TTL 定义**（不再写死在 `config.py`）。
+- 上游/我方提示词**不注入完整 TTL**，用轻量版内容；**专家角色移入 TTL**（不再写死在 `config.py`，已实施）。
+- **轻量版现状（2026-09-18 决定：先只做 bmm + ea）**：
+
+| 模块 | 轻量版真源 | 产物 | 界面可选 |
+| --- | --- | --- | --- |
+| `bmm` | `ontology/BMM轻量版.md`（已有） | `artifacts/prompts/bmm_light.md` | ✅ |
+| `ea` | `ontology/EA轻量版.md`（本轮新建，结构对齐 BMM 轻量版） | `artifacts/prompts/ea_light.md` | ✅ |
+| `ea-service` / `ea-ownership` / `bmm-fd` | 暂无 | 无（emitter 跳过，不产出空文件） | ❌ |
+
+- 由 `emitters/light_prompts.py` 把真源**复制**到产物目录并标注来源；`ontology_index.json`
+  每个模型带 `light_available` / `light_source` / `light_prompt`，**fork 界面只应把
+  `light_available=true` 的模型列为可选**（当前即 bmm / ea）。
+- `.env` 里的 `ONTOLOGY_MODELS`（BMM / EA）与此一致。
 
 ### 8.6 `extract_config.*.json` 的角色变更
 

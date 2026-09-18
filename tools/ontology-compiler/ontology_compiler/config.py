@@ -109,6 +109,18 @@ class ModuleSpec:
     # 抽取时的「专家角色」已迁到 TTL 的 bodhi:expertRole（见 loader.extract_expert_roles / config.EXPERT_ROLE）。
     # 这里保留空字段仅为兼容旧调用；不要再在此处硬编码角色。
     expert_role: str = ""
+    # 轻量版 md（人工撰写、供提取提示词使用；**不注入完整 TTL**）。None = 本模块暂无轻量版。
+    light_file: Path | None = None
+
+    def rel_light(self) -> str:
+        """轻量版的仓库相对路径（无轻量版时返回空串）。"""
+        if self.light_file is None:
+            return ""
+        return self.light_file.relative_to(REPO_ROOT).as_posix()
+
+    def light_ready(self) -> bool:
+        """轻量版是否存在（不存在则不能作为可选的抽取模型）。"""
+        return self.light_file is not None and Path(self.light_file).is_file()
 
     def rel_files(self) -> list[str]:
         return [p.relative_to(REPO_ROOT).as_posix() for p in self.files]
@@ -129,6 +141,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             namespace=NS["bmm"],
             files=(ONTOLOGY_DIR / "BMM完整版.ttl",),
             lexicon=LEXICON_DIR / "bmm.keywords.yaml",
+            light_file=ONTOLOGY_DIR / "BMM轻量版.md",
         ),
         "ea": ModuleSpec(
             key="ea",
@@ -139,6 +152,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             namespace=NS["ea"],
             files=(ONTOLOGY_DIR / "EA完整版.ttl",),
             lexicon=LEXICON_DIR / "ea.keywords.yaml",
+            light_file=ONTOLOGY_DIR / "EA轻量版.md",
         ),
         "ea-service": ModuleSpec(
             key="ea-service",
