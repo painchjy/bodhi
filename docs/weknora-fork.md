@@ -414,7 +414,46 @@ WEKNORA_EXISTING_LIMIT=180        # 存量注入条数上限（与现有实现�
 命中即合法"，保留原枚举作为兼容分支。这样**不破坏上游既有页面类型**，同时放行本体类型。
 
 
-### 10.9 方案 A1 实施细节（2026-09-19，源码已核实到文件/行）
+### 10.9 预演路径已跑通：真库片段 → BMM 抽取 → wiki + 图谱（2026-09-19 实测）
+
+**脚本**：`tools/ontology-extract/weknora_sync.py`（666 行，零新依赖；`extract.py` 作为引擎被导入复用）
+
+```powershell
+python tools/ontology-extract/weknora_sync.py `
+  --kb-id dbc2528f-611b-48da-9a71-d7c93975adb4 `
+  --knowledge-id 815b301f-703e-4cf8-8bfe-f85e32848f3d `
+  --model bmm
+# 可选：--dry-run（只导提示词）/ --no-write / --no-wiki / --no-graph / --from-log
+```
+
+**实测结果**（源文档《增量数据落标与枚举值管控方案.docx》，13 片段 / 2706 字正文）：
+
+| 环节 | 结果 |
+| --- | --- |
+| 片段选取 | 13 个片段 → **正文取 1 个 `parent_text` 父块**（2706 字）+ **溯源池 11 个 `text` 子块** |
+| LLM | 42.4s 返回 10254 字符，`finish_reason=stop` |
+| 本体校验 | **要素 27 / 关系 20 / 违规 0** / unmatched 6（不丢弃，进索引页） |
+| 溯源定位 | **exact 47 / span 0 / miss 0**（要素+关系全部精确命中子片段） |
+| 图谱 | **节点 27 / 关系 20**，12 个本体类、16 种关系类型（带中文 label），节点与关系都写了 `knowledge_id` + `chunk_id` + `chunk_index` |
+| wiki | **28 页**：27 个要素页（`page_type = bmm:<Class>`）+ 1 个索引页；每页带 `category_path`、`source_refs`、`chunk_refs`、`in_links`/`out_links` |
+
+wiki 页面类型分布：`bmm:CourseOfAction 5`、`bmm:OrganizationUnit 5`、`bmm:OperativeBusinessRule 4`、
+`bmm:BusinessProcess 2`、`bmm:ExternalInfluencer 2`、`bmm:Goal 2`、`bmm:InternalInfluencer 2`、
+`bmm:Assessment 1`、`bmm:Asset 1`、`bmm:BusinessPolicy 1`、`bmm:BusinessService 1`、`bmm:Objective 1`。
+
+**三条已知差异（都是 A1 要收尾的）**：
+
+1. 页面是**直写 Postgres**（字段与 `CreatePage` 对齐，含 links 复算），**未走上游 service**；
+   正式版改为经 `wikiPageService` 写入（顺带拿到拼音 slug、linkify、revision）。
+2. slug 是 `<模型>/<类小写>/<name sha1[:12]>`（本机无拼音库），正式版由 Go 生成可读 slug。
+3. **上游会在打开 wiki 时自动补一个根索引页**（`slug='index'`, `page_type='index'`, `last_edit_source` 空）——
+   本次实测就多出这样一页，属上游正常行为，不要误判为脚本重复写。
+
+**幂等**：重跑时先 `DELETE ... WHERE last_edit_source='ontology-extract'` 再整批重建；
+页面 id 用 `uuid5(slug)` 稳定生成；SQL 留档 `logs/ontology_wiki_*.sql`，报告 `logs/ontology_sync_*.json`。
+
+
+### 10.10 方案 A1 实施细节（2026-09-19，源码已核实到文件/行）
 
 **分工原则**：Go 侧负责"平台内的事"（拿片段、写 wiki 页面），Python 侧负责"本体抽取"（组提示词、调 LLM、校验）。
 
