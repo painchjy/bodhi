@@ -36,6 +36,29 @@ from ontology_compiler.model import OntProperty, Term
 # fork 侧解析器据此判断目录结构（改结构时递增）
 INDEX_SCHEMA = "bodhi2.weknora_ontology_index/1"
 
+# 图谱着色：定性调色板（对色盲较友好），按「模块序号 × 5 + 类序号」取色，
+# 确定性且稳定（同一 class 永远同一颜色），由产物下发，前端不硬编码。
+# 用户口径：图谱节点是 wiki 页面，**按页面归属的本体类型区分颜色**。
+PALETTE = (
+    "#3b82f6",  # blue
+    "#10b981",  # emerald
+    "#f59e0b",  # amber
+    "#ef4444",  # red
+    "#8b5cf6",  # violet
+    "#06b6d4",  # cyan
+    "#84cc16",  # lime
+    "#ec4899",  # pink
+    "#f97316",  # orange
+    "#14b8a6",  # teal
+    "#6366f1",  # indigo
+    "#eab308",  # yellow
+)
+
+
+def class_color(module_index: int, class_index: int) -> str:
+    """类 -> 颜色（确定性）。"""
+    return PALETTE[(module_index * 5 + class_index) % len(PALETTE)]
+
 
 class OntologyIndexEmitter:
     name = "weknora_index"
@@ -107,8 +130,19 @@ def model_entry(bundle, view, prefix_map: dict[str, str]) -> dict:
     bridges = [p for p in bundle.cross_module_bridges() if p.module == view.key]
     # 轻量版：提取提示词用它，不注入完整 TTL；没有轻量版的模块不应出现在界面可选列表里
     light_source = spec.rel_light() if spec.light_ready() else ""
+    # 着色：按模块序号 + 类序号取确定性颜色；图例只列可实例化的类（= wiki 页面类型候选）
+    module_index = bundle.module_order().index(view.key)
+    entries = []
+    legend = []
+    for i, cls in enumerate(view.classes):
+        entry = class_entry(cls, prefix_map)
+        entry["color"] = class_color(module_index, i)
+        entries.append(entry)
+        if not cls.is_enum:
+            legend.append({"page_type": cls.prefixed, "label": cls.label or "", "color": entry["color"]})
     return {
         "key": view.key,
+        "prefix": spec.prefix,
         "label": spec.label,
         "short_label": spec.short_label,
         "expert_role": expert_role,
@@ -130,7 +164,8 @@ def model_entry(bundle, view, prefix_map: dict[str, str]) -> dict:
             "cross_module_bridges": len(bridges),
         },
         # 页面类型候选 = 本模块声明的类（含枚举类；fork 侧按 is_enum 过滤）
-        "classes": [class_entry(c, prefix_map) for c in view.classes],
+        "classes": entries,
+        "legend": legend,
         "relations": [relation_entry(p, prefix_map) for p in view.object_properties],
         "cross_module_bridges": [relation_entry(p, prefix_map) for p in bridges],
         "referenced": {

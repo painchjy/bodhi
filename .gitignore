@@ -17,3 +17,6 @@ deploy/.env
 
 # 根目录运行配置：含 LLM API Key，只入库模板（与 deploy/.env 同策略）
 /.env
+
+# 抽取调试日志：含完整提示词与 LLM 原始返回，只在本机留痕
+logs/
