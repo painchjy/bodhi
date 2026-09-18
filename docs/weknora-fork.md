@@ -375,7 +375,46 @@ WEKNORA_EXISTING_LIMIT=180        # 存量注入条数上限（与现有实现�
 它们调用的是同一套抽取引擎（轻量版提示词 + 本体枚举 + 校验 + 写图），
 与 §9 的图谱展示、§8.2 的抽取契约完全一致 —— 只是入口不同。
 
-### 10.7 方案 A1 实施细节（2026-09-19，源码已核实到文件/行）
+### 10.7 关键约束：`wiki_enabled` 是总闸门，不能关（2026-09-19 实测）
+
+上游 `KnowledgeBase.IsWikiEnabled()`（`types/knowledgebase.go:822`）是 wiki 的唯一开关，
+它的分布**不止"生成"一处**：
+
+| 位置 | 被闸住的东西 |
+| --- | --- |
+| `service/knowledge_post_process.go:179` | **自动生成触发点**：`willSpawnWiki := WikiEnabled && len(textChunks)>0` |
+| `service/wiki_ingest_batch.go:293,1041` | 批次 ingest 入口直接 return |
+| `handler/wiki_page.go:63` | **对外 wiki API 全拒**（403） |
+| `service/agent_service.go:861,1300` | **wiki 工具不注册给 agent** |
+| `types/knowledgebase.go:799` → `Capabilities().Wiki` | KB 按能力过滤（会话选库会跳过） |
+| `chat_pipeline/wiki_boost.go:73` / `service/wiki_lint.go:100` | 对话 wiki 增强检索 / 巡检 |
+| `service/knowledge_delete.go:209,668` | 文档删除时的 wiki 清理 |
+
+**因此不能靠 `wiki_enabled=false` 来"停掉上游通用生成"**（会把 API/工具/能力一起关掉）。
+正确做法是加**本体模式开关**（KB 级），只改"生成端"：
+
+- 本体模式为真时，`knowledge_post_process.go` 不 spawn 上游候选生成（`willSpawnWiki=false`），
+  `wiki_ingest_batch` 的入口同样跳过；
+- `wiki_enabled` 保持 `true` → wiki API / `wiki_write_page` 等工具 / KB 能力**全部照旧可用**；
+- 页面的**产生**改由本体抽取负责（Python 抽取 → Go 经 `wikiPageService.CreatePage` 写入）。
+
+**写页面的两条硬约束（A1 工具必须处理）**：
+
+1. `wiki_pages` 的唯一约束是**部分唯一**：
+   `CREATE UNIQUE INDEX idx_wiki_pages_kb_slug ON (knowledge_base_id, slug) WHERE deleted_at IS NULL`
+   → 软删的旧页不阻塞新页；但**同名 slug 已存在（未删）时必须 upsert**（`GetPageBySlug` → 有则更新，无则创建），
+   否则 `CreatePage` 撞唯一约束失败。
+2. `CreatePage` **要求 slug 必填**（`service/wiki_page.go:75`），没有自动 slug 兜底
+   → 工具侧需自己按 slug 规则生成（参考 `wiki_write_page.go` 的 `normalizeAndValidateWikiSlug`）。
+
+### 10.8 本体模式的页面类型如何绕过白名单
+
+`IsValidWikiPageType`（`types/wiki_page.go:168`）是硬编码枚举（entity/concept/index/summary…），
+本体类型 `ea:Activity` 会被拒。改法：改为"先查本体目录（`artifacts/ontology_index.json` 的合法类型集合），
+命中即合法"，保留原枚举作为兼容分支。这样**不破坏上游既有页面类型**，同时放行本体类型。
+
+
+### 10.9 方案 A1 实施细节（2026-09-19，源码已核实到文件/行）
 
 **分工原则**：Go 侧负责"平台内的事"（拿片段、写 wiki 页面），Python 侧负责"本体抽取"（组提示词、调 LLM、校验）。
 
