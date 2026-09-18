@@ -100,6 +100,8 @@ class ModuleSpec:
     kind: str = "base"  # base（原始本体） | extension（扩展本体）
     lexicon: Path | None = None
     affects: tuple[str, ...] = ()  # 该扩展在语义上补强了哪些模块
+    # 抽取时的「专家角色」：下发到 WeKnora fork 的界面供用户选择（见 emitters/ontology_index.py）
+    expert_role: str = ""
 
     def rel_files(self) -> list[str]:
         return [p.relative_to(REPO_ROOT).as_posix() for p in self.files]
@@ -120,6 +122,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             namespace=NS["bmm"],
             files=(ONTOLOGY_DIR / "BMM完整版.ttl",),
             lexicon=LEXICON_DIR / "bmm.keywords.yaml",
+            expert_role="企业架构分析专家，精通 BMM 业务动机模型",
         ),
         "ea": ModuleSpec(
             key="ea",
@@ -130,6 +133,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             namespace=NS["ea"],
             files=(ONTOLOGY_DIR / "EA完整版.ttl",),
             lexicon=LEXICON_DIR / "ea.keywords.yaml",
+            expert_role="企业架构建模专家，精通企业架构模型规范",
         ),
         "ea-service": ModuleSpec(
             key="ea-service",
@@ -141,6 +145,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             files=(EXTENSIONS_DIR / "ea-service-ext.ttl",),
             kind="extension",
             affects=("ea",),
+            expert_role="IT 服务设计与服务契约专家，精通服务目标、服务设计与功能依赖",
         ),
         "ea-ownership": ModuleSpec(
             key="ea-ownership",
@@ -152,6 +157,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             files=(EXTENSIONS_DIR / "ea-ownership-ext.ttl",),
             kind="extension",
             affects=("ea",),
+            expert_role="企业治理与权责分析专家，精通所有权与控制关系",
         ),
         "bmm-fd": ModuleSpec(
             key="bmm-fd",
@@ -163,6 +169,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             files=(EXTENSIONS_DIR / "bmm-fd-ext.ttl",),
             kind="extension",
             affects=("bmm", "ea"),
+            expert_role="业务规则可执行化专家，精通函数依赖与规则判定",
         ),
     }
 

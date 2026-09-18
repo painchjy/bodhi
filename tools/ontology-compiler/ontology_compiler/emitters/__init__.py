@@ -2,6 +2,7 @@
 
 每个发射器接收「编译后的本体模型」并按目标层写出产物，互不知晓彼此细节：
     weknora_config  ->  artifacts/weknora/extract_config.<模块>.json
+    ontology_index  ->  artifacts/weknora/ontology_index.json（WeKnora fork 的本体目录：模型/专家/类/关系）
     shacl           ->  artifacts/shacl/
     neo4j           ->  artifacts/neo4j/
     json_schema     ->  artifacts/json_schema/
@@ -31,12 +32,14 @@ class Emitter(Protocol):
 from ontology_compiler.emitters.json_schema import JsonSchemaEmitter  # noqa: E402
 from ontology_compiler.emitters.label_map import LabelMapEmitter  # noqa: E402
 from ontology_compiler.emitters.neo4j import Neo4jEmitter  # noqa: E402
+from ontology_compiler.emitters.ontology_index import OntologyIndexEmitter  # noqa: E402
 from ontology_compiler.emitters.prompts import PromptEmitter  # noqa: E402
 from ontology_compiler.emitters.shacl import ShaclEmitter  # noqa: E402
 from ontology_compiler.emitters.weknora_config import WeKnoraConfigEmitter  # noqa: E402
 
 EMITTERS = (
     WeKnoraConfigEmitter(),
+    OntologyIndexEmitter(),
     ShaclEmitter(),
     Neo4jEmitter(),
     JsonSchemaEmitter(),
@@ -50,6 +53,7 @@ __all__ = [
     "JsonSchemaEmitter",
     "LabelMapEmitter",
     "Neo4jEmitter",
+    "OntologyIndexEmitter",
     "PromptEmitter",
     "ShaclEmitter",
     "WeKnoraConfigEmitter",
