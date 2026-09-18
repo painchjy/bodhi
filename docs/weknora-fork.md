@@ -371,9 +371,66 @@ WEKNORA_EXISTING_LIMIT=180        # 存量注入条数上限（与现有实现�
 
 ### 10.6 与最终形态的关系
 
+### 10.6 与最终形态的关系
+
 方案 A/B 都是**在 WeKnora 内**提供提取交互（对话式 / 专用页面），
 它们调用的是同一套抽取引擎（轻量版提示词 + 本体枚举 + 校验 + 写图），
 与 §9 的图谱展示、§8.2 的抽取契约完全一致 —— 只是入口不同。
+
+### 10.7 方案 A1 实施细节（2026-09-19，源码已核实到文件/行）
+
+**分工原则**：Go 侧负责"平台内的事"（拿片段、写 wiki 页面），Python 侧负责"本体抽取"（组提示词、调 LLM、校验）。
+
+| 改动 | 文件 | 依据 |
+| --- | --- | --- |
+| 工具名常量 | `internal/agent/tools/definitions.go`（+`ToolExtractOntologyKnowledge = "extract_ontology_knowledge"`） | 现有常量块 `definitions.go:9-76` |
+| **新工具** | `internal/agent/tools/extract_ontology_knowledge.go`（新建） | 模仿 `grep_chunks.go`（取片段）/`wiki_write_page.go`（写页面） |
+| 注册 | `internal/application/service/agent_service.go`（+1 行 `toolRegistry.RegisterTool(...)`） | 注册点 `agent_service.go:424-806` |
+| 预置 Agent | `config/agent_type_presets.yaml`（+`id: ontology-extract`） | 结构见 `types/agent_type_preset.go:59` |
+| 系统提示词 | `config/prompt_templates/*.yaml`（+`ontology_extract_agent`） | 模板注册见 `config.go` 的 `PromptTemplateStructured` 装配 |
+| 抽取服务 | `tools/ontology-extract/server.py`（新建，标准库 HTTP，复用 `extract.py` 的引擎） | 本仓库已跑通 |
+| 编排 | `deploy/docker-compose.weknora-fork.yml`（新增：抽取服务容器 + 挂载 `artifacts/`、`ontology/`、注入 `BODHI_EXTRACT_URL`） | 与现有叠加层同风格 |
+
+**新工具契约**（`extract_ontology_knowledge`）：
+
+```jsonc
+// 入参
+{
+  "model": "ea",                       // 必填：bmm | ea（= 本体模型，界面只列 light_available=true）
+  "knowledge_ids": ["..."],            // 源文档（不填则用本轮 @提及/会话选中的库范围）
+  "chunk_ids": ["..."],                // 源文片段（显式选择时）
+  "keyword": "开户|审核",              // 或关键词筛选（走 grep_chunks 同款检索）
+  "limit": 40,                         // 片段上限
+  "write_wiki": true,                  // 是否把结果写成 wiki 页面（默认 true）
+  "write_graph": true                  // 是否写图谱（默认 true）
+}
+// 出参（供 LLM 回报给用户）
+{
+  "model": "ea", "model_label": "EA 企业架构",
+  "chunks_used": 12, "elements": 42, "relationships": 57,
+  "violations": [], "unmatched": [{ "name": "...", "reason": "..." }],
+  "wiki_pages_written": 42, "graph_hint": "MATCH (n:BodhiInstance) WHERE n.kb='<kb>' RETURN n"
+}
+```
+
+**执行流程**：
+1. Go：解析参数 → 取片段（`knowledge_ids`/`chunk_ids`/`keyword`，复用既有检索与 chunk 仓储）；
+2. Go → Python：`POST {BODHI_EXTRACT_URL}/extract`，body = `{model, doc_name, chunks:[{chunk_id, knowledge_id, title, text}]}`；
+3. Python：组装轻量版提示词（专家角色取自 TTL、本体枚举取自 `ontology_index.json`）→ 调 LLM →
+   本体校验（类型白名单 + 关系 domain/range）→ **写 Neo4j**（节点 label = `模块__类`、边 = 关系 +
+   中文 label + 方向）→ 返回 `{elements, relationships, violations, unmatched}`（附 `chunk_id` 归属）；
+4. Go：把 `elements` 写成 **wiki 页面**（`wikiPageService.CreatePage`，`page_type = 模块:Class`，
+   `source_refs`/`chunk_refs` 指向本次片段）→ 汇总回报给用户。
+
+**前置依赖（都已具备）**：源码树 `/root/wk080`（v0.8.0，go 833/838，含 `go.mod`/`Makefile`/`Dockerfile.app`）、
+运行中的栈、已验证的 Python 引擎（42 节点/57 关系）。
+
+**仍需的小改动**：`IsValidWikiPageType` 目前是硬编码白名单（§4.1），
+不放开的话 `page_type = ea:Activity` 会被拒 → 该函数改为"接受本体目录里的合法类型"。
+
+**验证方式**：A1 完成后，在对话里说「把《增量数据落标与枚举值管控方案.docx》按 EA 模型提取一遍」，
+Agent 应先确认模型/文档/片段，再调用工具；随后 wiki 里应出现**本体类型**的页面
+（`SELECT DISTINCT page_type FROM wiki_pages` 里出现 `ea:*`），图谱里出现对应的节点与关系。
 
 
 
