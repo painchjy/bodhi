@@ -232,6 +232,64 @@ WEKNORA_EXISTING_LIMIT=180        # 存量注入条数上限（与现有实现�
 用户口径：**不再需要**该 JSON——fork 只需要
 **「所有本体模型的 class」**（知识分类枚举）与 **「relationType」**（关系类型枚举）。
 → 保留产物（仍有 SHACL/Neo4j/JSON Schema 等消费者），但**不再作为与 fork 的接口**；
-新的接口产物是**枚举目录**（class + relationType + 模块前缀），见 `emitters/ontology_index.py` 的后续调整。
+新的接口产物是**枚举目录**（class + relationType + 模块前缀），即 `artifacts/weknora/ontology_index.json`。
+
+## 9. v0.1 发布范围（用户口径，2026-09-18）
+
+目标：**先发布一个可用版本** —— 验证「用本体提取」的能力，并能在界面上**看到提取出的知识图谱**。
+
+### 9.1 范围
+
+- 抽取模型只提供 **bmm / ea**（其余 3 个扩展模块留给后续"推理验证"，暂不出现在界面）。
+- 提取提示词用**轻量版 md**（§8.5），不注入完整 TTL。
+- 发布判据（缺一不算可用）：
+  1. 上传文档后能触发**本体驱动**的抽取（替换上游通用实体-关系抽取）；
+  2. 抽取产物写入图谱：**节点是 wiki 页面**，类型取本体 class；
+  3. 界面有**知识图谱视图**：节点按本体类型着色、边 = 关系（带 label + 方向箭头）。
+
+### 9.2 与上游「页面链接图谱」的区别（不要混）
+
+| | 上游 wiki 链接图 | 我们的本体图谱（v0.1） |
+| --- | --- | --- |
+| 接口 | `GET /knowledgebase/:kb_id/wiki/graph`（`WikiPageHandler.GetGraph`，`routes_knowledge.go:326`） | **新增** `GET /knowledgebase/:kb_id/ontology-graph` |
+| 节点 | wiki 页面（`slug/title/page_type/link_count`） | wiki 页面 + **本体类型**（`bmm:Goal`…） |
+| 边 | `{source,target}`，**无 label、无方向语义** | `{source,target,type,label}`，**必须渲染箭头** |
+| 用途 | 页面互相引用的导航图 | 本体驱动的知识结构（后续推理的载体） |
+
+上游 i18n 自己也承认两者不同：`tabGraphTip`「Wiki 页面之间的引用关系图…与『知识库设置 → 知识图谱』
+中基于 LLM 抽取的实体-关系图谱不是同一个概念」；而抽取出来的实体-关系图**在本版本里没有可视化入口**
+（只进 `RetrieveGraphRepository` 供 GraphRAG 检索）。
+
+### 9.3 新接口契约
+
+`GET /api/v1/knowledgebase/{kb_id}/ontology-graph?models=bmm,ea&limit=…`
+
+```json
+{
+  "nodes": [{"id": "<wiki slug>", "title": "…", "page_type": "bmm:Goal", "type_label": "目标",
+             "module": "bmm", "color": "#3b82f6", "degree": 3}],
+  "edges": [{"source": "…", "target": "…", "type": "bmm:realizes", "label": "实现",
+             "directed": true, "evidence": [{"knowledge_id": "…", "chunk_id": "…"}]}],
+  "meta": {"total": 0, "returned": 0, "truncated": false,
+           "legend": [{"page_type": "bmm:Goal", "label": "目标", "color": "#3b82f6"}]}
+}
+```
+
+- `color` 与 `legend` 由**编译产物**下发（`ontology_index.json` 的 `classes[].color` / `legend[]`），
+  前端**不硬编码颜色**、也不再维护类型清单。
+- 页面类型取值形如 `模块前缀:Class`（§8.4）；`IsValidWikiPageType` 必须改为读本体目录。
+
+### 9.4 前端渲染要求（用户口径）
+
+- 图库：**AntV G6**（镜像里已打包：`graphManager` / `getItemGraphicEl` 等符号；无需新增依赖）。
+- 节点：wiki 页面；**填充色 = 该页面本体类型的颜色**；标签显示页面标题。
+- 连线：**关系类型 label**（如「实现行动方案」）；**按方向画箭头**（G6 `endArrow: true`）。
+- 图例：由 `meta.legend` 渲染（可点选高亮/过滤）。
+- 入口与"页面链接图"**分开**（不同 tab/菜单），避免混淆。
+
+### 9.5 v0.1 明确不做
+
+- 不做跨库推理；不做 `ea-service` / `ea-ownership` / `bmm-fd` 的抽取（后续阶段）。
+- 不改上游的 wiki 页面链接图，以及 Wiki 生成之外的流水线。
 
 
