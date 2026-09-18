@@ -292,4 +292,88 @@ WEKNORA_EXISTING_LIMIT=180        # 存量注入条数上限（与现有实现�
 - 不做跨库推理；不做 `ea-service` / `ea-ownership` / `bmm-fd` 的抽取（后续阶段）。
 - 不改上游的 wiki 页面链接图，以及 Wiki 生成之外的流水线。
 
+## 10. 交互设计：把「知识提取」变成对话能力（用户口径，2026-09-18）
+
+### 10.1 用户的设计意图
+
+- 提取是**单模型**的：让模型集中注意力，每次只提一类我们关心的知识；
+- **同一文档的片段可以多次提取**，每次换模型 → 可能产出新知识；
+- WeKnora 目前没有这个前端功能 → 希望**在对话里增加知识提取能力**，或**新增一类"知识提取"对话**：
+  意图识别判断是提取任务时，**要求用户明确**：①本体模型 ②源文档 ③源文片段
+  （可按关键词筛选，或直接选章节/切片）。
+
+### 10.2 上游已有的基础设施（都不是空白）
+
+| 需要的能力 | 上游现状（证据） |
+| --- | --- |
+| 意图识别 | `chat_pipeline/query_understand.go`：「performs query rewriting and **intent classification**」，输出 `{"rewrite_query":…,"intent":"kb_search"}`；枚举 9 个（`types/chat_manage.go:87-95`） |
+| 意图→提示词 | `ConversationConfig.IntentSystemPrompts map[string]string`；`config.go:1036-1045` 用 `IntentPrompts` 模板回填，**模板 ID 必须等于意图值**（模板文件 `config/prompt_templates/intent_prompts.yaml`，可挂载覆盖） |
+| 管线插件化 | `chat_pipeline/` 29 个插件（search / rerank / merge / query_understand / extract_entity / wiki_boost / query_knowledge_graph …） |
+| @提及文档 | 对话请求 `mentioned_items:[{id,name,type:kb|file}]`；Agent 配置 `kb_selection_mode: all/selected/disabled`、`retrieve_kb_only_when_mentioned` |
+| 片段级访问 | Agent 工具：`knowledge_search`、**`grep_chunks`**（关键词筛）、**`list_knowledge_chunks`**（列切片）、`get_document_info`；chunk 管理 API 亦存在 |
+| 新增一类 Agent | **纯配置**：`builtin_agents.yaml` / `agent_type_presets.yaml`（i18n + system_prompt_id + allowed_tools + kb_filter），前端经 `GET /agents/type-presets` 自动展示 |
+| 工具扩展 | `internal/agent/tools/registry.go` 注册表；已有 `wiki_*`、`query_knowledge_graph` 等先例 |
+
+### 10.3 方案 A（推荐，先做）：配置驱动一个「本体知识提取」Agent
+
+**改动量最小、当天可演示**：
+
+1. 新增 agent type preset（YAML）：
+   ```yaml
+   agent_type_presets:
+     - id: "ontology-extract"
+       i18n:
+         zh-CN: { label: "本体知识提取", description: "按指定本体模型，从选定文档/片段提取要素与关系并写入知识图谱" }
+       config:
+         system_prompt_id: "ontology_extract_agent"
+         allowed_tools: ["knowledge_search", "grep_chunks", "list_knowledge_chunks",
+                         "get_document_info", "extract_ontology_knowledge"]
+         kb_selection_mode: "selected"        # 必须先选知识库
+         max_iterations: 20
+   ```
+2. 新增系统提示词 `ontology_extract_agent`（内容要点）：
+   - 你要执行的是**本体抽取**，不是问答；
+   - **必须**向用户确认三个参数：本体模型（当前 `bmm` / `ea`）、源文档、源片段范围
+     （未给全就问，不要自己假设）；
+   - 片段范围三种给法：`knowledge_id` + 关键词（走 `grep_chunks`）、`knowledge_id` + 章节、
+     显式 `chunk_ids`（走 `list_knowledge_chunks`）；
+   - 调用 `extract_ontology_knowledge` 后，把"要素 N / 关系 M / 违规 X / 未归类 Y"和
+     未归类清单回报给用户，并给出可点击的图谱入口；
+   - 一次只用一个模型；用户换模型再提一遍是**预期用法**。
+3. 新增工具 `extract_ontology_knowledge`（Go）：
+   - 入参：`model`（bmm/ea）、`knowledge_ids[]`、`chunk_ids[]` 或 `keyword`、`write`（默认 true）；
+   - 行为：取指定片段（或关键词命中的片段）→ 组装轻量版提示词（与 CLI 同一套）→ 调 LLM
+     → 本体校验 → 写图（节点=知识实体 + `page_type`，边=关系 + label + 方向）；
+   - 出参：`{elements, relationships, violations, unmatched, graph_hint}`。
+   > 实现上先**复用 `tools/ontology-extract/extract.py`**（Python sidecar / 子进程即可），
+   > 后续再决定是否移植进 Go（§4.2 的 A/B 路线在此收口）。
+4. 意图识别增强（可选，第二步）：加一个 `ontology_extract` 意图值 + 对应
+   `intent_prompts.yaml` 模板（模板 ID = 意图值），命中时切到提取提示词。
+   注意：枚举是 Go 常量（`types/chat_manage.go`），新增值需同步 `NeedsKBRetrieval()` 语义。
+
+### 10.4 方案 B（后续）：专用「知识提取」界面
+
+当流程稳定后，做一个独立视图，把"选模型 / 选文档 / 选片段"做成控件：
+
+- 顶部：**本体模型单选**（当前 bmm / ea，来自 `ontology_index.json` 的 `light_available=true` 项）；
+- 左侧：源文档（`GET /knowledge-bases/:id/knowledge`）＋**章节树**（chunk 的父子结构）；
+- 中间：**片段多选**（按 `grep_chunks` 关键词筛选，或直接勾选切片；显示命中高亮）；
+- 右侧：运行 → 预览（要素/关系/违规/未归类）→ 确认写入；
+- 底栏：本次写了哪些节点/关系（点击跳图谱页）。
+
+### 10.5 多模型多次提取带来的两个设计问题（需要正视）
+
+1. **同一实体会在不同模型下成为不同类型**：节点 key 含类型（`bmm:Goal` vs `ea:Activity`），
+   因此同名实体可能出现在两个类型下。正式版应引入**实体身份层**（identity/alias），
+   把"同一实体在不同模型视角下的实例"聚合，这也正好承接 §8.3 的**多源唯一权威定义**。
+2. **一次提取的产物归属**：写入要带 `knowledge_id` / `chunk_id`（本版 CLI 暂用
+   `source_doc` + 逐字 `source_text`），否则做不到"文档更新 → 驱动知识更新"。
+
+### 10.6 与最终形态的关系
+
+方案 A/B 都是**在 WeKnora 内**提供提取交互（对话式 / 专用页面），
+它们调用的是同一套抽取引擎（轻量版提示词 + 本体枚举 + 校验 + 写图），
+与 §9 的图谱展示、§8.2 的抽取契约完全一致 —— 只是入口不同。
+
+
 
