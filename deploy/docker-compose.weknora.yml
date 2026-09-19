@@ -53,6 +53,14 @@ services:
     # mcp_services.url = http://host.docker.internal:8765/mcp
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    environment:
+      # app 创建 MCP 客户端前会做 SSRF 校验，主机名只放行 SSRF_WHITELIST_EXTRA 里列出的
+      # （上游默认 searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio）。
+      # 2026-09-19 实测：不加 host.docker.internal 会报
+      #   Failed to create client: MCP service URL failed SSRF validation:
+      #   SSRF validation failed: hostname host.docker.internal is restricted
+      # 注意要**保留上游默认值**再追加——这里覆盖的是同名环境变量。
+      SSRF_WHITELIST_EXTRA: searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio,host.docker.internal
 
   # ---------------------------------------------------------------------
   # frontend：换成本地自建的 Bodhi2 UI 镜像（零 Go 改动路径的最后一环）
