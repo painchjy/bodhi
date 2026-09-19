@@ -252,6 +252,81 @@ def patch_wikibrowser_v2(fe: pathlib.Path) -> None:
 
     path.write_text(text, encoding="utf-8")
     print("  WikiBrowser.vue v2 完成（%d 字节）" % len(text.encode("utf-8")))
+    patch_wikibrowser_v3(fe)
+
+
+def patch_wikibrowser_v3(fe: pathlib.Path) -> None:
+    """v3 微调（用户 2026-09-19 第三轮验收口径）：
+
+    1. 类型标签**改图标 + 悬停提示**：中文标签太长会把页面名挤出可视区、版本徽标也被顶掉；
+       改成小图标，tooltip 显示「中文名（本体类型）」。
+    2. **版本徽标挪到最前**（v2 放在标题后，长标题下看不到）。
+    3. 页面名允许换行（`min-width:0` + `overflow-wrap:anywhere`），列表容器可横向滚动。
+    4. **列表视图也加类型图标与版本徽标**（原先只有树视图有）。
+    """
+    path = fe / "src" / "views" / "knowledge" / "wiki" / "WikiBrowser.vue"
+    text = path.read_text(encoding="utf-8")
+
+    # 1+2+3) 树视图的页面行：徽标 → 类型图标(带 tooltip) → 标题
+    text = replace_maybe(
+        text,
+        '                      <span v-if="isOntologyType(item.page.page_type) || isPendingMergeType(item.page.page_type)"\n'
+        '                        :class="[\'wiki-page-item-type\', `wiki-page-item-type--${getTypeTheme(item.page.page_type)}`]">\n'
+        '                        {{ getTypeLabel(item.page.page_type) }}</span>\n'
+        '                      <span class="wiki-page-item-title">{{ item.page.title }}</span>\n'
+        '                      <span v-if="(item.page.version || 1) > 1" '
+        'class="wiki-page-item-version">v{{ item.page.version }}</span>',
+        '                      <span v-if="(item.page.version || 1) > 1" '
+        'class="wiki-page-item-version">v{{ item.page.version }}</span>\n'
+        '                      <t-tooltip\n'
+        '                        v-if="isOntologyType(item.page.page_type) || isPendingMergeType(item.page.page_type)"\n'
+        '                        :content="`${getTypeLabel(item.page.page_type)}（${item.page.page_type}）`"\n'
+        '                        placement="top">\n'
+        '                        <t-icon :name="getPageIcon(item.page)" class="wiki-page-item-type-icon" />\n'
+        '                      </t-tooltip>\n'
+        '                      <span class="wiki-page-item-title">{{ item.page.title }}</span>',
+        "树视图：徽标前置 + 类型图标(悬停看类名)")
+
+    # 4) 列表视图：类型图标 + 版本徽标
+    text = replace_maybe(
+        text,
+        '                    <div class="wiki-page-item-title">{{ item.title }}</div>',
+        '                    <div class="wiki-page-item-title">\n'
+        '                      <span v-if="(item.version || 1) > 1" '
+        'class="wiki-page-item-version">v{{ item.version }}</span>\n'
+        '                      <t-tooltip\n'
+        '                        v-if="isOntologyType(item.page_type) || isPendingMergeType(item.page_type)"\n'
+        '                        :content="`${getTypeLabel(item.page_type)}（${item.page_type}）`" placement="top">\n'
+        '                        <t-icon :name="getPageIcon(item)" class="wiki-page-item-type-icon" />\n'
+        '                      </t-tooltip>\n'
+        '                      <span class="wiki-page-item-title-text">{{ item.title }}</span>\n'
+        '                    </div>',
+        "列表视图：徽标 + 类型图标")
+
+    if ".wiki-page-item-type-icon {" not in text:
+        text += ("\n<style scoped>\n"
+                 "/* bodhi2 v3：类型用图标，悬停看类名；徽标前置；名称可换行 */\n"
+                 ".wiki-page-item-type-icon {\n"
+                 "  flex: 0 0 auto;\n"
+                 "  margin-right: 4px;\n"
+                 "  font-size: 13px;\n"
+                 "  color: var(--td-brand-color, #0052d9);\n"
+                 "}\n"
+                 ".wiki-page-item-title {\n"
+                 "  min-width: 0;\n"
+                 "  flex: 1 1 auto;\n"
+                 "  white-space: normal;\n"
+                 "  overflow-wrap: anywhere;\n"
+                 "  line-height: 1.35;\n"
+                 "}\n"
+                 ".wiki-page-item-title > .wiki-page-item-title-text { word-break: break-word; }\n"
+                 ".wiki-tree-list,\n"
+                 ".wiki-group-scroller { overflow-x: auto; }\n"
+                 "</style>\n")
+        print("  + 应用：v3 样式（图标/换行/横向滚动）")
+
+    path.write_text(text, encoding="utf-8")
+    print("  WikiBrowser.vue v3 完成（%d 字节）" % len(text.encode("utf-8")))
 
 
 def patch_knowledgebase(fe: pathlib.Path) -> None:
