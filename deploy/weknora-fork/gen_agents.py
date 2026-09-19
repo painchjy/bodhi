@@ -34,9 +34,18 @@ DESCRIPTIONS = {
     "ea": "按 EA 企业架构本体从知识库片段抽取要素与关系，并为每个要素写入本体类型（ea:*）的 wiki 页面。",
 }
 ALLOWED_TOOLS = [
+    # 读片段（一次）+ 写页；**不放 thinking / todo_write**：
+    # 2026-09-19 实测它们让智能体空转 40 轮、每轮撞 4096 token 截断，最终 0 保存。
     "grep_chunks", "list_knowledge_chunks", "get_document_info",
-    "wiki_search", "wiki_read_page", "wiki_write_page", "todo_write", "thinking",
+    "wiki_search", "wiki_read_page", "wiki_write_page",
 ]
+# 目标知识库：企业知识（抽取源）+ 企业本体模型（类型定义查询）
+KNOWLEDGE_BASES = [
+    "dbc2528f-611b-48da-9a71-d7c93975adb4",
+    "08810cbd-af86-48d1-bd25-3b2c338e3d68",
+]
+# 本体知识保存工具（MCP 服务）的 id：tools/ontology-mcp/server.py
+MCPSERVICE_IDS = ["a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001"]
 DB_CONTAINER, DB_USER, DB_NAME, DB_PASSWORD = "WeKnora-postgres", "postgres", "WeKnora", "postgres123!@#"
 
 for _stream in (sys.stdout, sys.stderr):
@@ -72,12 +81,21 @@ def build_sql(templates: dict[str, str]) -> str:
             "system_prompt_id": TEMPLATE_IDS[key],
             "system_prompt": content,               # 运行时用的是这个文本
             "temperature": 0.1,
-            "max_iterations": 40,
+            # 轮数与单轮预算：0 会回落到 4096（写页 JSON 必被截断）；12 轮足够走完
+            # 「读一次片段 → 逐个写页 → 汇报」，实测 40 轮会空转到超时。
+            "max_iterations": 12,
+            "max_completion_tokens": 16384,
+            "thinking": False,
+            "enable_rewrite": False,
             "allowed_tools": ALLOWED_TOOLS,
+            # 本体知识「保存工具」通过 MCP 挂载（tools/ontology-mcp/server.py）：
+            # 一次调用完成抽取+合规+两阈值合并，智能体不再自己判断重复。
+            "mcp_services": MCPSERVICE_IDS,
+            "knowledge_bases": KNOWLEDGE_BASES,      # 会话里"能选哪些库"取决于这个字段
+            "kb_selection_mode": "selected",
             "retain_retrieval_history": True,
             "faq_priority_enabled": False,
             "web_search_enabled": False,
-            "kb_selection_mode": "selected",
         }
         pairs = []
         for field, value in overrides.items():

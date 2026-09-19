@@ -49,6 +49,10 @@ services:
     volumes:
       - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/weknora-fork/config/agent_type_presets.yaml:/app/config/agent_type_presets.yaml:ro
       - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/weknora-fork/config/agent_system_prompt.yaml:/app/config/prompt_templates/agent_system_prompt.yaml:ro
+    # 让容器能访问宿主上的 MCP 服务（本体知识保存工具，见 tools/ontology-mcp/server.py）：
+    # mcp_services.url = http://host.docker.internal:8765/mcp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ---------------------------------------------------------------------
   # bodhi-ontology：本体投影灌库 —— **已停用**（2026-09-19 用户决定放弃 Neo4j 本体投影）
