@@ -10,8 +10,13 @@
 #   理解出的页（last_edit_source = pipeline / agent），会与我们的本体提取结果混淆。
 #   所以做法是：**事后清理** —— 只删它写的，不碰我们的（bodhi-onto-mcp）。
 #
-# 同时会重跑目录同步：WeKnora 的删除流程会把该库的 wiki_folders 一并清掉，
-# 导致界面树变空（实测过），所以清理后必须重建目录。
+# 同时会重跑目录同步：这是一道**保险**（幂等）。
+#   ⚠️ 更正（2026-09-19，用户实测）：目录**不会**因为删除文档而消失——之前"树空了"的真正
+#   原因是**把 wiki 能力位关掉**了（后端 /wiki/pages、/wiki/folders 直接 400，
+#   error code 1000 "Wiki feature is not enabled for this knowledge base"），
+#   目录行其实一直在库里。所以这里的同步只是兜底，不是必需步骤。
+#
+# 索引页（slug=index）：**保留**，不参与清理（它是知识库的入口页，由上游流水线维护）。
 #
 # 用法：
 #   bash deploy/weknora-fork/cleanup_auto_wiki.sh                  # 只看（默认，不改动）
@@ -24,6 +29,8 @@ BODHI=${BODHI_REPO_DIR:-/mnt/c/Users/PHJY/source/bodhi2}
 KB=${KB:-dbc2528f-611b-48da-9a71-d7c93975adb4}
 APPLY=0
 [ "${1:-}" = "--apply" ] && APPLY=1
+# 清理范围：它自己写的页 **除了** 索引页（slug=index，保留）
+COND="deleted_at IS NULL AND last_edit_source IN ('pipeline','agent') AND slug <> 'index'"
 
 Q() { docker exec -e PGPASSWORD='postgres123!@#' WeKnora-postgres psql -U postgres -d WeKnora -t -A -F' | ' -c "$1" 2>&1; }
 
@@ -42,9 +49,9 @@ echo "== 1) 当前页数（按写作来源） =="
 Q "SELECT coalesce(last_edit_source,'(null)') AS src, count(*) FROM wiki_pages WHERE knowledge_base_id='$KB_ID' AND deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC;"
 
 echo
-echo "== 2) 待清理的页（WeKnora 自己的：pipeline / agent） =="
-Q "SELECT slug, coalesce(last_edit_source,'?'), created_at::timestamp(0) FROM wiki_pages WHERE knowledge_base_id='$KB_ID' AND deleted_at IS NULL AND last_edit_source IN ('pipeline','agent') ORDER BY created_at DESC LIMIT 15;"
-CNT=$(Q "SELECT count(*) FROM wiki_pages WHERE knowledge_base_id='$KB_ID' AND deleted_at IS NULL AND last_edit_source IN ('pipeline','agent');" | head -1)
+echo "== 2) 待清理的页（WeKnora 自己的：pipeline / agent；索引页保留） =="
+Q "SELECT slug, coalesce(last_edit_source,'?'), created_at::timestamp(0) FROM wiki_pages WHERE knowledge_base_id='$KB_ID' AND $COND ORDER BY created_at DESC LIMIT 15;"
+CNT=$(Q "SELECT count(*) FROM wiki_pages WHERE knowledge_base_id='$KB_ID' AND $COND;" | head -1)
 echo "  合计：${CNT:-0} 条（我们的页不受影响：last_edit_source='bodhi-onto-mcp'）"
 
 if [ "$APPLY" != "1" ]; then
@@ -54,8 +61,8 @@ if [ "$APPLY" != "1" ]; then
 fi
 
 echo
-echo "== 3) 执行清理（软删除，可回溯） =="
-Q "UPDATE wiki_pages SET deleted_at = now(), updated_at = now() WHERE knowledge_base_id='$KB_ID' AND deleted_at IS NULL AND last_edit_source IN ('pipeline','agent');"
+echo "== 3) 执行清理（软删除，可回溯；索引页保留） =="
+Q "UPDATE wiki_pages SET deleted_at = now(), updated_at = now() WHERE knowledge_base_id='$KB_ID' AND $COND;"
 Q "SELECT coalesce(last_edit_source,'(null)') AS src, count(*) FROM wiki_pages WHERE knowledge_base_id='$KB_ID' AND deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC;"
 
 echo
