@@ -238,34 +238,78 @@ def save_log(method: str, messages: list[dict], raw_response: str,
     return path
 
 
-def call_llm(cfg: dict, system: str, user: str, method: str = "extraction") -> tuple[str, dict]:
-    """调用 LLM（OpenAI 兼容），返回 (原始文本, 元信息)。"""
-    from openai import OpenAI
+def _call_llm_stdlib(cfg: dict, messages: list[dict]) -> tuple[str, str, str]:
+    """标准库版本的 OpenAI 兼容调用（WSL 服务里没装 openai 包时的兜底）。
 
-    if not cfg.get("api_key"):
-        raise SystemExit("缺少 LLM_API_KEY（写在仓库根的 .env 里）")
-    client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"], timeout=600)
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    kwargs = {
+    只用到 chat/completions，足够本项目（提示词 + JSON 输出）。返回
+    (文本, finish_reason, usage 文本)。
+    """
+    body: dict = {
         "model": cfg["model"],
         "messages": messages,
         "temperature": cfg["temperature"],
         "max_tokens": cfg["max_tokens"],
     }
     if cfg.get("json_mode"):
-        kwargs["response_format"] = {"type": "json_object"}
+        body["response_format"] = {"type": "json_object"}
+    request = urllib.request.Request(
+        cfg["base_url"].rstrip("/") + "/chat/completions",
+        data=json.dumps(body).encode("utf-8"), method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Authorization", "Bearer " + cfg["api_key"])
+    with urllib.request.urlopen(request, timeout=600) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if payload.get("error"):
+        raise SystemExit("LLM 返回错误：%s" % json.dumps(payload["error"], ensure_ascii=False)[:400])
+    choice = (payload.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    # 有些网关把思维链放在 reasoning_content，正文仍取 content
+    raw = (message.get("content") or message.get("reasoning_content") or "")
+    finish = choice.get("finish_reason") or ""
+    return raw, finish, str(payload.get("usage") or {})
+
+
+def call_llm(cfg: dict, system: str, user: str, method: str = "extraction") -> tuple[str, dict]:
+    """调用 LLM（OpenAI 兼容），返回 (原始文本, 元信息)。
+
+    优先用 `openai` 包；没装则退回标准库实现 —— 因为提取服务要跑在 WSL 里，
+    不该被一个 pip 依赖卡住（这个兜底也顺带让整个工具链零依赖）。
+    """
+    if not cfg.get("api_key"):
+        raise SystemExit("缺少 LLM_API_KEY（写在仓库根的 .env 里）")
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     started = time.time()
+    backend = "openai"
     try:
-        response = client.chat.completions.create(**kwargs)
-    except Exception as exc:  # noqa: BLE001
-        raise SystemExit("LLM 调用失败：%s" % exc)
-    raw = (response.choices[0].message.content or "")
-    finish_reason = response.choices[0].finish_reason or ""
-    usage = getattr(response, "usage", None)
+        from openai import OpenAI
+
+        client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"], timeout=600)
+        kwargs = {
+            "model": cfg["model"], "messages": messages,
+            "temperature": cfg["temperature"], "max_tokens": cfg["max_tokens"],
+        }
+        if cfg.get("json_mode"):
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit("LLM 调用失败：%s" % exc)
+        raw = (response.choices[0].message.content or "")
+        finish_reason = response.choices[0].finish_reason or ""
+        usage = getattr(response, "usage", None)
+    except ImportError:
+        backend = "stdlib"
+        print("[Bodhi]   ℹ 未安装 openai 包，使用标准库 HTTP 调用")
+        try:
+            raw, finish_reason, usage = _call_llm_stdlib(cfg, messages)
+        except SystemExit:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit("LLM 调用失败（stdlib）：%s" % exc)
     save_log(method, messages, raw, finish_reason, usage)
-    print("[Bodhi]   ⏱ LLM 用时 %.1fs，返回 %d 字符，finish_reason=%s"
-          % (time.time() - started, len(raw), finish_reason))
-    return raw, {"finish_reason": finish_reason, "usage": str(usage)}
+    print("[Bodhi]   ⏱ LLM 用时 %.1fs，返回 %d 字符，finish_reason=%s（backend=%s）"
+          % (time.time() - started, len(raw), finish_reason, backend))
+    return raw, {"finish_reason": finish_reason, "usage": str(usage), "backend": backend}
 
 
 # ---------------------------------------------------------------------------
