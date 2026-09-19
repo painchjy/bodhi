@@ -62,3 +62,47 @@ cd /mnt/c/Users/PHJY/source/bodhi2/tools/ontology-mcp && python3 replay_extracti
 # 清理上游自动页 + 兜底重建目录
 bash /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/cleanup_auto_wiki.sh --apply
 ```
+
+
+## 5. 待做的前端 v5（用户 2026-09-19 明确要求，一次重建即可打包两件）
+
+两件都在 `deploy/weknora-fork/frontend/patch_frontend.py` 里加 **v5 段**，然后
+`build_frontend.sh /root/fe-build` → `deploy_frontend.sh deploy`（一次重建 ✓）。
+
+### 5.1 类型标签显示为空 → 改成**彩色圆点**（用户口径：「改成有颜色的圆点，简单一些」）
+
+- **根因**：v3 用 `<t-icon :name="getPageIcon(page)">`，而 `getPageIcon()` 对本类类型统一返回
+  `'hierarchy'` —— 该图标名在打包后的 tdesign 图标集里**渲染为空** ✗（悬停 tooltip 正常 ✓，
+  所以只是图标本身没画出来）。
+- **改法**：把树/列表两处的 `t-icon` 换成
+  `<span class="wiki-page-item-type-dot" :style="{ background: ontologyColor(page.page_type) }"></span>`，
+  tooltip 内容不变（`中文类名（bmm:XXX）`）。
+- 颜色来源：`gen_frontend_types.py` 生成的 `ontologyTypes.ts` 里**本来就有每个类型的 color**
+  → 让生成器多导出一个 `ontologyColor(type)`（读同一张表）✓，别在 Vue 里硬编码。
+- CSS 追加：`.wiki-page-item-type-dot { display:inline-block; width:8px; height:8px;
+  border-radius:50%; margin-right:6px; flex:0 0 auto; }`
+
+### 5.2 知识库页加「启用/禁用 wiki 自动生成」开关（用户口径：上传时自己控制是否自动提取 wiki）
+
+- **背景**：能力位 `indexing_strategy.wiki_enabled` 关掉后，上传文档**不再自动生成 wiki**
+  （省时省 token ✓），但后端 `/wiki/pages`、`/wiki/folders` 会 400 → 界面暂时看不到 wiki ✗。
+  所以开关必须**带明确提示**：关闭后"wiki/图谱界面临时不可用，需要时再打开"。
+- **实现步骤**（下轮直接照做）：
+  1. 在 `KnowledgeBase.vue` 头部（面包屑右侧）加 `<t-switch>`，绑定
+     `kbInfo.indexing_strategy.wiki_enabled`；
+  2. 变更时调用知识库更新接口 —— **先确认方法名**：`src/api/knowledge-base.ts` 里找
+     `updateKnowledgeBase` / `patchKnowledgeBase`（若上游没有对应封装，就用 `src/utils/request`
+     直接 `put('/api/v1/knowledge-bases/'+kbId, { indexing_strategy: {...} })`，
+     以 app 日志里该端点的 `method` 为准）；
+  3. 成功后 `MessagePlugin.success` 提示，并局部刷新 `kbInfo`；失败回滚开关状态；
+  4. 提示文案：「关闭 = 上传文档不再自动生成 wiki（省时省 token）；注意：关闭期间 wiki 列表
+     接口会被后端拒绝，界面暂时看不到 wiki 与图谱，需要时请重新打开」。
+- 后端不需要改 ✓（`indexing_strategy` 是 KB 的普通字段 ✓，我们已多次直接 SQL 改过 ✓）。
+
+## 6. 本轮收尾状态（2026-09-19 末）
+
+- 智能体已**收敛为一个入口**：`bodhi-ontology-bmm` 更名为「本体知识提取（BMM / EA）」，
+  提示词为精简版（1152 字符，默认 bmm、必须回显调用参数）；`bodhi-ontology-ea` 已软删保留追溯。
+- `deploy/weknora-fork/gen_agent_config.py` 已按用户要求**删除**
+  （`config/agents.sql`、`config/agent_system_prompt.yaml` 仍在，作历史追溯）。
+- `set_agent_prompt_lean.py` 是现在**唯一**的智能体提示词入口（改提示词就改它并重跑）。
