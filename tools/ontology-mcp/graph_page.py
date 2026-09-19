@@ -69,6 +69,24 @@ TEMPLATE = r"""<!DOCTYPE html>
   .hint { position:absolute; right:12px; bottom:10px; color:var(--dim); font-size:11px; }
   .loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     color:var(--dim); background:rgba(15,23,42,.7); }
+  /* 右栏正文：服务端用 mdview.py 渲染成 HTML（此前是 <pre> 里的 md 源码） */
+  .md { font-size:13px; line-height:1.65; word-break:break-word; }
+  .md h1, .md h2, .md h3, .md h4 { margin:12px 0 6px; line-height:1.3; }
+  .md h1 { font-size:17px; } .md h2 { font-size:15px; } .md h3 { font-size:14px; } .md h4 { font-size:13px; }
+  .md p { margin:6px 0; }
+  .md ul, .md ol { margin:6px 0 6px 18px; padding:0; }
+  .md li { margin:2px 0; }
+  .md code { background:#0b1220; border:1px solid var(--line); border-radius:4px; padding:0 4px;
+    font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  .md pre { background:#0b1220; border:1px solid var(--line); border-radius:6px; padding:8px;
+    overflow:auto; margin:8px 0; }
+  .md pre code { background:none; border:none; padding:0; }
+  .md blockquote { margin:8px 0; padding:4px 10px; border-left:3px solid var(--line); color:var(--dim); }
+  .md table { border-collapse:collapse; margin:8px 0; width:100%; font-size:12px; }
+  .md th, .md td { border:1px solid var(--line); padding:3px 6px; text-align:left; vertical-align:top; }
+  .md th { background:#0b1220; color:var(--dim); }
+  .md hr { border:none; border-top:1px solid var(--line); margin:10px 0; }
+  .md a { color:var(--accent); }
 </style>
 </head>
 <body>
@@ -370,7 +388,8 @@ async function showPanel(slug) {
       '<div style="color:#9ca3af">出链 ' + (d.out_links || []).length + ' ｜ 入链 ' + (d.in_links || []).length + '</div>' +
       '<h4 style="color:#9ca3af;margin:8px 0 2px">出链</h4><div>' + chips(d.out_links) + '</div>' +
       '<h4 style="color:#9ca3af;margin:8px 0 2px">被引用</h4><div>' + chips(d.in_links) + '</div>' +
-      '<h4 style="color:#9ca3af;margin:8px 0 2px">页面内容</h4><pre>' + esc(d.content) + '</pre>';
+      '<h4 style="color:#9ca3af;margin:8px 0 2px">页面内容</h4>' +
+      (d.content_html ? d.content_html : '<pre>' + esc(d.content) + '</pre>');
     Array.prototype.forEach.call(panel.querySelectorAll('[data-goto]'), function (el) {
       el.addEventListener('click', function () { gotoSlug(el.dataset.goto); });
     });

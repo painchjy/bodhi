@@ -711,3 +711,48 @@ Agent 应先确认模型/文档/片段，再调用工具；随后 wiki 里应出
 O1–O5 控制穿透；`validate` 与 `derive` 双模式；确定性 slug + 版本快照实现幂等）。
 落地位置 `tools/ke-core/`，接口为 CLI + 两个 MCP 工具（`reason_validate` / `reason_derive`）。
 
+
+
+### 11.5 前端验收反馈与修复（2026-09-19 用户实测）
+
+用户实测提了三条，逐条定位到根因并修好——**三条都不需要重建前端**（正好符合 §11.1 的策略）：
+
+**① 树的前两层名称空白、还弹出「请输入目录名称」的输入框**
+
+根因（两处代码相遇导致的必然现象，不是配置错）：
+
+```js
+const editingFolderId = ref('')                             // WikiBrowser.vue:2441 初值 ''
+<input v-if="editingFolderId === item.folderId" ...>        // :304 目录行模板
+<span v-else class="wiki-directory-title">{{ item.label }}</span>
+```
+
+目录行的 `folderId` 来自 `GET /api/v1/knowledgebase/{kb}/wiki/folders`（后端读 `wiki_folders` 表），
+而该表**是空的** → `item.folderId === ''` → `'' === ''` **恒成立** → 每个目录行都渲染成重命名
+输入框，`v-else` 里的目录名被顶掉且无法展开。表现就是「名称空白 + 要求填目录名称」。
+
+修法：新增 `tools/ontology-mcp/sync_folders.py`，把 `wiki_pages.category_path` 的全部前缀
+（模型 → 大类 → 类）写成 `wiki_folders` 行；**目录 id 用 UUIDv5 确定性生成**（同名同父 ⇒ 同 id），
+重跑是 upsert，天然幂等。实测写入 50 行：企业知识 23 行（= 1 模型 + 8 大类 + 14 类）、
+企业本体模型 27 行；复跑两次行数不变（幂等已验证）。
+
+**② 本体图谱右栏显示的是 md 源码**
+
+根因：`graph_page.py` 右栏是 `'<pre>' + esc(d.content) + '</pre>'`。
+修法：新增零依赖渲染器 `tools/ontology-mcp/mdview.py`（标题 / 段落 / 列表 / 引用 / 代码块 /
+行内代码 / 粗斜体 / 分隔线 / 管道表格 / 站内链接→可点击 chip），`/bodhi/page` 增加
+`content_html` 字段（服务端渲染），右栏优先用它。自检 7/7 通过；实测某页 727B md → 1197B HTML，
+且 `data-goto="bmm/resource/数据副本"` 可直接跳到图上对应节点。
+
+**③ 树的页面行没有「类型标签」**
+
+上游设计：页面行只有标题 +（我们加的）版本徽标（`wiki-page-item-version`，在线，见
+`WikiBrowser.vue:338`，`(item.page.version || 1) > 1` 才显示），类型信息由**「类」这一级目录名**
+承担（如 `… → 手段 → 操作性业务规则 → 页`）。所以①修好后类型就已经可见；若还想要「每行一个
+类型 tag」，需要改 Vue 并重建前端（记入待办，与其他前端微调一起批处理）。
+
+> 图谱数据修正：当前稳定值为 **53 节点 / 103 关系 / 21 种关系类型**（连测两次一致）；
+> §11.2 里写的 106 是更早一次的状态，以 103 为准。
+
+**待办（小，下一步）**：把 `sync_folders.py` 接到写入侧——`extract_and_save` 完成后自动同步该
+知识库目录，这样新抽取出的「类」目录会自动出现在树里，不必人工记得跑脚本。

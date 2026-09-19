@@ -68,6 +68,7 @@ _HERE = str(pathlib.Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from graph_page import render_graph_page  # noqa: E402
+from mdview import render as render_md  # noqa: E402
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -918,6 +919,14 @@ class MCPHandler(BaseHTTPRequestHandler):
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
                 data = bodhi_page(params.get("kb_id", ""), params.get("slug", ""))
+                # 右栏要的是「渲染后的正文」而不是 md 源码（此前直接 <pre> 了原文）。
+                # 渲染在服务端做：零依赖（mdview.py），前端与镜像都不用动。
+                if isinstance(data, dict) and data.get("content"):
+                    try:
+                        data["content_html"] = render_md(data["content"])
+                    except Exception as exc:  # noqa: BLE001
+                        print("[mcp] markdown 渲染失败，退回纯文本：%s" % exc)
+                        data["content_html"] = ""
                 self._json(data, 200, {"Access-Control-Allow-Origin": "*"})
             except Exception as exc:  # noqa: BLE001
                 self._json({"error": str(exc)}, 404, {"Access-Control-Allow-Origin": "*"})
