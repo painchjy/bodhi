@@ -104,5 +104,37 @@ bash /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/cleanup_auto_wiki.sh --
 - 智能体已**收敛为一个入口**：`bodhi-ontology-bmm` 更名为「本体知识提取（BMM / EA）」，
   提示词为精简版（1152 字符，默认 bmm、必须回显调用参数）；`bodhi-ontology-ea` 已软删保留追溯。
 - `deploy/weknora-fork/gen_agent_config.py` 已按用户要求**删除**
+
+### 5.3 列表/树**多选批量删除**（用户 2026-09-19 新增要求）
+
+- **后端能力已经有了** ✓：`deploy/weknora-fork/delete_wiki_pages.sh`（四种模式：`--list` /
+  `--slugs a,b,c` / `--type` / `--prefix` / `--ours`，默认 dry-run、软删除、永不动 `index`、
+  删完自动同步目录树 ✓，四种模式均已实测 ✓）。
+- **要做的是让 UI 能直接调**（不用改 Go）：
+  1. 在 `tools/ontology-mcp/server.py` 加一个 HTTP 端点 **`POST /bodhi/delete`**
+     （body：`{"kb_id":"…","slugs":["a","b"],"dry_run":false}`）→ 内部复用同一套逻辑：
+     `UPDATE wiki_pages SET deleted_at=now() WHERE knowledge_base_id=… AND slug IN (…) AND slug<>'index'`
+     → 再调 `sync_folders.sync_kb(kb_id, link_pages=True)` ✓；
+     ⚠️ 注意该服务当前的 `do_POST` 只处理 `/mcp`，需要加分支（`/bodhi/…` 走 JSON 响应 +
+     `Access-Control-Allow-Origin: *` ✓，沿用 `do_GET` 里 `/bodhi/*` 的写法）；
+  2. 前端（`WikiBrowser.vue`）：
+     - 树视图与列表视图**每行加 `<t-checkbox>`**（`v-model` 绑一个 `Set<string>` 的选中 slug 集合）；
+     - 顶部工具条：`已选 N 项` + 「删除」按钮（N=0 时禁用）；
+     - 点删除 → `<t-dialog>` 二次确认（文案含"软删除、可回溯、index 不受影响"）→ 调
+       `POST /bodhi/delete`（经现有 `/bodhi/` nginx 反代 ✓）；多选分片（每批 ≤200 slug ✓）；
+     - 成功后 `MessagePlugin.success(已删除 N 项)` + 清空选择 + 刷新当前目录/树 ✓；
+     - 失败时保留选择并提示 error 原文（便于你排查 ✓）。
+  3. 验收口径：多选 3 页删除 → 树上立刻少 3 页、目录计数更新 ✓；`slug='index'` 与上游页不受影响 ✓；
+     库里 `deleted_at` 有值（软删 ✓），可用 `UPDATE … SET deleted_at=NULL` 复原 ✓。
+
+### 5.4 v5 一次重建即可打包三件（①彩色圆点 ②wiki 开关 ③多选删除）
+
+```bash
+bash /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/build_frontend.sh /root/fe-build
+bash /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/deploy_frontend.sh deploy
+```
+（改 `patch_frontend.py` 时务必遵守它的**幂等约定**：对已打补丁的构建树要先 `rm -rf src` 从
+`/root/wk080/frontend/src` 还原干净源码 ✓，否则会重复插入语句导致 vite 报语法错 ✗。）
+
   （`config/agents.sql`、`config/agent_system_prompt.yaml` 仍在，作历史追溯）。
 - `set_agent_prompt_lean.py` 是现在**唯一**的智能体提示词入口（改提示词就改它并重跑）。
