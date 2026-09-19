@@ -500,6 +500,13 @@ def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
 
 
 def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
+    """插入新页；若该 slug 派生的确定性 id 已存在（含**软删除**的旧页）则改为复活+更新。
+
+    2026-09-19 实测崩溃：page id 由 slug 派生（UUIDv5），而上游的重复检查只看内存里
+    加载到的活页（deleted_at IS NULL）。用户删文档后旧页是**软删除**、id 仍占着，
+    于是重复抽取会 INSERT 撞主键（wiki_pages_pkey）→ 整批事务回滚 → 工具报错。
+    用 ON CONFLICT(id) DO UPDATE 一次解决：复活、覆盖内容、版本+1、标记来源。
+    """
     values = [
         sql_str(page_id_for(page["slug"])), str(tenant_id), sql_str(kb_id),
         sql_str(page["slug"]), sql_str(page["title"]), sql_str(page["page_type"]),
@@ -510,8 +517,17 @@ def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
         sql_json(page["page_metadata"]), sql_json(page.get("aliases") or []), "1",
         sql_str(TOOL_TAG), sql_str(""),
     ]
-    return ("INSERT INTO wiki_pages (%s) VALUES (%s);"
-            % (", ".join(PAGE_COLUMNS), ", ".join(values)))
+    conflict = (
+        "ON CONFLICT (id) DO UPDATE SET "
+        "title = EXCLUDED.title, page_type = EXCLUDED.page_type, status = EXCLUDED.status, "
+        "content = EXCLUDED.content, summary = EXCLUDED.summary, "
+        "category_path = EXCLUDED.category_path, wiki_path = EXCLUDED.wiki_path, "
+        "page_metadata = EXCLUDED.page_metadata, aliases = EXCLUDED.aliases, "
+        "source_refs = EXCLUDED.source_refs, chunk_refs = EXCLUDED.chunk_refs, "
+        "deleted_at = NULL, version = wiki_pages.version + 1, "
+        "last_edit_source = %s, updated_at = now()" % sql_str(TOOL_TAG))
+    return ("INSERT INTO wiki_pages (%s) VALUES (%s) %s;"
+            % (", ".join(PAGE_COLUMNS), ", ".join(values), conflict))
 
 
 def build_pending_page(model: dict, element: dict, candidate: dict, similarity: float,
