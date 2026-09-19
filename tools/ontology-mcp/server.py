@@ -734,6 +734,9 @@ def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
 # 待确认裁决 + 查询工具
 # ---------------------------------------------------------------------------
 def list_pending_merges(kb_id: str) -> dict:
+    # 参数容错：智能体常传知识库名称（如「企业知识」）或占位符，这里先解析成真实 UUID，
+    # 否则按错误的 id 查询会返回空清单（2026-09-19 用户实测：报告 5 条待确认却查到 0 条）。
+    kb_id, _note = resolve_kb_id(kb_id)
     rows = psql_csv(
         "SELECT slug, title, summary, page_metadata::text AS meta, created_at "
         "FROM wiki_pages WHERE knowledge_base_id = %s AND page_type = %s AND deleted_at IS NULL "
@@ -751,6 +754,7 @@ def list_pending_merges(kb_id: str) -> dict:
 
 
 def resolve_pending_merge(kb_id: str, pending_slug: str, action: str) -> dict:
+    kb_id, _note = resolve_kb_id(kb_id)   # 同上：支持用知识库名称调用
     rows = psql_csv("SELECT id, tenant_id, page_metadata::text AS meta, source_refs::text AS refs, "
                     "chunk_refs::text AS chunks FROM wiki_pages WHERE knowledge_base_id = %s "
                     "AND slug = %s AND deleted_at IS NULL" % (sql_str(kb_id), sql_str(pending_slug)))
@@ -834,11 +838,27 @@ JOB_KEEP = {"status", "started_at", "finished_at", "doc_title", "created", "merg
             "relationships", "error"}
 
 
+DETAIL_KEYS = ("created", "merged", "pending", "violations", "unmatched")
+
+
 def _job_brief(result: dict) -> dict:
-    return {k: (len(result[k]) if isinstance(result.get(k), list) else result.get(k))
-            for k in ("status", "started_at", "finished_at", "doc_title", "elements",
-                      "relationships", "created", "merged", "pending", "violations",
-                      "unmatched", "folders_synced", "error") if k in result}
+    """给智能体看的任务简报：**既要计数也要明细**。
+
+    2026-09-19 用户实测：旧实现把列表一律转成 len()，于是智能体只看到
+    `unmatched=7` / `pending=5` 却拿不到名称与理由，无法汇报也无法人工跟进。
+    现在同时给出 `*_count` 与 `*`（明细，最多 20 条，控制体积）。
+    """
+    out: dict = {}
+    for k in ("status", "started_at", "finished_at", "doc_title", "elements",
+              "relationships", "folders_synced", "error", "resolved_note"):
+        if k in result:
+            out[k] = result[k]
+    for k in DETAIL_KEYS:
+        items = result.get(k)
+        if isinstance(items, list):
+            out[k + "_count"] = len(items)
+            out[k] = items[:20]
+    return out
 
 
 def job_key(args: dict) -> str:
