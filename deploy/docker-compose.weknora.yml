@@ -55,6 +55,26 @@ services:
       - "host.docker.internal:host-gateway"
 
   # ---------------------------------------------------------------------
+  # frontend：换成本地自建的 Bodhi2 UI 镜像（零 Go 改动路径的最后一环）
+  # ---------------------------------------------------------------------
+  # 上游前端是 pnpm 工程（package.json 里有 resolutions.lightningcss="none"），
+  # npm 解析不了，构建步骤见 deploy/weknora-fork/build_frontend.sh：
+  #   <上游 frontend 源码> --patch_frontend.py--> npm install --> vite build --> weknora-ui:bodhi2
+  # 补丁内容：WikiBrowser 增「本体」「待确认合并」两个 tab + 三级折叠；知识库页增
+  # 「本体图谱」tab（内嵌 MCP 服务的 /graph 页，见 deploy/weknora-fork/frontend/BodhiGraphTab.vue）。
+  #
+  # nginx：**必须**整份覆盖 default.conf.template（不能往 conf.d/ 里塞一个只有
+  # location 的文件——那是 http 级，nginx 会启动失败）。本仓库的模板 = 上游模板 +
+  # 在 server{} 内插入的 location /bodhi/（源片段见 frontend/bodhi-proxy.conf），
+  # 反代到宿主上的 MCP/图谱服务 http://host.docker.internal:8765。
+  frontend:
+    image: weknora-ui:bodhi2
+    volumes:
+      - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/weknora-fork/frontend/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ---------------------------------------------------------------------
   # bodhi-ontology：本体投影灌库 —— **已停用**（2026-09-19 用户决定放弃 Neo4j 本体投影）
   # ---------------------------------------------------------------------
   # 本体模型的落点改为「企业本体模型」知识库：每个本体类一页、关系在页面中表达，

@@ -13,4 +13,10 @@
 # 前端将来要从源码构建，Vue/TS 也统一 LF
 *.vue text eol=lf
 *.ts text eol=lf
+# 2026-09-19 补：前端构建闸门脚本，以及 nginx 配置模板
+# （default.conf.template 由 frontend 容器 entrypoint 用 envsubst 生成 nginx 配置，
+#  带 \r 会污染指令；它挂在容器里只读使用）
+*.mjs text eol=lf
+*.conf text eol=lf
+*.template text eol=lf
 

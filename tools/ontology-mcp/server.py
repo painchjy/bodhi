@@ -357,7 +357,8 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         "slug": slug, "title": element["name"], "page_type": element["type"],
         "summary": (element.get("definition") or "")[:500],
         "content": "\n".join(lines).rstrip() + "\n",
-        "category_path": [model["label"], element["type_label"]],
+        "category_path": class_category_path(element["type"], model["key"], model["label"],
+                                             element["type_label"]),
         "wiki_path": slug, "source_refs": [doc_meta["id"]],
         "chunk_refs": [chunk_id] if chunk_id else [],
         "out_links": sorted({r.get("target_slug") for r in rels if r.get("target_slug")}),
@@ -921,10 +922,28 @@ class MCPHandler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 self._json({"error": str(exc)}, 404, {"Access-Control-Allow-Origin": "*"})
             return
-        if path in ("/graph", "/graph.html"):
+        if path in ("/graph", "/graph.html", "/bodhi/view"):
             params = dict(urlparse.parse_qsl(parsed.query))
             html = render_graph_page(params.get("kb_id", ""), params.get("model", ""))
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if path in ("/bodhi/pending", "/bodhi/pending.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                data = list_pending_merges(params.get("kb_id", ""))
+                self._json(data, 200, {"Access-Control-Allow-Origin": "*"})
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400, {"Access-Control-Allow-Origin": "*"})
+            return
+        if path in ("/bodhi/resolve", "/bodhi/resolve.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                data = resolve_pending_merge(params.get("kb_id", ""), params.get("slug", ""),
+                                             params.get("action", ""))
+                self._json(data, 200, {"Access-Control-Allow-Origin": "*"})
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/resolve 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, {"Access-Control-Allow-Origin": "*"})
             return
         # 本实现不使用服务端主动推送（GET SSE），按规范返回 405 即可
         self._json({"jsonrpc": "2.0", "id": None,
@@ -969,6 +988,42 @@ def _class_meta(model_key: str) -> dict[str, dict]:
                                 "module": model["key"], "module_label": model["label"],
                                 "parents": cls.get("parents") or []}
     return out
+
+
+_ALL_META: dict[str, dict] | None = None
+
+
+def all_class_meta() -> dict[str, dict]:
+    global _ALL_META
+    if _ALL_META is None:
+        _ALL_META = _class_meta("")
+    return _ALL_META
+
+
+def class_group(type_name: str) -> str:
+    """类的「大类」= 顶层父类的中文名（用于列表/树的二级分组）。"""
+    meta = all_class_meta()
+    cur = meta.get(type_name)
+    seen: set[str] = set()
+    while cur and (cur.get("parents") or []):
+        parent = cur["parents"][0]
+        if parent in seen or parent not in meta:
+            break
+        seen.add(parent)
+        cur = meta[parent]
+    if not cur:
+        return ""
+    return cur.get("label") or cur.get("name") or ""
+
+
+def class_category_path(type_name: str, fallback_module: str = "",
+                        fallback_module_label: str = "", fallback_label: str = "") -> list[str]:
+    """页面的一级分类路径：模型标签 → 大类 → 类标签（树按它逐级折叠）。"""
+    meta = all_class_meta().get(type_name) or {}
+    module_label = meta.get("module_label") or fallback_module_label or fallback_module
+    label = meta.get("label") or fallback_label or type_name
+    group = class_group(type_name) or label
+    return [module_label, group, label]
 
 
 def bodhi_graph(kb_id: str, model: str = "", types: str = "", limit: int = 300) -> dict:
