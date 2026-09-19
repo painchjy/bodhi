@@ -46,6 +46,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -61,6 +62,12 @@ TYPE_PENDING = "ontology:PendingMerge"
 PENDING_PREFIX = "bodhi/pending/"
 
 DEFAULT_HIGH, DEFAULT_LOW = 0.90, 0.75
+
+# 同目录的 graph_page.py（Bodhi 语义图 HTML 页）
+_HERE = str(pathlib.Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from graph_page import render_graph_page  # noqa: E402
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -894,6 +901,31 @@ class MCPHandler(BaseHTTPRequestHandler):
             self._json(payload, 200, extra)
 
     def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse.urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        if path in ("/bodhi/graph", "/bodhi/graph.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                data = bodhi_graph(params.get("kb_id", ""), params.get("model", ""),
+                                   params.get("types", ""), int(params.get("limit", 300) or 300))
+                self._json(data, 200, {"Access-Control-Allow-Origin": "*"})
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/graph 失败：%s" % exc)
+                self._json({"error": str(exc)}, 500, {"Access-Control-Allow-Origin": "*"})
+            return
+        if path in ("/bodhi/page", "/bodhi/page.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                data = bodhi_page(params.get("kb_id", ""), params.get("slug", ""))
+                self._json(data, 200, {"Access-Control-Allow-Origin": "*"})
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 404, {"Access-Control-Allow-Origin": "*"})
+            return
+        if path in ("/graph", "/graph.html"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            html = render_graph_page(params.get("kb_id", ""), params.get("model", ""))
+            self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            return
         # 本实现不使用服务端主动推送（GET SSE），按规范返回 405 即可
         self._json({"jsonrpc": "2.0", "id": None,
                     "error": {"code": -32000, "message": "GET 未支持；请用 POST /mcp"}}, 405)
@@ -916,6 +948,104 @@ def main() -> int:
     except KeyboardInterrupt:
         print("[mcp] 停止")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# 只读接口：Bodhi 语义图（供前端「Bodhi 图谱」页 / 服务自带 HTML 页使用）
+#   GET /bodhi/graph?kb_id=..&model=bmm&types=bmm:Goal,bmm:Objective&limit=300
+# 数据来源：页面正文的「## 本体关系」小节（我们写页时格式固定）+ 页面元数据
+# ---------------------------------------------------------------------------
+REL_LINE = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[(?P<target>.+?)\]\(wiki:(?P<slug>[^)]+)\)\s*$")
+
+
+def _class_meta(model_key: str) -> dict[str, dict]:
+    index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    out: dict[str, dict] = {}
+    for model in index["models"]:
+        if model_key and model["key"] != model_key:
+            continue
+        for cls in model["classes"]:
+            out[cls["name"]] = {"color": cls.get("color"), "label": cls.get("label"),
+                                "module": model["key"], "module_label": model["label"],
+                                "parents": cls.get("parents") or []}
+    return out
+
+
+def bodhi_graph(kb_id: str, model: str = "", types: str = "", limit: int = 300) -> dict:
+    """要素节点 + 本体关系边（边带关系类型与中文标签；方向 = 页面里的箭头方向）。"""
+    wanted = [t.strip() for t in types.split(",") if t.strip()]
+    colors = _class_meta(model)
+    sql = ("SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(summary,'') AS summary, "
+           "COALESCE(version,1) AS version, COALESCE(content,'') AS content, "
+           "COALESCE(page_metadata::text,'{}') AS meta, COALESCE(source_refs::text,'[]') AS refs "
+           "FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+           "AND COALESCE(page_type,'') NOT IN ('index','summary',%s)"
+           % (sql_str(kb_id), sql_str(TYPE_PENDING)))
+    if model:
+        sql += " AND page_type LIKE %s" % sql_str(model + ":%")
+    if wanted:
+        sql += " AND page_type IN (%s)" % ", ".join(sql_str(t) for t in wanted)
+    sql += " ORDER BY page_type, title LIMIT %d" % max(1, min(limit, 2000))
+    rows = psql_csv(sql)
+
+    nodes, known, edges = [], set(), []
+    for row in rows:
+        try:
+            meta = (json.loads(row["meta"] or "{}").get("ontology") or {})
+        except json.JSONDecodeError:
+            meta = {}
+        cls = colors.get(row["page_type"], {})
+        nodes.append({
+            "slug": row["slug"], "title": row["title"], "page_type": row["page_type"],
+            "class_label": cls.get("label") or meta.get("class_label") or row["page_type"],
+            "module": cls.get("module") or model or "", "module_label": cls.get("module_label") or "",
+            "color": cls.get("color") or "#94a3b8", "version": row["version"],
+            "summary": (row["summary"] or "")[:200],
+            "source_refs": json.loads(row["refs"] or "[]"),
+        })
+        known.add(row["slug"])
+    for row in rows:
+        for line in (row["content"] or "").splitlines():
+            hit = REL_LINE.match(line.strip())
+            if not hit:
+                continue
+            target_slug = hit.group("slug")
+            if target_slug not in known:      # 只画两端都在结果集里的边
+                continue
+            edges.append({"source": row["slug"], "target": target_slug,
+                          "type": hit.group("type"), "label": hit.group("label")})
+    return {"kb_id": kb_id, "model": model, "nodes": nodes, "edges": edges,
+            "meta": {"node_count": len(nodes), "edge_count": len(edges),
+                     "relation_types": sorted({e["type"] for e in edges}),
+                     "classes": sorted({n["page_type"] for n in nodes}),
+                     "modules": sorted({n["module"] for n in nodes if n["module"]}),
+                     "generated_at": now_text(), "limit": limit}}
+
+
+def bodhi_page(kb_id: str, slug: str) -> dict:
+    """取单页内容（供图谱页点击查看；也可给其他工具复用）。"""
+    rows = psql_csv("SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(summary,'') AS summary, "
+                    "COALESCE(content,'') AS content, COALESCE(version,1) AS version, "
+                    "COALESCE(source_refs::text,'[]') AS refs, COALESCE(chunk_refs::text,'[]') AS chunks, "
+                    "COALESCE(out_links::text,'[]') AS outs, COALESCE(in_links::text,'[]') AS ins, "
+                    "COALESCE(page_metadata::text,'{}') AS meta, COALESCE(updated_at::text,'') AS updated_at "
+                    "FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+                    % (sql_str(kb_id), sql_str(slug)))
+    if not rows:
+        raise RuntimeError("页面不存在：%s" % slug)
+    row = rows[0]
+    try:
+        meta = (json.loads(row["meta"] or "{}").get("ontology") or {})
+    except json.JSONDecodeError:
+        meta = {}
+    return {
+        "slug": row["slug"], "title": row["title"], "page_type": row["page_type"],
+        "summary": row["summary"], "content": row["content"], "version": row["version"],
+        "source_refs": json.loads(row["refs"] or "[]"), "chunk_refs": json.loads(row["chunks"] or "[]"),
+        "out_links": json.loads(row["outs"] or "[]"), "in_links": json.loads(row["ins"] or "[]"),
+        "class_label": meta.get("class_label", ""), "updated_at": row["updated_at"],
+        "merge_history": meta.get("merge_history", []),
+    }
 
 
 if __name__ == "__main__":
