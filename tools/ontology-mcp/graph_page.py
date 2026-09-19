@@ -400,6 +400,9 @@ async function showPanel(slug) {
 }
 
 function gotoSlug(slug) {
+  // 页面正文里的链接与 chips 可能带 wiki: 前缀（wiki:bmm/...），而图上节点 slug 不带
+  // → 先剥前缀，否则点关系目标会「跳转失败」（2026-09-19 用户实测反馈）
+  slug = String(slug || '').replace(/^wiki:/i, '').replace(/^\/wiki\//, '').replace(/^\/+/, '');
   var n = null;
   state.nodes.forEach(function (x) { if (x.slug === slug) n = x; });
   if (!n) {

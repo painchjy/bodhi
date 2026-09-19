@@ -86,7 +86,7 @@ def plan_folders(kb_id: str) -> tuple[list[dict], dict[str, str]]:
     return ordered, page_folder
 
 
-def sync_kb(kb_id: str, dry_run: bool, link_pages: bool) -> int:
+def sync_kb(kb_id: str, dry_run: bool, link_pages: bool, prune: bool = False) -> int:
     dirs, page_folder = plan_folders(kb_id)
     if not dirs:
         print("  知识库 %s：没有带 category_path 的页面，跳过" % kb_id)
@@ -120,6 +120,20 @@ def sync_kb(kb_id: str, dry_run: bool, link_pages: bool) -> int:
                 "WHERE knowledge_base_id = %s AND slug = %s AND COALESCE(folder_id,'') <> %s;"
                 % (server.sql_str(fid), server.sql_str(kb_id), server.sql_str(slug), server.sql_str(fid)))
 
+    pruned = 0
+    if prune:
+        # 结构变更（如三级 → 两级）后，旧目录会残留；按计划里的 id 白名单软删除其余目录
+        keep = ", ".join(server.sql_str(d["id"]) for d in dirs)
+        stale = server.psql_csv(
+            "SELECT id, path FROM wiki_folders WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+            "AND id NOT IN (%s)" % (server.sql_str(kb_id), keep))
+        for row in stale:
+            statements.append(
+                "UPDATE wiki_folders SET deleted_at = now(), updated_at = now() WHERE id = %s;"
+                % server.sql_str(row["id"]))
+            print("    - 软删除残留目录：%s" % row["path"])
+        pruned = len(stale)
+
     print("  知识库 %s：目录 %d 行（最深 %d 级）%s"
           % (kb_id, len(dirs), max(d["depth"] for d in dirs) + 1,
              ("，并挂 %d 页到最深目录" % len(page_folder)) if link_pages else ""))
@@ -141,6 +155,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--link-pages", action="store_true",
                         help="同时把页面挂到最深一级目录（wiki_pages.folder_id）")
+    parser.add_argument("--prune", action="store_true",
+                        help="软删除不在本次计划里的历史目录（例如结构从三级改成两级后残留的旧目录）")
     args = parser.parse_args()
 
     kbs: list[str] = []
@@ -155,10 +171,12 @@ def main() -> int:
     else:
         parser.error("需要 --kb-id 或 --all")
 
-    print("== 同步 wiki_folders（%d 个知识库%s） ==" % (len(kbs), "，dry-run" if args.dry_run else ""))
+    print("== 同步 wiki_folders（%d 个知识库%s%s） =="
+          % (len(kbs), "，dry-run" if args.dry_run else "",
+             "，prune 残留目录" if args.prune else ""))
     total = 0
     for kb in kbs:
-        total += sync_kb(kb, args.dry_run, args.link_pages)
+        total += sync_kb(kb, args.dry_run, args.link_pages, args.prune)
     if args.dry_run:
         return 0
     print("== 写入完成：%d 条语句 ==" % total)

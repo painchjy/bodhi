@@ -10,8 +10,12 @@ import { join, relative } from 'node:path'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
+// 注意：必须按 **当前工作目录** 解析依赖，而不是脚本所在目录——
+// 本脚本存放在 bodhi2 仓库里，被调用时的 CWD 才是被检查的前端工程
+// （曾因此报 Cannot find module '@vue/compiler-sfc'）。
+const requireFromCwd = createRequire(join(process.cwd(), 'package.json'))
 // 用 CJS 入口，避免 ESM-browser 版与 node 环境的差异
-const { parse } = require('@vue/compiler-sfc')
+const { parse } = requireFromCwd('@vue/compiler-sfc')
 
 const ROOT = process.argv[2] || 'src'
 const bad = []

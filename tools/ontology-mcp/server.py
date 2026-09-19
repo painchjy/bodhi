@@ -1027,12 +1027,17 @@ def class_group(type_name: str) -> str:
 
 def class_category_path(type_name: str, fallback_module: str = "",
                         fallback_module_label: str = "", fallback_label: str = "") -> list[str]:
-    """页面的一级分类路径：模型标签 → 大类 → 类标签（树按它逐级折叠）。"""
+    """页面的一级分类路径：**模型标签 → 大类**（树只按它折叠两级别）。
+
+    用户口径（2026-09-19 验收）：不需要三级目录——第三层直接就是知识页，
+    本体「类」这一层改为**页面行前面的类型标签**表达（见 patch_frontend.py 的 v2 调整）。
+    这样即使本体自身还有更深的层级，也只由标签区分，不再多分折叠层。
+    """
     meta = all_class_meta().get(type_name) or {}
     module_label = meta.get("module_label") or fallback_module_label or fallback_module
     label = meta.get("label") or fallback_label or type_name
     group = class_group(type_name) or label
-    return [module_label, group, label]
+    return [module_label, group]
 
 
 def bodhi_graph(kb_id: str, model: str = "", types: str = "", limit: int = 300) -> dict:

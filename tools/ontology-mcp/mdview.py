@@ -24,8 +24,17 @@ def esc(text: str) -> str:
 
 
 def _slug_of(target: str) -> str:
-    """从链接目标里取站内 slug（/wiki/xxx → xxx；裸 slug 直接返回）。"""
+    """从链接目标里取站内 slug。
+
+    注意：wiki 页正文里的链接与 in/out_links 常带 `wiki:` 前缀（例如
+    `wiki:bmm/resource/数据副本`），图谱节点 slug 不带，所以必须剥掉，
+    否则右栏点关系目标会跳转失败（2026-09-19 用户实测反馈）。
+    """
     t = (target or "").strip()
+    for prefix in ("wiki:", "Wiki:", "WIKI:"):
+        if t.startswith(prefix):
+            t = t[len(prefix):]
+            break
     if t.startswith("/wiki/"):
         t = t[len("/wiki/"):]
     elif t.startswith("wiki/"):

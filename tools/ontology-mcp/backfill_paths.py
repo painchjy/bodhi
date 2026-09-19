@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import json as _json
 import pathlib
 import sys
 
@@ -45,15 +46,18 @@ def main() -> int:
     statements, changed, skipped = [], 0, 0
     for row in rows:
         new_path = server.class_category_path(row["page_type"])
-        if len(new_path) < 3 or not all(new_path):
+        if len(new_path) < 2 or not all(new_path):
             skipped += 1
             continue
-        old = row["cat"].replace(" ", "")
-        if '"%s"' % new_path[0] in old and '"%s"' % new_path[2] in old and '"%s"' % new_path[1] in old:
+        try:
+            old_path = _json.loads(row["cat"] or "[]")
+        except Exception:  # noqa: BLE001
+            old_path = []
+        if old_path == new_path:
             continue
         statements.append("UPDATE wiki_pages SET category_path = %s, wiki_path = %s "
                           "WHERE knowledge_base_id = %s AND slug = %s;"
-                          % (server.sql_json(new_path), server.sql_str(row["slug"]),
+                          % (server.sql_json(new_path), server.sql_str("/".join(new_path)),
                              server.sql_str(args.kb_id), server.sql_str(row["slug"])))
         changed += 1
 
@@ -66,15 +70,15 @@ def main() -> int:
     server.psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
     print("已写入 %d 条 category_path 更新" % changed)
 
-    # 打印新的树结构预览（模型 → 大类 → 类 → 页数）
+    # 打印新的树结构预览（模型 → 大类 → 页数；两级，第三层就是知识页）
     tree = server.psql_csv(
-        "SELECT category_path->>0 AS lv1, category_path->>1 AS lv2, category_path->>2 AS lv3, count(*) AS n "
+        "SELECT category_path->>0 AS lv1, category_path->>1 AS lv2, count(*) AS n "
         "FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
-        "AND jsonb_typeof(category_path)='array' AND jsonb_array_length(category_path) >= 3 "
-        "GROUP BY 1,2,3 ORDER BY 1,2,3" % server.sql_str(args.kb_id))
-    print("== 三级树（%d 个类） ==" % len(tree))
+        "AND jsonb_typeof(category_path)='array' AND jsonb_array_length(category_path) >= 2 "
+        "GROUP BY 1,2 ORDER BY 1,2" % server.sql_str(args.kb_id))
+    print("== 两级树（%d 个大类） ==" % len(tree))
     for row in tree[:40]:
-        print("  %s → %s → %s（%s 页）" % (row["lv1"], row["lv2"], row["lv3"], row["n"]))
+        print("  %s → %s（%s 页）" % (row["lv1"], row["lv2"], row["n"]))
     return 0
 
 
