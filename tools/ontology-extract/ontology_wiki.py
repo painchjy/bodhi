@@ -364,14 +364,18 @@ def load_light_text(module: dict) -> str:
 
 def overview_page(builder: WikiBuilder) -> None:
     index = builder.index
-    totals = index.get("totals") or {}
+    classes_total = sum(len(m["classes"]) for m in builder.models)
+    relations_total = sum(len(m["relations"]) for m in builder.models)
+    bridges_total = sum(len(m.get("cross_module_bridges") or []) for m in builder.models)
+    ns = index.get("namespace") or {}
+    ns_text = (ns.get("base") or ns.get("base_iri")
+               or "、".join("%s=%s" % (k, v) for k, v in list(ns.items())[:5]))
     out_slugs = [slug_module(m["key"]) for m in builder.models]
     lines = ["# 企业本体模型 · 总览", "",
              "> **类型**：本体模块（`%s`，根页）  " % TYPE_MODULE,
-             "> **规模**：模块 %d 个 ｜ 类 %s 个 ｜ 关系 %s 条 ｜ 跨模块桥 %s 条  "
-             % (len(builder.models), totals.get("classes", "?"),
-                totals.get("relations", "?"), totals.get("bridges", "?")),
-             "> **命名空间**：`%s`  " % (index.get("namespace") or {}).get("base", ""),
+             "> **规模**：模块 %d 个 ｜ 类 %d 个 ｜ 关系 %d 条 ｜ 跨模块桥 %d 条  "
+             % (len(builder.models), classes_total, relations_total, bridges_total),
+             "> **命名空间**：`%s`  " % ns_text,
              "> **生成**：`%s` @ %s（编译产物 schema %s）"
              % (TOOL_TAG, builder.generated_at, index.get("artifact_schema_version", "?")), "",
              "## 这个知识库是什么", "",
@@ -398,11 +402,12 @@ def overview_page(builder: WikiBuilder) -> None:
     builder.add(slug="ontology/index", title="企业本体模型 · 总览", page_type=TYPE_MODULE,
                 module_label="总览", group="总览",
                 content="\n".join(lines).rstrip() + "\n",
-                summary="企业本体模型总览：%d 个模块、%s 个本体类、%s 条关系；页面类型与用法说明。"
-                        % (len(builder.models), totals.get("classes", "?"),
-                           totals.get("relations", "?")),
+                summary="企业本体模型总览：%d 个模块、%d 个本体类、%d 条关系（含 %d 条跨模块桥）；页面类型与用法说明。"
+                        % (len(builder.models), classes_total, relations_total, bridges_total),
                 wiki_path="ontology/index", out_slugs=out_slugs,
-                metadata={"kind": "overview", "totals": totals,
+                metadata={"kind": "overview",
+                          "totals": {"classes": classes_total, "relations": relations_total,
+                                     "bridges": bridges_total},
                           "generated_at": builder.generated_at, "generator": TOOL_TAG})
 
 
