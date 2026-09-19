@@ -43,6 +43,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import threading
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -820,6 +821,77 @@ def ontology_types(model_key: str) -> dict:
 # ---------------------------------------------------------------------------
 # MCP：工具定义与调用
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 异步任务层（2026-09-19 实测的必要性）
+#   app 侧 MCP 客户端的超时是**硬编码 60 秒且无配置项**（app env / 上游 compose 里都没有
+#   MCP 超时开关），而单次抽取的 LLM 调用就要 ~57s → 同步调用必然 context deadline exceeded。
+#   因此工具改为「立即受理 + 后台执行」，用 extract_status 轮询结果。
+# ---------------------------------------------------------------------------
+JOBS: dict[str, dict] = {}
+JOBS_LOCK = threading.Lock()
+JOB_KEEP = {"status", "started_at", "finished_at", "doc_title", "created", "merged",
+            "pending", "violations", "unmatched", "folders_synced", "elements",
+            "relationships", "error"}
+
+
+def _job_brief(result: dict) -> dict:
+    return {k: (len(result[k]) if isinstance(result.get(k), list) else result.get(k))
+            for k in ("status", "started_at", "finished_at", "doc_title", "elements",
+                      "relationships", "created", "merged", "pending", "violations",
+                      "unmatched", "folders_synced", "error") if k in result}
+
+
+def start_extract_job(args: dict) -> dict:
+    """受理一次抽取并立即返回；真正的抽取在后台线程里跑（可等 1-2 分钟）。"""
+    job_id = uuid.uuid4().hex[:12]
+    with JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "started_at": now_text()}
+        if len(JOBS) > 30:  # 只保留最近若干条，避免长跑进程内存膨胀
+            for stale in list(JOBS)[:-30]:
+                if JOBS[stale].get("status") != "running":
+                    JOBS.pop(stale, None)
+
+    def _run() -> None:
+        try:
+            result = extract_and_save(
+                str(args["model"]), str(args["kb_id"]), str(args["knowledge_id"]),
+                high=float(args.get("high", DEFAULT_HIGH)),
+                low=float(args.get("low", DEFAULT_LOW)),
+                dry_run=bool(args.get("dry_run", False)),
+                from_log=str(args.get("from_log", "")))
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "done", "finished_at": now_text(),
+                                     "doc_title": result.get("doc_title", "")})
+                JOBS[job_id].update(result)
+        except Exception as exc:  # noqa: BLE001
+            print("[mcp] 异步抽取失败 job=%s：%s" % (job_id, exc))
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "failed", "finished_at": now_text(),
+                                     "error": str(exc)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "status": "started", "job_id": job_id, "started_at": now_text(),
+        "note": ("抽取已受理并开始执行（约 1-2 分钟）。请立即用 extract_status(job_id=...) "
+                 "查询进度与结果；**不要**再次调用 extract_and_save 以免重复抽取。"),
+    }
+
+
+def extract_status(job_id: str = "") -> dict:
+    """查询异步抽取的状态/结果；不给 job_id 则列出最近的任务。"""
+    with JOBS_LOCK:
+        if job_id:
+            job = JOBS.get(job_id)
+            if not job:
+                return {"job_id": job_id, "status": "unknown",
+                        "note": "没有这个任务（可能服务重启过；重启会清空内存中的任务表）"}
+            return {"job_id": job_id, "args": None, **_job_brief(job)}
+        return {"count": len(JOBS),
+                "jobs": {k: {"status": v.get("status"), "started_at": v.get("started_at"),
+                             "finished_at": v.get("finished_at")}
+                         for k, v in list(JOBS.items())}}
+
+
 def tool_definitions() -> list[dict]:
     return [
         {
@@ -839,9 +911,23 @@ def tool_definitions() -> list[dict]:
                     "high": {"type": "number", "description": "合并阈值，默认 0.90"},
                     "low": {"type": "number", "description": "新增阈值，默认 0.75"},
                     "dry_run": {"type": "boolean", "description": "只算不写，默认 false"},
+                    "wait": {"type": "boolean",
+                             "description": ("默认 false = 立即受理并后台执行（推荐，避免调用超时）；"
+                                             "true = 同步等待结果（可能超过 60 秒，仅在本地调试时用）")},
+                    "from_log": {"type": "string",
+                                 "description": "调试用：从指定日志文件复放原始 LLM 输出，不发起真实调用"},
                 },
                 "required": ["model", "kb_id", "knowledge_id"],
             },
+        },
+        {
+            "name": "extract_status",
+            "description": ("查询本体抽取任务的状态与结果（配合 extract_and_save 的异步模式使用）。"
+                            "返回 status=running/done/failed，done 时含 created/merged/pending/"
+                            "violations/unmatched 明细与 folders_synced（目录是否已重建）。"),
+            "inputSchema": {"type": "object",
+                            "properties": {"job_id": {"type": "string",
+                                                      "description": "extract_and_save 返回的 job_id"}}},
         },
         {
             "name": "list_pending_merges",
@@ -872,12 +958,18 @@ def tool_definitions() -> list[dict]:
 
 def call_tool(name: str, args: dict) -> dict:
     if name == "extract_and_save":
+        # 默认异步受理（app 侧 MCP 60s 硬超时，而抽取要 1-2 分钟）；
+        # wait=true 才同步等待（本地调试用）。
+        if not args.get("wait") and not args.get("from_log"):
+            return start_extract_job(args)
         return extract_and_save(
             str(args["model"]), str(args["kb_id"]), str(args["knowledge_id"]),
             high=float(args.get("high", DEFAULT_HIGH)),
             low=float(args.get("low", DEFAULT_LOW)),
             dry_run=bool(args.get("dry_run", False)),
             from_log=str(args.get("from_log", "")))
+    if name == "extract_status":
+        return extract_status(str(args.get("job_id", "")))
     if name == "list_pending_merges":
         return list_pending_merges(str(args["kb_id"]))
     if name == "resolve_pending_merge":

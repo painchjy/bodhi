@@ -69,6 +69,11 @@ GOVERNANCE = """
 5. **来源文档不是关系**：文档自身（如《…方案》）不作为关系目标抽取；出处写在「原文依据」里。
 6. 抽取后必须**自查**：工具返回的 `created/merged/pending/violations` 要在回答里如实汇报；
    有 `violations` 时必须说明并修正，不得默默忽略。
+7. **异步受理**：`extract_and_save` 会在 100ms 内返回 `{"status":"started","job_id":"..."}`
+   （抽取在后台跑 1-2 分钟，因为单次 LLM 调用就要约 1 分钟，而调用方有 60 秒超时限制）。
+   拿到 job_id 后**必须**用 `extract_status(job_id=...)` 轮询，直到 status 变成 `done`
+   或 `failed`，再据结果汇报；**绝不要**因为看到 `started` 就再次调用 `extract_and_save`
+   （那会重复抽取）。若 status=`failed`，把 `error` 原样说明，不要自行重试写页。
 """
 
 
