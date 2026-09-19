@@ -48,6 +48,9 @@ TOOL_NAME = "mcp_bodhi_ontology_extract_and_save"
 FORBIDDEN_TOOLS = ("wiki_write_page", "wiki_page_modify", "wiki_delete_page",
                    "wiki_create_page", "wiki_update_page")
 MARK = "## 落库硬约束"
+# 版本标记：追加新规则时改这里 —— 旧实现只找 MARK，规则升级后会被幂等判据挡住永远进不去
+# （2026-09-19 实测：第 7 条「异步受理」没写进库，校验打印 f）
+GOV_VERSION = "<!-- bodhi-governance-version: 2 -->"
 
 GOVERNANCE = """
 
@@ -103,9 +106,13 @@ def patch_config(cfg: dict) -> tuple[dict, list[str]]:
             cfg["allowed_tools"] = [t for t in tools if t not in FORBIDDEN_TOOLS]
             changes.append("allowed_tools -= %s" % ", ".join(blocked))
     prompt = cfg.get("system_prompt") or ""
-    if MARK not in prompt:
-        cfg["system_prompt"] = prompt.rstrip() + GOVERNANCE
-        changes.append("system_prompt += 落库硬约束（%d 字符）" % len(GOVERNANCE))
+    if GOV_VERSION not in prompt:
+        # 追加或**升级**：若已有旧版块，先切掉旧块再整体追加，避免规则重复或新旧混排
+        idx = prompt.find(MARK)
+        if idx >= 0:
+            prompt = prompt[:idx].rstrip()
+        cfg["system_prompt"] = prompt.rstrip() + GOVERNANCE + "\n" + GOV_VERSION + "\n"
+        changes.append("system_prompt 落库硬约束 → v2（%d 字符）" % (len(GOVERNANCE) + len(GOV_VERSION)))
     return cfg, changes
 
 
