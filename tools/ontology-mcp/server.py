@@ -841,11 +841,46 @@ def _job_brief(result: dict) -> dict:
                       "unmatched", "folders_synced", "error") if k in result}
 
 
+def job_key(args: dict) -> str:
+    """任务去重键：同一（知识库, 文档, 模型）视为同一次抽取。"""
+    return "|".join([str(args.get("kb_id", "")).strip(),
+                     str(args.get("knowledge_id", "")).strip(),
+                     str(args.get("model", "")).strip()])
+
+
+def find_existing_job(args: dict) -> tuple[str, dict] | None:
+    """按去重键找已有的任务：在跑的、或最近的（无论成败）都复用，避免重复抽取。
+
+    2026-09-19 用户实测：智能体每"查询进度"都会再调一次 extract_and_save，
+    旧实现每次都新建 job → 同一篇文档被反复抽取。现在同组只保留一个任务，
+    重复调用直接返回原 job_id；要强制重跑请换 knowledge_id 或显式传 fresh=true。
+    """
+    if args.get("fresh"):
+        return None
+    key = job_key(args)
+    with JOBS_LOCK:
+        for job_id in reversed(list(JOBS)):
+            job = JOBS[job_id]
+            if job.get("key") == key:
+                return job_id, job
+    return None
+
+
 def start_extract_job(args: dict) -> dict:
-    """受理一次抽取并立即返回；真正的抽取在后台线程里跑（可等 1-2 分钟）。"""
+    """受理一次抽取并立即返回；同名同文档的任务会复用（幂等）。"""
+    existing = find_existing_job(args)
+    if existing:
+        job_id, job = existing
+        return {"status": job.get("status", "running"), "job_id": job_id,
+                "reused": True, "started_at": job.get("started_at"),
+                "note": ("同一篇文档已有抽取任务（未重复发起）。请用 "
+                         "extract_status(job_id=...) 查询该任务；确需重跑请传 fresh=true。"),
+                **_job_brief(job)}
+
+    key = job_key(args)
     job_id = uuid.uuid4().hex[:12]
     with JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "started_at": now_text()}
+        JOBS[job_id] = {"status": "running", "started_at": now_text(), "key": key}
         if len(JOBS) > 30:  # 只保留最近若干条，避免长跑进程内存膨胀
             for stale in list(JOBS)[:-30]:
                 if JOBS[stale].get("status") != "running":

@@ -343,6 +343,19 @@ def patch_knowledgebase(fe: pathlib.Path) -> None:
         "const validTabs = ['documents', 'wiki', 'graph', 'bodhi-graph'] as const",
         "validTabs")
 
+    # 1b) v4：wiki/图谱 tab 与 wiki 主区域**常显**（用户 2026-09-19 需求 1）
+    #     上游把整块 UI 包在 `v-if="isWiki"`，而 isWiki 取自 KB 能力位
+    #     `indexing_strategy.wiki_enabled`；我们关掉该能力位是为了**阻止上传后自动生成 wiki**
+    #     （省时省 token），但界面上的 wiki 树与本体图谱仍需可用，所以这里让它恒为真。
+    text = replace_once(
+        text,
+        "const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled)",
+        "// bodhi2 v4：wiki / 图谱 / 本体图谱 三个 tab 与 wiki 主区域常显；\n"
+        "// KB 的 indexing_strategy.wiki_enabled 只用来控制「上传后是否自动生成 wiki」，\n"
+        "// 不再影响界面（否则关掉它就看不到自己的本体页与图谱了）\n"
+        "const isWiki = computed(() => true)",
+        "isWiki 常显（v4）")
+
     # 2) 面包屑里加「本体图谱」入口（挂在 graph 那个 tooltip 之后）
     text = replace_once(
         text,
