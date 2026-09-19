@@ -100,18 +100,35 @@ def sync_kb(kb_id: str, dry_run: bool, link_pages: bool, prune: bool = False) ->
     # 同级按出现顺序编号，保证 sort_order 可复现
     counter: dict[str, int] = {}
     statements: list[str] = []
+
+    # 复用已存在的目录行（2026-09-19 实测的坑）：wiki_folders 上有唯一约束
+    # idx_wiki_folders_parent_name(knowledge_base_id, parent_id, name)。WeKnora 自己的
+    # wiki 流水线也会建目录，若我们按自己的确定性 UUIDv5 再插一份同名同父的行，
+    # 就会整批报 duplicate key。因此先按 path 建索引：命中则**沿用它的 id**（只更新
+    # path/depth/sort_order），并把它作为子目录的 parent_id —— 这样两边共存、互不冲突。
+    existing = server.psql_csv(
+        "SELECT id, path FROM wiki_folders WHERE knowledge_base_id = %s AND deleted_at IS NULL"
+        % server.sql_str(kb_id))
+    by_path = {r["path"]: r["id"] for r in existing if r["path"]}
+    resolved: dict[str, str] = {}
+    for d in dirs:
+        resolved[d["key"]] = by_path.get(d["key"]) or d["id"]
+    reused = len([k for k in resolved if k in by_path])
+
     for d in dirs:
         order = counter.get(d["parent"], 0)
         counter[d["parent"]] = order + 1
-        parent_id = "" if not d["parent"] else folder_id(kb_id, d["parent"])
+        parent_id = "" if not d["parent"] else resolved.get(d["parent"], "")
+        fid = resolved[d["key"]]
         statements.append(
             "INSERT INTO wiki_folders (id, tenant_id, knowledge_base_id, parent_id, name, path, depth, sort_order) "
             "VALUES (%s, %d, %s, %s, %s, %s, %d, %d) "
             "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, path = EXCLUDED.path, "
             "parent_id = EXCLUDED.parent_id, depth = EXCLUDED.depth, sort_order = EXCLUDED.sort_order, "
             "deleted_at = NULL, updated_at = now();"
-            % (server.sql_str(d["id"]), tenant_id, server.sql_str(kb_id), server.sql_str(parent_id),
+            % (server.sql_str(fid), tenant_id, server.sql_str(kb_id), server.sql_str(parent_id),
                server.sql_str(d["name"]), server.sql_str(d["key"]), d["depth"], order))
+
 
     if link_pages:
         for slug, fid in sorted(page_folder.items()):
@@ -122,8 +139,9 @@ def sync_kb(kb_id: str, dry_run: bool, link_pages: bool, prune: bool = False) ->
 
     pruned = 0
     if prune:
-        # 结构变更（如三级 → 两级）后，旧目录会残留；按计划里的 id 白名单软删除其余目录
-        keep = ", ".join(server.sql_str(d["id"]) for d in dirs)
+        # 结构变更（如三级 → 两级）后，旧目录会残留；按计划里的 id 白名单软删除其余目录。
+        # 注意用 resolved（含复用的既有目录 id），否则会把 WeKnora 建的目录误判为“不在计划里”。
+        keep = ", ".join(server.sql_str(v) for v in resolved.values())
         stale = server.psql_csv(
             "SELECT id, path FROM wiki_folders WHERE knowledge_base_id = %s AND deleted_at IS NULL "
             "AND id NOT IN (%s)" % (server.sql_str(kb_id), keep))
