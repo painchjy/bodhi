@@ -653,3 +653,61 @@ Agent 应先确认模型/文档/片段，再调用工具；随后 wiki 里应出
 
 
 
+
+## 11. 最小依赖策略（用户口径，2026-09-19）与前端上线记录
+
+### 11.1 决策：上游只当「重活供应商」，自研一律 Python（方案 A）
+
+用户原话（2026-09-19）：「我不需要完整的 WeKnora 镜像，例如与微信关联等功能，我只需要文件切片、
+向量存储、图谱存储、会话功能，知识提取已经被自己的 MCP 替代，后续最多增加知识推理所需能力，
+能实现内聚、幂等等复杂推理即可，这些推理估计也是自研插件的，所以请选择最少依赖的代码，
+不需要抓取全部代码，形成最小可运行的镜像就可以了。」
+
+据此定下的边界：
+
+| 能力 | 由谁提供 | 是否自研 | 是否要构建上游 |
+|---|---|---|---|
+| 文件切片（含 PDF/OCR 解析） | 上游 app + docreader（公共镜像） | ✗ | 否 |
+| 向量存储 / 检索 | 上游 app + postgres | ✗ | 否 |
+| 图谱存储（页面级关系图） | 上游 app（wiki 页面 + 关系） | ✗ | 否 |
+| 会话（含知识库问答、agent） | 上游 app（chat_pipeline） | ✗ | 否 |
+| 知识提取 / 本体合规 | **`tools/ontology-mcp/server.py`** | ✓ | 否（Python） |
+| 语义图谱页 + 只读接口 | **`tools/ontology-mcp/graph_page.py` + server** | ✓ | 否（Python） |
+| 本体类型前端（tab / 三级折叠 / 裁决） | 上游前端**打补丁后自建一次** | 半 | **仅此一次** |
+| 知识推理（内聚 / 幂等 / 穿透） | **`tools/ke-core/`（规划）** | ✓ | 否（Python） |
+
+**「不再抓全部代码」的具体含义**：上游 Go 代码一行都不用读、不用抓、不用改（零重建路径，
+见 §10.11）；上游前端源码只在**要改 Vue 时**才需要（本次已改完并固化为镜像，源码树留在 WSL
+`/root/fe-build` 备查，不入库）。今后新增能力只写 Python，**不再需要 npm / node / 构建链**。
+
+### 11.2 前端上线记录（2026-09-19，实测）
+
+| 项 | 值 |
+|---|---|
+| 镜像 | `weknora-ui:bodhi2`（130MB，`docker build` 成功，容器 `restarts=0`、`nginx -t` OK） |
+| 构建脚本 | `deploy/weknora-fork/build_frontend.sh`（可复现，含闸门）+ `deploy_frontend.sh`（切换+验收） |
+| 补丁脚本 | `deploy/weknora-fork/patch_frontend.py`（12 + 6 处替换 + 2 个新文件）、`gen_frontend_types.py`（47 类型 / 5 模块） |
+| nginx | 整份覆盖 `default.conf.template`（server{} 内插入 `location /bodhi/` → `host.docker.internal:8765`）；**不能**只往 `conf.d/` 塞 location（http 级，nginx 起不来） |
+| overlay | `deploy/docker-compose.weknora.yml` 的 `frontend:`：`image` + 模板挂载 + `extra_hosts` |
+| 线上验证 | 经前端反代 `/bodhi/graph` 200/45,918B、`/bodhi/view` 200/20,913B、`/bodhi/pending` 200；产物 `KnowledgeBase-CYYqYCiG.js`（428,606B）含 `BodhiGraphTab` / `本体图谱` / `待确认合并` |
+| 数据验证 | 三级 `category_path` 已回填 53 页、14 个类，如 `["BMM 业务动机模型","手段","操作性业务规则"]` 7 页 |
+| 提交 | `68444a1`（13 文件 / +1297 行） |
+
+### 11.3 构建踩坑（已固化进脚本，下次一分钟复现）
+
+1. **上游是 pnpm 工程**：`resolutions.lightningcss="none"` 让 npm 报 `Invalid comparator: none`
+   → 构建脚本先摘掉该覆盖项。
+2. **逐文件补拉的源码会被截断**：`src/views/settings/SandboxSettings.vue` 只有 7,594B（真实 30,112B），
+   vite 在转译 **4020 个模块后**才报 `Element is missing end tag`，极难定位
+   → 新增闸门 `frontend/check_sfc.mjs`（`@vue/compiler-sfc` 全量解析 190 个 `.vue`，秒级定位）。
+3. **WSL 只有 8GB 内存**，node 默认堆上限 **2096MB** → 构建 OOM（`HeapAllocator ... Aborted`）
+   → `NODE_OPTIONS=--max-old-space-size=6144`，之后 `built in 1m49s`。
+4. **切换镜像后必须 `docker restart WeKnora-frontend`**：nginx 只在启动时解析一次 app 的容器 IP，
+   重建 app 后不重启前端会全站 502（已写进 `apply.sh` / `wsl-up.sh` / `deploy_frontend.sh`）。
+
+### 11.4 下一步（自研 Python，无构建）
+
+推理插件规格已单独成文：**`docs/bodhi-reasoning.md`**（规则源=本体自带 SHACL，S1–S5 服务设计 /
+O1–O5 控制穿透；`validate` 与 `derive` 双模式；确定性 slug + 版本快照实现幂等）。
+落地位置 `tools/ke-core/`，接口为 CLI + 两个 MCP 工具（`reason_validate` / `reason_derive`）。
+
