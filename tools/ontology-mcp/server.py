@@ -716,6 +716,16 @@ def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
     if not dry_run and statements:
         statements.append(sql_rebuild_in_links(kb_id))
         psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
+        # 抽取落库后**自动重建该知识库的目录树**（用户 2026-09-19 口径）：
+        # 不重建的话前端树是平铺的（老问题）。目录 id 是 UUIDv5 确定性生成、逻辑幂等，
+        # 所以每次抽取后同步一遍是安全的；同步失败不影响本次抽取结果（只记录状态）。
+        try:
+            import sync_folders  # 延迟导入：sync_folders 反过来 import server
+            sync_folders.sync_kb(kb_id, dry_run=False, link_pages=True, prune=False)
+            summary["folders_synced"] = True
+        except Exception as exc:  # noqa: BLE001
+            print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
+            summary["folders_synced"] = "failed: %s" % exc
     return summary
 
 
