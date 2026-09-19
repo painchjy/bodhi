@@ -350,9 +350,8 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
     if rels:
         lines += ["## 本体关系", ""]
         for rel in rels:
-            lines.append("- %s（`%s`）→ [%s](wiki:%s)"
-                         % (rel.get("label") or rel["type"], rel["type"], rel["target"],
-                            rel.get("target_slug") or ""))
+            lines.append(rel_line(rel.get("label") or rel["type"], rel["type"],
+                                  rel["target"], rel.get("target_slug") or ""))
         lines.append("")
     return {
         "slug": slug, "title": element["name"], "page_type": element["type"],
@@ -409,17 +408,15 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
         for rel in rels:
             if rel.get("target_slug") and rel["target_slug"] in block:
                 continue
-            merged.insert(end, "- %s（`%s`）→ [%s](wiki:%s)"
-                          % (rel.get("label") or rel["type"], rel["type"], rel["target"],
-                             rel.get("target_slug") or ""))
+            merged.insert(end, rel_line(rel.get("label") or rel["type"], rel["type"],
+                                       rel["target"], rel.get("target_slug") or ""))
             added_relations.append(rel["type"])
             end += 1
     elif rels:
         merged += ["", "## 本体关系", ""]
         for rel in rels:
-            merged.append("- %s（`%s`）→ [%s](wiki:%s)"
-                          % (rel.get("label") or rel["type"], rel["type"], rel["target"],
-                             rel.get("target_slug") or ""))
+            merged.append(rel_line(rel.get("label") or rel["type"], rel["type"],
+                                   rel["target"], rel.get("target_slug") or ""))
             added_relations.append(rel["type"])
         merged.append("")
 
@@ -984,6 +981,21 @@ def main() -> int:
 # 数据来源：页面正文的「## 本体关系」小节（我们写页时格式固定）+ 页面元数据
 # ---------------------------------------------------------------------------
 REL_LINE = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[(?P<target>.+?)\]\(wiki:(?P<slug>[^)]+)\)\s*$")
+# 2026-09-19 起的统一格式：[[slug|正文]]（上游前端 citationMarkdown 支持 [[wiki]] 链接；
+# 旧的 [正文](wiki:slug) 会被 markdown 渲染器当未知协议退化成纯文本，页面里看不到链接）
+REL_LINE_V2 = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[\[(?P<slug>[^|\]]+)\|(?P<target>[^\]]+)\]\]\s*$")
+
+
+def parse_rel_line(line: str):
+    """解析「本体关系」小节的一行，兼容新旧两种链接格式。"""
+    return REL_LINE.match(line) or REL_LINE_V2.match(line)
+
+
+def rel_line(label: str, rel_type: str, target: str, slug: str) -> str:
+    """生成「本体关系」小节的一行（统一 [[slug|正文]] 站内链接格式）。"""
+    if slug:
+        return "- %s（`%s`）→ [[%s|%s]]" % (label, rel_type, slug, target)
+    return "- %s（`%s`）→ %s" % (label, rel_type, target)
 
 
 def _class_meta(model_key: str) -> dict[str, dict]:
@@ -1075,7 +1087,7 @@ def bodhi_graph(kb_id: str, model: str = "", types: str = "", limit: int = 300) 
         known.add(row["slug"])
     for row in rows:
         for line in (row["content"] or "").splitlines():
-            hit = REL_LINE.match(line.strip())
+            hit = parse_rel_line(line.strip())
             if not hit:
                 continue
             target_slug = hit.group("slug")

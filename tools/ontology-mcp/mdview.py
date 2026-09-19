@@ -16,7 +16,7 @@ from __future__ import annotations
 import html as _html
 import re
 
-_WIKI_PREFIXES = ("/wiki/", "wiki/")
+_WIKI_PREFIXES = ("/wiki/", "wiki/", "wiki:")
 
 
 def esc(text: str) -> str:
