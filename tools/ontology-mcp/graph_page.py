@@ -101,9 +101,6 @@ TEMPLATE = r"""<!DOCTYPE html>
       </svg>
       <div class="filters">
         <h4>本体类</h4><div id="classes"></div>
-        <h4>关系类型</h4>
-        <input type="text" id="relFilter" placeholder="过滤关系类型…">
-        <div id="relTypes"></div>
         <h4>搜索</h4>
         <input type="text" id="search" placeholder="按名称 / 定义过滤节点">
         <div class="row"><button id="allOn">全选</button><button id="allOff">全不选</button></div>
@@ -130,7 +127,7 @@ const gLabels = document.getElementById('elabels');
 const gNodes = document.getElementById('nodes');
 const panel = document.getElementById('panel');
 const state = { nodes: [], edges: [], classes: new Map(), relTypes: new Map(),
-                selClasses: new Set(), selRels: new Set(), q: '', showLabels: false,
+                selClasses: new Set(), q: '', showLabels: false,
                 sel: null, hover: null };
 const view = { x: -600, y: -450, w: 1200, h: 900 };
 
@@ -157,7 +154,6 @@ async function load() {
     state.relTypes = new Map();
     d.edges.forEach(function (e) { state.relTypes.set(e.type, (state.relTypes.get(e.type) || 0) + 1); });
     state.selClasses = new Set(state.classes.keys());
-    state.selRels = new Set(state.relTypes.keys());
     renderFilters(); layout(); zoomFit(); render();
     document.getElementById('stat').textContent =
       d.meta.node_count + ' 节点 / ' + d.meta.edge_count + ' 关系 / ' +
@@ -179,21 +175,6 @@ function renderFilters() {
       '<span class="swatch" style="background:' + esc(v.color) + '"></span>' + esc(v.label) +
       ' <span style="color:#6b7280">(' + v.count + ')</span></label>';
   }).join('') || '<div style="color:#6b7280">（无）</div>';
-  var rels = Array.from(state.relTypes.entries()).sort(function (a, b) { return b[1] - a[1]; });
-  document.getElementById('relTypes').innerHTML = rels.map(function (kv) {
-    var t = kv[0];
-    return '<label data-rel="' + esc(t) + '"><input type="checkbox" data-relx="' + esc(t) + '"' +
-      (state.selRels.has(t) ? ' checked' : '') + '>' + esc(t.replace(/^[a-z-]+:/, '')) +
-      ' <span style="color:#6b7280">(' + kv[1] + ')</span></label>';
-  }).join('') || '<div style="color:#6b7280">（无）</div>';
-  applyRelFilter();
-}
-
-function applyRelFilter() {
-  var q = (document.getElementById('relFilter').value || '').toLowerCase();
-  Array.prototype.forEach.call(document.querySelectorAll('#relTypes label'), function (el) {
-    el.style.display = (!q || el.dataset.rel.toLowerCase().indexOf(q) >= 0) ? 'flex' : 'none';
-  });
 }
 """
 
@@ -257,7 +238,7 @@ function visible() {
   });
   var keep = new Set(nodes.map(function (n) { return n.slug; }));
   var edges = state.edges.filter(function (e) {
-    return keep.has(e.source) && keep.has(e.target) && state.selRels.has(e.type);
+    return keep.has(e.source) && keep.has(e.target);
   });
   return { nodes: nodes, edges: edges };
 }
@@ -354,9 +335,18 @@ function moveNode(n) {
     var t = g.querySelector('text');
     if (t && c) { t.setAttribute('x', n.x + (+c.getAttribute('r')) + 3); t.setAttribute('y', n.y + 3); }
   });
+  var pos = new Map();
+  state.nodes.forEach(function (x) { pos.set(x.slug, x); });
   Array.prototype.forEach.call(gEdges.children, function (l) {
-    if (l.dataset.src === n.slug) { l.setAttribute('x1', n.x); l.setAttribute('y1', n.y); }
-    if (l.dataset.dst === n.slug) { l.setAttribute('x2', n.x); l.setAttribute('y2', n.y); }
+    if (l.dataset.src !== n.slug && l.dataset.dst !== n.slug) return;
+    var s = pos.get(l.dataset.src), t = pos.get(l.dataset.dst);
+    if (!s || !t) return;
+    l.setAttribute('x1', s.x); l.setAttribute('y1', s.y);
+    l.setAttribute('x2', t.x); l.setAttribute('y2', t.y);
+    // 关键：关系标签画在边的中点，节点移动时必须一起搬，否则标签会留在原地（看起来"消失了"）
+    var lab = gLabels.querySelector('text[data-src="' + l.dataset.src +
+                                    '"][data-dst="' + l.dataset.dst + '"]');
+    if (lab) { lab.setAttribute('x', (s.x + t.x) / 2); lab.setAttribute('y', (s.y + t.y) / 2); }
   });
 }
 
@@ -431,7 +421,11 @@ window.addEventListener('mousemove', function (ev) {
   }
 });
 window.addEventListener('mouseup', function () {
-  if (drag) { if (!drag.moved) showPanel(drag.n.slug); drag = null; }
+  if (drag) {
+    if (!drag.moved) { showPanel(drag.n.slug); }
+    else { render(); }        // 拖完整体重绘一次，保证线/标签/节点严格一致
+    drag = null;
+  }
   pan = null; svg.classList.remove('dragging');
 });
 svg.addEventListener('wheel', function (ev) {
@@ -459,13 +453,6 @@ document.getElementById('classes').addEventListener('change', function (ev) {
   if (ev.target.checked) state.selClasses.add(t); else state.selClasses.delete(t);
   render();
 });
-document.getElementById('relTypes').addEventListener('change', function (ev) {
-  var t = ev.target.dataset.relx;
-  if (!t) return;
-  if (ev.target.checked) state.selRels.add(t); else state.selRels.delete(t);
-  render();
-});
-document.getElementById('relFilter').addEventListener('input', applyRelFilter);
 document.getElementById('search').addEventListener('input', function (ev) {
   state.q = ev.target.value; render();
 });
@@ -477,11 +464,10 @@ document.getElementById('relayout').addEventListener('click', function () { layo
 document.getElementById('zoomFit').addEventListener('click', zoomFit);
 document.getElementById('allOn').addEventListener('click', function () {
   state.selClasses = new Set(state.classes.keys());
-  state.selRels = new Set(state.relTypes.keys());
   renderFilters(); render();
 });
 document.getElementById('allOff').addEventListener('click', function () {
-  state.selClasses = new Set(); state.selRels = new Set();
+  state.selClasses = new Set();
   renderFilters(); render();
 });
 document.getElementById('model').addEventListener('change', load);
