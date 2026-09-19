@@ -533,7 +533,66 @@ frontend nginx: proxy_pass http://app:8080;   # 服务名，但 nginx 只在启�
 > **不再自动透传原始 URI**，需要显式 `$request_uri`，容易改错 —— 当前先用"重启前端"这个简单方案。
 
 
-### 10.12 原始实施细节（已被 §10.10 取代，仅留档）
+### 10.12 智能体 vs 类型预设（重要区别）+ 预置本体提取智能体（2026-09-19）
+
+**踩的坑**：只加 `agent_type_presets.yaml` 后，UI 里"找不到新智能体，只有内置 4 个"。
+
+**真相（源码级）**：
+
+| 东西 | 来源 | 出现在 UI 哪里 |
+| --- | --- | --- |
+| **智能体（agents）** | `builtin_agents.yaml`（内置 4 个）+ `custom_agents` 表（自定义） | 智能体列表 / 新建对话选智能体 |
+| **智能体类型预设（type-presets）** | `agent_type_presets.yaml` | **只在「创建/编辑智能体」的类型选择器**里 —— 前端 `stores/editorResources.ts` → `AgentEditorModal.vue` 调用 `getAgentTypePresets()` |
+
+而且**运行时不用预设**，用的是 `custom_agents.config.system_prompt` 的**全文**
+（`session_agent_qa.go:360`：`if config.SystemPrompt != "" { UseCustomSystemPrompt = true }`），
+预设里的 `system_prompt_id` 只是编辑器 prefill 用。
+
+⇒ 要"开箱可用"，必须写一行 `custom_agents`。已由 `deploy/weknora-fork/gen_agents.py` 完成
+（克隆已有智能体 config → 覆盖本体字段；`--apply` 写入）：
+
+| id | 名称 | agent_mode | prompt | tools | kb_selection |
+| --- | --- | --- | --- | --- | --- |
+| `bodhi-ontology-bmm` | 本体知识提取 · BMM 业务动机模型 | smart-reasoning | ontology_extract_agent_bmm（10171 字符） | 8 | selected |
+| `bodhi-ontology-ea` | 本体知识提取 · EA 企业架构 | smart-reasoning | ontology_extract_agent_ea（7578 字符） | 8 | selected |
+
+要点：
+- `agent_mode = "smart-reasoning"`（ReAct，多步 + 工具；Go 端常量只有 `quick-answer` / `smart-reasoning` 两个）；
+- `agent_type = "custom"`（Go 端只认 `rag-qa` / `wiki-qa` / `hybrid-rag-wiki` / `data-analysis` / `custom` 五个常量，
+  我们自己的 preset id 放进去没有消费方，用 `custom` 最安全）；
+- 工具集固定 8 个（读片段 3 + wiki 4 + 计划 1）；`temperature 0.1`、`max_iterations 40`；
+- 两条都是 `is_builtin = false` → 用户在 UI 里可自由改名/改配置/删除。
+
+### 10.13 本体模型知识库（规划，待确认）
+
+需求：把「企业本体模型」单独做成一个知识库，**每个本体类一个 wiki 页面**，关系在页面中表达；
+其他知识库/智能体需要理解页面类型时去那里查；内容**由 TTL 编译生成**，改 TTL 就更新该知识库。
+
+建议的数据流（单一真源 = TTL，全部产物由编译器生成）：
+
+```
+ontology/*.ttl ──(tools/ontology-compiler)──┬─→ artifacts/weknora/ontology_index.json   （类型/关系枚举、颜色、图例 → 提示词）
+                                            ├─→ artifacts/prompts/<key>_light.md        （轻量版正文 → 提示词）
+                                            ├─→ artifacts/weknora/ontology_wiki/…       （新：每个本体类一页 → 本体模型 KB）★
+                                            └─→ artifacts/neo4j/*.cypher                （图谱投影；本机已按用户要求清空，可停用）
+```
+
+- **投影程序**：`tools/ontology-extract/project_ontology_wiki.py`（复用 `weknora_sync.py` 的 SQL 写入器；
+  幂等：先删 `last_edit_source='ontology-wiki'` 的页面再整批写入）。
+- **页面类型建议**（自描述、不与抽取页混淆）：
+  `ontology:Module`（模块索引页）、`ontology:Class`（每个本体类一页，含属主模块/父类/属性/关系 domain-range/示例）、
+  `ontology:Relation`（每个对象属性一页，便于按关系名查）、`ontology:LightDoc`（轻量版全文，供 agent 直接读）。
+- **其他知识库怎么用**：把该 KB 一并选进对话 → agent 用 `wiki_search` / `wiki_read_page` 查定义；
+  提示词里仍内嵌类型枚举（现状），KB 页是"权威定义 + 人查"的落点。
+- **一致性**：轻量版 md 建议**继续由 TTL 生成**（避免 TTL→KB→light 形成环），
+  但可以把 light 文档**也投影成 KB 里的一页**（`ontology:LightDoc`），满足"从知识库查"的诉求；
+  另提供 `--check` 比对 KB 页面与 TTL 是否一致。
+
+**待用户确认**：① 新 KB 名称与范围（是否所有 5 个模块都建页）；② 页面类型命名；
+③ 是否彻底放弃 Neo4j 本体投影（据此把 overlay 里的 `bodhi-ontology` 服务停掉，避免下次 `up` 又灌回去）。
+
+
+### 10.14 原始实施细节（已被 §10.10 取代，仅留档）
 
 > 下面这版计划（新增 Go 工具 + 注册 + 重建镜像）在 2026-09-19 被证伪：
 > 工具路径本来就能写本体类型页面、preset/提示词可从挂载文件加载，
