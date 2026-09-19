@@ -274,6 +274,56 @@ PAGE_COLUMNS = [
 ]
 
 
+def resolve_kb_id(raw: str) -> tuple[str, str]:
+    """把 kb_id 参数解析成真实 UUID：支持 UUID / 知识库名称（精确或包含）。
+
+    2026-09-19 实测：智能体传的是知识库**名称**（如「企业知识库」）而不是 UUID，
+    老实现直接抛「知识库不存在」导致整次抽取失败。这里做容错解析，并把说明回传给
+    智能体，让它下次直接用真实 id。
+    """
+    raw = (raw or "").strip()
+    if re.fullmatch(r"[0-9a-fA-F-]{36}", raw):
+        return raw, ""
+    rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
+                    "ORDER BY updated_at DESC")
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[\s　]+", "", s or "")
+
+    if raw:
+        want = _norm(raw)
+        hit = [r for r in rows if _norm(r["name"]) == want] \
+            or [r for r in rows if _norm(r["name"]) in want or want in _norm(r["name"])]
+        if len(hit) == 1:
+            return hit[0]["id"], "（kb_id「%s」按名称解析为 %s）" % (raw, hit[0]["name"])
+        if len(hit) > 1:
+            raise RuntimeError("知识库名称不唯一：%s → %s"
+                               % (raw, "、".join(r["name"] for r in hit)))
+    raise RuntimeError("知识库不存在：%s；可选：%s"
+                       % (raw or "(空)", "、".join(r["name"] for r in rows) or "（无）"))
+
+
+def resolve_knowledge_id(kb_id: str, raw: str) -> tuple[str, str]:
+    """把 knowledge_id 解析成真实 UUID：支持 UUID / id 前缀 / 标题包含；
+    占位符或无法解析时退回该知识库**最新一篇**文档（并在返回里说明）。"""
+    rows = psql_csv("SELECT id, title FROM knowledges WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                    "ORDER BY created_at DESC" % sql_str(kb_id))
+    if not rows:
+        raise RuntimeError("该知识库还没有文档：请先上传文档并等切片完成")
+    raw = (raw or "").strip()
+    if raw:
+        for r in rows:
+            if r["id"] == raw:
+                return r["id"], ""
+        for r in rows:
+            if r["id"].startswith(raw):
+                return r["id"], "（knowledge_id「%s」按 id 前缀匹配）" % raw
+            if raw.lower() in (r["title"] or "").lower():
+                return r["id"], "（knowledge_id「%s」按标题匹配：%s）" % (raw, r["title"])
+    return rows[0]["id"], ("（knowledge_id「%s」无法解析，已改用该库最新文档：%s）"
+                           % (raw or "(空)", rows[0]["title"]))
+
+
 def get_kb_tenant(kb_id: str) -> int:
     row = psql("SELECT tenant_id FROM knowledge_bases WHERE id = %s AND deleted_at IS NULL"
                % sql_str(kb_id))
@@ -564,6 +614,10 @@ def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
                      high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
                      dry_run: bool = False, from_log: str = "") -> dict:
     engine = load_engine()
+    # 参数容错（2026-09-19）：智能体常传知识库名称、或 d1 之类的占位符，
+    # 这里统一解析成真实 UUID，并把解析说明回传给智能体（避免下次再传错）。
+    kb_id, kb_note = resolve_kb_id(kb_id)
+    knowledge_id, doc_note = resolve_knowledge_id(kb_id, knowledge_id)
     tenant_id = get_kb_tenant(kb_id)
     doc_rows = psql_csv("SELECT id, title FROM knowledges WHERE id = %s" % sql_str(knowledge_id))
     if not doc_rows:
@@ -585,6 +639,8 @@ def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
     statements: list[str] = []
     summary = {
         "model": model["key"], "kb_id": kb_id, "knowledge_id": knowledge_id,
+        # 参数解析说明：让智能体看到真实 id，下次直接用它（避免再传名称/占位符）
+        "resolved_note": (kb_note + " " + doc_note).strip(),
         "doc_title": doc_title, "chunks": len(chunks), "chars": len(doc_text),
         "elements": len(payloads), "relationships": len(checked["edges"]),
         "created": [], "merged": [], "pending": [],
