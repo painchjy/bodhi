@@ -12,6 +12,7 @@
     ke_pages.py      —— wiki 页面维护：本体关系增删改、类型修改、批量软删除
     ke_docs.py       —— 按来源文档统计/清理本体实例（删文档后的残留）
     ke_audit.py      —— 知识运维：wiki/本体图谱/本体模型 一致性巡检 + 计划→确认→硬删
+    ke_design.py     —— 设计流水线：设计页落库（页面级溯源）+ FD × 服务详设交叉验证
     reason.py        —— （下一轮）SHACL 规则判定与推导，规格见 docs/bodhi-reasoning.md
 
 约定与 `tools/ontology-mcp/server.py` 完全一致：`docker exec psql -t -A`，
