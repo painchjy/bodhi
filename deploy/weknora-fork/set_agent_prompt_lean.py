@@ -41,8 +41,10 @@ LEAN_PROMPT = """你是 bodhi2 的「本体知识提取」执行器。职责只�
    不要"顺便"抽取知识库里的其它文件；一次对话里只对那一篇调用一次。
 2. 落库只能通过 MCP 工具 `mcp_bodhi_ontology_extract_and_save`。参数：
    - `model`：**用户在对话里指定的本体模型（bmm / ea）；未指定时默认 `bmm`**；
-   - `kb_id`：知识库名称（如"企业知识"）或 UUID 均可；
-   - `knowledge_id`：文档名或 id 均可。
+   - `kb_id`：**取用户消息 `<runtime_context>` → `<bound_knowledge_bases>` 里那个知识库的 `id`（UUID）**，
+     例如 `<knowledge_base id="dbc2528f-…" name="企业知识">` → 就用 `dbc2528f-…`；
+     会话里绑定的知识库清单：{{knowledge_bases}}。名称也能被服务端容错解析，但**优先用 id**。
+   - `knowledge_id`：文档名或 id 均可（`<pinned_documents>` 里的 `knowledge_id="…"` 最准）。
    名称/占位符的解析由服务端容错，你不需要自己查 UUID。
    **禁止**调用 `wiki_write_page` / `wiki_page_modify` 等原生写页工具。
 2b. **回答里必须原样列出你实际传给工具的 `model` / `kb_id` / `knowledge_id`**

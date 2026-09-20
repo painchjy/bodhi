@@ -63,6 +63,7 @@ def doc_index(kb_id: str) -> dict:
     `status`：`live`（文档在） / `deleted`（文档软删） / `missing`（knowledges 里没有这行，
     通常是被硬删或换了知识库）。
     """
+    kb_id, _kb_name, _note = ke_db.resolve_kb_id(kb_id)   # 名称/UUID 都接受；不存在的库报错
     rows = ke_db.psql_csv(
         "SELECT ref.knowledge_id AS knowledge_id, count(*) AS pages, "
         "       count(*) FILTER (WHERE jsonb_array_length(%s) <= 1) AS exclusive_pages, "
@@ -107,6 +108,7 @@ def doc_index(kb_id: str) -> dict:
 
 def pages_of_doc(kb_id: str, knowledge_id: str) -> list[dict]:
     """该文档引用的实例页清单（只读；带 refs/chunks/meta，供清理与报告用）。"""
+    kb_id, _kb_name, _note = ke_db.resolve_kb_id(kb_id)
     return [dict(r) for r in ke_db.psql_csv(
         "SELECT p.slug, p.title, COALESCE(p.page_type,'') AS page_type, COALESCE(p.version,1) AS version, "
         "       COALESCE(p.source_refs::text,'[]') AS refs, COALESCE(p.chunk_refs::text,'[]') AS chunks, "
@@ -188,6 +190,7 @@ def purge_document(kb_id: str, knowledge_id: str = "", title: str = "", apply: b
     kb_id = (kb_id or "").strip()
     if not kb_id:
         raise ValueError("purge_document 需要 kb_id")
+    kb_id, _kb_name, _note = ke_db.resolve_kb_id(kb_id)
     if not knowledge_id and not title:
         raise ValueError("purge_document 需要 knowledge_id 或 title")
     if knowledge_id:

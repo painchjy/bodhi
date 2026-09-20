@@ -711,12 +711,14 @@ def build_plan(kb_id: str, kinds=None, scope: str = "all", page_limit: int = 500
     kb_id = (kb_id or "").strip()
     if not kb_id:
         raise ValueError("plan 需要 kb_id")
+    # 与 audit 同口径：名称/UUID 都接受，不存在的库直接报错
+    kb_id, kb_name, _kb_note = ke_db.resolve_kb_id(kb_id)
     kinds = _normalize_kinds(kinds)
     collected = _collect(kb_id, kinds, page_limit)
     payload = {"kb_id": kb_id, "kinds": kinds, "actions": collected["actions"],
                "edits": collected["edits"], "cascade": collected["cascade"]}
     plan = {
-        "plan_id": _plan_id(payload), "kb_id": kb_id, "kinds": kinds,
+        "plan_id": _plan_id(payload), "kb_id": kb_id, "kb_name": kb_name, "kinds": kinds,
         "created_at": ke_db.now_text(), "mode": "hard-delete（不可逆）",
         "actions": collected["actions"], "edits": collected["edits"],
         "cascade": collected["cascade"], "truncated": collected["truncated"],
@@ -817,6 +819,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     kb_id = (kb_id or "").strip()
     if not kb_id:
         raise ValueError("audit 需要 kb_id")
+    # 名称/UUID 都接受；**不存在的库必须报错**（否则会给出"0 页 0 问题"的假报告）
+    kb_id, kb_name, kb_note = ke_db.resolve_kb_id(kb_id)
     scope = (scope or "all").strip().lower()
     if scope not in SCOPES:
         raise ValueError("scope 只能是 %s" % " / ".join(SCOPES))
@@ -847,7 +851,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     rep.data = ctx["data"]
     rep.findings.sort(key=lambda f: (SEV.get(f["severity"], 9), f["check"], f["subject"]))
     return {
-        "kb_id": kb_id, "scope": scope, "generated_at": ke_db.now_text(),
+        "kb_id": kb_id, "kb_name": kb_name, "scope": scope, "generated_at": ke_db.now_text(),
+        "kb_id_note": kb_note,
         "summary": {
             "pages": len(pages),
             "instance_pages": sum(1 for p in pages if _is_instance(p["page_type"])),

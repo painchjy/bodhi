@@ -178,7 +178,17 @@ ke_audit.py apply <kb_id> --plan-id <id> --confirm  # 执行（缺 --confirm 直
 | 工具（7） | `grep_chunks` / `list_knowledge_chunks` / `get_document_info` / `wiki_search` / `wiki_read_page` + **`mcp_bodhi_ontology_audit_scan`** / **`mcp_bodhi_ontology_audit_plan`**（**无** `wiki_write_page`、**无** `extract_and_save`） |
 | MCP | `mcp_services=[a7c1f0d2-…0001]`、`mcp_selection_mode=all` |
 | 知识库 | 业务库 + 本体模型库（两个都能体检） |
-| 提示词 | 单一真源：`deploy/weknora-fork/config/agent_system_prompt.yaml` 的 `templates[].id="knowledge_ops_agent"`（1502 字符） |
+| 提示词 | 单一真源：`deploy/weknora-fork/config/agent_system_prompt.yaml` 的 `templates[].id="knowledge_ops_agent"`（2050 字符） |
+
+**为什么提示词里放 `{{knowledge_bases}}`（用户建议，已采纳）**：上游 Go 会把系统提示词里的该变量渲染成
+「请看用户消息 `<runtime_context>` 里的 `<bound_knowledge_bases>`」；而那块的每个库都带
+`id="<uuid>" name="企业知识" doc_count="N" capabilities="…"` —— 所以 **kb_id 一律取 `id`**，
+不会再把名称当 id。同一函数还支持 `{{current_time}}` / `{{language}}` / `{{web_search_status}}`（本提示词都用了）。
+
+**代码侧兜底（防止"假清白报告"）**：`ke_db.resolve_kb_id()` 支持「UUID / 名称（精确或包含）」，
+且**未知知识库直接抛错**（`知识库不存在：…；可选：…`）。2026-09-20 用户实测：智能体传了名称，而旧代码
+把不认识的值当"空库"→ 给出 `0 页 / 0 findings / 0 源文档` 的**假健康报告**；现在 `audit_scan`/`audit_plan`
+都会先解析并在报告里回带 `kb_id`/`kb_name`（供核对），传错会得到明确错误。
 
 重新注册/更新（改提示词后）：
 ```bash
@@ -191,11 +201,14 @@ PY
 ```
 > ⚠️ **必须带 `--only ops`**：不带会把 bmm/ea 的**精简提示词**覆盖回 yaml 里的长版（`set_agent_prompt_lean.py` 的成果）。
 > 运维智能体 id 特意用 `bodhi-kb-ops`（不在 `bodhi-ontology-%` 前缀里），免得被那个精简脚本误伤。
+> 📌 `config/agents.sql` 只是**本次生成**的产物（带 `--only ops` 时只含 ops 行，不会动 bmm/ea）；
+> bmm/ea 的提示词归 `set_agent_prompt_lean.py` 管，别拿全量重跑去覆盖它。
 
 ## 7. 排障
 
 | 症状 | 处置 |
 |---|---|
+| 体检报告**全 0**但界面上明明有页/节点 | `kb_id` 传错（最常见：把**名称**当 id）。现在会直接回 `知识库不存在：…；可选：…`，且报告里带 `kb_id`/`kb_name` 可核对；正确 id 见 `<bound_knowledge_bases>` |
 | `audit_scan` 回 `unknown tool` | 服务没重启（改过 `server.py`/`ke_audit.py` 必须 `systemctl restart bodhi-mcp`） |
 | `model.source` 是 `json: …` | Neo4j 投影不可用 → B1/B2/B3 用 json 兜底判断（会标 `source`） |
 | 报告与手工 SQL 不一致 | 先看 `summary.truncated`；再看 `summary.model.classes/relations` 是否与 Neo4j 一致（模型侧变了要 `load`） |

@@ -12,6 +12,12 @@
 ----
     python deploy/weknora-fork/gen_agents.py            # 只生成 SQL（config/agents.sql）
     python deploy/weknora-fork/gen_agents.py --apply    # 生成并执行（写入 WeKnora 库）
+
+注意
+----
+- `config/agents.sql` 是**本次运行**的产物：带 `--only ops` 时文件里只有 ops 的行（不会动 bmm/ea）。
+- **别用全量重跑覆盖 bmm/ea 的提示词**：它们的精简版归 `set_agent_prompt_lean.py` 管；
+  运维智能体只跑 `--only ops`（id `bodhi-kb-ops`，不在 `bodhi-ontology-%` 里，不被精简脚本误伤）。
 """
 
 from __future__ import annotations
