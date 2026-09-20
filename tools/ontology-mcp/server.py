@@ -89,6 +89,8 @@ from ke_db import (  # noqa: E402,F401  （psql/sql_* 由同目录脚本 server.
 import ke_ontology  # noqa: E402
 import ke_admin  # noqa: E402
 import ke_pages  # noqa: E402
+import ke_docs  # noqa: E402  （按来源文档统计/清理本体实例，2026-09-20）
+import ke_audit  # noqa: E402  （wiki↔图谱↔模型 一致性巡检，只读，2026-09-20 P1）
 from ke_pages import (  # noqa: E402,F401  （历史脚本 relink_pages.py 已归档，此别名保留兼容）
     REL_LINE, REL_LINE_V2, parse_rel_line, rel_line,
 )
@@ -980,6 +982,47 @@ def tool_definitions() -> list[dict]:
             "inputSchema": {"type": "object", "properties": {"model": {"type": "string"}},
                             "required": ["model"]},
         },
+        {
+            "name": "audit_scan",
+            "description": ("知识运维**只读体检**：比对 wiki ↔ 本体图谱 ↔ 本体模型，并找出异常数据。"
+                            "检查项：悬空出边(A1)、in_links 不一致(A2)、类型/元数据矛盾(A3/A6)、"
+                            "重复或自环关系行(A5)、类型不在模型(B1)、关系不在模型(B2)、"
+                            "range 违反(B3)、模型库页与投影不一致(B4)、"
+                            "**无来源文档的实例页(C1)**、**来源文档已删/不存在(C2)**、"
+                            "同语义多页(D1)、软删残留(D2)、孤儿快照(D3)。"
+                            "返回 summary/totals/findings（每条含 severity、subject、detail、fix_hint）。"
+                            "**本工具不写任何数据**；清理需另行确认（P2）。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "知识库 UUID"},
+                    "scope": {"type": "string", "enum": list(ke_audit.SCOPES),
+                              "description": "all(默认) / wiki(A) / model(B) / source(C) / dupes(D)"},
+                    "max_findings": {"type": "integer",
+                                     "description": "最多返回多少条明细，默认 50（计数始终完整）"},
+                },
+                "required": ["kb_id"],
+            },
+        },
+        {
+            "name": "audit_plan",
+            "description": ("生成**只读**的清理/修复计划（**不写任何数据**）：列出要删/要改的清单与理由，"
+                            "并给出 plan_id 与执行命令。kinds：`init`（初始化＝清空该 KB 的 wiki 与图谱）、"
+                            "`all`（清理异常+修一致性问题：悬空关系行、in_links、重复关系行、无来源页、"
+                            "来源已删页、软删残留、孤儿快照）、或具体 kind。"
+                            "**执行必须由人工确认后走 CLI/HTTP（apply --confirm）** —— 本工具绝不执行。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "知识库 UUID"},
+                    "kinds": {"type": "string",
+                              "description": "init / all / 逗号分隔的具体 kind（默认 all）"},
+                    "scope": {"type": "string", "enum": list(ke_audit.SCOPES),
+                              "description": "顺带带出的现状快照范围，默认 all"},
+                },
+                "required": ["kb_id"],
+            },
+        },
     ]
 
 
@@ -1004,6 +1047,12 @@ def call_tool(name: str, args: dict) -> dict:
                                      str(args["action"]))
     if name == "ontology_types":
         return ontology_types(str(args["model"]))
+    if name == "audit_scan":
+        return ke_audit.audit(str(args["kb_id"]), str(args.get("scope", "all")),
+                              int(args.get("max_findings", 50)))
+    if name == "audit_plan":
+        return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
+                                   str(args.get("scope", "all")))
     raise RuntimeError("未知工具：%s" % name)
 
 
@@ -1163,6 +1212,27 @@ class MCPHandler(BaseHTTPRequestHandler):
                                               b.get("module_id", ""),
                                               bool(b.get("project_wiki", False)),
                                               b.get("kb_id", "")),
+            # 按来源文档清理本体实例（用户 2026-09-20 第二问：删文档不会联动清实例层）
+            #   删「独占页」+ 多源页摘引用；默认 dry-run（apply=false 只出计划）
+            "/bodhi/docs/purge":
+                lambda b: ke_docs.purge_document(b.get("kb_id", ""), b.get("knowledge_id", ""),
+                                                 b.get("title", ""), bool(b.get("apply", False)),
+                                                 bool(b.get("sync_folders", True)),
+                                                 bool(b.get("delete_exclusive", True))),
+            # 巡检清理：plan 只读出计划；apply 必须带 confirm=true（人工确认后才执行，硬删）
+            "/bodhi/audit/plan":
+                lambda b: ke_audit.build_plan(b.get("kb_id", ""), b.get("kinds", "all"),
+                                              b.get("scope", "all"),
+                                              int(b.get("page_limit", 5000) or 5000)),
+            "/bodhi/audit/apply":
+                lambda b: ke_audit.apply_plan(b.get("kb_id", ""), b.get("plan_id", ""),
+                                              bool(b.get("confirm", False)),
+                                              int(b.get("page_limit", 5000) or 5000)),
+            # 巡检兜底：把所有「来源文档已删/不存在」的残留一次清掉（默认 dry-run）
+            "/bodhi/docs/sweep":
+                lambda b: ke_docs.sweep(b.get("kb_id", ""), bool(b.get("apply", False)),
+                                        bool(b.get("include_missing", True)),
+                                        bool(b.get("delete_exclusive", True))),
         }
         fn = handlers.get(path)
         if not fn:
@@ -1241,6 +1311,41 @@ class MCPHandler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] %s 失败：%s" % (path, exc))
                 self._json({"error": str(exc)}, 500, self.CORS)
+            return
+        if path in ("/bodhi/audit", "/bodhi/audit.json"):
+            # 一致性巡检（只读）：?kb_id=&scope=all|wiki|model|source|dupes&max_findings=50
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                data = ke_audit.audit(params.get("kb_id", ""), params.get("scope", "all"),
+                                      int(params.get("max_findings", 50) or 50),
+                                      int(params.get("page_limit", 5000) or 5000))
+                self._json(data, 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] %s 失败：%s" % (path, exc))
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/docs", "/bodhi/docs.json"):
+            # 按来源文档统计本体实例页（只读）；`?orphans=1` 只回「来源文档已删/不存在」的残留
+            params = dict(urlparse.parse_qsl(parsed.query))
+            kb_id = params.get("kb_id", "")
+            try:
+                data = ke_docs.orphans(kb_id) if params.get("orphans") else ke_docs.doc_index(kb_id)
+                self._json(data, 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] %s 失败：%s" % (path, exc))
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/docs/pages", "/bodhi/docs/pages.json"):
+            # 某来源文档的实例页清单（只读）
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                pages = ke_docs.pages_of_doc(params.get("kb_id", ""), params.get("knowledge_id", ""))
+                self._json({"kb_id": params.get("kb_id", ""),
+                            "knowledge_id": params.get("knowledge_id", ""),
+                            "pages": pages}, 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] %s 失败：%s" % (path, exc))
+                self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/graph", "/bodhi/graph.json"):
             params = dict(urlparse.parse_qsl(parsed.query))

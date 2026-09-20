@@ -35,7 +35,8 @@ REL_SECTION = "## 本体关系"
 TAG_REL = "bodhi-rel-edit"     # 13 字符
 TAG_TYPE = "bodhi-type-edit"   # 15 字符
 TAG_DEL = "bodhi-page-del"     # 13 字符
-assert max(len(TAG_REL), len(TAG_TYPE), len(TAG_DEL)) <= 16
+TAG_OPS = "bodhi-ops-edit"     # 14 字符（一致性巡检的显式修复：删悬空/重复关系行）
+assert max(len(TAG_REL), len(TAG_TYPE), len(TAG_DEL), len(TAG_OPS)) <= 16
 
 # 「本体关系」小节的行格式（与 server.py / relink_pages.py 保持一致）
 REL_LINE = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[(?P<target>.+?)\]\(wiki:(?P<slug>[^)]+)\)\s*$")
@@ -220,6 +221,17 @@ def _with_line_inserted(content: str, new_line: str) -> str:
         insert_at -= 1
     lines.insert(insert_at, new_line)
     return "\n".join(lines).rstrip() + "\n"
+
+
+def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:
+    """按给定正文**重写一页**：快照旧版 → 更新 content/out_links/version+1 → 重算 in_links。
+
+    供「一致性巡检」的**显式修复**用（删悬空关系行 / 去重复关系行）。只 UPDATE 不 INSERT；
+    `tag` 会写进 `last_edit_source`（≤16 字符）。
+    """
+    page = _load_page(kb_id, slug)
+    _apply_content_update(kb_id, slug, content, tag)
+    return {"slug": slug, "before_version": page["version"], "after_version": page["version"] + 1}
 
 
 def add_relation(kb_id: str, slug: str, rel_type: str, target_slug: str,
