@@ -224,7 +224,7 @@ python tools/ontology-compiler/tests/test_compiler.py
 ## 已知约束与坑
 
 1. **rdflib 7.x：用 `str` 当谓词查询会静默返回空集**（`graph.subject_objects("rdf:type")` 得到 0 条，不报错）。所有查询必须用 `URIRef`——曾出现「类 0 / 属性 0」的假象，`tests/test_compiler.py::test_terms_are_really_loaded` 是这条的回归哨兵。
-2. **禁止 glob 抓本体**：`ontology/old/BMM_EXTENDED_LIGHT.ttl` 是 Markdown 风格伪 TTL，通配会直接语法错。新增本体必须登记到 `config.py`。
+2. **禁止 glob 抓本体**：`ontology/old/` 曾放 Markdown 风格伪 TTL（`BMM_EXTENDED_LIGHT.ttl`），通配会直接语法错；该目录已于 2026-09-20 清理，规矩不变。新增本体必须登记到 `config.py`。
 3. **依赖**：编译器本体只依赖 `rdflib`；读 YAML 词表额外依赖 `PyYAML`（缺失时报错，不静默降级）。
 4. **Windows 控制台编码**：`compile.py` 启动时会尝试把 stdout/stderr 重配为 UTF-8；管道里若看到中文乱码，是终端解码问题（设 `$env:PYTHONIOENCODING='utf-8'` + `[Console]::OutputEncoding=[Text.Encoding]::UTF8`），不是产物问题。
 5. **产物中的 `{{...}}` 占位符**：发射阶段必须全部替换（Neo4j 里的 `{{BMM_NS}}` 之类）；仅 `README.md` 的取值示例表豁免，由 `test_no_leftover_placeholders` 全量扫描把守。

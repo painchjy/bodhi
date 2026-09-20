@@ -48,6 +48,7 @@ DB_CONTAINER, DB_USER, DB_NAME, DB_PASSWORD = "WeKnora-postgres", "postgres", "W
 TYPE_MODULE = "ontology:Module"
 TYPE_CLASS = "ontology:Class"
 TYPE_RELATION = "ontology:Relation"
+TYPE_PROPERTY = "ontology:Property"
 TYPE_LIGHT = "ontology:LightDoc"
 
 PAGE_COLUMNS = [
@@ -86,6 +87,83 @@ def slug_module(module: str) -> str:
     return "ontology/%s" % module
 
 
+def slug_property(module: str, prop_name: str) -> str:
+    """属性定义页（**含数据属性**）：`ontology/bmm/prop/rule-severity`"""
+    return "ontology/%s/prop/%s" % (module, local_name(prop_name))
+
+
+def _neo4j_properties() -> dict[str, list[dict]]:
+    """从 Neo4j 读**全部本体属性**（对象属性 + 数据属性），按模块分组。
+
+    为什么从图库读而不是索引 JSON：`artifacts/weknora/ontology_index.json` 只收录了
+    对象属性（relations），**数据属性（如 bmmfd:ruleSeverity）不在里面**；
+    用户口径要求「没有在 Neo4j 之外另存的属性定义，必须在 wiki 中完整」，所以这里以
+    Neo4j 本体投影（= TTL 编译/加载后的图）为准，把每个属性的 label/comment/domain/range
+    都落到属性页上。Neo4j 不可用时返回 {}（脚本仍能产出类页/关系页）。
+    """
+    try:
+        ke_core = REPO / "tools" / "ke-core"
+        if str(ke_core) not in sys.path:
+            sys.path.insert(0, str(ke_core))
+        import ke_neo4j  # noqa: PLC0415  （零依赖的 Neo4j 客户端；不再依赖待删的 src/）
+
+        classes = {r["uri"]: r for r in ke_neo4j.query(
+            "MATCH (c:BodhiOntClass) WHERE c.external IS NULL "
+            "RETURN c.iri AS uri, coalesce(c.prefix,'') AS prefix, coalesce(c.local_name,'') AS name")}
+        props: dict[str, dict] = {}
+        for r in ke_neo4j.query(
+                "MATCH (p:BodhiOntProperty) "
+                "RETURN p.iri AS uri, coalesce(p.module,'') AS model_id, "
+                "       coalesce(p.prefix,'') AS prefix, coalesce(p.local_name,'') AS name, "
+                "       coalesce(p.label,'') AS label, coalesce(p.comment,'') AS comment, "
+                "       coalesce(p.property_kind,'object') AS kind"):
+            kind = str(r.get("kind") or "object").lower()
+            r["short_uri"] = ("%s:%s" % (r["prefix"], r["name"])) if r["prefix"] else r["name"]
+            r["prop_type"] = "ObjectProperty" if kind.startswith("obj") else "DatatypeProperty"
+            props[r["uri"]] = r
+        dom: dict[str, list[str]] = {}
+        for r in ke_neo4j.query("MATCH (p:BodhiOntProperty)-[:BODHI_DOMAIN]->(c:BodhiOntClass) "
+                                "RETURN p.iri AS a, c.iri AS b"):
+            dom.setdefault(r["a"], []).append(r["b"])
+        rng: dict[str, list[str]] = {}
+        for r in ke_neo4j.query("MATCH (p:BodhiOntProperty)-[:BODHI_RANGE]->(c:BodhiOntClass) "
+                                "RETURN p.iri AS a, c.iri AS b"):
+            rng.setdefault(r["a"], []).append(r["b"])
+        inverse: dict[str, str] = {}
+        for row in ke_neo4j.query("MATCH (p:BodhiOntProperty)-[:BODHI_INVERSE_OF]->(q) "
+                                  "RETURN p.iri AS a, q.iri AS b"):
+            inverse[row["a"]] = row["b"]
+
+        def short(uri: str) -> str:
+            rec = classes.get(uri) or {}
+            if rec.get("name"):
+                return ("%s:%s" % (rec["prefix"], rec["name"])) if rec.get("prefix") else rec["name"]
+            return local_name(uri)
+
+        out: dict[str, list[dict]] = {}
+        for uri, rec in props.items():
+            mod = rec.get("model_id") or ""
+            out.setdefault(mod, []).append({
+                "uri": uri, "name": rec.get("name") or "",
+                "prefixed": rec.get("short_uri") or rec.get("name") or "",
+                "label": rec.get("label") or rec.get("name") or "",
+                "comment": rec.get("comment") or "",
+                "kind": rec.get("prop_type") or "ObjectProperty",
+                "domains": [short(u) for u in dom.get(uri, [])],
+                "ranges": [short(u) for u in rng.get(uri, [])],
+                "inverse": short(inverse[uri]) if uri in inverse else "",
+            })
+        for mod in out:
+            out[mod].sort(key=lambda p: p["prefixed"])
+        total = sum(len(v) for v in out.values())
+        print("[ontology-wiki] Neo4j 读到 %d 个属性定义（%s）"
+              % (total, "、".join("%s:%d" % (k, len(v)) for k, v in sorted(out.items()))), flush=True)
+        return out
+    except Exception as exc:  # noqa: BLE001
+        print("[ontology-wiki] 读 Neo4j 属性失败（属性页将为空）：%s" % exc, flush=True)
+        return {}
+
+
 def wlink(title: str, slug: str) -> str:
     """wiki 内链：上游会解析成 out_links，图谱按它连边。"""
     return "[%s](wiki:%s)" % (title, slug) if slug else title
@@ -112,6 +190,8 @@ class WikiBuilder:
         self.pages: list[dict] = []
         self.links: dict[str, set[str]] = {}
         self.seen: set[str] = set()
+        # 全部属性定义（对象 + 数据）来自 Neo4j；用于类页的「属性定义」小节与属性页
+        self.properties = _neo4j_properties()
         self.generated_at = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
     # --- 解析辅助 ---------------------------------------------------------
@@ -138,6 +218,18 @@ class WikiBuilder:
     def relation_slug_of(self, type_name: str) -> str:
         found = self.relation_index.get(type_name)
         return slug_relation(found[0], type_name) if found else ""
+
+    # --- 属性（对象 + 数据）-----------------------------------------------
+    def property_slug_of(self, module: str, prop: dict) -> str:
+        return slug_property(module, prop.get("name") or "")
+
+    def property_link(self, module: str, prop: dict) -> str:
+        """对象属性优先指到「关系页」，数据属性/无关系页的指到「属性定义页」。"""
+        name = prop.get("prefixed") or prop.get("name") or ""
+        if prop.get("kind") == "ObjectProperty" and name in self.relation_index:
+            return self.relation_link(name)
+        return wlink("%s（%s）" % (prop.get("label") or name, name),
+                     slug_property(module, prop.get("name") or name))
 
     def add(self, *, slug: str, title: str, page_type: str, module_label: str,
             group: str, content: str, summary: str, wiki_path: str,
@@ -213,6 +305,22 @@ class WikiBuilder:
                     for s in (rel.get("domain") or []):
                         out_slugs.append(self.class_slug_of(s))
                 lines.append("")
+        own_props = [p for p in self.properties.get(module["key"], [])
+                     if name in (p.get("domains") or [])]
+        if own_props:
+            lines += ["## 属性定义（%d 个，含数据属性）" % len(own_props), ""]
+            for prop in own_props:
+                if prop.get("ranges"):
+                    target = "→ " + "、".join(self.class_link(r) for r in prop["ranges"])
+                elif prop.get("kind") == "DatatypeProperty":
+                    target = "→ 字面量（数据属性）"
+                else:
+                    target = "→ ?（未声明 range）"
+                lines.append("- %s %s%s" % (self.property_link(module["key"], prop), target,
+                                            ("  — " + prop["comment"][:60]) if prop.get("comment") else ""))
+                out_slugs.append(self.property_slug_of(module["key"], prop))
+            lines.append("")
+
         if cls.get("restriction_count"):
             lines += ["## 约束", "", "- 该类的 OWL 限制（restriction）数量：%d" % cls["restriction_count"], ""]
 
@@ -309,6 +417,17 @@ class WikiBuilder:
                              % (self.relation_link(rel["name"]),
                                 "、".join(rel.get("domain") or []) or "?",
                                 "、".join(rel.get("range") or []) or "?"))
+        props = self.properties.get(key) or []
+        if props:
+            data_props = [p for p in props if p.get("kind") == "DatatypeProperty"]
+            lines += ["", "## 本体属性（%d 条，含数据属性 %d 条）" % (len(props), len(data_props)), ""]
+            for prop in props:
+                lines.append("- %s：%s → %s"
+                             % (self.property_link(key, prop),
+                                "、".join(prop.get("domains") or []) or "?",
+                                "、".join(prop.get("ranges") or [])
+                                or ("（字面量）" if prop.get("kind") == "DatatypeProperty" else "?")))
+                out_slugs.append(self.property_slug_of(key, prop))
         if module.get("light_available"):
             light_slug = slug_module(key) + "/light"
             lines += ["", "## 轻量版提示词", "",
@@ -325,6 +444,56 @@ class WikiBuilder:
                  wiki_path=slug_module(key), out_slugs=out_slugs,
                  metadata={"kind": "module", "model": key, "classes": len(classes),
                            "relations": len(rels), "bridges": len(bridges),
+                           "generated_at": self.generated_at, "generator": TOOL_TAG})
+
+    # --- 本体属性页（含数据属性；用户口径：属性定义在 wiki 中必须完整）------
+    def property_page(self, module: dict, prop: dict) -> None:
+        key, label = module["key"], module["label"]
+        name = prop.get("name") or ""
+        plabel = prop.get("label") or name
+        prefixed = prop.get("prefixed") or name
+        kind = prop.get("kind") or "ObjectProperty"
+        kind_cn = ("对象属性（连到其它知识节点）" if kind == "ObjectProperty"
+                   else "数据属性（字面量取值）")
+        lines = ["# %s（`%s`）" % (plabel, prefixed), "",
+                 "> **类型**：本体属性（`%s`）  " % TYPE_PROPERTY,
+                 "> **模块**：%s（`%s`）  " % (label, key),
+                 "> **属性种类**：%s  " % kind_cn,
+                 "> **命名空间**：`%s`" % prop.get("uri", ""), ""]
+        lines += ["## 定义", "", (prop.get("comment") or "（该 TTL 未给 comment）").strip(), ""]
+        out_slugs = [slug_module(key)]
+        if prop.get("domains"):
+            lines += ["## 定义域（domain：谁可以发起）", ""]
+            for dom in prop["domains"]:
+                lines.append("- %s" % self.class_link(dom))
+                out_slugs.append(self.class_slug_of(dom))
+            lines.append("")
+        if prop.get("ranges"):
+            lines += ["## 值域（range：可以指向谁）", ""]
+            for rng in prop["ranges"]:
+                lines.append("- %s" % self.class_link(rng))
+                out_slugs.append(self.class_slug_of(rng))
+            lines.append("")
+        if prop.get("inverse"):
+            lines += ["## 反向属性", "", "- %s" % self.relation_link(prop["inverse"]), ""]
+            out_slugs.append(self.relation_slug_of(prop["inverse"]))
+        if kind == "ObjectProperty" and prefixed in self.relation_index:
+            lines += ["## 关系页", "", "- %s" % self.relation_link(prefixed), ""]
+            out_slugs.append(self.relation_slug_of(prefixed))
+        lines += ["## 说明", "",
+                  "本页由 Neo4j 本体投影（TTL 编译/加载后的图）生成（`%s`，生成于 %s）。"
+                  % (TOOL_TAG, self.generated_at), ""]
+
+        self.add(slug=slug_property(key, name), title="%s（%s）" % (plabel, prefixed),
+                 page_type=TYPE_PROPERTY, module_label=label, group="本体属性",
+                 content="\n".join(lines).rstrip() + "\n",
+                 summary=(prop.get("comment") or "")[:400]
+                         or "%s 模块的本体属性 %s" % (label, prefixed),
+                 wiki_path=slug_property(key, name), out_slugs=out_slugs,
+                 metadata={"kind": "property", "model": key, "property": name,
+                           "iri": prop.get("uri", ""), "prop_kind": kind,
+                           "domains": prop.get("domains") or [],
+                           "ranges": prop.get("ranges") or [],
                            "generated_at": self.generated_at, "generator": TOOL_TAG})
 
     def light_page(self, module: dict, text: str) -> None:
@@ -348,8 +517,191 @@ class WikiBuilder:
 # ---------------------------------------------------------------------------
 # 组装全量页面
 # ---------------------------------------------------------------------------
+def _supplement_from_neo4j(data: dict) -> None:
+    """把「Neo4j 有、json 没有」的模块/类/关系补进 index（字段与编译产物**完全同构**）。
+
+    为什么：上传导入的模块不产 json（见 docs/session-handoff.md §3.4bis），wiki 生成若只认 json
+    就覆盖不到它们。补录口径与 ke_ontology.class_meta 一致：真源 Neo4j，缺了才用 json。
+    字段集合照 artifacts/weknora/ontology_index.json 实测：
+      类   name / iri / label / definition / parents / is_enum / restriction_count
+      关系 name / iri / label / definition / domain / range / domain_display / range_display / inverse_of / functional
+    """
+    ke_core = REPO / "tools" / "ke-core"
+    if str(ke_core) not in sys.path:
+        sys.path.insert(0, str(ke_core))
+    import ke_neo4j  # noqa: PLC0415  （模块级没 import，这里按需引入：ke-core 是零依赖客户端）
+
+    known = {model["key"]: model for model in (data.get("models") or [])}
+    have_classes = {c.get("name") for m in known.values() for c in (m.get("classes") or [])}
+    have_rels = {r.get("name") for m in known.values() for r in (m.get("relations") or [])}
+
+    parents: dict[str, list[str]] = {}
+    for row in ke_neo4j.query("MATCH (c:BodhiOntClass)-[:BODHI_SUBCLASS_OF]->(p:BodhiOntClass) "
+                              "WHERE c.bodhi_projection = 'ontology' "
+                              "RETURN c.prefixed AS c, p.prefixed AS p ORDER BY c, p"):
+        if row.get("c") and row.get("p"):
+            parents.setdefault(row["c"], []).append(row["p"])
+    classes = ke_neo4j.query(
+        "MATCH (c:BodhiOntClass) WHERE c.bodhi_projection = 'ontology' "
+        "AND coalesce(c.external, false) = false AND c.prefixed IS NOT NULL "
+        "RETURN c.prefixed AS name, coalesce(c.iri,'') AS iri, coalesce(c.label,'') AS label, "
+        "       coalesce(c.comment,'') AS definition, coalesce(c.module,'') AS module, "
+        "       coalesce(c.is_enum,false) AS is_enum, coalesce(c.prefix,'') AS prefix")
+    rels = ke_neo4j.query(
+        "MATCH (p:BodhiOntProperty {property_kind: 'object'}) WHERE p.bodhi_projection = 'ontology' "
+        "AND p.prefixed IS NOT NULL "
+        "OPTIONAL MATCH (p)-[:BODHI_DOMAIN]->(d:BodhiOntClass) "
+        "OPTIONAL MATCH (p)-[:BODHI_RANGE]->(g:BodhiOntClass) "
+        "OPTIONAL MATCH (p)-[:BODHI_INVERSE_OF]->(inv:BodhiOntProperty) "
+        "RETURN p.prefixed AS name, coalesce(p.iri,'') AS iri, coalesce(p.label,'') AS label, "
+        "       coalesce(p.comment,'') AS definition, coalesce(p.module,'') AS module, "
+        "       coalesce(inv.prefixed,'') AS inverse_of, "
+        "       collect(DISTINCT d.prefixed) AS domain, collect(DISTINCT g.prefixed) AS range")
+
+    def model_of(key: str, prefix: str = "") -> dict:
+        model = known.get(key)
+        if model is None:
+            pf = prefix or key
+            model = {"key": key, "prefix": pf, "label": key, "short_label": pf.upper(),
+                     "expert_role": "", "kind": "extension", "namespace": "", "ontology_iri": "",
+                     "source_files": [], "affects": [], "light_available": False,
+                     "light_source": "", "light_prompt": "", "stats": {},
+                     "classes": [], "relations": [],
+                     "referenced": {"classes": [], "properties": [], "by_module": {}}}
+            known[key] = model
+            data.setdefault("models", []).append(model)
+            order = data.setdefault("module_order", [])
+            if key not in order:
+                order.append(key)
+        return model
+
+    added = 0
+    for row in classes:
+        if row["name"] in have_classes:
+            continue
+        mod = model_of(row["module"] or "external", row.get("prefix") or "")
+        mod["classes"].append({"name": row["name"], "iri": row["iri"],
+                               "label": row["label"] or row["name"],
+                               "definition": row["definition"],
+                               "parents": parents.get(row["name"], []),
+                               "is_enum": bool(row["is_enum"]), "restriction_count": 0})
+        have_classes.add(row["name"])
+        added += 1
+    for row in rels:
+        if row["name"] in have_rels:
+            continue
+        dom = [x for x in (row.get("domain") or []) if x]
+        rng = [x for x in (row.get("range") or []) if x]
+        mod = model_of(row["module"] or "external")
+        mod["relations"].append({"name": row["name"], "iri": row["iri"],
+                                 "label": row["label"] or row["name"],
+                                 "definition": row["definition"], "domain": dom, "range": rng,
+                                 "domain_display": dom[0] if dom else "",
+                                 "range_display": rng[0] if rng else "",
+                                 "inverse_of": row["inverse_of"] or "", "functional": False})
+        have_rels.add(row["name"])
+        added += 1
+    if added:
+        totals = data.setdefault("totals", {})
+        totals["modules"] = len(data.get("models") or [])
+        totals["classes"] = len(have_classes)
+        totals["object_properties"] = len(have_rels)
+
+
+def _neo4j_live_sets() -> dict:
+    """Neo4j 里**当下真实存在**的模块 / 类 / 对象属性（= 真源）。查询失败会抛异常，由调用方兜底。"""
+    ke_core = REPO / "tools" / "ke-core"
+    if str(ke_core) not in sys.path:
+        sys.path.insert(0, str(ke_core))
+    import ke_neo4j  # noqa: PLC0415
+
+    # 「现存模块」= **有内容**的模块（≥1 个类，或 ≥1 个属性）。
+    # ⚠️ 不能只看 BodhiModule 节点（2026-09-20 实测）：历史上泄漏的导入会把子模块的**空模块节点**
+    #    插回来（其语句里写着 `affects: 'bmm'`），只看模块节点就会给它生成一个"只有模块页、
+    #    没有类也没有关系"的空模块页。有内容才算活着。
+    modules = {str(r.get("m")) for r in ke_neo4j.query(
+        "MATCH (c:BodhiOntClass) WHERE c.bodhi_projection = 'ontology' "
+        "AND coalesce(c.external, false) = false AND c.module IS NOT NULL "
+        "RETURN DISTINCT c.module AS m") if r.get("m")}
+    modules |= {str(r.get("m")) for r in ke_neo4j.query(
+        "MATCH (p:BodhiOntProperty) WHERE p.bodhi_projection = 'ontology' "
+        "AND p.module IS NOT NULL RETURN DISTINCT p.module AS m") if r.get("m")}
+    classes = {str(r.get("n")) for r in ke_neo4j.query(
+        "MATCH (c:BodhiOntClass) WHERE c.bodhi_projection = 'ontology' "
+        "AND coalesce(c.external, false) = false AND c.prefixed IS NOT NULL "
+        "RETURN DISTINCT c.prefixed AS n") if r.get("n")}
+    relations = {str(r.get("n")) for r in ke_neo4j.query(
+        "MATCH (p:BodhiOntProperty {property_kind: 'object'}) "
+        "WHERE p.bodhi_projection = 'ontology' AND p.prefixed IS NOT NULL "
+        "RETURN DISTINCT p.prefixed AS n") if r.get("n")}
+    return {"modules": modules, "classes": classes, "relations": relations}
+
+
+def _prune_against_neo4j(data: dict) -> dict:
+    """把 json 里「Neo4j 已经没有」的模块 / 类 / 关系剔掉 —— **Neo4j 是权威，json 只是展示增强**。
+
+    为什么必须做（2026-09-20 用户实测踩到）：级联删除清掉了 ea / ea-service / ea-ownership 的图节点
+    与 wiki 页，可紧接着的 wiki 重投影又按 json（构建期快照，永远列着 5 个已登记模块）把它们的页面
+    写了回去 —— 现象是「清理成功了，但 ea 的 2 个子模型还在」。json 不会跟着 cascade 变，所以这里
+    做**减法**：不在 Neo4j 里的模块/类/关系，wiki 里也不该有。
+    返回统计供 CLI/日志用；Neo4j 不可用会抛异常，调用方回退成「json 原样」（宁可多页，也不静默清空）。
+    """
+    live = _neo4j_live_sets()
+    dropped_modules: list[str] = []
+    dropped_items = 0
+    kept_models: list[dict] = []
+    for model in data.get("models") or []:
+        if str(model.get("key") or "") not in live["modules"]:
+            dropped_modules.append(str(model.get("key") or ""))
+            continue
+        # 类 → 按 prefixed 名对齐；关系与跨模块桥（同形，桥是"别的模块的关系被本模块引用"）→ 同理
+        for field, pool in (("classes", live["classes"]), ("relations", live["relations"]),
+                            ("cross_module_bridges", live["relations"])):
+            rows = model.get(field) or []
+            if not rows:
+                continue
+            kept = [r for r in rows if r.get("name") in pool]
+            dropped_items += len(rows) - len(kept)
+            model[field] = kept
+        kept_models.append(model)
+
+    data["models"] = kept_models
+    if data.get("module_order"):
+        data["module_order"] = [k for k in data["module_order"] if k in live["modules"]]
+    totals = data.setdefault("totals", {})
+    totals["modules"] = len(kept_models)
+    totals["classes"] = sum(len(m.get("classes") or []) for m in kept_models)
+    totals["object_properties"] = sum(len(m.get("relations") or []) for m in kept_models)
+    totals["cross_module_bridges"] = sum(len(m.get("cross_module_bridges") or []) for m in kept_models)
+    return {"dropped_modules": dropped_modules, "dropped_items": dropped_items,
+            "live_modules": sorted(live["modules"])}
+
+
 def load_index() -> dict:
-    return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    """本体目录（**真源是 Neo4j 投影**；json 兜底 + 展示增强）。
+
+    口径（2026-09-20 修正）：先按 Neo4j 实况**剔掉 json 里的过期内容**（级联删除过的模块不能复活），
+    再补录「Neo4j 有、json 没有」的模块/类/关系（上传导入的模块不产 json）。
+    顺序很重要：先减后加 —— 补录的内容本来就来自 Neo4j，不会被接着的减法误删。
+    """
+    data = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    try:
+        pruned = _prune_against_neo4j(data)
+        if pruned["dropped_modules"] or pruned["dropped_items"]:
+            print("[wiki] 按 Neo4j 实况剔除 json 过期内容：模块 %s / 类与关系 %d 条（现存模块：%s）"
+                  % ("、".join(pruned["dropped_modules"]) or "无", pruned["dropped_items"],
+                     "、".join(pruned["live_modules"]) or "无"), flush=True)
+            if not data["models"]:
+                print("[wiki] ⚠️ Neo4j 里当前没有任何本体模块 —— wiki 只会生成总览页（index）。"
+                      "要用 artifacts 回放全部模块：POST /bodhi/ontology/load {compile:false}",
+                      flush=True)
+    except Exception as exc:  # noqa: BLE001  剔除失败不阻断生成，但要说出来（否则会残留已删模块的页）
+        print("[wiki] Neo4j 实况剔除失败（按 json 原样生成，可能残留已删模块的页）：%s" % exc, flush=True)
+    try:
+        _supplement_from_neo4j(data)
+    except Exception as exc:  # noqa: BLE001  补录失败不影响 json 版结果，但要说出来（否则上传的模块静默缺页）
+        print("[wiki] Neo4j 补录失败（上传的模块将不会生成页面）：%s" % exc, flush=True)
+    return data
 
 
 def load_light_text(module: dict) -> str:
@@ -371,22 +723,28 @@ def overview_page(builder: WikiBuilder) -> None:
     ns_text = (ns.get("base") or ns.get("base_iri")
                or "、".join("%s=%s" % (k, v) for k, v in list(ns.items())[:5]))
     out_slugs = [slug_module(m["key"]) for m in builder.models]
+    props_total = sum(len(v) for v in builder.properties.values())
+    data_total = sum(1 for v in builder.properties.values() for p in v
+                     if p.get("kind") == "DatatypeProperty")
     lines = ["# 企业本体模型 · 总览", "",
              "> **类型**：本体模块（`%s`，根页）  " % TYPE_MODULE,
-             "> **规模**：模块 %d 个 ｜ 类 %d 个 ｜ 关系 %d 条 ｜ 跨模块桥 %d 条  "
-             % (len(builder.models), classes_total, relations_total, bridges_total),
+             "> **规模**：模块 %d 个 ｜ 类 %d 个 ｜ 关系 %d 条 ｜ 属性 %d 条（数据属性 %d） ｜ 跨模块桥 %d 条  "
+             % (len(builder.models), classes_total, relations_total, props_total, data_total,
+                bridges_total),
              "> **命名空间**：`%s`  " % ns_text,
              "> **生成**：`%s` @ %s（编译产物 schema %s）"
              % (TOOL_TAG, builder.generated_at, index.get("artifact_schema_version", "?")), "",
              "## 这个知识库是什么", "",
-             "这里存放**企业本体模型的权威定义**：每个本体类一页、每条关系一页，"
-             "关系在页面里用链接表达（domain → range）。页面由 `ontology/*.ttl` 编译生成，"
-             "**改 TTL → 重新编译 → 重新投影**即可更新本库。", "",
+             "这里存放**企业本体模型的权威定义**：每个本体类一页、每条关系一页、"
+             "**每个属性（含数据属性）一页**，关系在页面里用链接表达（domain → range）。"
+             "页面由 `ontology/*.ttl` 编译 + Neo4j 本体投影生成，"
+             "**改 TTL → 重新编译/加载 → 重新投影**即可更新本库。", "",
              "## 页面类型说明", "",
              "| 页面类型 | 含义 |", "| --- | --- |",
              "| `%s` | 模块页/总览页（本页） |" % TYPE_MODULE,
-             "| `%s` | 一个本体类：定义、父类/子类、相关关系（domain/range）、约束、图谱颜色 |" % TYPE_CLASS,
+             "| `%s` | 一个本体类：定义、父类/子类、相关关系（domain/range）、**属性定义**、约束 |" % TYPE_CLASS,
              "| `%s` | 一条本体关系：方向 domain → range、逆关系、函数型、定义 |" % TYPE_RELATION,
+             "| `%s` | 一个本体属性（对象属性/数据属性）：定义、定义域、值域、反向属性 |" % TYPE_PROPERTY,
              "| `%s` | 该模块的轻量版提示词全文（抽取时喂给 LLM 的正文） |" % TYPE_LIGHT, "",
              "## 模块", ""]
     for module in builder.models:
@@ -432,6 +790,9 @@ def build_pages() -> tuple[list[dict], dict]:
             builder.relation_page(module, rel, is_bridge=rel["name"] in bridge_names)
         for rel in module.get("cross_module_bridges") or []:
             builder.relation_page(module, rel, is_bridge=True)
+        # 属性定义页（对象 + 数据）—— 由 Neo4j 提供，保证「属性定义在 wiki 中完整」
+        for prop in builder.properties.get(module["key"]) or []:
+            builder.property_page(module, prop)
         light = load_light_text(module)
         if light:
             builder.light_page(module, light)
@@ -455,6 +816,10 @@ def build_pages() -> tuple[list[dict], dict]:
                          if p["page_type"] == TYPE_RELATION and kind(p) == "relation"),
         "bridges": sum(1 for p in builder.pages
                        if p["page_type"] == TYPE_RELATION and kind(p) == "bridge"),
+        "properties": sum(1 for p in builder.pages if p["page_type"] == TYPE_PROPERTY),
+        "data_properties": sum(1 for p in builder.pages if p["page_type"] == TYPE_PROPERTY
+                               and (p["page_metadata"].get("ontology") or {}).get("prop_kind")
+                               == "DatatypeProperty"),
         "light": sum(1 for p in builder.pages if p["page_type"] == TYPE_LIGHT),
         "pages": len(builder.pages),
     }

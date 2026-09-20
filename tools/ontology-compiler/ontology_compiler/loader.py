@@ -101,8 +101,32 @@ RESTRICTION_PREDICATES: dict[str, str] = {
 # 前缀与显示
 # --------------------------------------------------------------------------
 def build_prefix_map(modules: dict[str, ModuleSpec]) -> dict[str, str]:
-    """命名空间 -> 前缀（模块命名空间优先，其次内置 owl/rdf/rdfs/xsd/sh）。"""
+    """命名空间 -> 前缀。
+
+    用户口径（2026-09-20）：**前缀以本体定义为准** —— 先读各模块 TTL 里的 `@prefix` 声明，
+    再用 config 里的 `spec.prefix` 兜底/补缺。这样 TTL 与编译产物不会出现「本体叫 `bmm-EA-ext:`、
+    编译产物叫 `ea:`」这类不一致（曾经因此把 Neo4j 里的 `ea:Activity` 写成 `bmm-EA-ext:Activity`，
+    前端按类查关系类型全空）。空前缀（`@prefix :`）忽略——它只是文件内部的默认前缀，不适合做展示前缀。
+    """
     prefix_map = {spec.namespace: spec.prefix for spec in modules.values()}
+    for spec in modules.values():
+        for path in spec.files:
+            try:
+                text = pathlib.Path(path).read_text(encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                continue
+            for line in text.splitlines()[:40]:      # 前缀声明都在文件头
+                match = re.match(r"\s*@prefix\s+([A-Za-z0-9_.-]*)\s*:\s*<([^>]+)>", line)
+                if not match:
+                    continue
+                name, ns = match.group(1), match.group(2)
+                if not name:
+                    continue
+                declared = prefix_map.get(ns)
+                if declared and declared != name:
+                    print("[compiler] 注意：%s 在 TTL 里声明为 `%s:`，config 里是 `%s`（以 TTL 为准）"
+                          % (ns, name, declared), flush=True)
+                prefix_map[ns] = name
     for prefix in ("owl", "rdf", "rdfs", "xsd", "sh"):
         prefix_map.setdefault(NS[prefix], prefix)
     return prefix_map

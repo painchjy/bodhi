@@ -49,7 +49,8 @@ python tools/ontology-extract/extract.py --doc <你的文档.md> --model bmm --n
 3. **可用类型 / 可用关系枚举**——取自 `artifacts/weknora/ontology_index.json`
    （`classes[]` / `relations[]` / `cross_module_bridges[]`，关系带 domain→range）。
 
-输出契约（按新口径裁剪，与 `src/services/extraction_service.py` 对齐）：
+输出契约（按新口径裁剪；原对照实现 `src/services/extraction_service.py` 已随 `src/` 删除，
+现役真源即同目录 `extract.py`）：
 
 - `elements[]`：`type`（本体 class）+ `name` + `definition` + `source_text`（**逐字引用**）+ `source_span`
 - `relationships[]`：`type`（本体关系）+ `source_element` / `target_element` + `source_text`

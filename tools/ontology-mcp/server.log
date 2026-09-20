@@ -1,2 +1,0 @@
-[mcp] bodhi-ontology-mcp 0.1.0 监听 http://0.0.0.0:8765/mcp（工具：extract_and_save, list_pending_merges, resolve_pending_merge, ontology_types）
-[mcp] 127.0.0.1 - "POST /mcp HTTP/1.1" 200 -

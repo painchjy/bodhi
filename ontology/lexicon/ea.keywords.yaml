@@ -5,7 +5,7 @@
 
 module: ea
 ontology_version: "1.0"
-namespace: "http://example.org/bmm-EA-ext#"
+namespace: "http://example.org/ea#"
 
 type_keywords:
   - keywords: ["业务流程", "端到端流程", "价值链流程"]

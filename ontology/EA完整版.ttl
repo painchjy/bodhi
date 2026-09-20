@@ -1,4 +1,5 @@
-@prefix :       <http://example.org/bmm-EA-ext#> .
+@prefix :       <http://example.org/ea#> .
+@prefix ea:     <http://example.org/ea#> .
 @prefix bmm:    <http://example.org/bmm#> .
 @prefix owl:    <http://www.w3.org/2002/07/owl#> .
 @prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -6,10 +7,10 @@
 @prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
 @prefix bodhi:  <http://example.org/bodhi#> .
 
-<http://example.org/bmm-EA-ext> rdf:type owl:Ontology ;
+<http://example.org/ea> rdf:type owl:Ontology ;
     rdfs:label "企业架构框架本体（与BMM扩展本体协同）"@zh ;
     owl:imports <http://example.org/bmm> ;
-    owl:versionIRI <http://example.org/bmm-EA-ext/1.0> ;
+    owl:versionIRI <http://example.org/ea/1.0> ;
     bodhi:expertRole "企业架构建模专家，精通企业架构模型规范"@zh .
 
 

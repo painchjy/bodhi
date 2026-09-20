@@ -477,8 +477,8 @@ wiki 页面类型分布：`bmm:CourseOfAction 5`、`bmm:OrganizationUnit 5`、`b
 生成与生效：
 
 ```bash
-python deploy/weknora-fork/gen_agent_config.py           # 生成（读 artifacts/weknora/ontology_index.json）
-python deploy/weknora-fork/gen_agent_config.py --check    # 与产物是否一致
+python deploy/weknora-fork/gen_agents.py                   # 生成（读 artifacts/weknora/ontology_index.json
+                                                          #       与 artifacts/prompts/*）
 cd <上游 WeKnora 部署目录>                                  # 本机：c:\Users\PHJY\source\WeKnora
 export BODHI_DEPLOY_DIR=<本仓库>/deploy
 docker compose -f docker-compose.yml \
@@ -577,7 +577,7 @@ ontology/*.ttl ──(tools/ontology-compiler)──┬─→ artifacts/weknora/
                                             └─→ artifacts/neo4j/*.cypher                （图谱投影；本机已按用户要求清空，可停用）
 ```
 
-- **投影程序**：`tools/ontology-extract/project_ontology_wiki.py`（复用 `weknora_sync.py` 的 SQL 写入器；
+- **投影程序**：`tools/ontology-extract/ontology_wiki.py build` + `project`（写入纪律统一走 `tools/ke-core/ke_pages.py`；
   幂等：先删 `last_edit_source='ontology-wiki'` 的页面再整批写入）。
 - **页面类型建议**（自描述、不与抽取页混淆）：
   `ontology:Module`（模块索引页）、`ontology:Class`（每个本体类一页，含属主模块/父类/属性/关系 domain-range/示例）、

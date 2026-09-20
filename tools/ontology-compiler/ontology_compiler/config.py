@@ -3,8 +3,9 @@
 设计约束
 --------
 1. 本体文件使用**显式清单**而不是通配 glob：
-   `ontology/old/` 下存在历史草稿（`BMM_EXTENDED_LIGHT.ttl` 是 Markdown 风格伪 TTL，
-   不是合法 Turtle），通配抓取会直接报语法错。新增本体模块必须在本文件登记。
+   `ontology/old/` 曾放历史草稿（`BMM_EXTENDED_LIGHT.ttl` 是 Markdown 风格伪 TTL，不是合法
+   Turtle），通配抓取会直接报语法错；该目录已于 2026-09-20 清理干净，但"显式清单"这条规矩
+   保持不变 —— 新增本体模块必须在本文件登记。
 2. 编译器本身只依赖 `rdflib`；读取 YAML 词表额外依赖 `PyYAML`（已在开发机确认可用），
    缺失时给出明确报错而不是静默降级。
 3. 所有产物路径都在 `artifacts/` 下，该目录整体是可重建物（列入 .gitignore），
@@ -39,7 +40,7 @@ ARTIFACTS_DIR = REPO_ROOT / "artifacts"
 # --------------------------------------------------------------------------
 NS: dict[str, str] = {
     "bmm": "http://example.org/bmm#",
-    "ea": "http://example.org/bmm-EA-ext#",
+    "ea": "http://example.org/ea#",
     "easvc": "http://example.org/bodhi/ext/ea-service#",
     "eaown": "http://example.org/bodhi/ext/ea-ownership#",
     "bmmfd": "http://example.org/bodhi/ext/bmm-fd#",
@@ -148,7 +149,7 @@ def build_modules() -> dict[str, ModuleSpec]:
             prefix="ea",
             label="EA 企业架构",
             short_label="EA",
-            ontology_iri="http://example.org/bmm-EA-ext",
+            ontology_iri="http://example.org/ea",
             namespace=NS["ea"],
             files=(ONTOLOGY_DIR / "EA完整版.ttl",),
             lexicon=LEXICON_DIR / "ea.keywords.yaml",

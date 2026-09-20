@@ -59,6 +59,11 @@ export const ONTOLOGY_TYPES: Record<string, OntologyTypeMeta> = {
   "eaown:Person": {"label": "自然人", "color": "#84cc16", "module": "ea-ownership", "moduleLabel": "EA 所有权与控制关系扩展", "group": "自然人", "order": 3003},
   "bmmfd:AccessControlRule": {"label": "访问控制规则", "color": "#f97316", "module": "bmm-fd", "moduleLabel": "BMM 规则可执行化扩展", "group": "手段", "order": 4000},
   "bmmfd:DataQualityRule": {"label": "数据质量规则", "color": "#14b8a6", "module": "bmm-fd", "moduleLabel": "BMM 规则可执行化扩展", "group": "手段", "order": 4001},
+  "ontology:Class": {"label": "本体类", "color": "#2563eb", "module": "ontology", "moduleLabel": "本体模型", "group": "本体类", "order": 90002},
+  "ontology:LightDoc": {"label": "轻量版提示词", "color": "#a16207", "module": "ontology", "moduleLabel": "本体模型", "group": "轻量版", "order": 90005},
+  "ontology:Module": {"label": "本体模块", "color": "#0f766e", "module": "ontology", "moduleLabel": "本体模型", "group": "模块", "order": 90001},
+  "ontology:Property": {"label": "本体属性", "color": "#0891b2", "module": "ontology", "moduleLabel": "本体模型", "group": "本体属性", "order": 90004},
+  "ontology:Relation": {"label": "本体关系", "color": "#7c3aed", "module": "ontology", "moduleLabel": "本体模型", "group": "本体关系", "order": 90003},
 };
 
 export const ONTOLOGY_MODULES: { key: string; label: string; order: number }[] = [
@@ -91,6 +96,41 @@ export const ONTOLOGY_MODULES: { key: string; label: string; order: number }[] =
 
 /** 所有本体类型 key（图过滤/请求参数用） */
 export const ONTOLOGY_TYPE_KEYS: string[] = Object.keys(ONTOLOGY_TYPES);
+
+/**
+ * 本体模型库（「企业本体模型」知识库）的页面类型：**统一 5 种**，
+ * 不按类区分（类/关系/属性各一页，页类型只表达“这一页是什么”）。
+ * 因此这些页的颜色必须按**模块**取（见 ontologyModuleColor）。
+ */
+export const ONTOLOGY_PAGE_TYPES: Record<string, { label: string; color: string; module: string }> = {
+  'ontology:Module': { label: '本体模块', color: '#0f766e', module: 'ontology' },
+  'ontology:Class': { label: '本体类', color: '#2563eb', module: 'ontology' },
+  'ontology:Relation': { label: '本体关系', color: '#7c3aed', module: 'ontology' },
+  'ontology:Property': { label: '本体属性', color: '#0891b2', module: 'ontology' },
+  'ontology:LightDoc': { label: '轻量版提示词', color: '#a16207', module: 'ontology' },
+};
+
+/** 模块配色（与 Neo4j 侧 MODULE_COLORS 同色值）：节点/圆点颜色 = 模块差异 */
+export const MODULE_COLORS: Record<string, string> = {
+  bmm: '#3b82f6',
+  ea: '#10b981',
+  'ea-service': '#f59e0b',
+  'ea-ownership': '#ef4444',
+  'bmm-fd': '#8b5cf6',
+  external: '#94a3b8',
+};
+
+export function ontologyModuleColor(moduleKey: string | undefined | null): string {
+  return MODULE_COLORS[moduleKey || ''] || '#64748b';
+}
+
+/** 页面圆点颜色：本体库页按 page_metadata.ontology.model（模块），其余按页类型 */
+export function pageDotColor(page: any): string {
+  const mod = page && page.page_metadata && page.page_metadata.ontology
+    ? page.page_metadata.ontology.model : ''
+  if (mod) return ontologyModuleColor(mod)
+  return ontologyColor(page && page.page_type)
+}
 
 /** 待确认合并页的类型（由 MCP 保存工具生成，人工裁决后消失） */
 export const PENDING_MERGE_TYPE = 'ontology:PendingMerge';

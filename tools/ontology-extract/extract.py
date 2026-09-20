@@ -17,7 +17,8 @@
   **并允许把同一实体在多份文档里的多次出现汇到同一节点**（多源），
   权威定义标记为 `authoritative=true` 的第一次（`docs/weknora-fork.md` §8.3）。
 
-提示词契约（与 src/services/extraction_service.py 对齐，按新口径裁剪）
+提示词契约（按 2026-09-19 新口径裁剪；原对照实现 src/services/extraction_service.py
+已于 2026-09-20 随 src/ 删除，**本文件即真源**）
 -------------------------------------------------------------------
 - **不让 LLM 判 create/merge**（用户口径）：输出里没有 `action` / `existing_id`；
 - 关系类型只能取自本体（`relations[].name`），并带 domain/range 约束，违规进 `violations`；
@@ -26,7 +27,7 @@
 
 日志
 ----
-与 `src/services/extraction_service.py::_save_log` 同格式：
+与历史实现 `extraction_service.py::_save_log` 同格式（该模块已随 src/ 删除）：
     logs/ontology_<method>_<yyyymmdd_HHMMSS>.log
 含 finish_reason / usage / 全部 messages（role + content）/ LLM 原始返回。
 
@@ -216,7 +217,7 @@ def build_system_prompt(model: dict, light: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# LLM 调用 + 日志（格式与 src/services/extraction_service.py::_save_log 对齐）
+# LLM 调用 + 日志（格式沿用历史实现 extraction_service.py::_save_log，该模块已随 src/ 删除）
 # ---------------------------------------------------------------------------
 def save_log(method: str, messages: list[dict], raw_response: str,
              finish_reason: str = "", usage=None) -> pathlib.Path:

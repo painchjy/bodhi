@@ -13,7 +13,7 @@
 | 占位符 | 替换值（含引号，直接拼接） |
 | --- | --- |
 | `{{BMM_NS}}` | `'http://example.org/bmm#'` |
-| `{{EA_NS}}` | `'http://example.org/bmm-EA-ext#'` |
+| `{{EA_NS}}` | `'http://example.org/ea#'` |
 | `{{EXT_EA_SERVICE_NS}}` | `'http://example.org/bodhi/ext/ea-service#'` |
 | `{{EXT_EA_OWNERSHIP_NS}}` | `'http://example.org/bodhi/ext/ea-ownership#'` |
 | `{{EXT_BMM_FD_NS}}` | `'http://example.org/bodhi/ext/bmm-fd#'` |

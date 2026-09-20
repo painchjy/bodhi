@@ -6,7 +6,7 @@
 #
 # 占位符（替换值已带引号，直接拼接使用）：
 #   {{BMM_NS}}               = 'http://example.org/bmm#'
-#   {{EA_NS}}                = 'http://example.org/bmm-EA-ext#'
+#   {{EA_NS}}                = 'http://example.org/ea#'
 #   {{EXT_EA_SERVICE_NS}}    = 'http://example.org/bodhi/ext/ea-service#'
 #   {{EXT_EA_OWNERSHIP_NS}}  = 'http://example.org/bodhi/ext/ea-ownership#'
 #   {{EXT_BMM_FD_NS}}        = 'http://example.org/bodhi/ext/bmm-fd#'

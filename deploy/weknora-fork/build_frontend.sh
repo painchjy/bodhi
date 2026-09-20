@@ -24,12 +24,24 @@ TAG=${2:-weknora-ui:bodhi2}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 FEDIR="$HERE/frontend"
 
+# 幂等约定（2026-09-19 踩坑）：patch_frontend.py 会**原地**改 src，且拒绝二次打补丁
+# （重复插入 import 会让 vite 报 babel 语法错）。所以重建前要把 src 还原成干净源码。
+# 干净源码目录由 CLEAN_SRC 指定（例如 /root/wk080/frontend/src）；未指定且已是
+# 打过补丁的树时，下面会直接报错并给出还原命令，绝不替你 rm（怕误删上游源码）。
+if [ -n "${CLEAN_SRC:-}" ]; then
+  echo "== 0) 从 $CLEAN_SRC 还原 src =="
+  rm -rf "$SRC/src" && cp -a "$CLEAN_SRC" "$SRC/src"
+  echo "  restored $(find "$SRC/src" -name '*.vue' | wc -l) vue files"
+fi
+
 cd "$SRC"
 echo "== 0) 目录 =="; pwd; node -v; npm -v
 
 echo
 echo "== 1) 应用前端补丁（幂等） =="
-python3 "$HERE/patch_frontend.py" "$SRC"
+# 注意：patch_frontend.py 位于 frontend/ 子目录，且参数是 --fe（曾经写成
+# "$HERE/patch_frontend.py" "$SRC" → 找不到文件/参数不认，构建直接失败）。
+python3 "$FEDIR/patch_frontend.py" --fe "$SRC"
 
 echo
 echo "== 2) 摘掉 npm 不认的 lightningcss 覆盖项 =="
@@ -58,6 +70,11 @@ node "$FEDIR/check_sfc.mjs" src
 
 echo
 echo "== 5) vite build =="
+# 2026-09-19 实测：默认 Node 堆上限（~2GB）不够，vite 打包 190+ .vue 时
+# `FATAL ERROR: Ineffective mark-compacts near heap limit`（exit 134）。
+# 本机 WSL 共 7.9GB / 4 核，这里给到 4GB 堆（可用 FE_NODE_HEAP_MB 覆盖）。
+export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${FE_NODE_HEAP_MB:-4096}"
+echo "  NODE_OPTIONS=$NODE_OPTIONS"
 npm run build
 echo "  dist: $(du -sh dist | cut -f1)  files=$(find dist -type f | wc -l)"
 

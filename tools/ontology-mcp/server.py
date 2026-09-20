@@ -64,12 +64,34 @@ PENDING_PREFIX = "bodhi/pending/"
 
 DEFAULT_HIGH, DEFAULT_LOW = 0.90, 0.75
 
+# Postgres/SQL 辅助与 now_text() 已移到 tools/ke-core/ke_db.py（见文件头 import）：
+# 本模块仍以同样的名字暴露 psql / psql_csv / sql_str / sql_json / now_text，
+# 因此 sync_folders.py 的 `server.psql_csv(...)` 这类调用**无需改动**
+# （backfill_paths.py / relink_pages.py 是一次性脚本，已归档到 tools/ontology-mcp/archive/）。
+
+
 # 同目录的 graph_page.py（Bodhi 语义图 HTML 页）
 _HERE = str(pathlib.Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from graph_page import render_graph_page  # noqa: E402
 from mdview import render as render_md  # noqa: E402
+
+# ke-core（2026-09-19 拆分）：DB / 本体(Neo4j) / 页面维护各自独立成模块，
+# 本文件只保留「MCP 传输 + 抽取合并流水线 + 只读图谱接口」。
+KE_CORE = pathlib.Path(__file__).resolve().parents[1] / "ke-core"
+if str(KE_CORE) not in sys.path:
+    sys.path.insert(0, str(KE_CORE))
+from ke_db import (  # noqa: E402,F401  （psql/sql_* 由同目录脚本 server.psql 等继续引用）
+    DB_CONTAINER, DB_NAME, DB_PASSWORD, DB_USER,
+    now_text as _now_text, psql, psql_csv, sql_json, sql_str,
+)
+import ke_ontology  # noqa: E402
+import ke_admin  # noqa: E402
+import ke_pages  # noqa: E402
+from ke_pages import (  # noqa: E402,F401  （历史脚本 relink_pages.py 已归档，此别名保留兼容）
+    REL_LINE, REL_LINE_V2, parse_rel_line, rel_line,
+)
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -80,7 +102,11 @@ for _stream in (sys.stdout, sys.stderr):
 
 
 def now_text() -> str:
-    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+    """（ke-core 拆分后保留的兼容别名：实现见 ke_db.now_text）"""
+    return _now_text()
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -146,52 +172,9 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 # ---------------------------------------------------------------------------
 # Postgres（与 weknora_sync.py 同一套约定：走容器里的 psql）
+#   `_docker_prefix` / `psql` / `psql_csv` / `sql_str` / `sql_json` 已移到
+#   tools/ke-core/ke_db.py，并在文件头 import 回来（名字不变，下游脚本无感）。
 # ---------------------------------------------------------------------------
-def _docker_prefix() -> list[str]:
-    import shutil  # noqa: PLC0415
-    if shutil.which("docker"):
-        probe = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
-                               capture_output=True, text=True, check=False)
-        if probe.returncode == 0:
-            return ["docker"]
-    if shutil.which("wsl"):
-        probe = subprocess.run(["wsl", "-d", "Ubuntu", "-u", "root",
-                                "docker", "version", "--format", "{{.Server.Version}}"],
-                               capture_output=True, text=True, check=False)
-        if probe.returncode == 0:
-            return ["wsl", "-d", "Ubuntu", "-u", "root", "docker"]
-    raise RuntimeError("找不到可用的 docker（Windows PATH 或 WSL 里都没有）")
-
-
-def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
-    cmd = _docker_prefix() + ["exec", "-i", "-e", "PGPASSWORD=" + DB_PASSWORD,
-                              DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME]
-    if stdin:
-        cmd += ["-v", "ON_ERROR_STOP=1", "-q", "-f", "-"]
-        done = subprocess.run(cmd, input=sql, text=True, encoding="utf-8",
-                              capture_output=True, check=False)
-    else:
-        cmd += (["--csv", "-c", sql] if csv else ["-t", "-A", "-c", sql])
-        done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True, check=False)
-    if done.returncode != 0:
-        raise RuntimeError("psql 失败：%s" % (done.stderr or done.stdout)[:600])
-    return done.stdout
-
-
-def psql_csv(sql: str) -> list[dict]:
-    import csv as csvlib  # noqa: PLC0415
-    import io  # noqa: PLC0415
-    return list(csvlib.DictReader(io.StringIO(psql(sql, csv=True))))
-
-
-def sql_str(value) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
-
-
-def sql_json(value) -> str:
-    return sql_str(json.dumps(value, ensure_ascii=False)) + "::jsonb"
-
-
 def page_id_for(slug: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:" + slug))
 
@@ -608,23 +591,12 @@ def element_payloads(engine, checked: dict, pool: list[dict]) -> list[dict]:
 
 
 def sql_rebuild_in_links(kb_id: str) -> str:
-    """按 out_links 重算 in_links（wiki 图谱的反向边）。
+    """按 out_links 重算 in_links（wiki 图谱的反向边）。实现见 ke_pages。
 
     注意：上游自己的页面（如根 index 页）可能把 out_links 写成**标量**，
-    直接 jsonb_array_elements_text 会报 "cannot extract elements from a scalar"，
-    所以先用 jsonb_typeof 守卫。
+    ke_pages 里已用 jsonb_typeof 守卫（保持此前的崩溃修复）。
     """
-    arr = "(CASE WHEN jsonb_typeof(s.out_links) = 'array' THEN s.out_links ELSE '[]'::jsonb END)"
-    return ("UPDATE wiki_pages SET in_links = '[]'::jsonb "
-            " WHERE knowledge_base_id = %s AND deleted_at IS NULL; "
-            "WITH edges AS (SELECT s.slug AS src, t.value AS dst FROM wiki_pages s "
-            "CROSS JOIN LATERAL jsonb_array_elements_text(%s) t "
-            "WHERE s.knowledge_base_id = %s AND s.deleted_at IS NULL), "
-            "inbound AS (SELECT dst, jsonb_agg(DISTINCT src) AS arr FROM edges GROUP BY dst) "
-            "UPDATE wiki_pages p SET in_links = COALESCE(i.arr, '[]'::jsonb) "
-            "FROM wiki_pages x LEFT JOIN inbound i ON i.dst = x.slug "
-            "WHERE p.knowledge_base_id = %s AND p.slug = x.slug AND p.deleted_at IS NULL;\n"
-            % (sql_str(kb_id), arr, sql_str(kb_id), sql_str(kb_id)))
+    return ke_pages.rebuild_in_links_sql(kb_id)
 
 
 def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
@@ -1073,7 +1045,13 @@ class MCPHandler(BaseHTTPRequestHandler):
         self._send(code, body, "application/json", extra)
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.rstrip("/") not in ("", "/mcp"):
+        # bodhi2 前端用的 JSON 接口（/bodhi/*）与 MCP 传输（/mcp）共用同一端口。
+        parsed = urlparse.urlsplit(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path.startswith("/bodhi/"):
+            self._bodhi_post(path)
+            return
+        if path not in ("", "/mcp"):
             self._json({"jsonrpc": "2.0", "id": None,
                         "error": {"code": -32600, "message": "未知端点：%s" % self.path}}, 404)
             return
@@ -1128,9 +1106,142 @@ class MCPHandler(BaseHTTPRequestHandler):
         else:
             self._json(payload, 200, extra)
 
+    # ------------------------------------------------------------------
+    # bodhi2 前端 JSON 接口（/bodhi/*）：与 MCP 传输共端口，见 do_POST 分支
+    # ------------------------------------------------------------------
+    CORS = {"Access-Control-Allow-Origin": "*"}
+
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("JSON 解析失败：%s" % exc) from exc
+
+    def _bodhi_post(self, path: str) -> None:
+        try:
+            body = self._read_json()
+        except ValueError as exc:
+            self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        handlers = {
+            "/bodhi/relations/add":
+                lambda b: ke_pages.add_relation(b.get("kb_id", ""), b.get("slug", ""),
+                                                b.get("rel_type", ""), b.get("target_slug", ""),
+                                                b.get("label", "")),
+            "/bodhi/relations/update":
+                lambda b: ke_pages.update_relation(b.get("kb_id", ""), b.get("slug", ""),
+                                                   b.get("target_slug", ""), b.get("new_rel_type", ""),
+                                                   b.get("new_target_slug", ""), b.get("label", "")),
+            "/bodhi/relations/delete":
+                lambda b: ke_pages.delete_relation(b.get("kb_id", ""), b.get("slug", ""),
+                                                   b.get("target_slug", ""), b.get("rel_type", "")),
+            "/bodhi/page/type":
+                lambda b: ke_pages.set_page_type(b.get("kb_id", ""), b.get("slug", ""),
+                                                 b.get("page_type", "")),
+            "/bodhi/delete":
+                lambda b: ke_pages.delete_pages(b.get("kb_id", ""), b.get("slugs") or [],
+                                                bool(b.get("dry_run"))),
+            "/bodhi/kb/wiki-flag":
+                lambda b: ke_pages.set_wiki_enabled(b.get("kb_id", ""), bool(b.get("enabled"))),
+            # 本体模型维护（用户 2026-09-20）：编译 → 清理旧模型 → 灌投影 → 重投影 wiki
+            "/bodhi/ontology/load":
+                lambda b: ke_admin.load_model(b.get("model_id", ""), b.get("kb_id", ""),
+                                              bool(b.get("purge", True)),
+                                              bool(b.get("compile", True)),
+                                              bool(b.get("project_wiki", True))),
+            "/bodhi/ontology/purge":
+                lambda b: ke_admin.purge_model(b.get("model_id", ""), b.get("kb_id", "")),
+            "/bodhi/ontology/apply":
+                lambda b: ke_admin.apply_projection(),
+            "/bodhi/ontology/wiki":
+                lambda b: ke_admin.regen_wiki(b.get("kb_id", "")),
+            # 上传即加载（用户 2026-09-20）：前端读文件文本 → JSON 传过来（免 multipart），
+            # 落 ontology/uploads/ → 级联删下游 → 解析入库（零产物）。依赖未就绪会抛 ValueError → 400。
+            "/bodhi/ontology/upload":
+                lambda b: ke_admin.upload_ttl(b.get("filename", ""), b.get("content", ""),
+                                              b.get("module_id", ""),
+                                              bool(b.get("project_wiki", False)),
+                                              b.get("kb_id", "")),
+        }
+        fn = handlers.get(path)
+        if not fn:
+            self._json({"error": "未知端点：%s" % path}, 404, self.CORS)
+            return
+        try:
+            print("[mcp] %s %s" % (path, json.dumps(body, ensure_ascii=False)[:200]))
+            self._json(fn(body), 200, self.CORS)
+        except ValueError as exc:      # 校验类错误 → 400（前端直接展示原文）
+            self._json({"error": str(exc)}, 400, self.CORS)
+        except Exception as exc:  # noqa: BLE001
+            print("[mcp] %s 失败：%s" % (path, exc))
+            self._json({"error": str(exc)}, 500, self.CORS)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self._send(204, b"", "text/plain",
+                   {"Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type"})
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse.urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if path in ("/bodhi/ontology/classes", "/bodhi/ontology/classes.json"):
+            try:
+                self._json(ke_ontology.classes(), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/ontology/classes 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path.startswith("/bodhi/ontology/relation-types"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_ontology.relation_types_for(params.get("page_type", "")), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/ontology/relation-types 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path.startswith("/bodhi/ontology/targets"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                data = ke_ontology.target_pages(params.get("kb_id", ""), params.get("rel_type", ""),
+                                                params.get("slug", ""), params.get("q", ""),
+                                                int(params.get("limit", 200) or 200))
+                self._json(data, 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/ontology/targets 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/relations", "/bodhi/relations.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                data = ke_pages.page_relations(params.get("kb_id", ""), params.get("slug", ""))
+                self._json(data, 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/relations 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/model-graph", "/bodhi/model-graph.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(bodhi_model_graph(params.get("model", ""), params.get("kb_id", "")),
+                           200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/model-graph 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path == "/bodhi/ontology/deps":
+            # 只读：上传前"会连带删除哪些下游模块"（给前端确认框 + 运维自查用）
+            params = dict(urlparse.parse_qsl(parsed.query))
+            model = params.get("model_id", "")
+            try:
+                victims = ke_admin.dependent_modules(model)
+                self._json({"model_id": model, "dependent_modules": victims,
+                            "purge_order": [*victims, model]}, 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] %s 失败：%s" % (path, exc))
+                self._json({"error": str(exc)}, 500, self.CORS)
+            return
         if path in ("/bodhi/graph", "/bodhi/graph.json"):
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
@@ -1159,7 +1270,21 @@ class MCPHandler(BaseHTTPRequestHandler):
             return
         if path in ("/graph", "/graph.html", "/bodhi/view"):
             params = dict(urlparse.parse_qsl(parsed.query))
-            html = render_graph_page(params.get("kb_id", ""), params.get("model", ""))
+            view = params.get("view", "")
+            if not view:
+                # 自动判定：**本体模型库**（只有这 5 种统一页类型）默认看「模型结构图」；
+                # ⚠️ 不能只判 `ontology:%`：普通知识库里也有 `ontology:PendingMerge`（待确认合并）页。
+                try:
+                    rows = psql_csv(
+                        "SELECT count(*) AS n FROM wiki_pages WHERE knowledge_base_id = %s "
+                        "AND deleted_at IS NULL AND page_type IN "
+                        "('ontology:Module','ontology:Class','ontology:Relation',"
+                        "'ontology:Property','ontology:LightDoc')"
+                        % sql_str(params.get("kb_id", "")))
+                    view = "model" if rows and int(rows[0]["n"] or 0) > 0 else "browse"
+                except Exception:  # noqa: BLE001
+                    view = "browse"
+            html = render_graph_page(params.get("kb_id", ""), params.get("model", ""), view)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             return
         if path in ("/bodhi/pending", "/bodhi/pending.json"):
@@ -1208,62 +1333,24 @@ def main() -> int:
 # 只读接口：Bodhi 语义图（供前端「Bodhi 图谱」页 / 服务自带 HTML 页使用）
 #   GET /bodhi/graph?kb_id=..&model=bmm&types=bmm:Goal,bmm:Objective&limit=300
 # 数据来源：页面正文的「## 本体关系」小节（我们写页时格式固定）+ 页面元数据
+# 说明：REL_LINE / parse_rel_line / rel_line 已移到 tools/ke-core/ke_pages.py
+#       （文件头 import 回来；relink_pages.py 的 server.rel_line 用法不变）。
 # ---------------------------------------------------------------------------
-REL_LINE = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[(?P<target>.+?)\]\(wiki:(?P<slug>[^)]+)\)\s*$")
-# 2026-09-19 起的统一格式：[[slug|正文]]（上游前端 citationMarkdown 支持 [[wiki]] 链接；
-# 旧的 [正文](wiki:slug) 会被 markdown 渲染器当未知协议退化成纯文本，页面里看不到链接）
-REL_LINE_V2 = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[\[(?P<slug>[^|\]]+)\|(?P<target>[^\]]+)\]\]\s*$")
-
-
-def parse_rel_line(line: str):
-    """解析「本体关系」小节的一行，兼容新旧两种链接格式。"""
-    return REL_LINE.match(line) or REL_LINE_V2.match(line)
-
-
-def rel_line(label: str, rel_type: str, target: str, slug: str) -> str:
-    """生成「本体关系」小节的一行（统一 [[slug|正文]] 站内链接格式）。"""
-    if slug:
-        return "- %s（`%s`）→ [[%s|%s]]" % (label, rel_type, slug, target)
-    return "- %s（`%s`）→ %s" % (label, rel_type, target)
-
-
 def _class_meta(model_key: str) -> dict[str, dict]:
-    index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-    out: dict[str, dict] = {}
-    for model in index["models"]:
-        if model_key and model["key"] != model_key:
-            continue
-        for cls in model["classes"]:
-            out[cls["name"]] = {"color": cls.get("color"), "label": cls.get("label"),
-                                "module": model["key"], "module_label": model["label"],
-                                "parents": cls.get("parents") or []}
-    return out
-
-
-_ALL_META: dict[str, dict] | None = None
+    meta = ke_ontology.class_meta()
+    if not model_key:
+        return meta
+    return {k: v for k, v in meta.items() if v.get("module") == model_key}
 
 
 def all_class_meta() -> dict[str, dict]:
-    global _ALL_META
-    if _ALL_META is None:
-        _ALL_META = _class_meta("")
-    return _ALL_META
+    """兼容别名：实现见 tools/ke-core/ke_ontology.py（标签/颜色/父类）。"""
+    return ke_ontology.class_meta()
 
 
 def class_group(type_name: str) -> str:
     """类的「大类」= 顶层父类的中文名（用于列表/树的二级分组）。"""
-    meta = all_class_meta()
-    cur = meta.get(type_name)
-    seen: set[str] = set()
-    while cur and (cur.get("parents") or []):
-        parent = cur["parents"][0]
-        if parent in seen or parent not in meta:
-            break
-        seen.add(parent)
-        cur = meta[parent]
-    if not cur:
-        return ""
-    return cur.get("label") or cur.get("name") or ""
+    return ke_ontology.top_group(type_name)
 
 
 def class_category_path(type_name: str, fallback_module: str = "",
@@ -1273,16 +1360,142 @@ def class_category_path(type_name: str, fallback_module: str = "",
     用户口径（2026-09-19 验收）：不需要三级目录——第三层直接就是知识页，
     本体「类」这一层改为**页面行前面的类型标签**表达（见 patch_frontend.py 的 v2 调整）。
     这样即使本体自身还有更深的层级，也只由标签区分，不再多分折叠层。
+    实现已并入 ke_ontology.category_path（Neo4j 优先，JSON 兜底）。
     """
-    meta = all_class_meta().get(type_name) or {}
-    module_label = meta.get("module_label") or fallback_module_label or fallback_module
-    label = meta.get("label") or fallback_label or type_name
-    group = class_group(type_name) or label
-    return [module_label, group]
+    return ke_ontology.category_path(type_name)
+
+
+# 本体模型库页面用的普通 markdown 内链（`[标题](wiki:slug)`）
+_WIKI_LINK_RE = re.compile(r"\[(?P<label>[^\]]+)\]\(wiki:(?P<slug>[^)]+)\)")
+# 按「所在小节」推断边类型（本体 wiki 的结构：父类/子类/相关关系/属性定义/…）
+_SECTION_EDGE = (
+    ("父类", ("subclass", "父类")),
+    ("子类", ("subclass", "子类")),
+    ("相关关系", ("relation", "相关关系")),
+    ("跨模块桥", ("relation", "跨模块桥")),
+    ("本体关系", ("relation", "本体关系")),
+    ("关系页", ("relation", "关系页")),
+    ("反向属性", ("relation", "反向属性")),
+    ("属性定义", ("property", "属性定义")),
+    ("本体属性", ("property", "本体属性")),
+    ("定义域", ("property", "定义域")),
+    ("值域", ("property", "值域")),
+    ("本体类", ("class", "包含类")),
+)
+
+
+def _section_edge(section: str, link_label: str):
+    """本体 wiki 的内链 → (边类型, 中文标签)；识别不出小节时退回 (wiki, 链接文字)。"""
+    for prefix, pair in _SECTION_EDGE:
+        if section.startswith(prefix):
+            return pair[0], ("%s：%s" % (pair[1], link_label)) if link_label else pair[1]
+    return "wiki", (section + "：" + link_label) if section else (link_label or "链接")
+
+
+def bodhi_model_graph(model: str = "", kb_id: str = "") -> dict:
+    """**本体模型结构图**（本体模型库专用）：节点 = 本体类，边 = 子类 + 对象属性(domain→range)。
+
+    与 `bodhi_graph`（按 wiki 页画图：类/关系/属性各是一页 → 关系也成了节点，且名字不全）的区别：
+    这里直接读 **Neo4j 本体投影**，所以：
+    - 节点只有**类**（带中文 label），颜色按**模块**；
+    - 关系是**边**，边上带关系中文名（`label`）与 prefixed（`type`），子类是「子类」边。
+    这样图就是「本体模型长什么样」，而不是「知识库里有哪些页」。
+    """
+    try:
+        import ke_neo4j  # ke-core（与 bodhi-mcp 同目录体系）
+        if not ke_neo4j.available():
+            return {"view": "model", "model": model, "nodes": [], "edges": [],
+                    "error": "Neo4j 本体投影不可用"}
+    except Exception as exc:  # noqa: BLE001
+        return {"view": "model", "model": model, "nodes": [], "edges": [],
+                "error": "Neo4j 不可用：%s" % exc}
+
+    params = {"m": model} if model else {}
+    where = "WHERE c.external IS NULL " + ("AND c.module = $m " if model else "")
+    rows = ke_neo4j.query(
+        "MATCH (c:BodhiOntClass) " + where +
+        "RETURN c.prefixed AS id, c.label AS label, c.local_name AS name, c.description AS definition, "
+        "       c.module AS module ORDER BY c.module, c.local_name", params)
+    nodes, ids = [], set()
+    for r in rows:
+        ident = r.get("id") or r.get("name") or ""
+        if not ident or ident in ids:
+            continue
+        ids.add(ident)
+        mod = r.get("module") or ""
+        label = r.get("label") or r.get("name") or ident
+        nodes.append({
+            "slug": ident, "title": label, "page_type": "ontology:Class",
+            "class_label": label, "module": mod, "module_label": ke_ontology.module_label(mod),
+            "group": mod or "ontology", "group_label": ke_ontology.module_label(mod),
+            "color": ke_ontology.module_color(mod), "version": 1,
+            "summary": (r.get("definition") or "")[:200], "source_refs": [],
+        })
+
+    edges = []
+    for r in ke_neo4j.query(
+            "MATCH (c:BodhiOntClass)-[:BODHI_SUBCLASS_OF]->(p:BodhiOntClass) "
+            "WHERE c.external IS NULL AND p.external IS NULL "
+            "RETURN c.prefixed AS a, p.prefixed AS b"):
+        if r.get("a") in ids and r.get("b") in ids:
+            edges.append({"source": r["a"], "target": r["b"], "type": "subclass", "label": "子类"})
+    for r in ke_neo4j.query(
+            "MATCH (p:BodhiOntProperty {property_kind: 'object'})-[:BODHI_DOMAIN]->(d:BodhiOntClass) "
+            "MATCH (p)-[:BODHI_RANGE]->(t:BodhiOntClass) "
+            "WHERE d.external IS NULL AND t.external IS NULL "
+            "RETURN p.prefixed AS pid, p.label AS plabel, d.prefixed AS a, t.prefixed AS b", {}):
+        if r.get("a") in ids and r.get("b") in ids:
+            edges.append({"source": r["a"], "target": r["b"],
+                          "type": r.get("pid") or "relation",
+                          "label": r.get("plabel") or r.get("pid") or ""})
+
+    groups = {}
+    for n in nodes:
+        g = groups.setdefault(n["group"], {"label": n["group_label"], "color": n["color"], "count": 0})
+        g["count"] += 1
+
+    # 节点点击要能打开该类的 wiki 页：把节点 slug 换成**真实 wiki slug**（本体模型库里
+    # `ontology/<模块>/<本地名小写>`），类名另存 `type_name`；页面不存在时保留 prefixed。
+    if kb_id:
+        def _wiki_slug(module_key: str, prefixed: str) -> str:
+            """真实 wiki slug：`ontology/<模块 key>/<本地名小写>`。
+
+            ⚠️ 模块 key 要用 Neo4j 的 `module`（ea-service / ea-ownership / bmm-fd），
+            不能用 prefixed 的前缀（easvc:/eaown:/bmmfd:）——否则对不上 wiki 页（实测 26/47）。
+            """
+            local = prefixed.split(":", 1)[-1]
+            return "ontology/%s/%s" % (module_key, re.sub(r"[^a-z0-9]+", "-", local.lower()).strip("-"))
+        want = {n["slug"]: _wiki_slug(n.get("module") or "", n["slug"]) for n in nodes}
+        try:
+            rows = psql_csv(
+                "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                "AND slug IN (%s)"
+                % (sql_str(kb_id), ", ".join(sql_str(s) for s in sorted(set(want.values())))))
+            have = {r["slug"] for r in rows}
+        except Exception:  # noqa: BLE001
+            have = set()
+        for n in nodes:
+            n["type_name"] = n["slug"]
+            if want.get(n["slug"]) in have:
+                n["slug"] = want[n["slug"]]
+        # ⚠️ 边的端点是 prefixed 名字（bmm:Goal），节点 slug 已换成 wiki slug，
+        # 必须同步重映射，否则图里只剩节点、没有关系（2026-09-20 实测踩过）。
+        remap = {n["type_name"]: n["slug"] for n in nodes}
+        for edge in edges:
+            edge["source"] = remap.get(edge["source"], edge["source"])
+            edge["target"] = remap.get(edge["target"], edge["target"])
+
+    return {"kb_id": kb_id, "model": model, "view": "model", "nodes": nodes, "edges": edges,
+            "meta": {"node_count": len(nodes), "edge_count": len(edges),
+                     "groups": [dict(key=k, **v) for k, v in sorted(groups.items())],
+                     "relation_types": sorted({e["type"] for e in edges})}}
 
 
 def bodhi_graph(kb_id: str, model: str = "", types: str = "", limit: int = 300) -> dict:
-    """要素节点 + 本体关系边（边带关系类型与中文标签；方向 = 页面里的箭头方向）。"""
+    """要素节点 + 关系边（实例页读「## 本体关系」；本体 wiki 页按小节解析 markdown 内链）。
+
+    节点带 `group` / `color`（**按模块配色**，用户 2026-09-19 口径：图要简单，颜色 = 模块差异）。
+    """
     wanted = [t.strip() for t in types.split(",") if t.strip()]
     colors = _class_meta(model)
     sql = ("SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(summary,'') AS summary, "
@@ -1299,31 +1512,61 @@ def bodhi_graph(kb_id: str, model: str = "", types: str = "", limit: int = 300) 
     rows = psql_csv(sql)
 
     nodes, known, edges = [], set(), []
+    # 是否「本体模型库」：它的页类型统一是 ontology:*（类/关系/属性各一页）。
+    # 是 → 图谱按**模块**分组配色（用户口径）；否（普通知识库）→ 维持原来的**按页类型**配色，
+    # 否则普通知识库会把所有实例节点并成一种颜色、图例只剩模型名（2026-09-19 实测回归）。
+    ontology_kb = any((r.get("page_type") or "").startswith("ontology:") for r in rows)
     for row in rows:
         try:
             meta = (json.loads(row["meta"] or "{}").get("ontology") or {})
         except json.JSONDecodeError:
             meta = {}
         cls = colors.get(row["page_type"], {})
+        module = (meta.get("model") or cls.get("module")
+                  or (row["page_type"].split(":", 1)[0] if ":" in row["page_type"] else model or ""))
+        class_label = cls.get("label") or meta.get("class_label") or row["page_type"]
+        if ontology_kb:
+            group = module or row["page_type"]
+            group_label = (cls.get("module_label") or meta.get("model_label")
+                           or (ke_ontology.module_label(module) if module else "")) or class_label
+            color = ke_ontology.module_color(module) if module else (cls.get("color") or "#94a3b8")
+        else:
+            group, group_label = row["page_type"], class_label
+            color = cls.get("color") or "#94a3b8"
         nodes.append({
             "slug": row["slug"], "title": row["title"], "page_type": row["page_type"],
-            "class_label": cls.get("label") or meta.get("class_label") or row["page_type"],
-            "module": cls.get("module") or model or "", "module_label": cls.get("module_label") or "",
-            "color": cls.get("color") or "#94a3b8", "version": row["version"],
+            "class_label": class_label,
+            "module": module, "module_label": group_label,
+            "group": group, "group_label": group_label,
+            "color": color,
+            "version": row["version"],
             "summary": (row["summary"] or "")[:200],
             "source_refs": json.loads(row["refs"] or "[]"),
         })
         known.add(row["slug"])
     for row in rows:
+        section = ""
         for line in (row["content"] or "").splitlines():
+            if line.startswith("## "):
+                section = line[3:].strip()
+                continue
             hit = parse_rel_line(line.strip())
-            if not hit:
+            if hit:
+                target_slug = hit.group("slug")
+                if target_slug not in known:      # 只画两端都在结果集里的边
+                    continue
+                edges.append({"source": row["slug"], "target": target_slug,
+                              "type": hit.group("type"), "label": hit.group("label")})
                 continue
-            target_slug = hit.group("slug")
-            if target_slug not in known:      # 只画两端都在结果集里的边
-                continue
-            edges.append({"source": row["slug"], "target": target_slug,
-                          "type": hit.group("type"), "label": hit.group("label")})
+            # 本体模型库的页用普通 markdown 内链（`[标题](wiki:slug)`），没有「关系行」；
+            # 这里按**所在小节**推断边类型，让本体图谱真的画出模型结构（用户口径：图要简单）。
+            for m in _WIKI_LINK_RE.finditer(line):
+                target_slug = m.group("slug").strip()
+                if target_slug not in known or target_slug == row["slug"]:
+                    continue
+                etype, elabel = _section_edge(section, m.group("label").strip())
+                edges.append({"source": row["slug"], "target": target_slug,
+                              "type": etype, "label": elabel})
     return {"kb_id": kb_id, "model": model, "nodes": nodes, "edges": edges,
             "meta": {"node_count": len(nodes), "edge_count": len(edges),
                      "relation_types": sorted({e["type"] for e in edges}),

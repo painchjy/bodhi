@@ -1,5 +1,5 @@
 @prefix :       <http://example.org/bodhi/ext/ea-service#> .
-@prefix ea:     <http://example.org/bmm-EA-ext#> .
+@prefix ea:     <http://example.org/ea#> .
 @prefix bmm:    <http://example.org/bmm#> .
 @prefix owl:    <http://www.w3.org/2002/07/owl#> .
 @prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -10,7 +10,7 @@
 <http://example.org/bodhi/ext/ea-service> rdf:type owl:Ontology ;
     rdfs:label "EA 服务契约扩展本体（业务属性 / 函数依赖 / 幂等 / 副作用）"@zh ;
     rdfs:comment "在 EA 完整版之上补充『服务契约 ServiceContract、业务属性 BusinessAttribute、函数依赖 FunctionalDependency、副作用 SideEffect』四类语义。目的：把文档里描述的服务能力编译为可校验（SHACL）、可执行（API/MCP）、带溯源的知识点，并支撑『函数依赖 -> 幂等性 -> 高内聚』的跨层推理。"@zh ;
-    owl:imports <http://example.org/bmm-EA-ext> , <http://example.org/bmm> ;
+    owl:imports <http://example.org/ea> , <http://example.org/bmm> ;
     owl:versionIRI <http://example.org/bodhi/ext/ea-service/1.0> ;
     bodhi:expertRole "IT 服务设计与服务契约专家，精通服务目标、服务设计与功能依赖"@zh .
 

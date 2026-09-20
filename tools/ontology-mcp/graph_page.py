@@ -98,7 +98,7 @@ TEMPLATE = r"""<!DOCTYPE html>
     <span class="grow"></span>
     <label>模型 <select id="model" style="background:#0b1220;color:inherit;border:1px solid var(--line);border-radius:5px;padding:2px 6px"></select></label>
     <label>节点上限 <input id="limit" type="number" min="20" max="800" value="150" style="width:70px;background:#0b1220;color:inherit;border:1px solid var(--line);border-radius:5px;padding:2px 6px"></label>
-    <label><input type="checkbox" id="showLabels"> 显示关系标签</label>
+    <label><input type="checkbox" id="showLabels" checked> 显示关系标签</label>
     <button id="reload">重新加载</button>
     <button id="relayout">重新布局</button>
     <button id="zoomFit">适应窗口</button>
@@ -131,6 +131,8 @@ TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <script>
 const KB = "__KB_ID__", MODEL = "__MODEL__";
+// view = 'browse'（按 wiki 页画，关系/属性也是页=节点）| 'model'（本体模型结构图：类=节点、关系=边）
+const VIEW = "__VIEW__";
 </script>
 <!-- SCRIPT_PART_2 -->
 </body>
@@ -145,7 +147,7 @@ const gLabels = document.getElementById('elabels');
 const gNodes = document.getElementById('nodes');
 const panel = document.getElementById('panel');
 const state = { nodes: [], edges: [], classes: new Map(), relTypes: new Map(),
-                selClasses: new Set(), q: '', showLabels: false,
+                selClasses: new Set(), q: '', showLabels: true,
                 sel: null, hover: null };
 const view = { x: -600, y: -450, w: 1200, h: 900 };
 
@@ -158,16 +160,24 @@ async function load() {
   const model = document.getElementById('model').value || '';
   document.getElementById('loading').style.display = 'flex';
   try {
-    const r = await fetch('/bodhi/graph?kb_id=' + encodeURIComponent(KB) +
-                          '&model=' + encodeURIComponent(model) + '&limit=' + limit);
+    // 模型视图读 Neo4j 本体投影（类=节点、关系=边）；浏览视图按 wiki 页读（原来的逻辑）
+    const url = VIEW === 'model'
+      ? '/bodhi/model-graph?model=' + encodeURIComponent(MODEL) + '&kb_id=' + encodeURIComponent(KB)
+      : '/bodhi/graph?kb_id=' + encodeURIComponent(KB) +
+        '&model=' + encodeURIComponent(MODEL) + '&limit=' + limit;
+    const r = await fetch(url);
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     state.nodes = d.nodes; state.edges = d.edges; state.sel = null; state.hover = null;
     state.classes = new Map();
+    // bodhi2：图按**分组**折叠/配色；服务端把「分组」定义为模块（本体图谱颜色 = 模块差异）
+    function groupKey(n) { return n.group || n.page_type; }
+    function groupLabel(n) { return n.group_label || n.class_label; }
     d.nodes.forEach(function (n) {
-      if (!state.classes.has(n.page_type))
-        state.classes.set(n.page_type, { color: n.color, label: n.class_label, count: 0 });
-      state.classes.get(n.page_type).count++;
+      const k = groupKey(n);
+      if (!state.classes.has(k))
+        state.classes.set(k, { color: n.color, label: groupLabel(n), count: 0 });
+      state.classes.get(k).count++;
     });
     state.relTypes = new Map();
     d.edges.forEach(function (e) { state.relTypes.set(e.type, (state.relTypes.get(e.type) || 0) + 1); });
@@ -202,8 +212,8 @@ function layout() {
   if (!nodes.length) return;
   var groups = new Map();
   nodes.forEach(function (n) {
-    if (!groups.has(n.page_type)) groups.set(n.page_type, []);
-    groups.get(n.page_type).push(n);
+    if (!groups.has(n.group || n.page_type)) groups.set(n.group || n.page_type, []);
+    groups.get(n.group || n.page_type).push(n);
   });
   var R = 260 + nodes.length * 1.7, gi = 0, gsize = groups.size || 1;
   groups.forEach(function (list) {
@@ -250,7 +260,7 @@ function layout() {
 function visible() {
   var q = state.q.trim().toLowerCase();
   var nodes = state.nodes.filter(function (n) {
-    return state.selClasses.has(n.page_type) &&
+    return state.selClasses.has(n.group || n.page_type) &&
       (!q || n.title.toLowerCase().indexOf(q) >= 0 ||
        (n.summary || '').toLowerCase().indexOf(q) >= 0);
   });
@@ -508,10 +518,11 @@ document.getElementById('model').addEventListener('change', load);
 """
 
 
-def render_graph_page(kb_id: str, model: str = "") -> str:
+def render_graph_page(kb_id: str, model: str = "", view: str = "browse") -> str:
     """拼最终 HTML（占位符替换，避免 % 与花括号转义问题）。"""
     script = SCRIPT_A + SCRIPT_B + SCRIPT_C1 + SCRIPT_C2
     return (TEMPLATE
             .replace("__KB_ID__", kb_id or "")
             .replace("__MODEL__", model or "")
+            .replace("__VIEW__", view or "browse")
             .replace("<!-- SCRIPT_PART_2 -->", "<script>\n" + script + "\n</script>"))
