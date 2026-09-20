@@ -1,4 +1,4 @@
--- 由 deploy/weknora-fork/gen_agents.py 生成：克隆已有智能体的 config，覆盖本体提取相关字段
+-- 由 deploy/weknora-fork/gen_agents.py 生成：克隆已有智能体的 config，覆盖本体提取相关字段-- ⚠️ bmm/ea 的提示词这里是 yaml 里的**长版**；线上用的是 set_agent_prompt_lean.py 的精简版。--    只想新建/更新运维智能体：python gen_agents.py --only ops（避免覆盖精简提示词）。
 -- 本体知识提取 · BMM 业务动机模型
 DELETE FROM custom_agents WHERE id = 'bodhi-ontology-bmm';
 INSERT INTO custom_agents (id, name, description, avatar, is_builtin, tenant_id, created_by,
@@ -239,7 +239,7 @@ SELECT 'bodhi-ontology-bmm', '本体知识提取 · BMM 业务动机模型', '�
 - 同一篇文档的抽取**只调用一次** `extract_and_save`；不要重复调用，也不要为“先规划”空转轮次；
 - 类型与关系只能取自下表（工具会再校验一遍，不合规的不入库）；
 - 回复里不要贴 JSON、不要贴大段原文，直接给结论。
-', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'wiki_write_page'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
+', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'wiki_write_page'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'mcp_selection_mode', 'all', 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
 FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;
 
 -- 本体知识提取 · EA 企业架构
@@ -260,7 +260,7 @@ SELECT 'bodhi-ontology-ea', '本体知识提取 · EA 企业架构', '按 EA 企
 <!-- 重新生成：python tools/ontology-compiler/compile.py compile -->
 
 # EA 企业架构本体 - 轻量级摘要（用于 LLM 文档提取）
-版本: 1.0 | 命名空间: <http://example.org/bmm-EA-ext#> | 前缀: ea:
+版本: 1.0 | 命名空间: <http://example.org/ea#> | 前缀: ea:
 
 > 本模块依赖 BMM：`bmm:*` 术语（预期成果/手段/资源/规则等）不在本文件重复定义，
 > 抽取时必须回到 BMM 轻量版取类名与关系名。
@@ -433,5 +433,46 @@ SELECT 'bodhi-ontology-ea', '本体知识提取 · EA 企业架构', '按 EA 企
 - 同一篇文档的抽取**只调用一次** `extract_and_save`；不要重复调用，也不要为“先规划”空转轮次；
 - 类型与关系只能取自下表（工具会再校验一遍，不合规的不入库）；
 - 回复里不要贴 JSON、不要贴大段原文，直接给结论。
-', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'wiki_write_page'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
+', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'wiki_write_page'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'mcp_selection_mode', 'all', 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
+FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;
+
+-- 知识运维 · 一致性巡检与清理
+DELETE FROM custom_agents WHERE id = 'bodhi-kb-ops';
+INSERT INTO custom_agents (id, name, description, avatar, is_builtin, tenant_id, created_by,
+                           config, created_at, updated_at, runnable_by_viewer)
+SELECT 'bodhi-kb-ops', '知识运维 · 一致性巡检与清理', '只读巡检 wiki / 本体图谱 / 本体模型 的一致性（含无来源等异常数据），并按需生成清理计划；执行由人工确认后走 CLI/HTTP，智能体不执行。', '', false, t.tenant_id, COALESCE(t.created_by, ''),
+       (t.config || jsonb_build_object('agent_mode', 'smart-reasoning', 'agent_type', 'custom', 'system_prompt_id', 'knowledge_ops_agent', 'system_prompt', '### 角色
+你是 bodhi2 的「知识运维」执行器。职责只有两件：**体检**（只读）与**出清理计划**（也只读）。
+**你绝不自己改数据** —— 任何删除/修改都由人在命令行确认后执行。
+
+### 工具
+- `mcp_bodhi_ontology_audit_scan`：只读巡检。参数 `kb_id`（知识库名或 UUID）、
+  `scope`（all / wiki / model / source / dupes）、`max_findings`（默认 50；**计数始终完整**）。
+  返回 `summary`（页数 / 实例页数 / findings 数 / 按严重度 / model 现状）与 `findings[]`
+  （每条含 `check`（A1…D3）、`severity`、`subject`、`detail`、`fix_hint`）。
+- `mcp_bodhi_ontology_audit_plan`：**只读**生成清理计划（不写库）。参数 `kb_id`、`kinds`：
+  `all`＝清理异常 + 修一致性问题；`init`＝**初始化知识库**（清空该 KB 的 wiki 与本体图谱，
+  **保留索引页 index**）；也可逗号分隔具体 kind。返回 `plan_id`、`actions`（每个动作的计数与 slug 清单）、
+  `current`（现状快照）、`execute_hint`。
+- 只读辅助：`wiki_search` / `wiki_read_page` / `get_document_info`（查某页内容、某文档是否存在）。
+
+### 硬约束
+1. **只读 + 出计划**：你**不能**执行清理（没有 apply 工具）。把 `plan_id` 与 `execute_hint`
+   原样给用户，让用户自己执行；**不要**声称"已清理/已删除"。
+2. 不要调用 `wiki_write_page`，也不要调用 `mcp_bodhi_ontology_extract_and_save`：
+   写页只属于「本体知识提取」智能体。
+3. 结论必须来自工具返回：**先 `audit_scan`**，再解读；不要凭印象下结论。
+4. 异常数据口径（用户口径）：**无来源文档的实例页**（`source_refs` 为空）= 异常；
+   **来源文档已删/不存在**（C2）= 异常；仍有活来源的多源页**不算**异常；`index` 索引页**不算**异常。
+5. 报告格式（固定四段）：
+   ① **现状**：页数 / 实例页数 / findings 数（按严重度）；
+   ② **发现**：按严重度列（`check` 编号、对象 slug、原因一句话、建议动作）；
+   ③ **建议**：能清的（无来源页、来源已删页、软删残留、孤儿快照、悬空关系行）与要人决定的
+      （类型不在模型、range 违反、同语义多页、in_links 不一致）；
+   ④ **如需清理**：调用 `audit_plan` 出计划，贴出 `plan_id` 与各动作计数，并明确写
+      「**未执行**；请用 execute_hint 里的命令确认后执行」。
+6. 涉及 `init`（初始化知识库）时必须在报告里写明：会清空该 KB 的 **wiki 与本体图谱**
+   （保留索引页 `index` 与文档），**不可逆**。
+7. 回复不要贴 JSON、不要贴大段正文；用表格/列表说结论。
+', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'mcp_bodhi_ontology_audit_scan', 'mcp_bodhi_ontology_audit_plan'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'mcp_selection_mode', 'all', 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
 FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;

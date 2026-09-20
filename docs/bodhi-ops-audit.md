@@ -13,7 +13,7 @@
 |---|---|---|
 | **P1** | 只读审计内核 `ke_audit.py` + MCP 工具 `audit_scan` + `GET /bodhi/audit` | ✅ 已实现并实测（**不写任何数据**） |
 | **P2** | 计划→确认→执行（**硬删**）+ **初始化知识库**：`plan`/`apply` + CLI + `POST /bodhi/audit/{plan,apply}` + MCP `audit_plan`（只出计划） | ✅ 已实现并沙箱自检（见 §5） |
-| **P3** | 「知识运维」智能体注册（`gen_agents.py` + 提示词） | ⏳ 待做 |
+| **P3** | 「知识运维」智能体注册（`gen_agents.py --only ops` + yaml 模板） | ✅ 已注册：`bodhi-kb-ops`（只读工具 + `audit_scan`/`audit_plan`，**无写页/无抽取**） |
 | 不做 | `/mcp-ops` 端点隔离（用户口径：**先不隔离**）；任何**自动**修复/定时清理（用户口径：**不得自动修**） | — |
 
 ## 0.1 用户已拍板的四条口径（2026-09-20）
@@ -102,10 +102,10 @@ ke_audit.py apply <kb_id> --plan-id <id> --confirm  # 执行（缺 --confirm 直
 
 | kind | 动作 |
 |---|---|
-| `init_wiki` | **初始化**：硬删该 KB 全部 wiki 页 + 版本快照 + 目录 + 问题项（**含 `index` 与软删行**） |
-| `init_graph` | **初始化**：删 Neo4j 里该 KB 的本体实例节点/边（当前部署为 0） |
-| `no_source_pages` | 无来源的实例页（C1）→ 删 |
-| `deleted_source_pages` | 来源文档已删/不存在的页（C2，引用全删的）→ 删 |
+| `init_wiki` | **初始化**：硬删该 KB 全部 wiki 页 + 版本快照 + 目录 + 问题项，**保留索引页 `index`**（用户口径：初始化后只留文档与索引页） |
+| `init_graph` | **初始化**：删 Neo4j 里该 KB 的本体实例节点/边（`DETACH DELETE`，**连边一起删**；当前部署为 0） |
+| `no_source_pages` | 无来源的实例页（C1）→ 删；**并级联删掉其它页里指向它的关系行** |
+| `deleted_source_pages` | 来源文档已删/不存在的页（C2，引用全删的）→ 删；同样级联删边 |
 | `mixed_source_refs` | 多源页摘掉已删文档的引用（页保留） |
 | `soft_deleted_rows` | 软删旧行（D2）→ 硬删（含其快照） |
 | `orphan_revisions` | 孤儿版本快照（D3）→ 删 |
@@ -113,7 +113,12 @@ ke_audit.py apply <kb_id> --plan-id <id> --confirm  # 执行（缺 --confirm 直
 | `dup_edges` | 重复/自环关系行（A5）→ 去重（同上） |
 | `in_links` | 重算 in_links（A2，幂等，无内容改动） |
 
-**初始化知识库（`init`）的边界**：清 **wiki + 图谱**；**不动文档**（`knowledges`/`chunks`/`embeddings`）。
+**删节点 = 连关系一起删（级联）** —— 计划里以 `actions.cascade_edges` 提前报出「会顺带删掉多少页上的多少行关系」：
+- 被删页**自己的出边**随页消失（页没了，正文也没了）；
+- **别的页指向它的关系行**由 `cascade_edges` 在同一趟里删掉（否则会留下悬空边 = 用户实测会看到的"剩余节点/断链"）；
+- 同一页同时命中「悬空行」和「级联行」时**只重写一次**（快照 + 版本+1 + 重算 links）。
+
+**初始化知识库（`init`）的边界**：清 **wiki + 图谱**、**保留索引页 `index`**；**不动文档**（`knowledges`/`chunks`/`embeddings`）。
 若 WeKnora 的定时索引任务之后又写了页（用户观察到的现象），**再跑一次 `init` 计划并确认**即可 —— 不做任何自动清理。
 
 `findings` 最多返回 `max_findings` 条（按严重度排序），**`totals` 始终是完整计数** —— 便于"先看规模，再拉明细"。
@@ -156,10 +161,36 @@ ke_audit.py apply <kb_id> --plan-id <id> --confirm  # 执行（缺 --confirm 直
 | `dangling_edges` | 悬空关系行被删；`version 5→6`、`last_edit_source=bodhi-ops-edit`、**生成新版本快照** ✅；重跑 `audit` 该 A1 消失 |
 | `in_links` | 重算执行成功（幂等） ✅ |
 | `soft_deleted_rows` / `orphan_revisions` | 计划计数正确（在 `init` 之后被执行时已为 0，属预期：init 已一并清掉） ✅ |
+| `cascade_edges`（删页连带删边） | 沙箱：B 页有 `[[A]]` 出边、A 被判为"无来源"→ 计划报 `cascade_edges{pages:1, lines:1}`；执行后 **A 已删、B 正文里的指向行消失**、B `version+1` 且 `last_edit_source=bodhi-ops-edit` ✅ |
+| `init_wiki` 保留索引页 | 沙箱 init 执行后**只剩 `('index','index')`**；目录已重建、in_links 已重算、复检 findings=0 ✅ |
+| 业务库未被波及 | 全程 `pages=53`（沙箱用独立 KB id，用完即删） ✅ |
 | MCP `audit_plan` | `tools/list` 有该工具；调用返回 `plan_id` 与 actions（**不执行**） ✅ |
 | HTTP `/bodhi/audit/apply` 无 confirm | `400 {"error":"拒绝执行：必须显式确认…"}` ✅ |
 
-> 结论：**改数据的两条路径（整库初始化 / 正文改写）都端到端验证过**，且"没有人工确认就动不了"。
+> 结论：**改数据的路径（整库初始化 / 删页级联删边 / 正文改写）都端到端验证过**，且"没有人工确认就动不了"。
+
+## 6.1 「知识运维」智能体（P3，已注册）
+
+| 项 | 值 |
+|---|---|
+| id / 名称 | `bodhi-kb-ops` / 知识运维 · 一致性巡检与清理（`is_builtin=false`，用户可改可删） |
+| 模式 | `agent_mode=smart-reasoning`、`agent_type=custom`、`temperature=0.1`、`max_iterations=12` |
+| 工具（7） | `grep_chunks` / `list_knowledge_chunks` / `get_document_info` / `wiki_search` / `wiki_read_page` + **`mcp_bodhi_ontology_audit_scan`** / **`mcp_bodhi_ontology_audit_plan`**（**无** `wiki_write_page`、**无** `extract_and_save`） |
+| MCP | `mcp_services=[a7c1f0d2-…0001]`、`mcp_selection_mode=all` |
+| 知识库 | 业务库 + 本体模型库（两个都能体检） |
+| 提示词 | 单一真源：`deploy/weknora-fork/config/agent_system_prompt.yaml` 的 `templates[].id="knowledge_ops_agent"`（1502 字符） |
+
+重新注册/更新（改提示词后）：
+```bash
+/opt/bodhi-venv/bin/python3 deploy/weknora-fork/gen_agents.py --only ops        # 生成 SQL
+# 落库（免嵌套 wsl：用 ke_db 直接喂 stdin）
+/opt/bodhi-venv/bin/python3 - <<'PY'
+import pathlib, sys; sys.path.insert(0, 'tools/ke-core'); import ke_db
+ke_db.psql(pathlib.Path('deploy/weknora-fork/config/agents.sql').read_text(encoding='utf-8'), stdin=True)
+PY
+```
+> ⚠️ **必须带 `--only ops`**：不带会把 bmm/ea 的**精简提示词**覆盖回 yaml 里的长版（`set_agent_prompt_lean.py` 的成果）。
+> 运维智能体 id 特意用 `bodhi-kb-ops`（不在 `bodhi-ontology-%` 前缀里），免得被那个精简脚本误伤。
 
 ## 7. 排障
 

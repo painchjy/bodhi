@@ -223,6 +223,11 @@ def _with_line_inserted(content: str, new_line: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def sync_folders(kb_id: str) -> dict:
+    """重建该 KB 的 wiki 目录树（幂等；`delete_pages` 内部也用它）。"""
+    return _sync_folders(kb_id)
+
+
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:
     """按给定正文**重写一页**：快照旧版 → 更新 content/out_links/version+1 → 重算 in_links。
 

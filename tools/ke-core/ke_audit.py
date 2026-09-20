@@ -429,10 +429,10 @@ FIX_KINDS = ("dangling_edges", "dup_edges", "in_links")
 INIT_KINDS = ("init_wiki", "init_graph")
 ALL_KINDS = INIT_KINDS + PURGE_KINDS + FIX_KINDS
 KIND_HELP = {
-    "init_wiki": "初始化-清空 wiki（该 KB 全部页 + 版本快照 + 目录 + 问题项，含 index 与软删行）",
+    "init_wiki": "初始化-清空 wiki（该 KB 全部页与快照、目录、问题项；**保留索引页 index**）",
     "init_graph": "初始化-清空图谱（Neo4j 里该 KB 的本体实例节点/边）",
-    "no_source_pages": "无来源的实例页（C1）→ 删",
-    "deleted_source_pages": "来源文档已删/不存在的页（C2，引用全删的）→ 删",
+    "no_source_pages": "无来源的实例页（C1）→ 删（并级联删指向它的关系行）",
+    "deleted_source_pages": "来源文档已删/不存在的页（C2，引用全删的）→ 删（并级联删指向它的关系行）",
     "mixed_source_refs": "多源页摘掉已删文档的引用（保留仍有活来源的页）",
     "soft_deleted_rows": "软删旧行（D2，同 slug 与活页并存的残留记录）→ 硬删",
     "orphan_revisions": "孤儿版本快照（D3，没有对应页）→ 删",
@@ -468,20 +468,43 @@ def _instance_nodes(kb_id: str) -> int:
 
 
 def _hard_delete_wiki(kb_id: str) -> dict:
-    """初始化：硬删该 KB 的**全部** wiki 数据（页 + 快照 + 目录 + 问题项）。"""
-    before = {}
-    for table in ("wiki_pages", "wiki_page_revisions", "wiki_folders", "wiki_page_issues"):
-        before[table] = int(ke_db.psql_csv(
-            "SELECT count(*) AS n FROM %s WHERE knowledge_base_id = %s" % (table, _q(kb_id))
-        )[0]["n"] or 0)
-    stmts = [
-        "DELETE FROM wiki_page_revisions WHERE knowledge_base_id = %s;" % _q(kb_id),
-        "DELETE FROM wiki_page_issues WHERE knowledge_base_id = %s;" % _q(kb_id),
-        "DELETE FROM wiki_pages WHERE knowledge_base_id = %s;" % _q(kb_id),
-        "DELETE FROM wiki_folders WHERE knowledge_base_id = %s;" % _q(kb_id),
-    ]
-    ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)
-    return {"deleted": before}
+    """初始化：硬删该 KB 的 wiki 数据，**保留索引页 `index`**（用户口径：只留文档与索引页）。
+
+    顺序：版本快照 → 问题项 → 页（保留 index）→ 目录（随后由 `sync_folders` 按活页重建）；
+    最后重算 in_links。**不可逆**。
+    """
+    where = ("knowledge_base_id = %s AND slug <> 'index'" % _q(kb_id))
+    before = {
+        "pages_live": int(ke_db.psql_csv(
+            "SELECT count(*) AS n FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL"
+            % _q(kb_id))[0]["n"] or 0),
+        "pages_all": int(ke_db.psql_csv(
+            "SELECT count(*) AS n FROM wiki_pages WHERE knowledge_base_id = %s"
+            % _q(kb_id))[0]["n"] or 0),
+        "revisions": int(ke_db.psql_csv(
+            "SELECT count(*) AS n FROM wiki_page_revisions WHERE knowledge_base_id = %s"
+            % _q(kb_id))[0]["n"] or 0),
+        "folders": int(ke_db.psql_csv(
+            "SELECT count(*) AS n FROM wiki_folders WHERE knowledge_base_id = %s"
+            % _q(kb_id))[0]["n"] or 0),
+        "issues": int(ke_db.psql_csv(
+            "SELECT count(*) AS n FROM wiki_page_issues WHERE knowledge_base_id = %s"
+            % _q(kb_id))[0]["n"] or 0),
+    }
+    ke_db.psql("BEGIN;\n"
+               "DELETE FROM wiki_page_revisions WHERE %s;\n"
+               "DELETE FROM wiki_page_issues WHERE knowledge_base_id = %s;\n"
+               "DELETE FROM wiki_pages WHERE %s;\n"
+               "DELETE FROM wiki_folders WHERE knowledge_base_id = %s;\n"
+               "COMMIT;\n" % (where, _q(kb_id), where, _q(kb_id)), stdin=True)
+    out = {"deleted": before, "index_kept": True}
+    try:
+        out["folders_synced"] = bool(ke_pages.sync_folders(kb_id))
+    except Exception as exc:  # noqa: BLE001
+        out["folders_synced"] = "failed: %s" % exc
+    ke_db.psql(ke_pages.rebuild_in_links_sql(kb_id), stdin=True)
+    out["in_links_rebuilt"] = True
+    return out
 
 
 def _hard_delete_graph(kb_id: str) -> dict:
@@ -573,11 +596,15 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
         live_pages = int(ke_db.psql_csv(
             "SELECT count(*) AS n FROM wiki_pages WHERE knowledge_base_id = %s "
             " AND deleted_at IS NULL" % _q(kb_id))[0]["n"] or 0)
+        # 用户口径：初始化后**只保留文档和索引页** → `slug='index'` 永不删
+        index_kept = "index" in live
         actions["init_wiki"] = {"pages_live": live_pages, "pages_all": counts["wiki_pages"],
+                                "pages_to_delete": counts["wiki_pages"] - (1 if index_kept else 0),
+                                "index_kept": index_kept,
                                 "revisions": counts["wiki_page_revisions"],
                                 "folders": counts["wiki_folders"],
                                 "issues": counts["wiki_page_issues"],
-                                "note": "含 index 与软删行；硬删不可逆"}
+                                "note": "删该 KB 全部 wiki 页与快照，**保留索引页 index**；硬删不可逆"}
     if "init_graph" in kinds:
         actions["init_graph"] = {"nodes": _instance_nodes(kb_id),
                                  "note": "Neo4j BodhiInstance（当前部署通常为 0）"}
@@ -647,7 +674,31 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
                           "by_slug": {p["slug"]: p for p in pages}, "data": {},
                           "model": None, "docs": None, "ontology_kb": ONTOLOGY_KB}, tmp)
         actions["in_links"] = {"count": tmp.totals.get("A2", 0)}
-    return {"actions": actions, "edits": edits, "truncated": truncated}
+
+    # 级联：删页时会一并删掉**指向这些页的关系行**（用户口径：节点清理后关系一起删）
+    delete_slugs: set = set()
+    if "init_wiki" in kinds:
+        delete_slugs |= {s for s in live if s != "index"}
+    for kind in ("no_source_pages", "deleted_source_pages"):
+        if kind in kinds:
+            delete_slugs |= set(actions[kind]["slugs"])
+    cascade: dict = {}
+    if delete_slugs:
+        survivors = live - delete_slugs
+        for page in pages:
+            if page["slug"] not in survivors:
+                continue
+            drop: dict = {}
+            for rel in ke_pages.parse_out_relations(page["content"]):
+                if rel["slug"] and rel["slug"] in delete_slugs:
+                    drop[rel["line_index"]] = "目标页将被删（%s）" % rel["slug"]
+            if drop:
+                cascade[page["slug"]] = {"lines": sorted(drop),
+                                         "why": {str(k): v for k, v in sorted(drop.items())}}
+        actions["cascade_edges"] = {
+            "pages": len(cascade), "lines": sum(len(c["lines"]) for c in cascade.values()),
+            "note": "删页时一并删掉这些**指向被删页**的关系行（级联）；页自己的出边随页一起消失"}
+    return {"actions": actions, "edits": edits, "cascade": cascade, "truncated": truncated}
 
 
 def build_plan(kb_id: str, kinds=None, scope: str = "all", page_limit: int = 5000,
@@ -662,12 +713,13 @@ def build_plan(kb_id: str, kinds=None, scope: str = "all", page_limit: int = 500
         raise ValueError("plan 需要 kb_id")
     kinds = _normalize_kinds(kinds)
     collected = _collect(kb_id, kinds, page_limit)
-    payload = {"kb_id": kb_id, "kinds": kinds, "actions": collected["actions"]}
+    payload = {"kb_id": kb_id, "kinds": kinds, "actions": collected["actions"],
+               "edits": collected["edits"], "cascade": collected["cascade"]}
     plan = {
         "plan_id": _plan_id(payload), "kb_id": kb_id, "kinds": kinds,
         "created_at": ke_db.now_text(), "mode": "hard-delete（不可逆）",
         "actions": collected["actions"], "edits": collected["edits"],
-        "truncated": collected["truncated"],
+        "cascade": collected["cascade"], "truncated": collected["truncated"],
         "kinds_help": {k: KIND_HELP.get(k, "") for k in kinds},
         "current": audit(kb_id, scope=scope, max_findings=1)["summary"],
         "execute_hint": ("ke_audit.py apply %s --plan-id %s --confirm" % (kb_id, _plan_id(payload))),
@@ -693,7 +745,9 @@ def apply_plan(kb_id: str, plan_id: str, confirm: bool = False, page_limit: int 
         raise ValueError("计划属于另一个知识库：%s" % plan.get("kb_id"))
     kinds = plan.get("kinds") or []
     fresh = _collect(kb_id, kinds, page_limit)
-    if _plan_id({"kb_id": kb_id, "kinds": kinds, "actions": fresh["actions"]}) != plan_id:
+    verify = {"kb_id": kb_id, "kinds": kinds, "actions": fresh["actions"],
+              "edits": fresh["edits"], "cascade": fresh["cascade"]}
+    if _plan_id(verify) != plan_id:
         raise ValueError("数据已变化（plan_id 不匹配）——请重新 plan 并再次确认")
 
     applied: dict = {}
@@ -717,19 +771,26 @@ def apply_plan(kb_id: str, plan_id: str, confirm: bool = False, page_limit: int 
         applied["soft_deleted_rows"] = _hard_delete_soft_rows(kb_id)
     if "orphan_revisions" in kinds and fresh["actions"]["orphan_revisions"]["count"]:
         applied["orphan_revisions"] = _delete_orphan_revisions(kb_id)
-    if ("dangling_edges" in kinds or "dup_edges" in kinds) and fresh["edits"]:
+    # 正文改写：一次算齐（悬空/重复关系行 + 级联删边行），同一页只重写一次
+    drop_by_slug: dict = {}
+    for slug, info in (fresh.get("cascade") or {}).items():
+        drop_by_slug.setdefault(slug, set()).update(int(x) for x in info["lines"])
+    if "dangling_edges" in kinds or "dup_edges" in kinds:
+        for slug, info in (fresh.get("edits") or {}).items():
+            for line_no, why in info["why"].items():
+                if ("悬空" in why and "dangling_edges" in kinds) or \
+                        ("悬空" not in why and "dup_edges" in kinds):
+                    drop_by_slug.setdefault(slug, set()).add(int(line_no))
+    if drop_by_slug:
         by_slug = {p["slug"]: p for p in load_pages(kb_id, page_limit)[0]}
         done = []
-        for slug, info in sorted(fresh["edits"].items()):
+        for slug, lines in sorted(drop_by_slug.items()):
             page = by_slug.get(slug)
-            if not page:
-                continue
-            drop = [int(line_no) for line_no, why in info["why"].items()
-                    if ("悬空" in why and "dangling_edges" in kinds)
-                    or ("悬空" not in why and "dup_edges" in kinds)]
-            if drop:
-                done.append(_apply_edge_edits(kb_id, page, drop))
-        applied["edges"] = {"pages": len(done), "detail": done[:20]}
+            if page and lines:
+                done.append(_apply_edge_edits(kb_id, page, sorted(lines)))
+        applied["edges"] = {"pages": len(done),
+                            "lines": sum(len(v) for v in drop_by_slug.values()),
+                            "detail": done[:20]}
     if "in_links" in kinds:
         applied["in_links"] = _rebuild_in_links(kb_id)
 

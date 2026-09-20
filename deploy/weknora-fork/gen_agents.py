@@ -27,11 +27,15 @@ REPO = HERE.parents[1]
 CONFIG = HERE / "config"
 OUT_SQL = CONFIG / "agents.sql"
 
-TEMPLATE_IDS = {"bmm": "ontology_extract_agent_bmm", "ea": "ontology_extract_agent_ea"}
-NAMES = {"bmm": "本体知识提取 · BMM 业务动机模型", "ea": "本体知识提取 · EA 企业架构"}
+TEMPLATE_IDS = {"bmm": "ontology_extract_agent_bmm", "ea": "ontology_extract_agent_ea",
+                "ops": "knowledge_ops_agent"}
+NAMES = {"bmm": "本体知识提取 · BMM 业务动机模型", "ea": "本体知识提取 · EA 企业架构",
+         "ops": "知识运维 · 一致性巡检与清理"}
 DESCRIPTIONS = {
     "bmm": "按 BMM 业务动机模型从知识库片段抽取要素与关系，并为每个要素写入本体类型（bmm:*）的 wiki 页面。",
     "ea": "按 EA 企业架构本体从知识库片段抽取要素与关系，并为每个要素写入本体类型（ea:*）的 wiki 页面。",
+    "ops": "只读巡检 wiki / 本体图谱 / 本体模型 的一致性（含无来源等异常数据），并按需生成清理计划；"
+           "执行由人工确认后走 CLI/HTTP，智能体不执行。",
 }
 ALLOWED_TOOLS = [
     # 读片段（一次）+ 写页；**不放 thinking / todo_write**：
@@ -39,6 +43,16 @@ ALLOWED_TOOLS = [
     "grep_chunks", "list_knowledge_chunks", "get_document_info",
     "wiki_search", "wiki_read_page", "wiki_write_page",
 ]
+# 「知识运维」智能体：**只给只读工具 + 巡检工具**（不给写页、不给抽取）
+OPS_TOOLS = [
+    "grep_chunks", "list_knowledge_chunks", "get_document_info",
+    "wiki_search", "wiki_read_page",
+    "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
+]
+TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS}
+# 智能体 id：提取智能体沿用 `bodhi-ontology-<key>`；**运维智能体单独一个 id**，
+# 免得被 `set_agent_prompt_lean.py`（按 `bodhi-ontology-%` 前缀改提示词）误伤。
+AGENT_IDS = {"bmm": "bodhi-ontology-bmm", "ea": "bodhi-ontology-ea", "ops": "bodhi-kb-ops"}
 # 目标知识库：企业知识（抽取源）+ 企业本体模型（类型定义查询）
 KNOWLEDGE_BASES = [
     "dbc2528f-611b-48da-9a71-d7c93975adb4",
@@ -56,14 +70,18 @@ for _stream in (sys.stdout, sys.stderr):
             pass
 
 
-def load_templates() -> dict[str, str]:
+def load_templates(only: str = "") -> dict[str, str]:
     doc = yaml.safe_load((CONFIG / "agent_system_prompt.yaml").read_text(encoding="utf-8"))
     by_id = {t["id"]: t.get("content", "") for t in doc.get("templates", [])}
     out = {}
     for key, tid in TEMPLATE_IDS.items():
+        if only and key != only:
+            continue
         if tid not in by_id:
             raise SystemExit("模板 %s 不存在（先跑 gen_agent_config.py）" % tid)
         out[key] = by_id[tid]
+    if not out:
+        raise SystemExit("没有匹配的智能体 key：%s" % only)
     return out
 
 
@@ -72,9 +90,11 @@ def sql_literal(text: str) -> str:
 
 
 def build_sql(templates: dict[str, str]) -> str:
-    parts = ["-- 由 deploy/weknora-fork/gen_agents.py 生成：克隆已有智能体的 config，覆盖本体提取相关字段"]
+    parts = ["-- 由 deploy/weknora-fork/gen_agents.py 生成：克隆已有智能体的 config，覆盖本体提取相关字段",
+             "-- ⚠️ bmm/ea 的提示词这里是 yaml 里的**长版**；线上用的是 set_agent_prompt_lean.py 的精简版。",
+             "--    只想新建/更新运维智能体：python gen_agents.py --only ops（避免覆盖精简提示词）。"]
     for key, content in templates.items():
-        agent_id = "bodhi-ontology-%s" % key
+        agent_id = AGENT_IDS.get(key, "bodhi-ontology-%s" % key)
         overrides = {
             "agent_mode": "smart-reasoning",
             "agent_type": "custom",                 # Go 端只认这五个常量值，用 custom 最安全
@@ -87,10 +107,11 @@ def build_sql(templates: dict[str, str]) -> str:
             "max_completion_tokens": 16384,
             "thinking": False,
             "enable_rewrite": False,
-            "allowed_tools": ALLOWED_TOOLS,
+            "allowed_tools": TOOLS_BY_AGENT.get(key, ALLOWED_TOOLS),
             # 本体知识「保存工具」通过 MCP 挂载（tools/ontology-mcp/server.py）：
             # 一次调用完成抽取+合规+两阈值合并，智能体不再自己判断重复。
             "mcp_services": MCPSERVICE_IDS,
+            "mcp_selection_mode": "all",             # 与既有两个智能体一致（不设时上游可能只暴露部分工具）
             "knowledge_bases": KNOWLEDGE_BASES,      # 会话里"能选哪些库"取决于这个字段
             "kb_selection_mode": "selected",
             "retain_retrieval_history": True,
@@ -135,15 +156,18 @@ def run_sql(sql: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成/写入「本体知识提取」智能体")
     parser.add_argument("--apply", action="store_true", help="同时写入数据库")
+    parser.add_argument("--only", default="", choices=["", "bmm", "ea", "ops"],
+                        help="只处理某一个智能体（默认全部；改 bmm/ea 会覆盖它们的精简提示词，慎用）")
     args = parser.parse_args()
 
-    templates = load_templates()
+    templates = load_templates(args.only)
     sql = build_sql(templates)
     CONFIG.mkdir(parents=True, exist_ok=True)
     OUT_SQL.write_text(sql, encoding="utf-8")
     print("写出 %s（%d 字节）" % (OUT_SQL.relative_to(REPO).as_posix(), len(sql.encode("utf-8"))))
     for key, content in templates.items():
-        print("  智能体 bodhi-ontology-%-3s 提示词 %5d 字符  tools=%d" % (key, len(content), len(ALLOWED_TOOLS)))
+        print("  智能体 bodhi-ontology-%-3s 提示词 %5d 字符  tools=%d"
+              % (key, len(content), len(TOOLS_BY_AGENT.get(key, ALLOWED_TOOLS))))
     if args.apply:
         run_sql(sql)
         print("已写入 WeKnora 数据库")
