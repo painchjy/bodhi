@@ -227,14 +227,69 @@ def locate_chunk(source_text: str, pool: list[dict]) -> tuple[str, int]:
     return "", -1
 
 
+def scope_instructions(scope: dict | None, model: dict) -> list[str]:
+    """把「本次收窄范围」编译成提示词片段（`scope.classes` / `scope.relations`）。"""
+    scope = scope or {}
+    classes = [str(x).strip() for x in (scope.get("classes") or []) if str(x).strip()]
+    relations = [str(x).strip() for x in (scope.get("relations") or []) if str(x).strip()]
+    if not classes and not relations:
+        return []
+    meta = ke_ontology.class_meta()
+    lines = ["", "【本次收窄范围】（用户指定，优先于上面的全量清单）",
+             "- 只抽取这些类：%s" % "、".join("%s（%s）" % (c, (meta.get(c) or {}).get("label") or "")
+                                              for c in classes) if classes else "- 类：不限制（仍按全量清单）",
+             "- 只允许这些关系：%s" % "、".join(relations) if relations else "- 关系：不限制（仍按全量清单）",
+             "- 范围外的内容**不要输出**（服务端会把范围外的要素移入 unmatched 并说明原因）。"]
+    return lines
+
+
+def apply_extract_scope(checked: dict, scope: dict | None) -> dict:
+    """按收窄范围过滤抽取结果：范围外的节点/关系移入 `unmatched`（**不静默丢**）。
+
+    为什么在服务端再过一遍：提示词是"请求"，模型不一定照做；收窄必须由确定性代码兜底，
+    否则用户以为"只抽了任务与步骤"，库里却混进全量类型。
+    """
+    classes = {str(x).strip() for x in ((scope or {}).get("classes") or []) if str(x).strip()}
+    relations = {str(x).strip() for x in ((scope or {}).get("relations") or []) if str(x).strip()}
+    if not classes and not relations:
+        return checked
+    kept_nodes, moved = [], []
+    for node in checked.get("nodes") or []:
+        if classes and node.get("type") not in classes:
+            moved.append({"name": node.get("name"), "type": node.get("type"),
+                          "reason": "不在本次收窄范围（classes）"})
+            continue
+        kept_nodes.append(node)
+    kept_names = {n.get("name") for n in kept_nodes}
+    kept_edges = []
+    for edge in checked.get("edges") or []:
+        if relations and edge.get("type") not in relations:
+            moved.append({"name": "%s→%s" % (edge.get("source"), edge.get("target")),
+                          "type": edge.get("type"), "reason": "不在本次收窄范围（relations）"})
+            continue
+        if classes and (edge.get("source") not in kept_names or edge.get("target") not in kept_names):
+            moved.append({"name": "%s→%s" % (edge.get("source"), edge.get("target")),
+                          "type": edge.get("type"), "reason": "关系端点在收窄范围外"})
+            continue
+        kept_edges.append(edge)
+    checked["nodes"], checked["edges"] = kept_nodes, kept_edges
+    checked["unmatched"] = list(checked.get("unmatched") or []) + moved
+    checked["scope"] = {"classes": sorted(classes), "relations": sorted(relations),
+                        "filtered": len(moved)}
+    return checked
+
+
 def run_extraction(engine, model_key: str, doc_name: str, doc_text: str,
-                   from_log: str = "") -> dict:
-    """调用 LLM 抽取一次并做本体校验（不写任何库）。"""
+                   from_log: str = "", scope: dict | None = None) -> dict:
+    """调用 LLM 抽取一次并做本体校验（不写任何库）；`scope` = 本次收窄范围。"""
     index = engine.load_index(engine.DEFAULT_INDEX)
     model = engine.pick_model(index, model_key)
     system = engine.build_system_prompt(model, engine.load_light(model, engine.DEFAULT_PROMPTS))
     env = engine.load_env(REPO / ".env")
     user = engine.build_user_prompt(doc_name, doc_text, [])
+    extra = scope_instructions(scope, model)
+    if extra:
+        user = user + "\n" + "\n".join(extra)
     if from_log:
         raw = engine.read_raw_from_log(pathlib.Path(from_log))
     else:
@@ -248,6 +303,7 @@ def run_extraction(engine, model_key: str, doc_name: str, doc_text: str,
         }
         raw, _meta = engine.call_llm(cfg, system, user, method="mcp_extraction")
     checked = engine.validate(engine.parse_json(raw), model, doc_name)
+    checked = apply_extract_scope(checked, scope)
     return {"model": model, "checked": checked, "raw_len": len(raw)}
 
 
@@ -1222,9 +1278,109 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
     return summary
 
 
+# ---------------------------------------------------------------------------
+# 技能（skills/）：目录 + 指令 + 该技能的本体面
+# ---------------------------------------------------------------------------
+# 为什么由 MCP 承载技能而不是塞进智能体提示词：
+#   ① 省 token（智能体先看目录，用到哪个取哪个）；② 技能改了不用重新注册智能体；
+#   ③ 未来若开 WeKnora 沙箱技能（tenant_skills/bundle），同一份 SKILL.md 可直接打成 bundle。
+# 本次部署的 WeKnora 是**沙箱安装型**技能（tenant_sandbox_configs 为空、SANDBOX_DOCKER=false），
+# 原生技能不可用 —— 所以由 MCP 提供等价能力（见 docs/agent-design-flow.md §11）。
+SKILLS_DIR = REPO / "skills"
+_SKILLS_CACHE: dict | None = None
+_SKILLS_STAMP: tuple | None = None
+
+
+def _skills_stamp() -> tuple:
+    try:
+        return tuple(sorted((p.parent.name, p.stat().st_mtime, p.stat().st_size)
+                            for p in SKILLS_DIR.glob("*/SKILL.md")))
+    except Exception:  # noqa: BLE001
+        return ()
+
+
+def load_skills() -> dict:
+    """读 `skills/<id>/SKILL.md`（front-matter + 正文），按 mtime 缓存。"""
+    global _SKILLS_CACHE, _SKILLS_STAMP
+    stamp = _skills_stamp()
+    if _SKILLS_CACHE is not None and stamp == _SKILLS_STAMP:
+        return dict(_SKILLS_CACHE)
+    import yaml as _yaml
+    out: dict[str, dict] = {}
+    for path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
+        text = path.read_text(encoding="utf-8")
+        meta, body = {}, text
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            if len(parts) >= 3:
+                try:
+                    meta = _yaml.safe_load(parts[1]) or {}
+                except Exception:  # noqa: BLE001  front-matter 写坏不该让技能整块消失
+                    meta = {}
+                body = parts[2].strip()
+        sid = str(meta.get("id") or path.parent.name)
+        out[sid] = {"id": sid, "dir": path.parent.name, "path": str(path),
+                    "meta": meta, "instructions": body}
+    _SKILLS_CACHE, _SKILLS_STAMP = out, stamp
+    return dict(out)
+
+
+def skills(skill: str = "", model: str = "") -> dict:
+    """技能目录 / 技能全文 + 该技能需要的那部分本体面。
+
+    - 不传 `skill`：返回**目录**（id / name / when / models / stages / tools）；
+    - 传 `skill`：返回该技能**完整指令**（SKILL.md 正文）+ `front_matter`，
+      并按 front-matter 的 `scope`（focus/classes/relations）把 `ontology_types` **收窄**后一并返回
+      —— 智能体拿到"这个技能能用的类/关系/数据属性"，不用再自己筛。
+    """
+    all_skills = load_skills()
+    if not skill:
+        catalog = []
+        for sid, item in all_skills.items():
+            meta = item["meta"]
+            catalog.append({"id": sid, "name": meta.get("name") or sid,
+                            "when": meta.get("when") or "",
+                            "models": meta.get("models") or [],
+                            "default_model": meta.get("default_model") or "",
+                            "stages": meta.get("stages") or [],
+                            "tools": meta.get("tools") or []})
+        return {"count": len(catalog), "catalog": catalog,
+                "how_to_use": ("先用本目录选技能，再 `skills(skill=\"<id>\")` 取该技能完整指令"
+                               "（含它需要的类/关系/数据属性）。**不要凭记忆猜步骤**。")}
+    if skill not in all_skills:
+        raise ValueError("未知技能：%s（可用：%s）" % (skill, "、".join(sorted(all_skills)) or "无"))
+    item = all_skills[skill]
+    meta = item["meta"]
+    scope = meta.get("scope") or {}
+    model_key = (model or meta.get("default_model")
+                 or ((meta.get("models") or ["ea"])[0]))
+    ontology = {}
+    try:
+        ontology = ontology_types(model_key, focus=str(scope.get("focus") or ""),
+                                  classes=scope.get("classes") or None,
+                                  relations=scope.get("relations") or None)
+    except Exception as exc:  # noqa: BLE001  技能仍可用（只是没有本体面）
+        ontology = {"error": str(exc)[:160]}
+    if isinstance(ontology, dict):   # 去重（ontology_types 会把"本模块引用"的类/关系并进来）
+        for key, field in (("classes", "name"), ("relations", "name")):
+            seen, uniq = set(), []
+            for row in ontology.get(key) or []:
+                if row.get(field) in seen:
+                    continue
+                seen.add(row.get(field))
+                uniq.append(row)
+            if uniq:
+                ontology[key] = uniq
+    return {"id": skill, "name": meta.get("name") or skill, "when": meta.get("when") or "",
+            "front_matter": meta, "instructions": item["instructions"],
+            "ontology_model": model_key, "ontology": ontology,
+            "source": item["path"].replace(str(REPO) + "/", "")}
+
+
 def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
                      high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
-                     dry_run: bool = False, from_log: str = "") -> dict:
+                     dry_run: bool = False, from_log: str = "",
+                     scope: dict | None = None) -> dict:
     engine = load_engine()
     # 参数容错（2026-09-19）：智能体常传知识库名称、或 d1 之类的占位符，
     # 这里统一解析成真实 UUID，并把解析说明回传给智能体（避免下次再传错）。
@@ -1243,7 +1399,7 @@ def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
     body, pool = split_body_pool(chunks)
     doc_text = "\n\n---\n\n".join((c["content"] or "").strip() for c in body)
 
-    result = run_extraction(engine, model_key, doc_title, doc_text, from_log=from_log)
+    result = run_extraction(engine, model_key, doc_title, doc_text, from_log=from_log, scope=scope)
     model, checked = result["model"], result["checked"]
     payloads = element_payloads(engine, checked, pool)
     # 落库半段统一走 save_elements（与「设计路径」同一份实现，见 save_knowledge）
@@ -1695,7 +1851,8 @@ def start_extract_job(args: dict) -> dict:
                 high=float(args.get("high", DEFAULT_HIGH)),
                 low=float(args.get("low", DEFAULT_LOW)),
                 dry_run=bool(args.get("dry_run", False)),
-                from_log=str(args.get("from_log", "")))
+                from_log=str(args.get("from_log", "")),
+                scope=args.get("scope") or None)
             with JOBS_LOCK:
                 JOBS[job_id].update({"status": "done", "finished_at": now_text(),
                                      "doc_title": result.get("doc_title", "")})
@@ -1738,13 +1895,24 @@ def tool_definitions() -> list[dict]:
                             "再按向量相似度与存量比对 —— 高相似直接合并（追加原文证据、"
                             "定义取更完整者、版本+1、可回退），低相似新增页面，中间区间生成"
                             "「待确认合并」页由人工裁决。**只需调用一次**，不要自己重复读源文或"
-                            "自己判断与存量是否重复。"),
+                            "自己判断与存量是否重复。"
+                            "`scope` 支持**按对话收窄范围**（只抽某几类/某几条关系）："
+                            "服务端会把它写进提示词，并**在结果上再过一遍**（范围外的要素进 unmatched 并说明原因）。"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "model": {"type": "string", "description": "本体模型 key：bmm / ea"},
                     "kb_id": {"type": "string", "description": "目标知识库 UUID"},
                     "knowledge_id": {"type": "string", "description": "源文档（knowledge）UUID"},
+                    "scope": {
+                        "type": "object",
+                        "description": ("本次收窄范围（可选）：{classes:[\"ea:Step\",\"ea:Task\"], "
+                                        "relations:[\"ea:taskHasStep\"]}。"
+                                        "取值从 `ontology_types(model, focus=…)` 里挑；"
+                                        "不传 = 按该模型全量清单抽取。"),
+                        "properties": {"classes": {"type": "array", "items": {"type": "string"}},
+                                       "relations": {"type": "array", "items": {"type": "string"}}},
+                    },
                     "high": {"type": "number", "description": "合并阈值，默认 0.90"},
                     "low": {"type": "number", "description": "新增阈值，默认 0.75"},
                     "dry_run": {"type": "boolean", "description": "只算不写，默认 false"},
@@ -1802,6 +1970,21 @@ def tool_definitions() -> list[dict]:
                 "with_attributes": {"type": "boolean",
                                     "description": "是否附带 class_attributes（默认 true）"},
             }, "required": ["model"]},
+        },
+        {
+            "name": "skills",
+            "description": ("**技能目录 / 技能指令**（本服务的技能库在 `skills/<id>/SKILL.md`，单一来源）。"
+                            "不传 `skill` → 返回目录（id / name / when / models / stages / tools）；"
+                            "传 `skill` → 返回该技能**完整指令**，并附带它需要的**本体面**"
+                            "（按技能声明的 scope 收窄好的类 / 关系 / 每个类的数据属性）。"
+                            "用法：先看目录判断用哪个技能，再取全文照做 —— **不要凭记忆猜步骤**。"),
+            "inputSchema": {"type": "object", "properties": {
+                "skill": {"type": "string",
+                          "description": "技能 id（domain_modeling / ea_overview_design / "
+                                         "service_detailed_design …）；留空 = 只看目录"},
+                "model": {"type": "string",
+                          "description": "可选：本次想用的本体模型（覆盖技能默认值，如 bmm）"},
+            }},
         },
         {
             "name": "audit_scan",
@@ -1943,6 +2126,8 @@ def call_tool(name: str, args: dict) -> dict:
         return ontology_types(str(args["model"]), str(args.get("focus", "")),
                               args.get("classes") or None, args.get("relations") or None,
                               bool(args.get("with_attributes", True)))
+    if name == "skills":
+        return skills(str(args.get("skill", "")), str(args.get("model", "")))
     if name == "audit_scan":
         return ke_audit.audit(str(args["kb_id"]), str(args.get("scope", "all")),
                               int(args.get("max_findings", 50)))

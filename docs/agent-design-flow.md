@@ -270,3 +270,55 @@ OWL 表达不了的（FK 配引用、写操作非幂等需说明、同属性被 
 ```
 > E 类并入 `scope=all` ⇒ **尚未做详设的服务会各报一条 E3(low)**（"还没有详细设计"）；
 > 这是**待办信号**不是数据错误，只看详设问题时用 `--scope coupling`。
+
+## 11. 技能驱动与合并智能体（2026-09-21）
+
+### 11.1 为什么由 MCP 承载技能
+本部署的 WeKnora「技能」是**沙箱安装型**（`tenant_skills.sandbox_config_id` 非空、`bundle_ref/sha256`、
+`read_skill` 工具、`SkillSettings.vue`），而本机 `tenant_sandbox_configs` **0 行**、
+app env `WEKNORA_SANDBOX_DOCKER_ENABLED=false` —— 原生技能不可用。
+
+所以技能放在**仓库单一来源** `skills/<id>/SKILL.md`（YAML front-matter + 正文），由 MCP 的一个工具提供：
+
+| 调用 | 返回 |
+|---|---|
+| `skills()` | **目录**：id / name / when / models / stages / tools |
+| `skills(skill="<id>")` | 该技能**完整指令** + `front_matter` + **按技能声明的 `scope` 收窄好的本体面**（类 / 关系 / 每个类的数据属性） |
+
+好处：① 提示词只留"目录 + 纪律"，省 token；② 改技能**不用重新注册智能体**（mtime 缓存自动重读）；
+③ 将来开沙箱后，**同一份 SKILL.md 可直接打成 bundle** 注册成原生技能（一份源两种呈现）。
+
+### 11.2 三个技能
+| id | 名称 | 源 | 模型（front-matter） | 阶段 |
+|---|---|---|---|---|
+| `domain_modeling` | 领域知识建模 | 文档 | `models: [ea, bmm]`，default `bmm` | `extract` |
+| `ea_overview_design` | 企架概要设计 | 知识图谱 + 文档 | `models: [ea]` | `report` → `graph` |
+| `service_detailed_design` | 服务详细设计 | 服务页 + 图谱 | `models: [ea-service, ea]` | `detail` |
+
+新增技能 = 建目录写 `SKILL.md`（front-matter 必填 `id`/`name`/`when`），MCP 重启后自动出现在目录里，**无需改代码**。
+
+### 11.3 合并智能体 `bodhi-ea-modeler`
+- 绑定：企业知识 + 企业本体模型；MCP = bodhi 本体服务；工具 = 读 + `skills` + `ontology_types`
+  + `extract_and_save/extract_status` + `save_knowledge` + 待确认裁决 + `audit_scan/audit_plan`（**无原生写页工具**）。
+- 提示词很薄（≈1.3k 字符）：**先看技能目录 → 取技能全文 → 照做**；把"回执 `applied=false` 不得说已落库"
+  与"只处理点名对象"写成硬规则。
+- 注册/更新：
+```bash
+/opt/bodhi-venv/bin/python3 deploy/weknora-fork/gen_agents.py --only modeler      # 生成 agents.sql
+# 落库（免嵌套 wsl）
+/opt/bodhi-venv/bin/python3 -c "
+import pathlib,sys; sys.path.insert(0,'tools/ke-core'); import ke_db
+ke_db.psql('BEGIN;\n'+pathlib.Path('deploy/weknora-fork/config/agents.sql').read_text(encoding='utf-8')+'\nCOMMIT;\n', stdin=True)"
+```
+- 旧智能体（`bodhi-ontology-bmm` / `bodhi-ontology-ea` / `bodhi-ea-design`）**保留但可停用**（软删即可回滚）：
+```sql
+UPDATE custom_agents SET deleted_at = now() WHERE id IN
+  ('bodhi-ontology-bmm','bodhi-ontology-ea','bodhi-ea-design');
+```
+
+### 11.4 按对话收窄范围（`scope`）
+`extract_and_save(..., scope={"classes":[...], "relations":[...]})`：
+服务端把范围写进抽取提示词，**并在结果上再过一遍**（`apply_extract_scope`）——
+范围外的节点/关系进 `unmatched` 并附原因（`scope.filtered` 给出条数），**不静默丢**。
+选范围用 `ontology_types(model, focus="步骤")` 或 `classes=[...]`。
+
