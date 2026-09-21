@@ -1,0 +1,29 @@
+# bodhi2 MCP 服务（本体知识保存工具 / 技能 / 巡检）
+#
+# 用法（在解包后的 02-mcp-server 目录里执行）：
+#   cp .env.example .env && vi .env      # 改 BODHI_DB_* 为你们的 Postgres
+#   docker compose -f docker-compose.mcp.yml up -d --build
+#   docker logs -f bodhi2-mcp
+#
+# 要点：
+#   - 与 WeKnora 的 app **同一 docker 网络** → MCP URL 用容器 DNS（http://bodhi-mcp:8765/mcp），
+#     天然绕开 WeKnora 的 SSRF 白名单问题（见 ../MCP-SERVER.md §6）。
+#   - 网络名按你们 compose 实际改（常见 weknora_weknora-network / WeKnora-network）。
+services:
+  bodhi-mcp:
+    build: .
+    image: bodhi2-mcp:1.0
+    container_name: bodhi2-mcp
+    env_file: [.env]
+    restart: unless-stopped
+    ports:
+      - "8765:8765"          # 仅便于本机 curl 自检；只在内网可去掉
+    networks:
+      - weknora-network
+    volumes:
+      - ./logs:/app/logs     # 工具调用日志落到宿主机，便于取证
+
+networks:
+  weknora-network:
+    external: true
+    name: ${WEKNORA_NETWORK:-weknora-network}

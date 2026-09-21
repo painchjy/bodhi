@@ -1,0 +1,26 @@
+[Unit]
+Description=bodhi2 ontology MCP server (skill-driven design tools)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bodhi2
+# 裸机部署：直连本机 Postgres（Postgres 必须允许 TCP）
+Environment=BODHI_DB_HOST=127.0.0.1
+Environment=BODHI_DB_PORT=5432
+Environment=BODHI_DB_USER=postgres
+Environment=BODHI_DB_NAME=WeKnora
+Environment=BODHI_DB_PASSWORD=CHANGE_ME
+# 可选：Neo4j 本体投影
+#Environment=BODHI_NEO4J_HTTP=http://127.0.0.1:7474
+#Environment=NEO4J_USERNAME=neo4j
+#Environment=NEO4J_PASSWORD=CHANGE_ME
+ExecStart=/usr/bin/python3 /opt/bodhi2/tools/ontology-mcp/server.py --host 0.0.0.0 --port 8765
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -863,15 +863,29 @@ def _docker_prefix() -> list[str]:
 
 
 def psql(sql: str, stdin: bool = False) -> str:
-    cmd = _docker_prefix() + ["exec", "-i", "-e", "PGPASSWORD=" + DB_PASSWORD,
-                              DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME]
+    # 与 ke-core/ke_db.py 同口径：设了 BODHI_DB_HOST 就**直连 TCP**（容器/远端部署），
+    # 否则沿用 `docker exec psql`（本机开发）。
+    host = os.environ.get("BODHI_DB_HOST", "").strip()
+    if host:
+        import shutil  # noqa: PLC0415
+        exe = shutil.which("psql")
+        if not exe:
+            raise SystemExit("已设 BODHI_DB_HOST 但 PATH 里没有 psql 客户端（apt install postgresql-client）")
+        cmd = [exe, "-h", host, "-p", os.environ.get("BODHI_DB_PORT", "5432"),
+               "-U", DB_USER, "-d", DB_NAME]
+        env = dict(os.environ, PGPASSWORD=DB_PASSWORD)
+    else:
+        cmd = _docker_prefix() + ["exec", "-i", "-e", "PGPASSWORD=" + DB_PASSWORD,
+                                  DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME]
+        env = None
     if stdin:
         cmd += ["-v", "ON_ERROR_STOP=1", "-q", "-f", "-"]
         done = subprocess.run(cmd, input=sql, text=True, encoding="utf-8",
-                              capture_output=True, check=False)
+                              capture_output=True, check=False, env=env)
     else:
         cmd += ["-t", "-A", "-c", sql]
-        done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True, check=False)
+        done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True,
+                              check=False, env=env)
     if done.returncode != 0:
         raise SystemExit("psql 失败：%s" % (done.stderr or done.stdout)[:900])
     return done.stdout

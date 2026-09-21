@@ -1,0 +1,17 @@
+# 前端切换 overlay 片段（合并到你们自己的 docker-compose.yml）
+#
+# 用法：把下面 frontend 段的内容并进你们 compose 里的 frontend 服务（或作为 -f 附加文件）：
+#   docker compose -f docker-compose.yml -f docker-compose.bodhi2.yml up -d --no-build frontend
+#   docker restart WeKnora-frontend          # 让 nginx 重新 envsubst + 解析上游
+#
+# 前置：镜像已载入（gunzip -c weknora-ui-bodhi2.tar.gz | docker load → weknora-ui:bodhi2）
+services:
+  frontend:
+    image: weknora-ui:bodhi2
+    volumes:
+      # 覆盖 nginx 模板：含 /bodhi/ 反代 + **上游运行期解析**（重建 app 后不用再重启前端）
+      - ./default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    extra_hosts:
+      # 仅当 /bodhi/ 反代指向宿主机上的 MCP（host.docker.internal:8765）时需要；
+      # 若 MCP 也在本 compose 网络里，把模板里的 /bodhi/ 改成 http://bodhi2-mcp:8765 即可省掉这行
+      - "host.docker.internal:host-gateway"

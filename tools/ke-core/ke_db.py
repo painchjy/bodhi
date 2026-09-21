@@ -42,6 +42,10 @@ DB_CONTAINER = os.environ.get("BODHI_DB_CONTAINER", "WeKnora-postgres")
 DB_USER = os.environ.get("BODHI_DB_USER", "postgres")
 DB_NAME = os.environ.get("BODHI_DB_NAME", "WeKnora")
 DB_PASSWORD = os.environ.get("BODHI_DB_PASSWORD", "postgres123!@#")
+# 容器化/远端部署：设了 BODHI_DB_HOST 就**直连 TCP**（用本机 psql 客户端），
+# 不再 `docker exec`（容器里没有 docker CLI；也不该给 MCP 容器 docker 权限）。
+DB_HOST = os.environ.get("BODHI_DB_HOST", "").strip()
+DB_PORT = os.environ.get("BODHI_DB_PORT", "5432").strip()
 
 
 def now_text() -> str:
@@ -65,16 +69,33 @@ def _docker_prefix() -> list[str]:
     raise RuntimeError("找不到可用的 docker（Windows PATH 或 WSL 里都没有）")
 
 
+def _psql_prefix() -> list[str]:
+    """psql 调用前缀。
+
+    - `BODHI_DB_HOST` 非空 → **直连 TCP**（容器/远端部署；用镜像里的 psql 客户端，
+      口令通过子进程环境 PGPASSWORD 传递）；
+    - 否则 → 沿用本仓库既有做法 `docker exec <容器> psql`（本机开发）。
+    """
+    if DB_HOST:
+        exe = shutil.which("psql")
+        if not exe:
+            raise RuntimeError("已设 BODHI_DB_HOST 但 PATH 里没有 psql 客户端（apt install postgresql-client）")
+        return [exe, "-h", DB_HOST, "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME]
+    return _docker_prefix() + ["exec", "-i", "-e", "PGPASSWORD=" + DB_PASSWORD,
+                               DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME]
+
+
 def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
-    cmd = _docker_prefix() + ["exec", "-i", "-e", "PGPASSWORD=" + DB_PASSWORD,
-                              DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME]
+    cmd = _psql_prefix()
+    env = dict(os.environ, PGPASSWORD=DB_PASSWORD) if DB_HOST else None
     if stdin:
         cmd += ["-v", "ON_ERROR_STOP=1", "-q", "-f", "-"]
         done = subprocess.run(cmd, input=sql, text=True, encoding="utf-8",
-                              capture_output=True, check=False)
+                              capture_output=True, check=False, env=env)
     else:
         cmd += (["--csv", "-c", sql] if csv else ["-t", "-A", "-c", sql])
-        done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True, check=False)
+        done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True,
+                              check=False, env=env)
     if done.returncode != 0:
         raise RuntimeError("psql 失败：%s" % (done.stderr or done.stdout)[:600])
     return done.stdout

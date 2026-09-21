@@ -1,0 +1,92 @@
+# 本体模型知识库（交付与导入指引）
+
+> 交付物：`03-ontology-kb/`
+> - `ontology/` —— TTL 单一真源：`EA完整版.ttl`、`BMM完整版.ttl`、`extensions/*.ttl`（服务详设/归属/FD 扩展）、`shapes/*`、`lexicon/*`
+> - `tools/ontology-compiler/` —— 编译器（TTL → artifacts）
+> - `tools/ontology-extract/ontology_wiki.py` —— 把编译产物投影成「本体模型」知识库页面
+> - `artifacts/weknora/` —— 编译产物：`ontology_index.json`（类型/关系枚举/颜色）、`ontology_wiki.jsonl`（**247 页**页面清单）、`extract_config.*.json`
+> - `seed/` —— **可直接导入的种子**（无需 Python/编译器）：`ontology_kb_pages.sql`、`ontology_kb.json`、`kb_row.sql`
+> - `refresh_ontology_kb.sh` —— 一键：编译 → 生成清单 → 投影 → 重启容器
+
+## 0. 「本体模型知识库」是什么、为什么必须有
+
+它是**类型系统的运行真源**：每个本体类一页、关系在页面里表达。作用有三：
+
+1. **智能体查类型**：MCP 的 `ontology_types(model, focus?)` 返回可用类/关系/每个类允许的数据属性 —— 抽取和设计落库都按它校验；
+2. **前端下拉与图例**：编辑页的「本体类型」下拉、图谱配色都取这类清单（颜色/中文名编在 UI 产物里，见 `FRONTEND.md`）；
+3. **巡检基准**：`audit_scan` 的 B1（类型不在模型）/B2（关系不在模型）/B3（range 违反）都以它为准。
+
+实测规模（我们这版）：类 **52** ｜ 关系 **80** ｜ 数据属性 **107** ｜ 模块 **6** ｜ 轻量版提示词 **2** ｜ 索引页 **1** ＝ **248 页**。
+
+## 1. 方案 A（推荐）：按 TTL 重新生成（可随本体演进）
+
+```bash
+# ① 环境：python3（标准库即可）；数据库访问用 BODHI_DB_* 环境变量（见 MCP-SERVER.md §2）
+cd /opt/bodhi2
+export BODHI_DB_HOST=127.0.0.1 BODHI_DB_USER=postgres BODHI_DB_PASSWORD=你的口令 BODHI_DB_NAME=WeKnora
+
+# ② 编译 TTL → artifacts（幂等；只读写仓库内文件）
+python3 tools/ontology-compiler/compile.py compile --diff
+
+# ③ 生成页面清单（247 页）
+python3 tools/ontology-extract/ontology_wiki.py build
+
+# ④ 投影进知识库（**幂等**：先删 last_edit_source='ontology-wiki' 的旧页，再写）
+python3 tools/ontology-extract/ontology_wiki.py project --kb-id <本体模型知识库的 uuid>
+#    若还没有这个知识库：先在 UI 建一个空知识库「企业本体模型」，再把它的 id 填到这里
+
+# ⑤（可选）一键版：编译+投影+重启容器
+ONTOLOGY_KB_ID=<uuid> bash deploy/weknora-fork/refresh_ontology_kb.sh
+```
+
+## 2. 方案 B：直接导入种子（部署机没有 Python / 不想编译）
+
+```bash
+# ① 建一个空知识库（UI），记下它的 uuid：ONT_KB=<uuid>
+# ② 用它的 id 替换种子里的占位符，然后导入
+sed "s/__ONTOLOGY_KB_ID__/$ONT_KB/g" seed/ontology_kb_pages.sql > /tmp/ont.sql
+psql "postgresql://postgres:口令@127.0.0.1:5432/WeKnora" -v ON_ERROR_STOP=1 -f /tmp/ont.sql
+# ③ 或：直接用 JSON 清单导入（seed/ontology_kb.json，逐条 slug/title/page_type/content）
+```
+
+导入的是 `wiki_pages` 行（含 `slug / title / page_type / content / page_metadata / out_links / in_links / version`），
+**不需要** `knowledges`（文档）表 —— 本体页面是"生成型"页面，`source_refs` 为空是**正常的**（巡检对 `ontology:*` 类型豁免 C1）。
+导入后如前端树不显示，跑一次目录重建（或重启 app）：`docker restart WeKnora-app && docker restart WeKnora-frontend`。
+
+## 3. 校验（导入/生成之后必须做）
+
+```bash
+# ① 页数与类型分布（期望：Class 52 / Relation 80 / Property 107 / Module 6 / LightDoc 2 / index 1 = 248）
+psql "postgresql://postgres:口令@127.0.0.1:5432/WeKnora" -At -F' | ' -c \
+ "SELECT page_type, count(*) FROM wiki_pages WHERE knowledge_base_id='<ONT_KB>' AND deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC"
+
+# ② MCP 侧：类型枚举能取到（应能列出全部本体类，含 5 个模型 bmm / ea / ea-service / ea-ownership / bmm-fd 的类）
+curl -s "http://127.0.0.1:8765/bodhi/ontology/classes" | head -c 400
+
+# ③ 智能体侧：让智能体调 ontology_types(model="ea-service")，应返回
+#    类 easvc:ServiceOperation / easvc:BusinessAttribute …、关系 operationOperatesOnAttribute（边带 crudKind）…
+```
+
+## 4. 加/改本体类型（标准流程）
+
+```bash
+# ① 改 TTL（真源只有这里）
+vi ontology/EA完整版.ttl              # 或 ontology/extensions/*.ttl 放业务扩展
+# ② 编译 + 投影（见 §1 ②③④）
+# ③ 若改了「类清单」（新增/删除类）→ 前端类型下拉与配色需要**重建 UI 镜像**
+python3 01-frontend/frontend/patches/gen_frontend_types.py --fe /path/to/frontend && （重新构建前端）
+# ④ 巡检复检
+curl -s "http://127.0.0.1:8765/bodhi/audit?kb_id=<业务库>" | head -c 400
+```
+
+> **注意 TTL 语法**：注释里不要出现 ASCII 双引号（`"`）未闭合的情况 —— 会让 Turtle 解析失败（我们踩过）。
+> 编译报错时先 `python3 tools/ontology-compiler/compile.py compile` 看具体行号。
+
+## 5. 与业务知识库的关系（别混）
+
+| 知识库 | 内容 | 来源 | 谁写它 |
+|---|---|---|---|
+| **企业本体模型**（本包） | 类/关系/属性/模块页 | TTL 编译 | 只用本包的脚本（人来跑）|
+| 企业知识（业务） | 流程、活动、任务、服务、实体… 实例页 | 文档抽取 + 设计落库 | 智能体（`extract_and_save` / `save_knowledge`）|
+
+业务库的智能体在**查类型**时读前者；写实例时只写后者。两个库可以都给智能体绑定（智能体配置里 `knowledge_bases` 两项都填）。

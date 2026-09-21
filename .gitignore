@@ -20,3 +20,6 @@ deploy/.env
 
 # ³éÈ¡µ÷ÊÔÈÕÖ¾£ºº¬ÍêÕûÌáÊ¾´ÊÓë LLM Ô­Ê¼·µ»Ø£¬Ö»ÔÚ±¾»úÁôºÛ
 logs/
+
+# äº¤ä»˜åŒ…äº§ç‰©ï¼ˆtar.gz ä½“ç§¯å¤§ï¼Œä¸è¿› gitï¼›ç”¨ tools/delivery/pack_release.py é‡æ–°ç”Ÿæˆï¼‰
+/dist-delivery/
