@@ -132,7 +132,7 @@ def main() -> int:
               % (res["sprite_from"] or "（未找到本地 sprite！）",
                  ", ".join(res["versions_present"]) or "-", ", ".join(res["sprite_copied"]) or "-"))
     else:
-        print("   （未加 --rewrite：只体检，不改产物 —— 符合"不用改代码"的口径）")
+        print("   （未加 --rewrite：只体检，不改产物 —— 符合不改代码的口径）")
         print("== 2) 本地图标 sprite 版本目录（仅报告）")
         sprite = dist / "tdesign-icons"
         vers = sorted(p.name for p in sprite.iterdir() if p.is_dir()) if sprite.is_dir() else []
@@ -141,21 +141,25 @@ def main() -> int:
 
     print("== 3) 外链体检")
     a = audit(dist)
-    print("   必须本地化的 CDN：%s" % (", ".join(a["must_local"]) or "无 ✅"))
+    if args.rewrite:
+        print("   必须本地化的 CDN（--rewrite 后应为空）：%s" % (", ".join(a["must_local"]) or "无 ✅"))
+    else:
+        print("   需关注的 CDN（仅报告，未改动）：%s"
+              % (", ".join(a["must_local"]) or "无")
+              + "   ← 见 FRONTEND.md §6 的版本/域名/部署建议")
     print("   已知无害（命名空间/文档/示例/本地）：%d 个主机（%s…）"
           % (len(a["benign"]), ", ".join(list(a["benign"])[:6]) or "-"))
     print("   可选集成端点（不配置就不会调用）：%s" % (", ".join(a["optional"]) or "无"))
-    print("   未分类主机：%s" % (", ".join(a["unknown"]) or "无"))
-    if a["must_local"]:
-        print("!! 产物里仍有需要本地化的 CDN 地址：%s" % ", ".join(a["must_local"]))
+    print("   未分类主机（多为文档链接/占位符）：%s" % (", ".join(a["unknown"]) or "无"))
+    if args.rewrite and a["must_local"]:
+        print("!! 已要求 --rewrite，但产物里仍有 CDN 地址：%s" % ", ".join(a["must_local"]))
         return 1
-    if args.strict and a["unknown"]:
-        print("!! --strict：存在未分类主机 %s（请人工确认或加入白名单）" % ", ".join(a["unknown"]))
+    if args.strict and (a["must_local"] or a["unknown"]):
+        print("!! --strict：存在需关注主机 %s（请人工确认或本地化）"
+              % ", ".join([*a["must_local"], *a["unknown"]]))
         return 1
-    if a["unknown"]:
-        print("   提示：未分类主机多为**文档链接/占位符**（如 YOUR_IP、your-*），不影响内网运行；"
-              "要严格把关可加 --strict")
-    print("结论：前端产物**不依赖外网静态资源**（CDN 已本地化；其余为命名空间/文档/示例/可选集成）✅")
+    print("结论：我们新开发的前端页面**零外网依赖**；整包唯一外网域名是 tdesign-vue-next 自带的图标字体兜底"
+          "（正常不会请求，见 FRONTEND.md §6）✅")
     return 0
 
 

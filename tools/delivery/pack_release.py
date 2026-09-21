@@ -165,13 +165,18 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
     copy_tree(seed_dir / "sql", d / "sql")
     copy_tree(REPO / "skills", d / "skills")
     shutil.rmtree(d / "skills" / "dist", ignore_errors=True)
+    # 体检/归一化小工具随手册一起交付（FRONTEND.md §6 让用户按需自行跑）
+    copy_tree(REPO / "tools" / "delivery", d / "tools" / "delivery")
     write(d / "README.md",
           "# bodhi2 配置手册包\n\n先读 `MANUAL.md`（总指引），再按需读：\n\n"
           "- `KB-CONFIG.md` —— 自定义知识库配置（wiki_config / 页面与类型约定 / 验收）\n"
-          "- `TROUBLESHOOTING.md` —— 排错（12 条真实故障，含 SSRF / nginx 上游 / EOF）\n"
+          "- `TROUBLESHOOTING.md` —— 排错（13 条真实故障，含 SSRF / nginx 上游 / EOF）\n"
           "- `AGENTS-SQL.md` —— 智能体与 MCP 登记 SQL（可回滚）\n"
           "- `MCP-SERVER.md` / `FRONTEND.md` / `ONTOLOGY-KB.md` —— 三个包各自的部署指引\n"
-          "- `docs/` 设计与运维文档、`ontology/` 本体规范、`skills/` 技能全文\n")
+          "  （`FRONTEND.md` §6 是**外部资源依赖清单**：域名 / 版本 / 部署建议）\n"
+          "- `docs/` 设计与运维文档、`ontology/` 本体规范、`skills/` 技能全文\n"
+          "- `tools/delivery/offline_harden.py` —— 前端产物**外链体检**（只报告，不改产物；"
+          "`--rewrite` 才做本地化）；`tools/delivery/patch_version_badge.py` —— 版本徽标位置归一化\n")
     return {"manuals": [f for f in MANUALS if (d / f).is_file()]}
 
 
