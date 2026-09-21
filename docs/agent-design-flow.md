@@ -208,3 +208,65 @@ print(server.save_knowledge(KB, stage='report', model='ea', report=r, mode='dry_
 print(server.save_knowledge(KB, stage='report', model='ea', report=r, mode='apply')['page_versions'])  # before→+1
 PY
 ```
+
+## 10. 服务详细设计（2026-09-21）
+
+**口径：详设不新开保存工具** —— 用同一份「通用保存」（`save_knowledge` 的 nodes/edges），
+校验与渲染都由**本体**决定（见 §11）。详设 = 本体里多几个件 + 两个派生（都不新增工具）。
+
+### 10.1 本体件（`ontology/extensions/ea-service-ext.ttl`）
+| 件 | 形态 | 说明 |
+|---|---|---|
+| `easvc:ServiceOperation` | 类 | 服务操作/接口（一服务多操作；与 `ServiceContract` 刻意分开） |
+| `easvc:crudKind` | 数据属性（domain=`ServiceOperation`） | `C/R/U/D`，**作为 `operationOperatesOnAttribute` 边的限定属性**填写 |
+| `easvc:operationMethod` / `isIdempotent` / `transactionBoundary` | 数据属性 | 实现形态 / 幂等 / 事务边界 |
+| `easvc:keyRole` | 数据属性（domain=`BusinessAttribute`） | `PK/FK/UNIQUE/NONE`（**不建 Key 类**，避免为建模而建模） |
+| `easvc:serviceHasOperation` / `operationOfService` | 对象属性 | 服务 ↔ 操作（互逆） |
+| `easvc:operationOperatesOnAttribute` | 对象属性（边带 `crudKind`） | CRUD 本体，耦合分析的数据基础 |
+| `easvc:operationAccepts` / `operationReturns` | 对象属性 | 操作级输入/输出属性 |
+| `easvc:referencesAttribute` | 对象属性 | 外键 → 被引用属性（应指向 PK/UNIQUE） |
+| `easvc:serviceOwnsEntity` | 对象属性 | 服务负责的实体（判边界内聚） |
+
+TBox：`ServiceOperation` 至少 1 个 `operationOperatesOnAttribute` + 至少 1 个 `operationMethod`；
+OWL 表达不了的（FK 配引用、写操作非幂等需说明、同属性被 ≥2 服务写）由巡检 **E 类**兜底。
+
+### 10.2 落库（通用保存，无新工具）
+```jsonc
+{"kb_id": "...", "model": "ea", "stage": "graph", "mode": "apply",
+ "nodes": [
+   {"name": "开户服务", "type": "ea:MCPService", "definition": "...", "purpose": "..."},
+   {"name": "创建客户", "type": "easvc:ServiceOperation", "definition": "...",
+    "attributes": {"easvc:operationMethod": "MCP tool: createCustomer",
+                   "easvc:isIdempotent": "false", "easvc:transactionBoundary": "single"}},
+   {"name": "客户号", "type": "easvc:BusinessAttribute", "definition": "主键",
+    "attributes": {"easvc:keyRole": "PK"}}],
+ "edges": [
+   {"source": "开户服务", "type": "easvc:serviceHasOperation", "target": "创建客户"},
+   {"source": "创建客户", "type": "easvc:operationOperatesOnAttribute", "target": "客户号",
+    "properties": {"easvc:crudKind": "C,U"}}]}
+```
+`edges[].properties` 渲染进页面独立的 **`## 关系限定（边属性）`** 小节（刻意**不动** `## 本体关系` 行语法，
+那行被 `ke_pages` 解析成 `out_links`/`in_links`）。解析器把 `，` 当分隔符**仅当**其后是 `前缀:名=`，
+所以 `crudKind=C,U` 这种"值里带逗号"不会被拆坏。
+
+### 10.3 派生一：`## CRUD 矩阵`（服务页，确定性渲染）
+落库后自动刷新（`server.refresh_crud_matrix`；跨页聚合：服务 → 操作 → 属性 + `crudKind` + `keyRole`）。
+历史页/手工改过关系行的页用 CLI 重刷：
+```bash
+/opt/bodhi-venv/bin/python3 tools/ontology-mcp/refresh_design.py --kb 企业知识 --all-services [--dry-run]
+```
+只读视图（前端/运维）：`GET /bodhi/crud?kb_id=&slug=` → `{service, operations[], attributes{}, matrix_md}`。
+
+### 10.4 派生二：耦合与完整性巡检（E 类，只读）
+| 检查 | 判定 | 严重度 |
+|---|---|---|
+| E1 写耦合 | 同一业务属性被 **≥2 个服务**以 C/U/D 操作 | medium |
+| E2 读耦合 | 某服务读（R）的属性由**别的服务**写 | low |
+| E3 详设完整性 | 服务无操作 / 操作无被操作属性 / 缺 `operationMethod` / 写操作 `isIdempotent=false` 无幂等说明 | low–medium |
+| E4 键一致性 | `keyRole=FK` 无 `referencesAttribute`；引用目标非 PK/UNIQUE；目标页不存在 | medium |
+
+```bash
+/opt/bodhi-venv/bin/python3 tools/ke-core/ke_audit.py scan <kb> --scope coupling
+```
+> E 类并入 `scope=all` ⇒ **尚未做详设的服务会各报一条 E3(low)**（"还没有详细设计"）；
+> 这是**待办信号**不是数据错误，只看详设问题时用 `--scope coupling`。

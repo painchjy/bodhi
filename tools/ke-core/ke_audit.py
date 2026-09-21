@@ -56,7 +56,7 @@ except Exception:  # noqa: BLE001
     ke_docs = None  # type: ignore
 
 SEV = {"high": 0, "medium": 1, "low": 2}
-SCOPES = ("all", "wiki", "model", "source", "dupes")
+SCOPES = ("all", "wiki", "model", "source", "dupes", "coupling")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
@@ -339,6 +339,127 @@ def check_model_kb_pages(ctx: dict, rep: Report) -> None:
                 "模型库多 %d 个页（Neo4j 里没有对应类/模块）：%s"
                 % (len(extra), "、".join(sorted(s for s, _ in extra)[:6])),
                 "按 §6.4 口径剔除过期页（load/wikiregen 会做）")
+
+
+def check_coupling(ctx: dict, rep: Report) -> None:
+    """E（服务详细设计）：CRUD 矩阵推导出的耦合与完整性（**只读，不自动改**）。
+
+    E1 写耦合：同一业务属性被 **≥2 个 IT 服务**以 C/U/D 操作（服务边界/内聚性评审重点）；
+    E2 读耦合：某服务读（R）的属性由**别的服务**写（跨服务读依赖）；
+    E3 详设完整性：服务无操作 / 操作无被操作属性 / 缺 operationMethod / 写操作非幂等无幂等键；
+    E4 键一致性：keyRole=FK 无 referencesAttribute；引用目标非 PK/UNIQUE；PK 未被函数依赖覆盖。
+
+    数据来源与 `server.crud_model` 同一口径：**wiki 页的关系行 + 关系限定小节 + 数据属性**，
+    所以这里不 import server（ke-core 不依赖 ontology-mcp），自己走一遍页面解析。
+    """
+    pages = ctx["by_slug"]
+    contracts, ops_by_service, attr_users = {}, {}, {}
+
+    meta = ke_ontology.class_meta()
+
+    def is_service_type(type_name: str) -> bool:
+        return bool(type_name) and "ea:Service" in ke_ontology.ancestors(type_name, meta)
+
+    def data_attrs(content: str) -> dict:
+        lines = (content or "").splitlines()
+        start = next((i for i, ln in enumerate(lines) if ln.strip() == "## 属性（数据属性）"), -1)
+        if start < 0:
+            return {}
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        vals = {}
+        for idx in range(start + 1, end):
+            hit = re.match(r"^- (?P<k>[^（=]+?)(?:（[^）]*）)?\s*=\s*(?P<v>.+?)\s*$", lines[idx].strip())
+            if hit:
+                vals[hit.group("k").strip()] = hit.group("v").strip()
+        return vals
+
+    for page in pages.values():
+        for rel in ke_pages.parse_out_relations(page["content"]):
+            if rel["type"] == "easvc:serviceHasOperation" and rel["slug"]:
+                ops_by_service.setdefault(page["slug"], []).append(rel["slug"])
+    for page in pages.values():
+        if not is_service_type(page.get("page_type") or ""):
+            continue
+        service_ops = ops_by_service.get(page["slug"]) or []
+        if not service_ops:
+            rep.add("E3", "low", page["slug"],
+                    "服务「%s」还没有详细设计（没有声明任何 `easvc:serviceHasOperation` 操作）"
+                    % page["title"],
+                    "按「服务详细设计」技能补：操作（ServiceOperation）+ 操作→属性 CRUD + 主外键")
+            continue
+        for op_slug in service_ops:
+            op = pages.get(op_slug)
+            if not op:
+                continue
+            quals = {}
+            for q in ke_pages.parse_rel_qualifiers(op["content"]):
+                quals.setdefault(q["slug"], {}).update(q["properties"])
+            touched = [r for r in ke_pages.parse_out_relations(op["content"])
+                       if r["type"] == "easvc:operationOperatesOnAttribute" and r["slug"]]
+            attrs = data_attrs(op["content"])
+            if not touched:
+                rep.add("E3", "medium", op_slug,
+                        "服务操作「%s」没有声明被操作的业务属性（operationOperatesOnAttribute）"
+                        % op["title"], "补 `easvc:operationOperatesOnAttribute` + 边限定 `crudKind`")
+            if "easvc:operationMethod" not in attrs:
+                rep.add("E3", "low", op_slug,
+                        "服务操作「%s」没声明实现方式（easvc:operationMethod）" % op["title"],
+                        "补 operationMethod（HTTP 方法 / MCP tool / 函数名）")
+            idem = (attrs.get("easvc:isIdempotent") or "").strip().lower()
+            writes = []
+            for rel in touched:
+                crud = (quals.get(rel["slug"]) or {}).get("easvc:crudKind", "")
+                kinds = [k for k in ("C", "R", "U", "D") if k in (crud or "").upper()]
+                if any(k in kinds for k in ("C", "U", "D")):
+                    writes.append(rel)
+                for kind in kinds:
+                    attr_users.setdefault(rel["slug"], {}).setdefault(kind, set()).add(page["slug"])
+            # 幂等提醒**按操作报一次**（一个操作可能写多个属性，逐属性报会重复刷屏）
+            if writes and idem == "false":
+                rep.add("E3", "low", op_slug,
+                        "写操作「%s」声明 isIdempotent=false，但没有幂等/重试说明"
+                        % op["title"], "补幂等键或在契约里说明重试策略")
+    # E1/E2：按属性聚合
+    for attr_slug, by_kind in attr_users.items():
+        writers = set()
+        for kind in ("C", "U", "D"):
+            writers |= by_kind.get(kind) or set()
+        readers = by_kind.get("R") or set()
+        if len(writers) >= 2:
+            rep.add("E1", "medium", attr_slug,
+                    "写耦合：业务属性被 %d 个服务写（%s）"
+                    % (len(writers), "、".join(sorted(pages.get(w, {}).get("title") or w
+                                                      for w in writers))),
+                    "评审服务边界（同一属性的写方应收敛到一个服务，或明确主从）")
+        cross = readers - writers
+        if writers and cross:
+            rep.add("E2", "low", attr_slug,
+                    "读耦合：%s 读由 %s 写的属性"
+                    % ("、".join(sorted(pages.get(r, {}).get("title") or r for r in cross)),
+                       "、".join(sorted(pages.get(w, {}).get("title") or w for w in writers))),
+                    "确认读依赖是否经过接口（不要直接读别的服务的表）")
+    # E4：键一致性
+    for page in pages.values():
+        attrs = data_attrs(page["content"])
+        role = (attrs.get("easvc:keyRole") or "").strip().upper()
+        refs = [r for r in ke_pages.parse_out_relations(page["content"])
+                if r["type"] == "easvc:referencesAttribute" and r["slug"]]
+        if role == "FK" and not refs:
+            rep.add("E4", "medium", page["slug"],
+                    "外键属性「%s」没有声明 referencesAttribute（引用目标）" % page["title"],
+                    "补 `easvc:referencesAttribute`；目标应为被引用实体的 PK/UNIQUE 属性")
+        for rel in refs:
+            target = pages.get(rel["slug"])
+            t_role = (data_attrs(target["content"]).get("easvc:keyRole") or "").upper() if target else ""
+            if target and t_role not in ("PK", "UNIQUE"):
+                rep.add("E4", "medium", page["slug"],
+                        "外键「%s」引用的「%s」键角色是 %s（应为 PK/UNIQUE）"
+                        % (page["title"], target["title"], t_role or "未声明"),
+                        "把目标属性标为 PK/UNIQUE，或改引用正确的键属性")
+            if not target:
+                rep.add("E4", "medium", page["slug"],
+                        "外键「%s」的引用目标页面不存在（%s）" % (page["title"], rel["slug"]),
+                        "修正 referencesAttribute 目标或补建该属性页")
 
 
 def check_ontology_artifacts(ctx: dict, rep: Report) -> None:
@@ -930,6 +1051,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_sources(ctx, rep)
     if scope in ("all", "dupes"):
         check_dupes(ctx, rep)
+    if scope in ("all", "coupling"):
+        check_coupling(ctx, rep)
 
     model = ctx["model"]
     rep.data = ctx["data"]

@@ -55,6 +55,65 @@ def rel_line(label: str, rel_type: str, target: str, slug: str) -> str:
     return "- %s（`%s`）→ %s" % (label, rel_type, target)
 
 
+# ---------------------------------------------------------------------------
+# 边限定属性（「## 关系限定（边属性）」小节）
+# ---------------------------------------------------------------------------
+# 为什么单开一个小节：`## 本体关系` 的行语法被本模块解析成 out_links/in_links
+# （反向边、巡检 A1/A5、关系面板都吃它），**改语法会连带一大片**；
+# 而 CRUD 种类、幂等这类**边上的限定属性**（本体声明在源类上）只需要能读能写能渲染。
+QUAL_SECTION = "## 关系限定（边属性）"
+QUAL_LINE = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ (?P<target>.*?)："
+                       r"(?P<props>.+?)\s*$")
+
+
+def rel_qualifier_line(label: str, rel_type: str, target: str, slug: str,
+                       properties: dict) -> str:
+    """生成「关系限定（边属性）」小节的一行（`crudKind=C,U` 这类）。
+
+    分隔符用 **`；`** 而不是 `，`：值本身可能含逗号（`crudKind=C,U`），
+    用逗号当分隔符会把一个值拆成两段（2026-09-21 实测：`C,U` 被读成 `C`）。
+    """
+    pairs = "；".join("%s=%s" % (k, v) for k, v in sorted((properties or {}).items()))
+    link = ("[[%s|%s]]" % (slug, target)) if slug else target
+    return "- %s（`%s`）→ %s：%s" % (label or rel_type, rel_type, link, pairs)
+
+
+def parse_rel_qualifiers(content: str) -> list[dict]:
+    """解析「关系限定（边属性）」小节 → [{type, slug, target, label, properties, line_index}]。
+
+    与本模块的 out_links 解析**同一口径**（小节 + 行两个正则），保证渲染/回读闭环。
+    分隔符：优先 `；`（新格式，值里可含逗号）；旧数据用 `，` 分隔时按逗号兜底。
+    """
+    lines = (content or "").splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == QUAL_SECTION), -1)
+    if start < 0:
+        return []
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    out = []
+    for idx in range(start + 1, end):
+        hit = QUAL_LINE.match(lines[idx].strip())
+        if not hit:
+            continue
+        target_raw = hit.group("target")
+        slug = ""
+        link = re.search(r"\[\[([^|\]]+)\|?[^\]]*\]\]", target_raw)
+        if link:
+            slug = link.group(1)
+        raw = hit.group("props")
+        # 分隔符识别：`；` 一定分隔符；`，`/`,` **仅当**后面跟 `前缀:名=` 才算分隔符
+        # —— 否则 `crudKind=C,U` 这种"值里带逗号"会被拆成 `C` 与 `U`（2026-09-21 实测丢值）。
+        parts = re.split(r"[；;]|(?<=.)[，,](?=[A-Za-z_][\w\-]*:[^\s=]+=)", raw)
+        props = {}
+        for pair in parts:
+            if "=" in pair:
+                key, _, value = pair.partition("=")
+                props[key.strip()] = value.strip()
+        out.append({"line_index": idx, "label": hit.group("label"), "type": hit.group("type"),
+                    "target": re.sub(r"\[\[[^\]]*\]\]", "", target_raw).strip(), "slug": slug,
+                    "properties": props})
+    return out
+
+
 def _load_page(kb_id: str, slug: str) -> dict:
     rows = ke_db.psql_csv(
         "SELECT id, slug, title, COALESCE(page_type,'') AS page_type, COALESCE(content,'') AS content, "

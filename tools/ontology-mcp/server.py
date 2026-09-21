@@ -427,13 +427,11 @@ def _design_sections(element: dict) -> list[str]:
     # （那行的语法被 ke_pages 解析成 out_links/in_links，改语法会连带审计与反向边）。
     qualified = [r for r in (element.get("relations") or []) if r.get("properties")]
     if qualified:
-        lines += ["## 关系限定（边属性）", ""]
+        lines += [ke_pages.QUAL_SECTION, ""]
         for rel in qualified:
-            pairs = "，".join("%s=%s" % (k, v) for k, v in sorted(rel["properties"].items()))
-            target = rel.get("target") or ""
-            link = ("[[%s|%s]]" % (rel["target_slug"], target)) if rel.get("target_slug") else target
-            lines.append("- %s（`%s`）→ %s：%s" % (rel.get("label") or rel.get("type"),
-                                                   rel.get("type"), link, pairs))
+            lines.append(ke_pages.rel_qualifier_line(
+                rel.get("label") or rel.get("type"), rel.get("type"), rel.get("target") or "",
+                rel.get("target_slug") or "", rel.get("properties") or {}))
         lines.append("")
     incoming = element.get("incoming") or []
     if incoming:
@@ -590,10 +588,24 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
                 cur.append(ln)
         have = {ln.strip() for ln in merged if ln.startswith("## ")}
         for sec in sections:
-            if sec[0].strip() in have:
+            title_sec = sec[0].strip()
+            if title_sec == ke_pages.QUAL_SECTION:
+                # 派生小节（边限定属性）→ **每次替换**：旧行可能是旧格式（逗号分隔会被误读成多个键）
+                # 或旧的 CRUD 值；"有就跳过"会把过期内容永久留下（2026-09-21 实测）。
+                start = next((i for i, ln in enumerate(merged) if ln.strip() == title_sec), -1)
+                if start >= 0:
+                    end = next((i for i in range(start + 1, len(merged))
+                                if merged[i].startswith("## ")), len(merged))
+                    merged = merged[:start] + list(sec) + merged[end:]
+                    added_sections.append(title_sec)
+                else:
+                    merged += [""] + list(sec)
+                    added_sections.append(title_sec)
+                continue
+            if title_sec in have:
                 continue
             merged += [""] + list(sec) + [""]
-            added_sections.append(sec[0].strip())
+            added_sections.append(title_sec)
 
     post = {"definition_upgraded": bool(new_def) and len(new_def) > len(old_def),
             "evidence_added": added_evidence, "relations_added": added_relations,
@@ -918,6 +930,18 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         except Exception as exc:  # noqa: BLE001
             print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
             summary["folders_synced"] = "failed: %s" % exc
+        # 服务详细设计：刷新「服务页的 CRUD 矩阵」（跨页聚合，必须**写库之后**再读才拿得到）
+        try:
+            svc_types = service_types()
+            targets = []
+            for entry in summary["created"] + summary["merged"]:
+                slug = entry.get("slug") or entry.get("into")
+                if slug and entry.get("type") in svc_types:
+                    targets.append(slug)
+            if targets:
+                summary["crud_matrix"] = refresh_crud_matrix(kb_id, targets)
+        except Exception as exc:  # noqa: BLE001
+            summary["crud_matrix"] = "failed: %s" % exc
     summary["retagged"] = retagged or [dict(x, ok=None, note="dry_run 未执行") for x in retag_queue]
     return summary
 
@@ -1303,6 +1327,158 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str) -> dict:
     statements.append(sql_rebuild_in_links(kb_id))
     psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
     return result
+
+
+# ---------------------------------------------------------------------------
+# 服务详细设计：CRUD 矩阵（跨页聚合，确定性渲染 —— 不靠 LLM 排版）
+# ---------------------------------------------------------------------------
+CRUD_SECTION = "## CRUD 矩阵"
+CRUD_ORDER = ("C", "R", "U", "D")
+_ATTR_VALUE = re.compile(r"^- (?P<name>[^（=]+?)(?:（[^）]*）)?\s*=\s*(?P<value>.+?)\s*$")
+
+
+def service_types() -> set:
+    """「IT 服务」类的集合 = `ea:Service` 的**子类闭包**（domain 侧）。
+
+    注意别用 `target_closure("easvc:serviceHasOperation")`：那是 **range** 闭包（ServiceOperation），
+    会把操作页当成服务页（2026-09-21 实测：CRUD 矩阵刷错对象）。
+    """
+    meta = ke_ontology.class_meta()
+    out = set()
+    for name in meta:
+        try:
+            if "ea:Service" in ke_ontology.ancestors(name, meta):
+                out.add(name)
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def _page_row(kb_id: str, slug: str) -> dict | None:
+    rows = psql_csv("SELECT slug, title, COALESCE(page_type,'') AS page_type, "
+                    "       COALESCE(content,'') AS content FROM wiki_pages "
+                    "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+                    % (sql_str(kb_id), sql_str(slug)))
+    return rows[0] if rows else None
+
+
+def detail_attributes(page_content: str) -> dict:
+    """解析页里 `## 属性（数据属性）` 小节 → {prefixed: 值}（如 `easvc:keyRole` = PK）。"""
+    lines = (page_content or "").splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == "## 属性（数据属性）"), -1)
+    if start < 0:
+        return {}
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    out = {}
+    for idx in range(start + 1, end):
+        hit = _ATTR_VALUE.match(lines[idx].strip())
+        if hit:
+            out[hit.group("name").strip()] = hit.group("value").strip()
+    return out
+
+
+def crud_model(kb_id: str, service_slug: str) -> dict:
+    """把「服务 → 操作 → 属性 + crudKind」聚合出来（只读，跨页）。
+
+    数据真源是 **wiki 页的关系行**（与 in_links/关系面板同一口径）：
+      - 服务页 `## 本体关系`：`easvc:serviceHasOperation` → 操作页；
+      - 操作页 `## 本体关系`：`easvc:operationOperatesOnAttribute` → 属性页；
+      - 操作页 `## 关系限定（边属性）`：同一目标的 `easvc:crudKind`（C/R/U/D）；
+      - 属性页 `## 属性（数据属性）`：`easvc:keyRole`（PK/FK/UNIQUE）。
+    """
+    svc = _page_row(kb_id, service_slug)
+    if not svc:
+        raise ValueError("页面不存在：%s" % service_slug)
+    operations, attributes = [], {}
+    for rel in ke_pages.parse_out_relations(svc["content"]):
+        if rel["type"] != "easvc:serviceHasOperation" or not rel["slug"]:
+            continue
+        op = _page_row(kb_id, rel["slug"])
+        if not op:
+            continue
+        quals: dict = {}
+        for q in ke_pages.parse_rel_qualifiers(op["content"]):
+            quals.setdefault((q["type"], q["slug"]), {}).update(q["properties"])
+        touched = []
+        for orel in ke_pages.parse_out_relations(op["content"]):
+            if orel["type"] != "easvc:operationOperatesOnAttribute" or not orel["slug"]:
+                continue
+            crud = (quals.get((orel["type"], orel["slug"])) or {}).get("easvc:crudKind", "")
+            kinds = [k for k in CRUD_ORDER if k in (crud or "").upper()]
+            touched.append({"slug": orel["slug"], "title": orel["target"], "crud": kinds,
+                            "crud_raw": crud})
+            attr = attributes.setdefault(orel["slug"], {"slug": orel["slug"], "title": orel["target"],
+                                                        "key_role": "", "ops": {}})
+            for kind in kinds:
+                attr["ops"].setdefault(kind, []).append(op["title"])
+            if not attr["key_role"]:
+                attr_page = _page_row(kb_id, orel["slug"])
+                if attr_page:
+                    attr["key_role"] = detail_attributes(attr_page["content"]).get("easvc:keyRole", "")
+        operations.append({"slug": rel["slug"], "title": op["title"],
+                           "attrs": detail_attributes(op["content"]), "touched": touched})
+    return {"service": svc["title"], "service_slug": service_slug,
+            "operations": operations, "attributes": attributes}
+
+
+def crud_matrix_lines(kb_id: str, service_slug: str) -> list[str]:
+    """渲染 `## CRUD 矩阵` 小节（没有操作/属性时返回 []，不留空表）。"""
+    data = crud_model(kb_id, service_slug)
+    attrs = [a for a in data["attributes"].values() if a["ops"]]
+    if not attrs:
+        return []
+    lines = [CRUD_SECTION, "",
+             "> 本表由系统按**本体关系**自动生成（服务 → 操作 → 属性，`easvc:crudKind` 为边限定属性）；"
+             "改设计请去操作页的「本体关系 / 关系限定」小节，不要手改本表。", "",
+             "| 业务属性 | 键 | C | R | U | D | 涉及操作 |", "|---|---|---|---|---|---|---|"]
+    for attr in sorted(attrs, key=lambda a: a["slug"]):
+        cells = ["√" if kind in attr["ops"] else "" for kind in CRUD_ORDER]
+        ops = "、".join("%s(%s)" % (op, kind) for kind in CRUD_ORDER
+                        for op in attr["ops"].get(kind, []))
+        role = (attr.get("key_role") or "").upper() or "—"
+        lines.append("| %s | %s | %s | %s |" % (attr["title"], role, " | ".join(cells), ops))
+    writes = sum(1 for a in attrs if any(k in a["ops"] for k in ("C", "U", "D")))
+    lines += ["", "**汇总**：操作 %d 个；属性 %d 个（其中被本服务写 %d 个、只读 %d 个）。"
+              % (len(data["operations"]), len(attrs), writes, len(attrs) - writes), ""]
+    return lines
+
+
+def _replace_section(content: str, title: str, block: list[str]) -> str:
+    """把正文里的 `title` 小节替换成 `block`（不存在则追加到末尾）。"""
+    lines = (content or "").splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == title), -1)
+    if start < 0:
+        return "\n".join(lines).rstrip() + "\n\n" + "\n".join(block).rstrip() + "\n"
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    merged = lines[:start] + list(block) + lines[end:]
+    return "\n".join(merged).rstrip() + "\n"
+
+
+def refresh_crud_matrix(kb_id: str, service_slugs: list) -> dict:
+    """把服务页的 `## CRUD 矩阵` 刷成最新（读库 → 改正文 → 版本快照 + 反向边重算）。
+
+    为什么放在落库之后单独刷：矩阵是**跨页聚合**（服务 → 操作 → 属性），
+    本次新写的操作/属性页刚落库，只有写库完成后再读才拿得到。
+    """
+    done, skipped = [], []
+    for slug in sorted({s for s in (service_slugs or []) if s}):
+        try:
+            page = _page_row(kb_id, slug)
+            if not page:
+                continue
+            block = crud_matrix_lines(kb_id, slug)
+            if not block:
+                skipped.append(slug)
+                continue
+            if "\n".join(block).rstrip() in (page["content"] or ""):
+                skipped.append(slug)
+                continue
+            ke_pages.rewrite_page_content(kb_id, slug,
+                                          _replace_section(page["content"], CRUD_SECTION, block))
+            done.append(slug)
+        except Exception as exc:  # noqa: BLE001  刷矩阵失败不影响落库结果
+            skipped.append("%s(%s)" % (slug, str(exc)[:60]))
+    return {"refreshed": done, "skipped": skipped}
 
 
 def ontology_types(model_key: str, focus: str = "", classes: list | None = None,
@@ -2007,6 +2183,20 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json(data, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/ontology/targets 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/crud", "/bodhi/crud.json"):
+            # 服务详细设计的 CRUD 矩阵（只读派生视图，与页面里的小节同源）：
+            # 给前端/运维直接查「某服务读了写了哪些属性、谁是写耦合热点」。
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                kb, slug = params.get("kb_id", "") or "", params.get("slug", "") or ""
+                data = crud_model(kb, slug) if slug else {"error": "需要 slug"}
+                if isinstance(data, dict) and "error" not in data:
+                    data["matrix_md"] = "\n".join(crud_matrix_lines(kb, slug))
+                self._json(data, 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/crud 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/relations", "/bodhi/relations.json"):
