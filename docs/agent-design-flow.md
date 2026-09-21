@@ -419,3 +419,29 @@ Front-matter 要求（Go 侧 `ParseSkillFile` + `parseSkillBundleVersion`）：Y
 > 口径：**MCP 承载仍是主路**（不需要沙箱、改技能免重启、改完即生效）；开沙箱只是把同一份技能再挂到原生技能面，
 > 便于在 UI 的「技能」页里看到/勾选。开与不开都不影响 `skills()` 工具的行为。
 
+#### ⚠️ 开沙箱的硬前提：SSRF 白名单（2026-09-21 实测踩到）
+沙箱一开，app 对**出站 URL** 走严格 SSRF：`internal/utils/security.go` 的 `restrictedHostnames` 含
+`host.docker.internal`，且 `internal/mcp/security.go ValidateServiceOutboundURLs` 在**每次建 MCP 客户端前**再校验一次。
+于是 MCP 服务 URL（`http://host.docker.internal:8765/mcp`）被拒：
+
+```
+ERROR Failed to create MCP client for service bodhi_ontology:
+      MCP service URL failed SSRF validation: hostname host.docker.internal is restricted
+WARN  registerMCPTools | No MCP tools registered from 1 enabled service(s)
+INFO  stage=Agent action=tools_ready tool_count=5      # 只剩 5 个 wiki 工具（技能面整体失效）
+```
+
+症状很有迷惑性：智能体说"这些工具在我的环境里不存在"（因为它**真的**没拿到）。
+修法：`.env` 里给 `SSRF_WHITELIST_EXTRA` 补 `host.docker.internal`；**注意**该变量会**覆盖** compose 的默认值
+（`searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio`），所以要把默认一起写上。改完重建 app →
+`tool_count` 从 5 回到 **15**，`skills/audit_scan/save_knowledge/service_overview` 全部恢复。
+`enable_sandbox.sh` 已内置这一步（`--revert` 时摘除）。
+
+#### 安装生命周期（要有人管）
+- 安装是**LLM 驱动**的沙箱会话（`WeKnora Skill Installer`，工具 `edit_skill_file` / `shell_exec` / `write_skill_file`），
+  会建 venv、装依赖、最后打**快照镜像**（`tenant_skill_snapshots`：building → active → superseded）。
+- **app 重启会杀掉正在安装的会话** → 行会停在 `installing`。恢复：`POST /api/v1/sandbox-configs/{cfg}/skills/{id}/reinstall`
+  （幂等；已 ready 的重跑不影响）。
+- 观察：`docker ps | grep sandbox`（安装容器在不在）、`tenant_skills.status`、`GET /sandbox-configs/{cfg}/skills`。
+- `GET /api/v1/skills` 只在**技能可用**时返回条目（`skills_available` 字段）；安装中途会是 `false`。
+
