@@ -1488,7 +1488,9 @@ def tool_definitions() -> list[dict]:
                     },
                     "nodes": {
                         "type": "array",
-                        "description": ("细分节点：[{name, type(本体类), purpose(用途), inputs[], outputs[], "
+                        "description": ("细分节点：[{name, type(本体类，如 ea:Service / ea:APIService / "
+                                        "ea:MCPService / ea:SkillService / ea:Application), "
+                                        "purpose(用途), inputs[], outputs[], "
                                         "assertions[{id,kind:'N|E',assertion}], attributes{数据属性:值}, "
                                         "definition, description?, aliases?, retag?}]；"
                                         "服务页会自动渲染 用途/输入输出/设计规范(ASSERTION)/属性/被引用(入边)。"
@@ -1498,8 +1500,8 @@ def tool_definitions() -> list[dict]:
                     },
                     "edges": {
                         "type": "array",
-                        "description": ("关系：[{source, type(本体对象属性，如 bmm-ea-ext:applicationProvidesService / "
-                                        "bmm-ea-ext:stepUsesService), target, label?}]；"
+                        "description": ("关系：[{source, type(本体对象属性，如 ea:applicationProvidesService / "
+                                        "ea:stepUsesService), target, label?}]；"
                                         "target 可以是本次节点名，也可以是库内已有页标题（会解析成 slug）"),
                         "items": {"type": "object"},
                     },

@@ -150,17 +150,40 @@ def property_pairs(prop) -> list[tuple[str, object]]:
         ("property_kind", prop.kind),
         ("is_functional", prop.is_functional),
         ("characteristics", ",".join(prop.characteristics)),
+        # 数据属性的 range 是**字面量类型**（xsd:string 等），不是类：单独记在属性上，
+        # 不再建"外部占位类"（否则界面会显示「未定义 … range · external」，见用户 2026-09-21 反馈）。
+        ("range_literal", ",".join(prop.range_iris) if getattr(prop, "is_datatype", False) else ""),
         ("bodhi_projection", "ontology"),
     ]
 
 
+# 标准词汇命名空间：出现 range/domain 里都**不算"未定义类"**（是字面量类型或内置词汇）。
+STANDARD_VOCAB_PREFIXES = (
+    "http://www.w3.org/2001/XMLSchema#",
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "http://www.w3.org/2000/01/rdf-schema#",
+    "http://www.w3.org/2002/07/owl#",
+    "http://www.w3.org/ns/shacl#",
+)
+
+
+def is_standard_vocab(iri: str) -> bool:
+    return any((iri or "").startswith(prefix) for prefix in STANDARD_VOCAB_PREFIXES)
+
+
 def external_iris(bundle: OntologyBundleView) -> list[str]:
-    """被引用但不在本体系声明里的 IRI（外部词汇）：建占位节点，避免投影出现断边。"""
+    """被引用但不在本体系声明里的 IRI（外部词汇）：建占位节点，避免投影出现断边。
+
+    2026-09-21：**跳过标准词汇命名空间**（xsd / rdf / rdfs / owl / sh）——
+    它们多出现在**数据属性的 range**（xsd:string 等）里，属于字面量类型/内置词汇，
+    建占位类会被界面标成「未定义 … range · external」（用户实测反馈：bmm 也有）。
+    数据属性的 range 现在记在属性节点的 `range_literal` 上。
+    """
     declared = set(bundle.classes) | set(bundle.object_properties) | set(bundle.data_properties)
     found: list[str] = []
 
     def note(iri: str) -> None:
-        if iri and iri not in declared and iri not in found:
+        if iri and iri not in declared and iri not in found and not is_standard_vocab(iri):
             found.append(iri)
 
     for cls in bundle.classes.values():

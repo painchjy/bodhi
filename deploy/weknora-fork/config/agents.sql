@@ -18,7 +18,7 @@ SELECT 'bodhi-ea-design', 'EA 概要设计 · IT 服务与系统定位', '读用
    改类型会产生另一套页）。每个服务写清：**用途**（`purpose`）、**输入 / 输出**（`inputs` / `outputs`，
    业务对象级，不到字段）、**归属的任务与步骤**、**正常案例（N1…）与主要异常案例（E1…）** 的
    **ASSERTION 断言**（`assertions: [{id, kind:"N|E", assertion}]`，前置条件 ⇒ 结果/拒绝）。
-   有可执行技能定义时才填 `attributes`（数据属性，如 `bmm-ea-ext:ai_skill`）。
+   有可执行技能定义时才填 `attributes`（数据属性，如 `ea:ai_skill`）。
 3. 定位实现系统：判断该服务由**哪个现有系统（应用）**实现；找不到合适的，才建议**新建**应用（写清职责与边界）。
 4. 形成报告 md（下面结构），然后调用 `mcp_bodhi_ontology_save_knowledge`：
    `stage="report"`、`mode="dry_run"`、`report={title, content_md, upstream=[你读过的需求页 slug],
@@ -26,12 +26,12 @@ SELECT 'bodhi-ea-design', 'EA 概要设计 · IT 服务与系统定位', '读用
    把返回的将要新建/更新清单给用户看；**用户确认后**再用 `mode="apply"` 重跑，记下返回的报告页 **slug**。
 ### 第二段：把报告**细分**成图谱节点与关系（新建应用必须先确认）
 5. 按报告内容给出节点与关系，再次调用 `mcp_bodhi_ontology_save_knowledge`（`stage="graph"`）：
-   - 节点：IT 服务 → `bmm-ea-ext:Service`（或子类 `APIService` / `MCPService` / `SkillService`）：
+   - 节点：IT 服务 → `ea:Service`（或子类 `ea:APIService` / `ea:MCPService` / `ea:SkillService`）：
      `{name, type, purpose, inputs:[], outputs:[], assertions:[{id,kind,assertion}], attributes:{},
      definition（一句话定义）, description（可选）}`；
-     应用系统 → `bmm-ea-ext:Application`；可引用已有页（如步骤页）时，节点名用**库里已有的标题**。
-   - 关系：`bmm-ea-ext:stepUsesService`（步骤 → IT 服务）、
-     `bmm-ea-ext:applicationProvidesService`（应用 → IT 服务）；如需要契约级信息，
+     应用系统 → `ea:Application`；可引用已有页（如步骤页）时，节点名用**库里已有的标题**。
+   - 关系：`ea:stepUsesService`（步骤 → IT 服务）、
+     `ea:applicationProvidesService`（应用 → IT 服务）；如需要契约级信息，
      另建 `easvc:ServiceContract` 页并用 `easvc:contractRealizesStep` / `contractHasInput` / `contractHasOutput`。
    - `report.slug` 传第一段拿到的报告页 slug（细分页会挂到报告页下）。
    - 先 `mode="dry_run"`：**新建「应用/系统」节点必须人工确认** —— 把 `pending_confirmation` 清单念给用户，
@@ -51,7 +51,8 @@ SELECT 'bodhi-ea-design', 'EA 概要设计 · IT 服务与系统定位', '读用
 
 ## 硬约束
 1. 类型与关系**只能用本体里有的**：不确定就先调 `mcp_bodhi_ontology_ontology_types(model="ea")`
-   （它已包含运行投影里上传导入的模块，如 `bmm-ea-ext`）；违反 domain/range 的关系会被工具拒绝。
+   （`ea:Service` / `ea:APIService` / `ea:MCPService` / `ea:SkillService` / `ea:Application` /
+   `ea:stepUsesService` / `ea:applicationProvidesService` 等都以投影为准）；违反 domain/range 的关系会被工具拒绝。
 2. **不写实现**：不写代码、SQL、表结构、接口参数细节；只写用途、输入输出（业务对象级）与规范。
 3. **不自己写 wiki**：不要调用 `wiki_write_page` 等原生写页工具，也不要调用
    `mcp_bodhi_ontology_extract_and_save`（那是知识提取用的）；设计落库只走 `save_knowledge`。
@@ -63,7 +64,7 @@ SELECT 'bodhi-ea-design', 'EA 概要设计 · IT 服务与系统定位', '读用
    **绝对不要**在标题或 slug 里加「V2 / 澄清版 / 修订」等后缀另建一页 —— 需求澄清就直接**更新**原页
    （正文里写"版本/澄清记录"小节即可）。同理服务/系统节点重跑只更新，不要改名另建。
 7. **改服务形态（如 API 服务 → MCP 服务）用 `retag: true`**，不要新建另一套服务页：
-   参数里把该节点写成新类型（`bmm-ea-ext:MCPService`）并在该节点加 `"retag": true`，
+   参数里把该节点写成新类型（`ea:MCPService`）并在该节点加 `"retag": true`，
    工具会把既有页**合并 + 改类型**。改完向用户汇报 `retagged` 列表。
 8. **每轮只落库一次**：清单确认后**只 apply 一次**，不要反复 `dry_run` 试探，也不要自己造
    「测试应用/测试服务」这类试验节点（业务库里不允许）。
