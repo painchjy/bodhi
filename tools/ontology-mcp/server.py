@@ -1177,20 +1177,27 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
             doc_meta["title"] = "（无来源文档）"
     if not doc_meta["id"]:
         # 设计页没有源文片段，来源按方案 C 记到**需求文档**；调用方没给文档时，
-        # 就从报告页的 source_refs 继承（否则巡检 C1 会把设计页判成"无来源"）。
-        rs = ((report or {}).get("slug") or "").strip()
-        if rs:
-            rows = psql_csv("SELECT COALESCE(source_refs::text,'[]') AS refs FROM wiki_pages "
-                            "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
-                            % (sql_str(kb_id), sql_str(rs)))
-            if rows:
+        # 从 `report.slug`（报告页）**或 `report.upstream` 里的上游页**继承 source_refs
+        # —— 否则巡检 C1 会把设计页判成"无来源"（2026-09-21 实测：详设新建的属性/操作页命中 8 条 C1）。
+        cands = [((report or {}).get("slug") or "").strip()]
+        cands += [str(s).strip() for s in ((report or {}).get("upstream") or [])]
+        cands = [c for c in cands if c]
+        if cands:
+            lst = ", ".join(sql_str(c) for c in cands)
+            rows = psql_csv(
+                "SELECT slug, COALESCE(source_refs::text,'[]') AS refs FROM wiki_pages "
+                "WHERE knowledge_base_id = %s AND slug IN (%s) AND deleted_at IS NULL "
+                "ORDER BY array_position(ARRAY[%s]::text[], slug)"
+                % (sql_str(kb_id), lst, lst))
+            for row in rows:
                 try:
-                    refs = json.loads(rows[0]["refs"] or "[]")
+                    refs = json.loads(row["refs"] or "[]")
                 except Exception:  # noqa: BLE001
                     refs = []
                 if refs:
                     doc_meta["id"] = refs[0]
-                    doc_meta["title"] = doc_meta["title"] or "（继承自报告页的来源文档）"
+                    doc_meta["title"] = doc_meta["title"] or "（继承自上游页/报告页的来源文档）"
+                    break
 
     if stage == "report":
         title = ((report or {}).get("title") or "").strip()

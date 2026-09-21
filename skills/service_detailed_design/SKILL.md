@@ -42,8 +42,13 @@ guard: 键角色不建 Key 类（用 easvc:keyRole）；CRUD 只在边上给（p
    读操作 `R`，写操作 `C/U/D`。
 5. **落库**：`save_knowledge(stage="graph", mode="dry_run")` 先看清单，用户确认后 `mode="apply"`；
    服务页会自动生成 `## CRUD 矩阵`（系统渲染，别自己写表）。
+   **`report.upstream` 必须带上「服务页 + 报告页」** —— 设计页的 `source_refs` 从这里继承，
+   不带的话新页会被巡检判 C1（"实例页无来源"，high）。
 6. **汇报**：服务 → 操作数 → 属性数与键角色 → 读写分布；然后**念一遍巡检结论**
    （`audit_scan(scope="coupling")`：E1 写耦合 / E2 读耦合 / E3 完整性 / E4 键一致性）。
+
+> 完整样例：同目录 `EXAMPLE.json`（真实数据「身份三要素采集服务」：3 操作 / 5 属性 / 24 条边），
+> 照着改成目标服务即可。
 
 ## 纪律
 - **主外键不建类**：`keyRole` 是数据属性（PK/FK/UNIQUE/NONE），外键用 `referencesAttribute` 指过去。

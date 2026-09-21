@@ -249,6 +249,10 @@ OWL 表达不了的（FK 配引用、写操作非幂等需说明、同属性被 
 那行被 `ke_pages` 解析成 `out_links`/`in_links`）。解析器把 `，` 当分隔符**仅当**其后是 `前缀:名=`，
 所以 `crudKind=C,U` 这种"值里带逗号"不会被拆坏。
 
+> **落库必须带 `report.upstream`（服务页 + 报告页）**：新属性/操作页的 `source_refs` 从上游页继承
+> （`save_knowledge` 里 `report.slug` 或 `report.upstream` 任一有值即可），否则新页是"实例页无来源" → 巡检 **C1**（high）。
+> 完整样例见 `skills/service_detailed_design/EXAMPLE.json`（真实数据「身份三要素采集服务」：3 操作 / 5 属性 / 24 条边）。
+
 ### 10.3 派生一：`## CRUD 矩阵`（服务页，确定性渲染）
 落库后自动刷新（`server.refresh_crud_matrix`；跨页聚合：服务 → 操作 → 属性 + `crudKind` + `keyRole`）。
 历史页/手工改过关系行的页用 CLI 重刷：
