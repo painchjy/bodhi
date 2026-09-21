@@ -1202,17 +1202,39 @@ def ontology_types(model_key: str) -> dict:
                     "ORDER BY name")]
             except Exception:  # noqa: BLE001  投影不可用就用产物（保持旧行为）
                 proj_classes, proj_props = [], []
+            # 只把「本模块引用」与「上传导入（该前缀不在产物模块里）」的类/关系补进结果；
+            # 说明文案也**只在真有上传导入模块时**才标「产物可能过期」——
+            # 否则投影里其它模块的类会被当成漂移，出现「已用投影补录（见 B5）」的误导提示
+            # （2026-09-21：产物与投影已一致，提示却仍在）。
+            model_prefixes = {str(m.get("prefix") or "") for m in index["models"]}
+            ref_classes = {c["name"] for c in (model.get("referenced") or {}).get("classes") or []}
             have_cls = {c["name"] for c in out["classes"]}
+            uploaded_cls, referenced_cls = [], []
             for name in proj_classes:
-                if name not in have_cls:
-                    meta = ke_ontology.class_meta().get(name) or {}
+                if name in have_cls:
+                    continue
+                meta = ke_ontology.class_meta().get(name) or {}
+                if name.split(":")[0] in model_prefixes:
+                    if name not in ref_classes:
+                        continue  # 别的模块自己的类，不是本模块契约
+                    out["classes"].append({"name": name, "label": meta.get("label") or name,
+                                           "definition": meta.get("definition") or ""})
+                    referenced_cls.append(name)
+                else:
                     out["classes"].append({"name": name, "label": meta.get("label") or name,
                                            "definition": "（来自运行投影：上传导入的模块）"})
+                    uploaded_cls.append(name)
             have_rel = {r["name"] for r in out["relations"]}
+            uploaded_rel = []
             for prop in proj_props:
-                if prop["name"] not in have_rel:
-                    out["relations"].append({**prop, "note": "（来自运行投影）"})
-            # 数据属性（如 bmm-ea-ext:ai_skill）—— 设计要写"AI 技能/工具定义"，必须让智能体看得到
+                if prop["name"] in have_rel:
+                    continue
+                if str(prop["name"]).split(":")[0] in model_prefixes:
+                    out["relations"].append({**prop, "note": "（本模块引用）"})
+                else:
+                    out["relations"].append({**prop, "note": "（来自运行投影：上传导入的模块）"})
+                    uploaded_rel.append(prop["name"])
+            # 数据属性（如 ea:ai_skill）—— 设计要写"AI 技能/工具定义"，必须让智能体看得到
             try:
                 out["data_properties"] = [{"name": r["name"], "label": r.get("label") or ""}
                                           for r in ke_neo4j.query(
@@ -1222,12 +1244,13 @@ def ontology_types(model_key: str) -> dict:
                                           if r.get("name")]
             except Exception:  # noqa: BLE001
                 out["data_properties"] = []
-            if len(out["classes"]) != len(model["classes"]) or \
-                    len(out["relations"]) != len(model["relations"]):
+            if uploaded_cls or uploaded_rel:
                 out["source"] = "artifacts+projection"
-                out["note"] = ("已用 Neo4j 投影补录（产物可能过期，见巡检 B5）："
+                out["note"] = ("投影里有**上传导入、不产 JSON 产物**的模块（%s），"
+                               "其类型/关系在产物里看不到（见巡检 B5）："
                                "重编 `tools/ontology-compiler/compile.py compile`、"
-                               "重载 `deploy/bootstrap-neo4j.sh`")
+                               "重载 `deploy/bootstrap-neo4j.sh`"
+                               % "、".join(sorted(uploaded_cls + uploaded_rel)[:6]))
             return out
     raise RuntimeError("未知本体模型：%s" % model_key)
 

@@ -152,6 +152,11 @@ bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh status
 bash /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/build_frontend.sh /root/fe-build
 bash /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/deploy_frontend.sh deploy
 
+# 只改了本体类型表（ontologyTypes.ts）时的最小路径（CLEAN_SRC 干净副本已不在，别加 CLEAN_SRC）
+cp /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/frontend/ontologyTypes.ts /root/fe-build/src/utils/ontologyTypes.ts
+cd /root/fe-build && NODE_OPTIONS=--max-old-space-size=4096 npm run build && docker build -f Dockerfile -t weknora-ui:bodhi2 .
+bash /mnt/c/Users/PHJY/source/bodhi2/deploy/weknora-fork/deploy_frontend.sh deploy
+
 # 离线复放（不烧 token、不受 60s 超时影响；验证写入路径）
 cd /mnt/c/Users/PHJY/source/bodhi2/tools/ontology-mcp && python3 replay_extraction.py --dry-run
 

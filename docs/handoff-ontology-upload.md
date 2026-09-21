@@ -121,6 +121,18 @@ CLI（服务不可用时等价，必须 venv python）：
 - 重建/上线（**CLEAN_SRC 必给**，见 `build_frontend.sh` 的幂等约定）：
   `CLEAN_SRC=/root/wk080/frontend/src bash deploy/weknora-fork/build_frontend.sh /root/fe-build`
   → `bash deploy/weknora-fork/deploy_frontend.sh deploy`（镜像内自检应见 `bodhi-onto-upload`）。
+- ⚠️ 2026-09-21 实测：`/root/wk080/frontend/src`（干净源码副本）**已被清掉**，带 `CLEAN_SRC` 的整链会
+  在 `cp` 处直接失败（`cannot stat`）。此时若**只改本体类型表**（`gen_frontend_types.py` 产出的
+  `frontend/ontologyTypes.ts`，例如本体从 `bmm-ea-ext` 迁到 `ea`），不必动 Vue 补丁，走最小路径：
+  ```bash
+  cp deploy/weknora-fork/frontend/ontologyTypes.ts /root/fe-build/src/utils/ontologyTypes.ts
+  cd /root/fe-build && NODE_OPTIONS=--max-old-space-size=4096 npm run build   # ~1m50s
+  docker build -f Dockerfile -t weknora-ui:bodhi2 .
+  bash deploy/weknora-fork/deploy_frontend.sh deploy                            # 切换 + 验收
+  # 验收：docker exec WeKnora-frontend grep -o 'ea:MCPService' /usr/share/nginx/html/assets/*.js | head -1
+  ```
+  （`/root/fe-build` 的 `node_modules` 已在，无需 `npm install`；`ontologyTypes.ts` 会被 `patch_frontend.py`
+  拷到 `src/utils/`，所以直接覆盖同名文件即可。）
 
 **6.1bis 验收实测（2026-09-20 晚，经 `http://localhost/bodhi/*` 反代，与按钮完全同形）**
 
