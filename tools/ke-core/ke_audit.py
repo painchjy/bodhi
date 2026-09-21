@@ -424,11 +424,14 @@ def check_coupling(ctx: dict, rep: Report) -> None:
                     writes.append(rel)
                 for kind in kinds:
                     attr_users.setdefault(rel["slug"], {}).setdefault(kind, set()).add(page["slug"])
-            # 幂等提醒**按操作报一次**（一个操作可能写多个属性，逐属性报会重复刷屏）
-            if writes and idem == "false":
+            # 幂等提醒**按操作报一次**（一个操作可能写多个属性，逐属性报会重复刷屏）：
+            # 只有"非幂等写 + 没写重试策略（`easvc:retryPolicy`）"才提醒 —— 填了就消解
+            # （2026-09-21：让"提醒"变成可消解的设计字段，而不是永远挂着的红点）。
+            if writes and idem == "false" and not (attrs.get("easvc:operationRetryPolicy") or "").strip():
                 rep.add("E3", "low", op_slug,
-                        "写操作「%s」声明 isIdempotent=false，但没有幂等/重试说明"
-                        % op["title"], "补幂等键或在契约里说明重试策略")
+                        "写操作「%s」声明 isIdempotent=false，但没写重试/补偿策略"
+                        % op["title"],
+                        "补 `easvc:operationRetryPolicy`（重试退避/补偿与幂等键来源）")
     # E1/E2：按属性聚合
     for attr_slug, by_kind in attr_users.items():
         writers = set()

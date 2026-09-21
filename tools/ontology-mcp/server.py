@@ -583,6 +583,13 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
     }
 
 
+# 由载荷推导出来的小节（渲染器每次重算）→ 合并时**替换**而不是"已存在就跳过"
+DERIVED_SECTIONS = {
+    "## 用途", "## 输入 / 输出", "## 设计规范（正常 / 异常案例 · ASSERTION）",
+    "## 属性（数据属性）", "## 关系限定（边属性）", "## 被引用（入边）",
+}
+
+
 def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: int,
                   doc_meta: dict) -> tuple[str, dict]:
     """合并：定义取更完整的一方；追加原文证据；关系行去重后追加。不动标题/类型/其它章节。"""
@@ -668,18 +675,18 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
         have = {ln.strip() for ln in merged if ln.startswith("## ")}
         for sec in sections:
             title_sec = sec[0].strip()
-            if title_sec == ke_pages.QUAL_SECTION:
-                # 派生小节（边限定属性）→ **每次替换**：旧行可能是旧格式（逗号分隔会被误读成多个键）
-                # 或旧的 CRUD 值；"有就跳过"会把过期内容永久留下（2026-09-21 实测）。
+            if title_sec in DERIVED_SECTIONS:
+                # 派生小节（用途/输入输出/设计规范/属性/被引用/关系限定）→ **每次替换**：
+                # 它们的内容完全由本次载荷推导，"已存在就跳过"会让改设计（补属性、改 CRUD）
+                # 永远落不到已有页上（2026-09-21 实测：补 `easvc:operationRetryPolicy` 没写进去）。
                 start = next((i for i, ln in enumerate(merged) if ln.strip() == title_sec), -1)
                 if start >= 0:
                     end = next((i for i in range(start + 1, len(merged))
                                 if merged[i].startswith("## ")), len(merged))
                     merged = merged[:start] + list(sec) + merged[end:]
-                    added_sections.append(title_sec)
                 else:
                     merged += [""] + list(sec)
-                    added_sections.append(title_sec)
+                added_sections.append(title_sec)
                 continue
             if title_sec in have:
                 continue

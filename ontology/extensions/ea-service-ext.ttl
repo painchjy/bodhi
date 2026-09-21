@@ -260,6 +260,12 @@
     rdfs:range xsd:string ;
     rdfs:comment "该业务属性在实体中的键角色：PK（主键）/ FK（外键，必须配 referencesAttribute）/ UNIQUE（唯一键）/ NONE（普通属性，默认）。"@zh .
 
+:operationRetryPolicy rdf:type owl:DatatypeProperty ;
+    rdfs:label "操作重试策略"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range xsd:string ;
+    rdfs:comment "**非幂等写操作**（isIdempotent=false 且 crudKind 含 C/U/D）必须填：重试与补偿策略/幂等键来源，如『以 核查流水号 为幂等键，失败按 1/2/4s 退避重试 3 次』。巡检 E3 检查该说明是否存在（2026-09-21 新增，让提醒变成可消解的设计字段）。注意与**契约级**的 `retryPolicy`（domain=ServiceContract）区分：一个是操作级、一个是契约级。"@zh .
+
 # ============================================================
 # 四、公理约束（TBox）
 # ============================================================
