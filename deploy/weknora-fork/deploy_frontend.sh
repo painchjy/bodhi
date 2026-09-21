@@ -58,6 +58,20 @@ do_check() {
   curl -s -m 20 "http://localhost/bodhi/pending?kb_id=$KB_BIZ" \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print("  pending=%s" % len(d.get("pending",d.get("items",[]))))' 2>&1
 
+  step "F. 外部资源体检（我们新开发的页面零外链；唯一外网域名 tdesign.gtimg.com，见 FRONTEND.md §6）"
+  docker exec WeKnora-frontend sh -c '
+    printf "  index.html 绝对外链数（期望 0）: "; grep -cE "src=\"https?://|href=\"https?://" /usr/share/nginx/html/index.html || true
+    printf "  本地图标 sprite 版本（期望 0.4.1）: "; ls /usr/share/nginx/html/tdesign-icons/ 2>/dev/null | tr "\n" " "; echo
+    printf "  tdesign-vue-next 自带兜底常量命中文件数（期望 1）: "; \
+      grep -l "tdesign.gtimg.com" /usr/share/nginx/html/assets/*.js 2>/dev/null | wc -l' 2>&1
+  echo "  （完整外链分级报告：在仓库里跑 python3 tools/delivery/offline_harden.py --dist <dist>）"
+
+  step "G. 版本徽标位置（应在标题之后；补丁 v10）"
+  docker exec WeKnora-frontend sh -c '
+    f=$(grep -l "wiki-page-item-version" /usr/share/nginx/html/assets/*.js | head -1)
+    awk -v f="$f" "{i=index(\$0,\"wiki-page-item-title\"); j=index(\$0,\"wiki-page-item-version\"); \
+      if (i>0 && j>0) printf \"  %s: %s\\n\", f, (i<j ? \"OK（徽标在标题后）\" : \"!! 徽标仍在标题前\")}" "$f"' 2>&1
+
   echo
   echo "浏览器验收："
   echo "  1) http://localhost/  → 知识库「企业知识」→ wiki 列表：应见【本体】【待确认合并】tab，"

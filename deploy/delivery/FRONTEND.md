@@ -14,6 +14,7 @@
 | **本体图谱 tab** | `components/bodhi/BodhiGraphTab.vue` 等 | 知识库里第三个 tab：按本体模型渲染图谱（节点=wiki 页、边=本体关系），支持按类型过滤 |
 | **类型可视化** | `utils/ontologyTypes.ts`（**57 个类型**） | 类型彩色圆点 + 悬停中文类名；列表视图同样显示徽标；新增 `easvc:*`（服务详设）类型 |
 | **本体关系维护面板** | `components/bodhi/BodhiRelationsPanel.vue` | 阅读页右侧：出边可改/可删、入边只读；调 MCP 的 `/bodhi/relations*` |
+| **版本徽标位置** | `views/knowledge/wiki/WikiBrowser.vue`（补丁 v10） | 列表行 `v3` 徽标放在**标题之后**（放前面会让各行标题起始位置不齐，用户 2026-09-21 反馈）；`tools/delivery/patch_version_badge.py` 可对已有源码单独归一化（幂等）|
 | **类型下拉（编辑页）** | `AgentEditorModal`/知识页编辑 | 页面 `page_type` 用下拉选取（来自本体模型库编译产物），避免手打前缀出错 |
 | **上传自动生成 wiki 开关** | 知识库头部 | 打开后上传文档自动进 wiki 抽取流程 |
 | **树/列表多选批量删除** | wiki 列表页 | |
@@ -85,3 +86,62 @@ docker compose build frontend && docker compose up -d --no-build frontend
    - 发生重建时仍建议 `docker restart WeKnora-frontend` 一把（`deploy_frontend.sh` / `enable_sandbox.sh` 里都自动做了）。
 2. **`/bodhi/` 的上游地址**：模板里默认 `http://host.docker.internal:8765`（MCP 跑在宿主机时）。
    若 MCP 也进了 compose 网络，把该行改成 `proxy_pass http://bodhi-mcp:8765;`（同网络 DNS），更稳。
+
+## 6. 外部资源依赖清单（内网部署参考；**不改代码**）
+
+> 口径（用户 2026-09-21）：原生页面内网已可正常使用，所以只看**我们新开发/改动的前端页面**；
+> 若有外网 CDN，列出版本 + 域名 + 部署建议即可 —— 因此我们**没有**修改产物里的任何外链。
+
+### 6.1 我们新开发/改动的页面：**零外网依赖** ✅
+
+| 文件（我们的补丁） | `http(s)://` 出现次数 |
+|---|---|
+| `views/knowledge/wiki/BodhiGraphTab.vue`（本体图谱 tab） | **0** |
+| `views/knowledge/wiki/BodhiRelationsPanel.vue`（关系维护面板） | **0** |
+| `views/knowledge/wiki/BodhiOntologyUpload.vue`（本体上传） | **0** |
+| `utils/ontologyTypes.ts`（57 类型配色/中文名） | **0** |
+| `WikiBrowser.vue` 补丁（类型圆点、**版本徽标**、待确认裁决、多选删、编辑下拉） | **0** |
+| `KnowledgeBase.vue` 补丁（本体图谱 tab、上传自动生成 wiki 开关） | **0** |
+
+- 这些页面只调用**同源**接口：`/bodhi/*`（nginx 反代到 MCP 服务）与 `/api/v1/*`（WeKnora app）；
+- 用到的图标来自产品自带的**本地离线 sprite**（`/tdesign-icons/0.4.1/fonts/index.js`），不走 CDN；
+- 无外部字体、无外部图片、无外部脚本。
+
+### 6.2 整包唯一的外网域名（`tdesign-vue-next` 自带，非我们引入）
+
+| 项 | 值 |
+|---|---|
+| **域名** | `tdesign.gtimg.com` |
+| **路径** | `/icon/<版本>/fonts/index.js`、`/icon/<版本>/fonts/index.css` |
+| **版本** | 组件内置版本表：**0.4.0 / 0.4.1 / 0.4.2 / 0.4.3 / 0.4.4**（默认常量指向 **0.4.2**） |
+| 出现在 | `assets/tdesign-icon-offline-*.js`（打包后的 tdesign-vue-next `Icon` 组件） |
+| 触发条件 | **仅当运行时没找到已加载的图标 sprite 才会去取**。上游 `index.html` 已提前加载本地 sprite（注释点名 tdesign issue #867/#897），所以正常使用**不会请求**该域名 |
+| 我们是否改动 | **没有**（与上游完全一致，产物里仍是 3 处常量） |
+
+### 6.3 部署建议（按你们内网策略三选一）
+
+1. **直接阻断（推荐）**：默认运行不需要它；最坏情况只是个别图标缺失/回退，不影响功能与数据。
+   验证方法：浏览器 F12 → Network 过滤 `tdesign.gtimg.com`（正常应为 **0 条**请求）。
+2. **放行白名单**：若要求图标绝不缺失，在出口放行 `tdesign.gtimg.com`（HTTPS/443）。
+3. **要"零外网 URL"（可选，需重新打包）**：
+   `python3 tools/delivery/offline_harden.py --dist <dist> --rewrite` —— 把该常量改成本地
+   `/tdesign-icons/<版本>/fonts/index.js`，并把 sprite 补齐到 0.4.0–0.4.4 目录，然后重建镜像。
+   **默认不启用**（本次按"不改代码"口径未做）。
+
+### 6.4 其余扫到的主机名都是"不会被请求"的
+
+XML 命名空间（`w3.org` / `openxmlformats.org` / `purl.org` …）、文档链接（`github.com`、`vuejs.org` …）、
+示例占位（`*.example.com`、`YOUR_IP`、`your-*`）、以及**可选渠道/模型集成端点**
+（`api.openai.com`、`open.feishu.cn`、`open.larksuite.com`、`dashscope.aliyuncs.com` …）——
+只有你们在设置里配了对应渠道/模型才会调用，不配置就没人访问。
+
+体检命令（**只报告，不改产物**）：
+
+```bash
+python3 tools/delivery/offline_harden.py --dist /path/to/frontend/dist
+# 也可直接查镜像：
+docker run --rm --entrypoint sh weknora-ui:bodhi2 -c '
+  grep -cE "src=\"https?://|href=\"https?://" /usr/share/nginx/html/index.html   # → 0
+  grep -o "https://tdesign.gtimg.com/icon/" /usr/share/nginx/html/assets/tdesign-icon-offline-*.js | wc -l   # → 3（自带的兜底常量）
+  ls /usr/share/nginx/html/tdesign-icons/'                                       # → 0.4.1（本地 sprite）
+```

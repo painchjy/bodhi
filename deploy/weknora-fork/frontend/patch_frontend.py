@@ -1165,6 +1165,47 @@ def patch_knowledgebase(fe: pathlib.Path) -> None:
     print("  KnowledgeBase.vue 完成（%d 字节）" % len(text.encode("utf-8")))
 
 
+def patch_version_badge_last(fe: pathlib.Path) -> None:
+    """v10（用户 2026-09-21）：**版本徽标挪到行末**。
+
+    徽标（`v3`）原先在标题**前** → 每行标题起始位置不齐（用户："放前面不整齐"）。
+    这里把两处（目录树行 / 扁平列表行）的徽标统一移到标题之后，并保持原来的 `margin-left: 6px`。
+    幂等：已经是目标位置时什么都不改（可反复运行）。
+    """
+    path = fe / "src" / "views" / "knowledge" / "wiki" / "WikiBrowser.vue"
+    text = path.read_text(encoding="utf-8")
+    before = text
+    tree_badge = ('<span v-if="(item.page.version || 1) > 1" '
+                  'class="wiki-page-item-version">v{{ item.page.version }}</span>')
+    flat_badge = ('<span v-if="(item.version || 1) > 1" '
+                  'class="wiki-page-item-version">v{{ item.version }}</span>')
+
+    def move(badge: str, anchor: str, indent: str) -> bool:
+        nonlocal text
+        if badge not in text or text.count(anchor) != 1:
+            return False
+        stripped, n = re.subn(r"[ \t]*" + re.escape(badge) + r"[ \t]*\r?\n", "", text, count=1)
+        if not n:
+            return False
+        text = stripped.replace(anchor, anchor + "\n" + indent + badge, 1)
+        return True
+
+    moved_tree = move(tree_badge, '<span class="wiki-page-item-title">{{ item.page.title }}</span>',
+                      "                      ")
+    moved_flat = move(flat_badge, '<span class="wiki-page-item-title-text">{{ item.title }}</span>',
+                      "                      ")
+    # 兜底：旧写法「徽标紧跟 t-tooltip」若还在，直接删掉（标题锚点没命中时才会走到）
+    text = re.sub(r"[ \t]*" + re.escape(tree_badge) + r"\r?\n(?=[ \t]*<t-tooltip)", "", text, count=1)
+    text = re.sub(r"[ \t]*" + re.escape(flat_badge) + r"\r?\n(?=[ \t]*<t-tooltip)", "", text, count=1)
+
+    if text != before:
+        path.write_text(text, encoding="utf-8")
+    print("  树行徽标：%s ｜ 列表行徽标：%s ｜ 文件变化：%s"
+          % ("已移到标题后" if moved_tree else "已在目标位置",
+             "已移到标题后" if moved_flat else "已在目标位置",
+             "是" if text != before else "否"))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="给 WeKnora 前端打本体感知补丁")
     parser.add_argument("--fe", required=True, help="前端源码目录（构建副本）")
@@ -1211,6 +1252,8 @@ def main() -> int:
     # 放在 patch_wikibrowser_v4 之后：v4 链里最后一步 patch_knowledgebase_v5 已经把
     # 「上传自动生成 wiki」开关插进面包屑，v6 的锚点就是它。
     patch_knowledgebase_v6(fe)
+    print("== 6) v10 批次（2026-09-21 版本徽标挪到行末：放标题前会不整齐） ==")
+    patch_version_badge_last(fe)
     print("== 完成 ==")
     return 0
 

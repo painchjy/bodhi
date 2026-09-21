@@ -79,6 +79,27 @@ npm run build
 echo "  dist: $(du -sh dist | cut -f1)  files=$(find dist -type f | wc -l)"
 
 echo
+echo "== 5.5) 外链体检（只报告，不改产物） =="
+# 我们新开发的页面零外链；唯一的外网域名是 tdesign-vue-next 内置的图标字体兜底常量
+# （https://tdesign.gtimg.com/icon/<版本>/fonts/index.js，见 FRONTEND.md §6 的清单与部署建议）。
+# 严格隔离内网若要本地化它，可显式加 --rewrite。
+python3 "$HERE/../../tools/delivery/offline_harden.py" --dist dist
+
+echo
+echo "== 5.6) 版本徽标冒烟（应在标题之后出现，见 patch_frontend v10） =="
+node - <<'JS'
+const fs = require('fs');
+let hit = 'none';
+for (const f of fs.readdirSync('dist/assets')) {
+  if (!f.endsWith('.js')) continue;
+  const t = fs.readFileSync('dist/assets/' + f, 'utf8');
+  const i = t.indexOf('wiki-page-item-title'), j = t.indexOf('wiki-page-item-version');
+  if (i >= 0 && j >= 0) { hit = (i < j ? 'OK（徽标在标题后）' : '!! 徽标仍在标题前') + ' @ ' + f; break; }
+}
+console.log('  ' + hit);
+JS
+
+echo
 echo "== 6) docker build -> $TAG =="
 docker build -f Dockerfile -t "$TAG" .
 docker images --format '{{.Repository}}:{{.Tag}}  {{.Size}}' | grep -F "$TAG" || true
