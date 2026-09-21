@@ -367,12 +367,31 @@ def element_slug(model_key: str, element: dict) -> str:
                          hashlib.sha1(element["name"].encode("utf-8")).hexdigest()[:12])
 
 
+def element_page_slug(model: dict, element: dict) -> str:
+    """页面 slug：设计载荷自带 `slug`（按**节点自身类所属模块**算，如 `bmm-ea-ext/apiservice/…`）；
+    没有时才按模型 key 推导（抽取路径的原行为，保持不变）。"""
+    explicit = (element.get("slug") or "").strip()
+    return explicit or element_slug(model["key"], element)
+
+
+def same_type_family(a: str, b: str) -> bool:
+    """两个本体类是否同一族（相等或同一继承链）——用于「只在同类页之间做合并」的守卫。"""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    try:
+        return a in ke_ontology.ancestors(b) or b in ke_ontology.ancestors(a)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_index: int,
                    doc_meta: dict) -> dict:
     """新要素 -> 页面（与 ontology_wiki/weknora_sync 同风格：能被人读，也能被图谱用）。"""
-    slug = element_slug(model["key"], element)
     rels = element.get("relations") or []
     upstream = [s for s in (element.get("upstream") or []) if s]
+    slug = element_page_slug(model, element)
     lines = ["# %s（`%s`）" % (element["name"], element["type"]), "",
              "> **本体类型**：%s（`%s`）  " % (element["type_label"], element["type"]),
              "> **来源**：《%s》%s  " % (doc_meta["title"],
@@ -392,9 +411,10 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         lines.append("")
     if upstream:
         # 方案 C 溯源：来源**文档**写在 `## 原文依据`；上游**页面**写在这里（设计页没有源文片段）
+        # 注意：循环变量不要叫 slug —— 会覆盖上面的页面 slug（2026-09-21 沙箱实测踩到）
         lines += ["## 溯源", ""]
-        for slug in upstream:
-            lines.append("- 上游页面：`%s`" % slug)
+        for up in upstream:
+            lines.append("- 上游页面：`%s`" % up)
         lines.append("")
     return {
         "slug": slug, "title": element["name"], "page_type": element["type"],
@@ -538,7 +558,11 @@ def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
         "page_metadata = EXCLUDED.page_metadata, aliases = EXCLUDED.aliases, "
         "source_refs = EXCLUDED.source_refs, chunk_refs = EXCLUDED.chunk_refs, "
         "deleted_at = NULL, version = wiki_pages.version + 1, "
-        "last_edit_source = %s, updated_at = now()" % sql_str(TOOL_TAG))
+        "last_edit_source = %s, updated_at = now() "
+        # 只对**软删除**行做「复活+覆盖」；活页被同一个 id 命中说明 slug 撞了（同要素应走合并），
+        # 这时**不得**改写已有活页的 title/page_type —— 2026-09-21 沙箱实测：设计节点把报告页那行
+        # 覆盖成了「注册信息登记服务 / bmm-ea-ext:APIService」。
+        "WHERE wiki_pages.deleted_at IS NOT NULL" % sql_str(TOOL_TAG))
     return ("INSERT INTO wiki_pages (%s) VALUES (%s) %s;"
             % (", ".join(PAGE_COLUMNS), ", ".join(values), conflict))
 
@@ -631,7 +655,7 @@ def sql_rebuild_in_links(kb_id: str) -> str:
 def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_meta: dict,
                   *, high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW, dry_run: bool = False,
                   tenant_id: int | None = None, resolved_note: str = "", knowledge_id: str = "",
-                  extra: dict | None = None, engine=None) -> dict:
+                  extra: dict | None = None, engine=None, same_type_only: bool = False) -> dict:
     """**落库半段**（抽取路径与设计路径共用）：相似度匹配 → 合并/新增/待确认 → 写页 → 重算 links。
 
     这段逻辑原先内联在 `extract_and_save` 里（2026-09-20 原样抽出，行为逐字保留）：
@@ -655,16 +679,22 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         summary.update(extra)
 
     for element in payloads:
-        sim, candidate = pick_match(element, pages)
-        # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），
-        # 直接走合并；否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
-        exact = next((p for p in pages if p["slug"] == element_slug(model["key"], element)), None)
+        # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），直接走合并；
+        # 否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
+        exact = next((p for p in pages if p["slug"] == element_page_slug(model, element)), None)
         if exact is not None:
             sim, candidate = 1.0, exact
+        else:
+            # 同类型守卫（设计路径开启）：只在同一本体类族（相等或同一继承链）的页之间做相似度合并，
+            # 避免「设计节点并进报告页/需求页」这类跨类误合并（2026-09-21 沙箱实测事故）。
+            pool = ([p for p in pages if same_type_family(element["type"], p.get("page_type"))]
+                    if same_type_only else pages)
+            sim, candidate = pick_match(element, pool)
         if candidate is not None and sim >= high:
             content, post = merge_content(candidate["content"], element, element["chunk_id"],
                                           element["chunk_index"], doc_meta)
-            source_refs = union_list(candidate.get("source_refs"), [doc_meta["id"]])
+            source_refs = union_list(candidate.get("source_refs"),
+                                     [doc_meta["id"]] if doc_meta.get("id") else [])
             chunk_refs = union_list(candidate.get("chunk_refs"),
                                     [element["chunk_id"]] if element["chunk_id"] else [])
             metadata = candidate.get("page_metadata") or {}
@@ -811,7 +841,8 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
         accepted += [{"source": name, "type": r["type"], "target": r["target"]} for r in rels]
         payloads.append({
             "name": name, "type": node["type"], "type_label": node["_type_label"],
-            "module": node["_module"], "definition": node.get("definition") or "",
+            "module": node["_module"], "slug": slug_by_name[name],
+            "definition": node.get("definition") or "",
             "description": node.get("description") or "",
             "source_text": node.get("source_text") or "（概要设计，无原文片段）",
             "chunk_id": "", "chunk_index": -1, "relations": rels,
@@ -868,7 +899,7 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
         checked = {"edges": [], "violations": [], "unmatched": []}
         summary = save_elements(kb_id, model_obj, checked, [element], doc_meta, high=high, low=low,
                                 dry_run=(mode != "apply"), tenant_id=tenant_id,
-                                resolved_note=kb_note, engine=engine)
+                                resolved_note=kb_note, engine=engine, same_type_only=True)
         summary["stage"] = "report"
         return summary
 
@@ -887,7 +918,7 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
             allowed.append(payload)
     summary = save_elements(kb_id, model_obj, checked, allowed, doc_meta, high=high, low=low,
                             dry_run=(mode != "apply"), tenant_id=tenant_id,
-                            resolved_note=kb_note, engine=engine)
+                            resolved_note=kb_note, engine=engine, same_type_only=True)
     summary["stage"] = "graph"
     summary["pending_confirmation"] = blocked
     report_slug = ((report or {}).get("slug") or "").strip()
