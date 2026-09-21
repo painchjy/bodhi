@@ -142,14 +142,14 @@ def pkg_ontology(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
     copy_tree(REPO / "artifacts", d / "artifacts")
     shutil.copy2(REPO / "deploy" / "weknora-fork" / "refresh_ontology_kb.sh",
                  d / "refresh_ontology_kb.sh")
-    copy_tree(seed_dir, d / "seed")
+    copy_tree(seed_dir, d)          # seed_dir 内就是 seed/ 与 sql/ 两层 → 直接铺到包根
     write(d / "README.md", (DELIVERY / "ONTOLOGY-KB.md").read_text(encoding="utf-8"))
     pages = 0
     seed_sql = d / "seed" / "ontology_kb_pages.sql"
     if seed_sql.is_file():
         pages = sum(1 for ln in seed_sql.read_text(encoding="utf-8").splitlines()
                     if ln.startswith("INSERT INTO wiki_pages"))
-    return {"seed_pages": pages}
+    return {"seed_pages": pages, "layout": sorted(p.name for p in d.iterdir())}
 
 
 def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
