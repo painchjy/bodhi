@@ -62,7 +62,9 @@ ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
 #   —— 用户 2026-09-21 口径：这类问题提示后**直接给命令**，不走 plan_id 确认流程
 ONTOLOGY_INDEX = HERE.parents[1] / "artifacts" / "weknora" / "ontology_index.json"
-ARTIFACT_FIX = "/opt/bodhi-venv/bin/python3 tools/ontology-compiler/compile.py compile --diff"
+ARTIFACT_FIX = ("/opt/bodhi-venv/bin/python3 tools/ontology-compiler/compile.py compile --diff"
+                "（产物含前端类型清单 ontologyTypes.ts 的来源；重编后需重建/部署前端才会在界面出现新分类："
+                "bash deploy/weknora-fork/build_frontend.sh && bash deploy/weknora-fork/deploy_frontend.sh）")
 PROJECTION_FIX = "bash deploy/bootstrap-neo4j.sh"
 # 结构性/上游页：不属于「实例页」，C1/A6/B1 一律豁免
 NON_INSTANCE = ("index", "summary")

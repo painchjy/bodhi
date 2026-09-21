@@ -85,21 +85,27 @@ def psql_csv(sql: str) -> list[dict]:
 
 
 def resolve_kb_id(raw: str) -> tuple[str, str, str]:
-    """把 kb_id 参数解析成真实 UUID：支持 UUID / 知识库名称（精确或包含，忽略空格）。
+    """把 kb_id 参数解析成真实 UUID：支持 UUID / UUID 前缀 / 知识库名称（精确或包含，忽略空格）。
 
-    与 `server.resolve_kb_id` 同口径（2026-09-19 实测：智能体常把**名称**当 id 传）。
-    区别：这里返回 `(kb_id, name, note)`，且**找不到就抛错** —— 巡检/清理绝不能对不存在的
-    知识库静默返回空结果（否则会得到"0 页 0 问题"的假清白报告，2026-09-20 用户实测踩到）。
+    与 `server.resolve_kb_id` 同口径（2026-09-19 实测：智能体常把**名称**当 id 传；
+    2026-09-21 实测：它还会**自己编**一个短串，如 `b1`）→ 因此报错信息里**必须带 id**，
+    否则调用方无从纠正；这里也支持用 UUID 前缀（如 `dbc2528f`）解析。
     """
     raw = (raw or "").strip()
-    if re.fullmatch(r"[0-9a-fA-F-]{36}", raw):
-        rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE id = %s AND deleted_at IS NULL"
-                        % sql_str(raw))
-        if rows:
-            return rows[0]["id"], rows[0]["name"], ""
-        raise ValueError("知识库不存在：%s（按 UUID 找，但没有这个库）" % raw)
     rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
                     "ORDER BY updated_at DESC")
+    options = "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in rows) or "（无）"
+    if re.fullmatch(r"[0-9a-fA-F-]{36}", raw):
+        hit = [r for r in rows if r["id"].lower() == raw.lower()]
+        if hit:
+            return hit[0]["id"], hit[0]["name"], ""
+        raise ValueError("知识库不存在：%s（按 UUID 找，但没有这个库）；可选：%s" % (raw, options))
+    if re.fullmatch(r"[0-9a-fA-F-]{4,35}", raw):
+        hit = [r for r in rows if r["id"].lower().startswith(raw.lower())]
+        if len(hit) == 1:
+            return hit[0]["id"], hit[0]["name"], "（kb_id「%s」按 UUID 前缀解析为 %s）" % (raw, hit[0]["id"])
+        if len(hit) > 1:
+            raise ValueError("UUID 前缀不唯一：%s → %s" % (raw, "、".join(r["name"] for r in hit)))
 
     def _norm(text: str) -> str:
         return re.sub(r"[\s\u3000]+", "", text or "")
@@ -112,10 +118,10 @@ def resolve_kb_id(raw: str) -> tuple[str, str, str]:
             return (hit[0]["id"], hit[0]["name"],
                     "（kb_id「%s」按名称解析为 %s）" % (raw, hit[0]["id"]))
         if len(hit) > 1:
-            raise ValueError("知识库名称不唯一：%s → %s"
-                             % (raw, "、".join(r["name"] for r in hit)))
-    raise ValueError("知识库不存在：%s；可选：%s"
-                     % (raw or "(空)", "、".join(r["name"] for r in rows) or "（无）"))
+            raise ValueError("知识库名称不唯一：%s → %s；请改用 id"
+                             % (raw, "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in hit)))
+    raise ValueError("知识库不存在：%s；**请把可选清单里的 id 原样传给 kb_id**，可选：%s"
+                     % (raw or "(空)", options))
 
 
 def sql_str(value) -> str:

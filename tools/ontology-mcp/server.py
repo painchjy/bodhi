@@ -87,6 +87,7 @@ from ke_db import (  # noqa: E402,F401  （psql/sql_* 由同目录脚本 server.
     now_text as _now_text, psql, psql_csv, sql_json, sql_str,
 )
 import ke_ontology  # noqa: E402
+import ke_db  # noqa: E402  （模块级引用：resolve_kb_id 等）
 import ke_admin  # noqa: E402
 import ke_pages  # noqa: E402
 import ke_docs  # noqa: E402  （按来源文档统计/清理本体实例，2026-09-20）
@@ -262,32 +263,13 @@ PAGE_COLUMNS = [
 
 
 def resolve_kb_id(raw: str) -> tuple[str, str]:
-    """把 kb_id 参数解析成真实 UUID：支持 UUID / 知识库名称（精确或包含）。
+    """把 kb_id 参数解析成真实 UUID：支持 UUID / UUID 前缀 / 知识库名称（精确或包含）。
 
-    2026-09-19 实测：智能体传的是知识库**名称**（如「企业知识库」）而不是 UUID，
-    老实现直接抛「知识库不存在」导致整次抽取失败。这里做容错解析，并把说明回传给
-    智能体，让它下次直接用真实 id。
+    统一委托给 `ke_db.resolve_kb_id`（2026-09-21）：那里的报错**带 id**（形如
+    `企业知识（dbc2528f…）`），调用方（智能体）能照着纠正 —— 实测它会自己编 `b1` 这种串。
     """
-    raw = (raw or "").strip()
-    if re.fullmatch(r"[0-9a-fA-F-]{36}", raw):
-        return raw, ""
-    rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
-                    "ORDER BY updated_at DESC")
-
-    def _norm(s: str) -> str:
-        return re.sub(r"[\s　]+", "", s or "")
-
-    if raw:
-        want = _norm(raw)
-        hit = [r for r in rows if _norm(r["name"]) == want] \
-            or [r for r in rows if _norm(r["name"]) in want or want in _norm(r["name"])]
-        if len(hit) == 1:
-            return hit[0]["id"], "（kb_id「%s」按名称解析为 %s）" % (raw, hit[0]["name"])
-        if len(hit) > 1:
-            raise RuntimeError("知识库名称不唯一：%s → %s"
-                               % (raw, "、".join(r["name"] for r in hit)))
-    raise RuntimeError("知识库不存在：%s；可选：%s"
-                       % (raw or "(空)", "、".join(r["name"] for r in rows) or "（无）"))
+    kb_id, _name, note = ke_db.resolve_kb_id(raw)
+    return kb_id, note
 
 
 def resolve_knowledge_id(kb_id: str, raw: str) -> tuple[str, str]:
@@ -376,15 +358,67 @@ def element_page_slug(model: dict, element: dict) -> str:
 
 
 def same_type_family(a: str, b: str) -> bool:
-    """两个本体类是否同一族（相等或同一继承链）——用于「只在同类页之间做合并」的守卫。"""
+    """两个本体类是否「同类族」——相等、同一继承链、或**同根**（如 APIService 与 MCPService 同属 Service）。
+
+    为什么放宽到同根（2026-09-21 实测）：智能体第二次跑时把服务类型从 `APIService` 改成 `MCPService`，
+    严格继承判定认为不同族 → 各建一套页（用户看到"2 套服务"）。同根判定既能合并这类兄弟类，
+    又能挡住跨域误合并（如把 `bmm:Goal` 并进 `ea:Step`）。
+    """
     if not a or not b:
         return False
     if a == b:
         return True
     try:
-        return a in ke_ontology.ancestors(b) or b in ke_ontology.ancestors(a)
+        chain_a = list(ke_ontology.ancestors(a))   # 由近及远，末位是根
+        chain_b = list(ke_ontology.ancestors(b))
     except Exception:  # noqa: BLE001
         return False
+    if a in chain_b or b in chain_a:
+        return True
+    return bool(chain_a) and bool(chain_b) and chain_a[-1] == chain_b[-1]
+
+
+def _design_sections(element: dict) -> list[str]:
+    """把设计载荷里的结构化字段渲染成 wiki 小节（服务页要能自解释：用途/输入输出/规范/属性/被引用）。
+
+    字段约定（设计智能体按此给 JSON）：
+      purpose(str) / inputs(list[str]) / outputs(list[str])
+      assertions(list[{id, kind(N|E), assertion}])
+      attributes(dict{本体属性名: 值})           # 数据属性（如 ai_skill）
+      incoming(list[{source_title, type}])        # 由 design_elements 反推的入边
+    """
+    lines: list[str] = []
+    purpose = (element.get("purpose") or "").strip()
+    if purpose:
+        lines += ["## 用途", "", purpose, ""]
+    inputs = [str(x).strip() for x in (element.get("inputs") or []) if str(x).strip()]
+    outputs = [str(x).strip() for x in (element.get("outputs") or []) if str(x).strip()]
+    if inputs or outputs:
+        lines += ["## 输入 / 输出", "", "| 方向 | 业务对象 |", "|---|---|"]
+        lines += ["| 输入 | %s |" % x for x in inputs]
+        lines += ["| 输出 | %s |" % x for x in outputs]
+        lines.append("")
+    assertions = element.get("assertions") or []
+    if assertions:
+        lines += ["## 设计规范（正常 / 异常案例 · ASSERTION）", "",
+                  "| 编号 | 类型 | 断言 |", "|---|---|---|"]
+        for a in assertions:
+            kind = "正常" if str(a.get("kind", "N")).upper().startswith("N") else "异常"
+            lines.append("| %s | %s | %s |" % (a.get("id", ""), kind, a.get("assertion", "")))
+        lines.append("")
+    attributes = element.get("attributes") or {}
+    if attributes:
+        lines += ["## 属性（数据属性）", ""]
+        for name, value in attributes.items():
+            lines.append("- %s：%s" % (name, value))
+        lines.append("")
+    incoming = element.get("incoming") or []
+    if incoming:
+        lines += ["## 被引用（入边）", ""]
+        for edge in incoming:
+            lines.append("- 「%s」（`%s`）→ 本页" % (edge.get("source_title", ""), edge.get("type", "")))
+        lines.append("")
+    return lines
 
 
 def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_index: int,
@@ -401,6 +435,7 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
              (element.get("definition") or "（暂无定义）").strip(), ""]
     if element.get("description"):
         lines += ["## 判定依据", "", element["description"].strip(), ""]
+    lines += _design_sections(element)
     lines += ["## 原文依据", "",
               "- %s（来源：《%s》%s）" % (element.get("source_text", "").strip(), doc_meta["title"],
                                         (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""), ""]
@@ -503,9 +538,26 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
             merged += ["", "## 溯源", ""] + ["- 上游页面：`%s`" % s for s in upstream] + [""]
             added_upstream = list(upstream)
 
+    design_lines = _design_sections(element)
+    added_sections = []
+    if design_lines:
+        sections, cur = [], None
+        for ln in design_lines:
+            if ln.startswith("## "):
+                cur = [ln]
+                sections.append(cur)
+            elif cur is not None:
+                cur.append(ln)
+        have = {ln.strip() for ln in merged if ln.startswith("## ")}
+        for sec in sections:
+            if sec[0].strip() in have:
+                continue
+            merged += [""] + list(sec) + [""]
+            added_sections.append(sec[0].strip())
+
     post = {"definition_upgraded": bool(new_def) and len(new_def) > len(old_def),
             "evidence_added": added_evidence, "relations_added": added_relations,
-            "upstream_added": added_upstream}
+            "upstream_added": added_upstream, "design_sections_added": added_sections}
     return "\n".join(merged).rstrip() + "\n", post
 
 
@@ -679,6 +731,8 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     if extra:
         summary.update(extra)
 
+    retagged: list = []
+    retag_queue: list = []
     for element in payloads:
         # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），直接走合并；
         # 否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
@@ -686,8 +740,8 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         if exact is not None:
             sim, candidate = 1.0, exact
         else:
-            # 同类型守卫（设计路径开启）：只在同一本体类族（相等或同一继承链）的页之间做相似度合并，
-            # 避免「设计节点并进报告页/需求页」这类跨类误合并（2026-09-21 沙箱实测事故）。
+            # 同类型守卫（设计路径开启）：只在同一本体类族（相等、同一继承链，或**同根**）的页之间做
+            # 相似度合并，避免「设计节点并进报告页/需求页」这类跨类误合并（2026-09-21 沙箱实测事故）。
             pool = ([p for p in pages if same_type_family(element["type"], p.get("page_type"))]
                     if same_type_only else pages)
             sim, candidate = pick_match(element, pool)
@@ -714,6 +768,14 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                                               source_refs, chunk_refs, metadata))
             summary["merged"].append({"name": element["name"], "type": element["type"],
                                       "into": candidate["slug"], "similarity": sim, **post})
+            # 类型变更（retag）：用户口径「把 API 服务改为 MCP 服务」= 改既有页的类型，
+            # 不是再建一份（2026-09-21 实测：不加这个能力就会出 2 套服务）。
+            want_type = element["type"]
+            if element.get("retag") and candidate.get("page_type") \
+                    and candidate["page_type"] != want_type \
+                    and same_type_family(candidate["page_type"], want_type):
+                retag_queue.append({"slug": candidate["slug"], "from": candidate["page_type"],
+                                    "to": want_type, "name": element["name"], "similarity": sim})
             candidate.update({"content": content, "summary": new_summary,
                               "source_refs": source_refs, "chunk_refs": chunk_refs,
                               "page_metadata": metadata})
@@ -747,6 +809,13 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     if not dry_run and statements:
         statements.append(sql_rebuild_in_links(kb_id))
         psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
+        # 类型变更（retag）：批量写完后逐条改类型（快照 + 重建 category_path），再统一同步一次目录
+        for item in retag_queue:
+            try:
+                res = ke_pages.set_page_type(kb_id, item["slug"], item["to"], sync_folders=False)
+                retagged.append({**item, "ok": True, "version": res.get("version")})
+            except Exception as exc:  # noqa: BLE001
+                retagged.append({**item, "ok": False, "error": str(exc)[:160]})
         # 落库后**自动重建该知识库的目录树**（用户 2026-09-19 口径）：
         # 不重建的话前端树是平铺的（老问题）。目录 id 是 UUIDv5 确定性生成、逻辑幂等，
         # 所以每次落库后同步一遍是安全的；同步失败不影响本次结果（只记录状态）。
@@ -757,6 +826,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         except Exception as exc:  # noqa: BLE001
             print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
             summary["folders_synced"] = "failed: %s" % exc
+    summary["retagged"] = retagged or [dict(x, ok=None, note="dry_run 未执行") for x in retag_queue]
     return summary
 
 
@@ -832,6 +902,14 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
                                              "target": dst, "target_slug": dst_slug,
                                              "source_text": edge.get("source_text", "")})
 
+    incoming_map: dict = {}
+    for edge in edges:
+        rel_type = (edge.get("type") or "").strip()
+        src = (edge.get("source") or "").strip()
+        dst = (edge.get("target") or "").strip()
+        if dst and src and rel_type:
+            incoming_map.setdefault(dst, []).append({"source_title": src, "type": rel_type})
+
     accepted = []
     payloads = []
     for node in nodes:
@@ -845,6 +923,14 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "module": node["_module"], "slug": slug_by_name[name],
             "definition": node.get("definition") or "",
             "description": node.get("description") or "",
+            # 概要设计字段（服务页要自解释：用途/输入输出/ASSERTION 规范/数据属性/被引用入边）
+            "purpose": node.get("purpose") or node.get("definition") or "",
+            "inputs": node.get("inputs") or [],
+            "outputs": node.get("outputs") or [],
+            "assertions": node.get("assertions") or [],
+            "attributes": node.get("attributes") or {},
+            "retag": bool(node.get("retag")),   # true = 合并进既有页时**同时把该页类型改成 element 的类型**
+            "incoming": incoming_map.get(name, []),
             "source_text": node.get("source_text") or "（概要设计，无原文片段）",
             "chunk_id": "", "chunk_index": -1, "relations": rels,
             "upstream": upstream, "aliases": node.get("aliases") or [],
@@ -890,8 +976,25 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
         body = ((report or {}).get("content_md") or "").strip()
         if not title or not body:
             raise ValueError("stage=report 需要 report.title 与 report.content_md")
+        slug = ((report or {}).get("slug") or "").strip()
+        if not slug:
+            # 幂等（2026-09-21 用户实测：第二次跑把标题改成「…V2 需求澄清版」→ 又建一页，太乱）：
+            # 同一需求文档 / 同一上游页 的既有**报告页**直接复用它的 slug（= 更新，不新建）。
+            conds = []
+            if doc_meta.get("id"):
+                conds.append("source_refs @> %s::jsonb" % sql_json([doc_meta["id"]]))
+            ups = [s for s in ((report or {}).get("upstream") or []) if s]
+            if ups:
+                conds.append("page_metadata->'design'->'upstream' @> %s::jsonb" % sql_json(ups[:1]))
+            if conds:
+                rows = psql_csv(
+                    "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                    "AND COALESCE(page_type,'') = 'summary' AND (%s) "
+                    "ORDER BY updated_at DESC LIMIT 1" % (sql_str(kb_id), " OR ".join(conds)))
+                if rows:
+                    slug = rows[0]["slug"]
         element = {"name": title, "type": (report or {}).get("page_type") or "summary",
-                   "type_label": "概要设计报告", "module": model,
+                   "type_label": "概要设计报告", "module": model, "slug": slug,
                    "definition": body, "description": "",
                    "source_text": "概要设计报告（由设计智能体生成、人工确认后落库）",
                    "chunk_id": "", "chunk_index": -1, "relations": [],
@@ -1090,6 +1193,16 @@ def ontology_types(model_key: str) -> dict:
             for prop in proj_props:
                 if prop["name"] not in have_rel:
                     out["relations"].append({**prop, "note": "（来自运行投影）"})
+            # 数据属性（如 bmm-ea-ext:ai_skill）—— 设计要写"AI 技能/工具定义"，必须让智能体看得到
+            try:
+                out["data_properties"] = [{"name": r["name"], "label": r.get("label") or ""}
+                                          for r in ke_neo4j.query(
+                        "MATCH (p:BodhiOntProperty {property_kind:'datatype'}) "
+                        "WHERE p.bodhi_projection = 'ontology' AND p.prefixed IS NOT NULL "
+                        "RETURN DISTINCT p.prefixed AS name, p.label AS label ORDER BY name")
+                                          if r.get("name")]
+            except Exception:  # noqa: BLE001
+                out["data_properties"] = []
             if len(out["classes"]) != len(model["classes"]) or \
                     len(out["relations"]) != len(model["relations"]):
                 out["source"] = "artifacts+projection"
@@ -1359,8 +1472,12 @@ def tool_definitions() -> list[dict]:
                     },
                     "nodes": {
                         "type": "array",
-                        "description": ("细分节点：[{name, type(本体类，如 bmm-ea-ext:Service / "
-                                        "bmm-ea-ext:Application), definition, description, aliases?}]"),
+                        "description": ("细分节点：[{name, type(本体类), purpose(用途), inputs[], outputs[], "
+                                        "assertions[{id,kind:'N|E',assertion}], attributes{数据属性:值}, "
+                                        "definition, description?, aliases?, retag?}]；"
+                                        "服务页会自动渲染 用途/输入输出/设计规范(ASSERTION)/属性/被引用(入边)。"
+                                        "**类型变更（如 API 服务→MCP 服务）用 `retag: true`**：命中同根类的既有页时"
+                                        "合并并改类型，不会新建第二份"),
                         "items": {"type": "object"},
                     },
                     "edges": {
