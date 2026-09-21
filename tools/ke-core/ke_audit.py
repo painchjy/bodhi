@@ -22,6 +22,7 @@ A（wiki ↔ 图谱）：A1 悬空出边 / A2 反向边(in_links)不一致 / A3 
   A4 关系类型非法(domain 继承) / A5 重复关系行与自环 / A6 元数据缺失
 B（图谱 ↔ 模型）：B1 类型不在模型 / B2 关系不在模型 / B3 range 违反 /
   B4（本体模型库）投影与页不一致
+  B5（本体投影 ↔ 编译产物不一致）：修复**直接给命令**（重编产物 / 重载投影），不走 plan_id
 C（来源异常）：C1 无来源实例页 / C2 来源文档已删或不存在 / C3 正文称有来源但 `source_refs` 空 /
   C4 图侧实例无溯源
 D（重复/幂等）：D1 同语义多页 / D2 软删残留与活页并存 / D3 孤儿版本快照
@@ -58,6 +59,11 @@ SEV = {"high": 0, "medium": 1, "low": 2}
 SCOPES = ("all", "wiki", "model", "source", "dupes")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
+# B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
+#   —— 用户 2026-09-21 口径：这类问题提示后**直接给命令**，不走 plan_id 确认流程
+ONTOLOGY_INDEX = HERE.parents[1] / "artifacts" / "weknora" / "ontology_index.json"
+ARTIFACT_FIX = "/opt/bodhi-venv/bin/python3 tools/ontology-compiler/compile.py compile --diff"
+PROJECTION_FIX = "bash deploy/bootstrap-neo4j.sh"
 # 结构性/上游页：不属于「实例页」，C1/A6/B1 一律豁免
 NON_INSTANCE = ("index", "summary")
 NON_INSTANCE_PREFIX = ("ontology:",)
@@ -331,6 +337,65 @@ def check_model_kb_pages(ctx: dict, rep: Report) -> None:
                 "模型库多 %d 个页（Neo4j 里没有对应类/模块）：%s"
                 % (len(extra), "、".join(sorted(s for s, _ in extra)[:6])),
                 "按 §6.4 口径剔除过期页（load/wikiregen 会做）")
+
+
+def check_ontology_artifacts(ctx: dict, rep: Report) -> None:
+    """B5：Neo4j 本体投影（**运行真源**）与编译产物 `artifacts/` 是否一致。
+
+    为什么需要：**通过本体上传接口导入的模块不产 json**（见 docs/session-handoff.md §3.4bis），
+    于是 `ontology_types` 工具、抽取契约（`extract_config.*.json`）、SHACL、前端类型候选都可能看不到
+    新类/新关系（2026-09-21 实测：上传的 `bmm-ea-ext` 模块在投影里有、产物里没有）。
+    本检查只读，**修复直接给命令**（不走 plan_id 确认流程）。
+    """
+    import json as _json
+    try:
+        proj_classes = {r["name"] for r in ke_neo4j.query(
+            "MATCH (c:BodhiOntClass) WHERE c.bodhi_projection = 'ontology' "
+            "AND coalesce(c.external, false) = false AND c.prefixed IS NOT NULL "
+            "RETURN DISTINCT c.prefixed AS name") if r.get("name")}
+        proj_props = {r["name"] for r in ke_neo4j.query(
+            "MATCH (p:BodhiOntProperty) WHERE p.bodhi_projection = 'ontology' "
+            "AND p.prefixed IS NOT NULL RETURN DISTINCT p.prefixed AS name") if r.get("name")}
+    except Exception as exc:  # noqa: BLE001
+        rep.add("B5", "medium", ctx["kb_id"], "无法读 Neo4j 本体投影：%s" % exc, PROJECTION_FIX)
+        return
+    try:
+        index = _json.loads(ONTOLOGY_INDEX.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        rep.add("B5", "high", ctx["kb_id"], "读不到编译产物 %s：%s" % (ONTOLOGY_INDEX, exc),
+                ARTIFACT_FIX)
+        return
+    art_classes, art_props, modules = set(), set(), []
+    for model in (index.get("models") or []):
+        modules.append(str(model.get("key") or ""))
+        for cls in (model.get("classes") or []):
+            if cls.get("name"):
+                art_classes.add(cls["name"])
+        for rel in (model.get("relations") or []):
+            if rel.get("name"):
+                art_props.add(rel["name"])
+    only_proj_c = sorted(proj_classes - art_classes)
+    only_art_c = sorted(art_classes - proj_classes)
+    only_proj_p = sorted(proj_props - art_props)
+    only_art_p = sorted(art_props - proj_props)
+    ctx["data"]["ontology_artifacts"] = {
+        "projection": {"classes": len(proj_classes), "properties": len(proj_props)},
+        "artifacts": {"classes": len(art_classes), "properties": len(art_props),
+                      "modules": modules},
+        "projection_only": {"classes": only_proj_c[:20], "properties": only_proj_p[:20]},
+        "artifacts_only": {"classes": only_art_c[:20], "properties": only_art_p[:20]},
+        "fix_commands": {"recompile": ARTIFACT_FIX, "reload_projection": PROJECTION_FIX},
+    }
+    if only_proj_c or only_proj_p or only_art_c or only_art_p:
+        rep.add("B5", "medium", ctx["kb_id"],
+                "本体投影与编译产物不一致：投影 %d 类/%d 属性，产物 %d 类/%d 属性（产物模块：%s）。"
+                "投影有产物无 → 类 %s；属性 %s。产物有投影无 → 类 %s；属性 %s。"
+                % (len(proj_classes), len(proj_props), len(art_classes), len(art_props),
+                   "、".join(m for m in modules[:8] if m) or "—",
+                   "、".join(only_proj_c[:6]) or "—", "、".join(only_proj_p[:6]) or "—",
+                   "、".join(only_art_c[:6]) or "—", "、".join(only_art_p[:6]) or "—"),
+                "① 重编产物：%s；② 重载投影：%s（两步都是直接命令，无需计划确认）"
+                % (ARTIFACT_FIX, PROJECTION_FIX))
 
 
 # ---------------------------------------------------------------------------
@@ -842,6 +907,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_wiki_graph(ctx, rep)
     if scope in ("all", "model"):
         check_graph_model(ctx, rep)
+        check_ontology_artifacts(ctx, rep)
     if scope in ("all", "source"):
         check_sources(ctx, rep)
     if scope in ("all", "dupes"):

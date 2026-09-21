@@ -52,6 +52,7 @@
 | B2 | 关系不在模型 | 关系类型不是模型里的对象属性 | high | ❌ 同上 |
 | B3 | range 违反 | 用 `ke_ontology.target_closure(rel_type)` 判：目标页类型不在允许范围内 | high | ❌ |
 | B4 | 模型库页 vs 投影 | 本体模型库：Neo4j 的模块/类 与 `ontology:Class`/`ontology:Module` 页一一对应（`ontology/index` 总览页豁免） | medium | ✅ 重投影（`/bodhi/ontology/wiki`） |
+| B5 | **本体投影 ↔ 编译产物不一致** | 投影（运行真源，含上传导入的模块）的类/属性 与 `artifacts/weknora/ontology_index.json` 对比；两侧差集都报（投影独有 = 上传模块未编进产物；产物独有 = 投影加载不全） | medium | ✅ **直接命令，不走 plan_id**：① 重编产物 `/opt/bodhi-venv/bin/python3 tools/ontology-compiler/compile.py compile --diff`；② 重载投影 `bash deploy/bootstrap-neo4j.sh` |
 | C1 | **无来源实例页** | 实例页 `source_refs` 为空（`index`/`summary`/`ontology:*` 豁免） | high | ✅ 清理（P2） |
 | C2 | **来源文档已删/不存在** | `source_refs` 指向 `knowledges.deleted_at` 非空或行不存在（复用 `ke_docs.doc_index`） | high | ✅ 清理（复用 `ke_docs`） |
 | C3 | 正文称有来源但无溯源 | 非实例页正文含 `（来源：`/`<sources>` 而 `source_refs` 空 | low | ❌ 上游页，不动 |
