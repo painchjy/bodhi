@@ -395,6 +395,97 @@ def relation_type_map(page_type: str) -> dict[str, dict]:
     return {r["prefixed"]: r for r in relation_types_for(page_type)["relation_types"]}
 
 
+# ---------------------------------------------------------------------------
+# 数据属性（datatype property）—— 「通用保存」的 schema 一半
+# ---------------------------------------------------------------------------
+# 为什么需要：节点上的 `attributes`（如 `ea:ai_skill`）与边上的限定属性（如 `easvc:crudKind`）
+# 必须由**本体**决定「这个类允许哪些属性」，否则扩展一处就要改一次工具/校验代码；
+# 本体的真源是 Neo4j 投影（上传导入的模块不产 JSON，见 docs/session-handoff.md §3.4bis）。
+# 声明在这些类上的数据属性 = **全局可用**（OWL 里的顶层通配；`bmm:name`/`bmm:definition` 就声明在 owl:Thing）
+_GLOBAL_DOMAINS = {"http://www.w3.org/2002/07/owl#Thing", "http://www.w3.org/2000/01/rdf-schema#Resource"}
+# 常见标准命名空间 → 短前缀（range 展示用；避免页面里出现整条 IRI）
+_STD_PREFIXES = (
+    ("http://www.w3.org/2001/XMLSchema#", "xsd:"),
+    ("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "rdf:"),
+    ("http://www.w3.org/2000/01/rdf-schema#", "rdfs:"),
+    ("http://www.w3.org/2002/07/owl#", "owl:"),
+    ("http://www.w3.org/ns/shacl#", "sh:"),
+)
+
+
+def short_iri(iri: str) -> str:
+    """把 IRI 缩成 prefixed 形式（`xsd:string` / `bmm:Goal`），拿不准就原样返回。
+
+    用于页面展示（数据属性 range）与 `ontology_types.class_attributes`：长 IRI 在正文里很难读。
+    """
+    text = (iri or "").strip()
+    if not text:
+        return ""
+    for base, prefix in _STD_PREFIXES:
+        if text.startswith(base):
+            return prefix + text[len(base):]
+    for prefix, base in (index_data().get("namespace") or {}).items():
+        if base and text.startswith(base):
+            return "%s:%s" % (prefix, text[len(base):])
+    return text
+
+
+_DATA_PROP_CACHE: dict | None = None
+_DATA_PROP_STAMP = None
+
+
+def data_properties() -> dict:
+    """全部数据属性：{prefixed: {label, module, range_literal, domains[]}}。
+
+    `domains` 来自投影的 `BODHI_DOMAIN` 边（该数据属性声明在哪些类上）；
+    没有声明 domain 的（老 TTL）→ `domains=[]`，调用方按「任意类都允许」处理。
+    """
+    global _DATA_PROP_CACHE, _DATA_PROP_STAMP
+    stamp = index_stamp()
+    if _DATA_PROP_CACHE is not None and stamp == _DATA_PROP_STAMP:
+        return dict(_DATA_PROP_CACHE)
+    props: dict[str, dict] = {}
+    source = "neo4j"
+    try:
+        if not ke_neo4j.available():
+            raise RuntimeError("Neo4j 投影为空或不可用")
+        for row in ke_neo4j.query(
+                "MATCH (p:BodhiOntProperty) WHERE p.bodhi_projection = 'ontology' "
+                "AND toLower(coalesce(p.property_kind,'')) = 'datatype' AND p.prefixed IS NOT NULL "
+                "OPTIONAL MATCH (p)-[:BODHI_DOMAIN]->(d:BodhiOntClass) "
+                "RETURN p.prefixed AS prefixed, coalesce(p.label,'') AS label, "
+                "       coalesce(p.module,'') AS module, coalesce(p.range_literal,'') AS range_literal, "
+                "       collect(DISTINCT d.prefixed) AS domains ORDER BY p.prefixed"):
+            name = row.get("prefixed")
+            if not name:
+                continue
+            props[name] = {"prefixed": name, "label": row.get("label") or name,
+                           "module": row.get("module") or "", "range_literal": row.get("range_literal") or "",
+                           "domains": [d for d in (row.get("domains") or []) if d]}
+    except Exception as exc:  # noqa: BLE001  JSON 产物只有计数、没有名单 → 只能空表兜底
+        source = "unavailable: %s" % exc
+    _DATA_PROP_CACHE = {"source": source, "properties": props}
+    _DATA_PROP_STAMP = stamp
+    return dict(_DATA_PROP_CACHE)
+
+
+def data_properties_for(type_name: str) -> dict[str, dict]:
+    """某类（含其祖先）允许的数据属性 —— 节点 `attributes` / 边限定属性的白名单。
+
+    规则：数据属性声明在 `domains` 里的任一类**或其祖先**上即允许（继承语义）；
+    `domains` 为空、或声明在 `owl:Thing` / `rdfs:Resource` 上的视为**全局可用**
+    （如 `bmm:name` / `bmm:definition` 这类通用属性，不该被判"未声明"）。
+    """
+    all_props = data_properties()["properties"]
+    chain = set(ancestors(type_name)) if type_name else set()
+    out: dict[str, dict] = {}
+    for name, meta in all_props.items():
+        domains = set(meta.get("domains") or [])
+        if not domains or (domains & _GLOBAL_DOMAINS) or (chain & domains):
+            out[name] = meta
+    return out
+
+
 def target_closure(rel_type: str, meta: dict[str, dict] | None = None) -> list[str]:
     """某对象属性的 range 闭包（range 类 + 其所有子类）——「能连到哪些类」。"""
     meta = meta or class_meta()

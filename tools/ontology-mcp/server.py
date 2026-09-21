@@ -412,9 +412,28 @@ def _design_sections(element: dict) -> list[str]:
         lines.append("")
     attributes = element.get("attributes") or {}
     if attributes:
+        # 本体当 schema：属性名（中文标签，range）由本体元数据渲染，不靠调用方排版
+        known = ke_ontology.data_properties_for(element.get("type") or "")
         lines += ["## 属性（数据属性）", ""]
         for name, value in attributes.items():
-            lines.append("- %s：%s" % (name, value))
+            meta = known.get(name) or {}
+            suffix = ""
+            if meta:
+                rng = ke_ontology.short_iri(meta.get("range_literal") or "")
+                suffix = "（%s%s）" % (meta.get("label") or "", ("，%s" % rng) if rng else "")
+            lines.append("- %s%s = %s" % (name, suffix, value))
+        lines.append("")
+    # 边限定属性（如 `easvc:crudKind` = CRUD 种类）：单独小节，**不动 `## 本体关系` 的行格式**
+    # （那行的语法被 ke_pages 解析成 out_links/in_links，改语法会连带审计与反向边）。
+    qualified = [r for r in (element.get("relations") or []) if r.get("properties")]
+    if qualified:
+        lines += ["## 关系限定（边属性）", ""]
+        for rel in qualified:
+            pairs = "，".join("%s=%s" % (k, v) for k, v in sorted(rel["properties"].items()))
+            target = rel.get("target") or ""
+            link = ("[[%s|%s]]" % (rel["target_slug"], target)) if rel.get("target_slug") else target
+            lines.append("- %s（`%s`）→ %s：%s" % (rel.get("label") or rel.get("type"),
+                                                   rel.get("type"), link, pairs))
         lines.append("")
     incoming = element.get("incoming") or []
     if incoming:
@@ -945,6 +964,16 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             continue
         node["_module"] = info.get("module") or model_key
         node["_type_label"] = info.get("label") or cls
+        # 通用校验（本体当 schema）：节点 attributes 的键必须在本体里声明为该类（或祖先）的数据属性。
+        # **不拦写入**（blocking=False）：历史数据/新模块可能还没把数据属性补进本体，
+        # 这里只回报，让"扩展本体"有明确信号；要长期使用就补 `ontology/*.ttl` 或走上传导入。
+        allowed_attrs = ke_ontology.data_properties_for(cls)
+        for attr_name in (node.get("attributes") or {}):
+            if attr_name not in allowed_attrs:
+                violations.append({"kind": "attribute", "name": name, "type": cls,
+                                   "attribute": attr_name, "blocking": False,
+                                   "reason": "本体里没有为该类声明这个数据属性（该模块可用：%s）"
+                                             % ("、".join(sorted(allowed_attrs)[:8]) or "无")})
         slug_by_name[name] = element_slug(node["_module"],
                                          {"name": name, "type": cls})
 
@@ -973,7 +1002,20 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             continue
         outgoing.setdefault(src, []).append({"type": rel_type, "label": edge.get("label", ""),
                                              "target": dst, "target_slug": dst_slug,
+                                             "properties": dict(edge.get("properties") or {}),
                                              "source_text": edge.get("source_text", "")})
+        # 边限定属性（如 `easvc:crudKind`）：本体当 schema —— 允许的是**源类**（或祖先）声明的数据属性。
+        props = dict(edge.get("properties") or {})
+        if props:
+            src_type = next((n.get("type") for n in nodes
+                             if (n.get("name") or "").strip() == src), "") or _graph_target_type(src)
+            allowed_src = ke_ontology.data_properties_for(src_type)
+            for prop_name in props:
+                if prop_name not in allowed_src:
+                    violations.append({"kind": "edge-property", "source": src, "type": rel_type,
+                                       "property": prop_name, "blocking": False,
+                                       "reason": "本体里没有为源类 %s 声明这个数据属性（可用：%s）"
+                                                 % (src_type or "?", "、".join(sorted(allowed_src)[:8]) or "无")})
 
     incoming_map: dict = {}
     for edge in edges:
@@ -1263,8 +1305,15 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str) -> dict:
     return result
 
 
-def ontology_types(model_key: str) -> dict:
+def ontology_types(model_key: str, focus: str = "", classes: list | None = None,
+                   relations: list | None = None, with_attributes: bool = True) -> dict:
     """某本体模型的类与关系清单（供智能体选类型/关系）。
+
+    2026-09-21 收窄参数（「领域知识建模」技能按对话缩范围用）：
+      - `focus`：关键词（匹配类/关系的中文 label 或 prefixed，大小写不敏感）；
+      - `classes` / `relations`：显式白名单（prefixed）；给了白名单就以它为准。
+    2026-09-21 数据属性：每个类带 `attributes`（该类+祖先允许的数据属性，见 ke_ontology.data_properties_for）
+      —— 「通用保存」的 schema 一半：节点 attributes 的键、边限定属性的键都按它校验，不再是硬编码。
 
     2026-09-21：**以 Neo4j 投影为真源补录**（`ke_ontology.class_meta()` 已含上传导入模块），
     否则上传的新模块（如 `bmm-ea-ext`）在旧产物里看不到 —— 表现就是智能体"看不见新类型/新关系"
@@ -1333,6 +1382,31 @@ def ontology_types(model_key: str) -> dict:
                 else:
                     out["relations"].append({**prop, "note": "（来自运行投影：上传导入的模块）"})
                     uploaded_rel.append(prop["name"])
+            # 收窄：显式白名单优先，其次关键词（匹配 prefixed 或中文 label）
+            key = (focus or "").strip().lower()
+            cls_list = [c for c in out["classes"]
+                        if (not classes or c["name"] in set(classes))
+                        and (not key or key in c["name"].lower()
+                             or key in (c.get("label") or "").lower())]
+            rel_list = [r for r in out["relations"]
+                        if (not relations or r["name"] in set(relations))
+                        and (not key or key in r["name"].lower()
+                             or key in (r.get("label") or "").lower())]
+            if key or classes or relations:
+                out["classes"], out["relations"] = cls_list, rel_list
+                out["narrowed"] = {"focus": focus or "", "classes": len(cls_list),
+                                   "relations": len(rel_list)}
+            if with_attributes:
+                # 「通用保存」的 schema：每个类允许哪些数据属性（类 + 祖先声明）
+                attrs = {}
+                for cls in out["classes"]:
+                    allowed = ke_ontology.data_properties_for(cls["name"])
+                    if allowed:
+                        attrs[cls["name"]] = [
+                            {"name": a["prefixed"], "label": a.get("label") or "",
+                             "range": ke_ontology.short_iri(a.get("range_literal") or "")}
+                            for a in sorted(allowed.values(), key=lambda x: x["prefixed"])]
+                out["class_attributes"] = attrs
             # 数据属性（如 ea:ai_skill）—— 设计要写"AI 技能/工具定义"，必须让智能体看得到
             try:
                 out["data_properties"] = [{"name": r["name"], "label": r.get("label") or ""}
@@ -1536,9 +1610,22 @@ def tool_definitions() -> list[dict]:
         },
         {
             "name": "ontology_types",
-            "description": "返回某本体模型的可用类与关系（含 domain/range），供核对类型是否合法。",
-            "inputSchema": {"type": "object", "properties": {"model": {"type": "string"}},
-                            "required": ["model"]},
+            "description": ("返回某本体模型的可用类与关系（含 domain/range），供核对类型是否合法。"
+                            "**可用 `focus` / `classes` / `relations` 收窄**（技能按对话缩范围："
+                            "如 focus=\"Service\" 只看服务相关）。返回里 `class_attributes` 给出**每个类允许的"
+                            "数据属性**（本体声明，含祖先）—— 落库时 `nodes[].attributes` 与 "
+                            "`edges[].properties` 的键就按它填（未声明的键会被回报为 violations，不拦写入）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "model": {"type": "string", "description": "本体模型 key（bmm / ea / ea-service …）"},
+                "focus": {"type": "string",
+                          "description": "关键词收窄（匹配类/关系的中文标签或 prefixed，大小写不敏感）"},
+                "classes": {"type": "array", "items": {"type": "string"},
+                            "description": "显式白名单（prefixed），给了就以它为准"},
+                "relations": {"type": "array", "items": {"type": "string"},
+                              "description": "显式白名单（prefixed）"},
+                "with_attributes": {"type": "boolean",
+                                    "description": "是否附带 class_attributes（默认 true）"},
+            }, "required": ["model"]},
         },
         {
             "name": "audit_scan",
@@ -1624,6 +1711,9 @@ def tool_definitions() -> list[dict]:
                                         "purpose(用途), inputs[], outputs[], "
                                         "assertions[{id,kind:'N|E',assertion}], attributes{数据属性:值}, "
                                         "definition, description?, aliases?, retag?}]；"
+                                        "**`attributes` 的键 = 本体为该类（或祖先）声明的数据属性**"
+                                        "（见 `ontology_types(model).class_attributes`；未声明的键会被回报为 "
+                                        "violations(kind=attribute)，不拦写入，但要长期用就补本体）。"
                                         "服务页会自动渲染 用途/输入输出/设计规范(ASSERTION)/属性/被引用(入边)。"
                                         "**类型变更（如 API 服务→MCP 服务）用 `retag: true`**：命中同根类的既有页时"
                                         "合并并改类型，不会新建第二份"),
@@ -1632,7 +1722,10 @@ def tool_definitions() -> list[dict]:
                     "edges": {
                         "type": "array",
                         "description": ("关系：[{source, type(本体对象属性，如 ea:applicationProvidesService / "
-                                        "ea:stepUsesService), target, label?}]；"
+                                        "ea:stepUsesService / easvc:operationOperatesOnAttribute), target, "
+                                        "label?, properties?(边限定属性，键 = **源类**声明的数据属性)}]；"
+                                        "`properties` 会渲染成页面里独立的 `## 关系限定（边属性）` 小节"
+                                        "（不改 `## 本体关系` 的行语法，反向边/审计不受影响）；"
                                         "target 可以是本次节点名，也可以是库内已有页标题（会解析成 slug）"),
                         "items": {"type": "object"},
                     },
@@ -1671,7 +1764,9 @@ def call_tool(name: str, args: dict) -> dict:
         return resolve_pending_merge(str(args["kb_id"]), str(args["pending_slug"]),
                                      str(args["action"]))
     if name == "ontology_types":
-        return ontology_types(str(args["model"]))
+        return ontology_types(str(args["model"]), str(args.get("focus", "")),
+                              args.get("classes") or None, args.get("relations") or None,
+                              bool(args.get("with_attributes", True)))
     if name == "audit_scan":
         return ke_audit.audit(str(args["kb_id"]), str(args.get("scope", "all")),
                               int(args.get("max_findings", 50)))
