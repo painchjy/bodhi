@@ -44,6 +44,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -2262,6 +2263,49 @@ def tool_result(payload: dict, is_error: bool = False) -> dict:
     }
 
 
+def _log_tool_call(name: str, args: dict, result, ms: float) -> None:
+    """把每次工具调用落一条可核对的行（观测用）。
+
+    为什么需要：智能体"是否先看技能目录、是否照技能做、是否真的落库"必须**可核对**，
+    否则只能听它自述。日志 `logs/mcp_calls_YYYYMMDD.log` 一行一次调用：
+    时间 / 工具 / 耗时 / 入参摘要 / 结果摘要。
+    """
+    try:
+        def brief(value, limit=60):
+            if isinstance(value, (int, float, bool)) or value is None:
+                return value
+            if isinstance(value, str):
+                return value if len(value) <= limit else value[:limit] + "…"
+            if isinstance(value, list):
+                return [brief(v, 24) for v in value[:4]] + (["…共%d项" % len(value)] if len(value) > 4 else [])
+            if isinstance(value, dict):
+                return {k: brief(v, 40) for k, v in list(value.items())[:6]}
+            return str(value)[:limit]
+
+        summary = result if isinstance(result, dict) else {}
+        keys = ("applied", "created", "merged", "pending", "violations", "unmatched", "retract",
+                "retract_planned", "crud_matrix", "report_page", "page_versions", "count",
+                "catalog", "id", "name", "error", "how_to_use", "source", "note")
+        picked = {}
+        for key in keys:
+            if key in summary:
+                value = summary[key]
+                if isinstance(value, list):
+                    value = "len=%d %s" % (len(value), json.dumps(brief(value), ensure_ascii=False)[:120])
+                elif isinstance(value, dict) and len(json.dumps(value, ensure_ascii=False)) > 160:
+                    value = json.dumps(brief(value), ensure_ascii=False)[:160] + "…"
+                picked[key] = value
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        path = LOG_DIR / ("mcp_calls_%s.log" % datetime.now().strftime("%Y%m%d"))
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write("%s\t%-26s\t%7.0fms\targs=%s\tresult=%s\n"
+                     % (now_text(), name, ms,
+                        json.dumps(brief(args), ensure_ascii=False)[:300],
+                        json.dumps(picked, ensure_ascii=False)[:500]))
+    except Exception:  # noqa: BLE001  日志失败绝不影响工具结果
+        pass
+
+
 # ---------------------------------------------------------------------------
 # MCP：Streamable HTTP 传输（JSON-RPC 2.0）
 # ---------------------------------------------------------------------------
@@ -2337,10 +2381,18 @@ class MCPHandler(BaseHTTPRequestHandler):
             arguments = params.get("arguments") or {}
             print("[mcp] tools/call %s %s" % (name, json.dumps(arguments, ensure_ascii=False)))
             try:
-                result = tool_result(call_tool(name, arguments))
+                _started = time.time()
+                payload = call_tool(name, arguments)
+                result = tool_result(payload)
+                _log_tool_call(name, arguments, payload, ms=(time.time() - _started) * 1000.0)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] 工具失败：%s" % exc)
                 result = tool_result({"error": str(exc)}, is_error=True)
+                try:
+                    _log_tool_call(name, arguments, {"error": str(exc)},
+                                   ms=(time.time() - _started) * 1000.0)
+                except Exception:  # noqa: BLE001
+                    pass
         else:
             self._json({"jsonrpc": "2.0", "id": rid,
                         "error": {"code": -32601, "message": "未实现的方法：%s" % method}}, 200, extra)

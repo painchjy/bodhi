@@ -354,3 +354,25 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 范围外的节点/关系进 `unmatched` 并附原因（`scope.filtered` 给出条数），**不静默丢**。
 选范围用 `ontology_types(model, focus="步骤")` 或 `classes=[...]`。
 
+### 11.5 端到端验收（技能驱动是否真的发生）
+```bash
+# 驱动 bodhi-ea-modeler 跑一轮**只读**任务，并留证据
+/opt/bodhi-venv/bin/python3 deploy/weknora-fork/try_agent_chat.py
+#   ① 脚本日志：/mnt/c/Users/PHJY/AppData/Local/Temp/agent_run.log（SSE 原文 + 会话消息）
+#   ② 工具调用日志：logs/mcp_calls_YYYYMMDD.log（时间/工具/耗时/入参/结果摘要）
+```
+**期望证据（2026-09-21 实测）**：
+```
+22:06:41 skills          78ms  args={}                                  result={"count": 3, ...}
+22:06:44 skills        1120ms  args={"skill": "service_detailed_design"} result={"id": ..., "source": "skills/service_detailed_design/SKILL.md"}
+22:06:48 audit_scan     137ms  args={"kb_id": "b1", "scope": "coupling"} result={"error": "知识库不存在：b1；请把可选清单里的 id 原样传…"}
+22:06:52 audit_scan     935ms  args={"kb_id": "企业知识", ...}            result={...}
+```
+- **先目录 → 再取全文**（这正是技能驱动的目标行为）；取到全文后它复述了 `scope.classes/relations`、
+  `class_attributes`（含 `operationRetryPolicy`）与纪律（E1/E2/A5）；
+- `kb_id` 传错被服务端纠正后自己改正（参数容错在起作用）；
+- **零写库**：该轮没有任何 `save_knowledge/extract_and_save` 调用，wiki 页 `updated_at` 无变化。
+
+> 排查提示：若 app 侧报 `failed to call tool: ... EOF`，先看 `bodhi-mcp` 的 journal 有没有 `tools/call`
+> 与异常 —— 服务端 handler 抛异常会直接关连接（2026-09-21 实测：日志函数里漏 `import time` 就是这个症状）。
+
