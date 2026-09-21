@@ -34,14 +34,18 @@ CONFIG = HERE / "config"
 OUT_SQL = CONFIG / "agents.sql"
 
 TEMPLATE_IDS = {"bmm": "ontology_extract_agent_bmm", "ea": "ontology_extract_agent_ea",
-                "ops": "knowledge_ops_agent"}
+                "ops": "knowledge_ops_agent", "design": "ea_overview_design_agent"}
 NAMES = {"bmm": "本体知识提取 · BMM 业务动机模型", "ea": "本体知识提取 · EA 企业架构",
-         "ops": "知识运维 · 一致性巡检与清理"}
+         "ops": "知识运维 · 一致性巡检与清理",
+         "design": "EA 概要设计 · IT 服务与系统定位"}
 DESCRIPTIONS = {
     "bmm": "按 BMM 业务动机模型从知识库片段抽取要素与关系，并为每个要素写入本体类型（bmm:*）的 wiki 页面。",
     "ea": "按 EA 企业架构本体从知识库片段抽取要素与关系，并为每个要素写入本体类型（ea:*）的 wiki 页面。",
     "ops": "只读巡检 wiki / 本体图谱 / 本体模型 的一致性（含无来源等异常数据），并按需生成清理计划；"
            "执行由人工确认后走 CLI/HTTP，智能体不执行。",
+    "design": "读用 EA 本体建模好的业务流程（任务/步骤/实体），做概要设计：产出「概要设计报告」（IT 服务定义、"
+              "输入输出、归属任务步骤、正常/异常案例 ASSERTION 规范、服务新建或修改、归属系统与需新建资源），"
+              "再把报告细分成图谱节点与关系；两段都先 dry_run、人工确认后 apply。",
 }
 ALLOWED_TOOLS = [
     # 读片段（一次）+ 写页；**不放 thinking / todo_write**：
@@ -55,10 +59,18 @@ OPS_TOOLS = [
     "wiki_search", "wiki_read_page",
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
 ]
-TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS}
-# 智能体 id：提取智能体沿用 `bodhi-ontology-<key>`；**运维智能体单独一个 id**，
+# 「EA 概要设计」智能体：只读 wiki + 看本体类型 + **设计落库工具**（不给原生写页、不给抽取）
+DESIGN_TOOLS = [
+    "grep_chunks", "list_knowledge_chunks", "get_document_info",
+    "wiki_search", "wiki_read_page",
+    "mcp_bodhi_ontology_ontology_types", "mcp_bodhi_ontology_save_knowledge",
+]
+TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
+                  "design": DESIGN_TOOLS}
+# 智能体 id：提取智能体沿用 `bodhi-ontology-<key>`；**运维/设计各用独立 id**，
 # 免得被 `set_agent_prompt_lean.py`（按 `bodhi-ontology-%` 前缀改提示词）误伤。
-AGENT_IDS = {"bmm": "bodhi-ontology-bmm", "ea": "bodhi-ontology-ea", "ops": "bodhi-kb-ops"}
+AGENT_IDS = {"bmm": "bodhi-ontology-bmm", "ea": "bodhi-ontology-ea", "ops": "bodhi-kb-ops",
+             "design": "bodhi-ea-design"}
 # 目标知识库：企业知识（抽取源）+ 企业本体模型（类型定义查询）
 KNOWLEDGE_BASES = [
     "dbc2528f-611b-48da-9a71-d7c93975adb4",
@@ -162,7 +174,7 @@ def run_sql(sql: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成/写入「本体知识提取」智能体")
     parser.add_argument("--apply", action="store_true", help="同时写入数据库")
-    parser.add_argument("--only", default="", choices=["", "bmm", "ea", "ops"],
+    parser.add_argument("--only", default="", choices=["", "bmm", "ea", "ops", "design"],
                         help="只处理某一个智能体（默认全部；改 bmm/ea 会覆盖它们的精简提示词，慎用）")
     args = parser.parse_args()
 
@@ -172,8 +184,8 @@ def main() -> int:
     OUT_SQL.write_text(sql, encoding="utf-8")
     print("写出 %s（%d 字节）" % (OUT_SQL.relative_to(REPO).as_posix(), len(sql.encode("utf-8"))))
     for key, content in templates.items():
-        print("  智能体 bodhi-ontology-%-3s 提示词 %5d 字符  tools=%d"
-              % (key, len(content), len(TOOLS_BY_AGENT.get(key, ALLOWED_TOOLS))))
+        print("  智能体 %-18s 提示词 %5d 字符  tools=%d"
+              % (AGENT_IDS.get(key, key), len(content), len(TOOLS_BY_AGENT.get(key, ALLOWED_TOOLS))))
     if args.apply:
         run_sql(sql)
         print("已写入 WeKnora 数据库")

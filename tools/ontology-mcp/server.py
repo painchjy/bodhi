@@ -91,6 +91,7 @@ import ke_admin  # noqa: E402
 import ke_pages  # noqa: E402
 import ke_docs  # noqa: E402  （按来源文档统计/清理本体实例，2026-09-20）
 import ke_audit  # noqa: E402  （wiki↔图谱↔模型 一致性巡检，只读，2026-09-20 P1）
+import ke_neo4j  # noqa: E402  （Neo4j 本体投影；ontology_types 补录、B5 一致性都用它）
 from ke_pages import (  # noqa: E402,F401  （历史脚本 relink_pages.py 已归档，此别名保留兼容）
     REL_LINE, REL_LINE_V2, parse_rel_line, rel_line,
 )
@@ -1042,10 +1043,16 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str) -> dict:
 
 
 def ontology_types(model_key: str) -> dict:
+    """某本体模型的类与关系清单（供智能体选类型/关系）。
+
+    2026-09-21：**以 Neo4j 投影为真源补录**（`ke_ontology.class_meta()` 已含上传导入模块），
+    否则上传的新模块（如 `bmm-ea-ext`）在旧产物里看不到 —— 表现就是智能体"看不见新类型/新关系"
+    （对应巡检 B5：本体投影 ↔ 编译产物不一致）。
+    """
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     for model in index["models"]:
         if model["key"] == model_key:
-            return {
+            out = {
                 "model": model["key"], "label": model["label"],
                 "expert_role": model.get("expert_role", ""),
                 "classes": [{"name": c["name"], "label": c.get("label"),
@@ -1054,7 +1061,42 @@ def ontology_types(model_key: str) -> dict:
                                "domain": r.get("domain"), "range": r.get("range")}
                               for r in list(model["relations"])
                               + list(model.get("cross_module_bridges") or [])],
+                "source": "artifacts",
             }
+            try:
+                proj_classes = [r["name"] for r in ke_neo4j.query(
+                    "MATCH (c:BodhiOntClass) WHERE c.bodhi_projection = 'ontology' "
+                    "AND coalesce(c.external,false) = false AND c.prefixed IS NOT NULL "
+                    "RETURN DISTINCT c.prefixed AS name ORDER BY name") if r.get("name")]
+                proj_props = [{"name": r["name"], "label": r.get("label") or "",
+                               "domain": r.get("domain"), "range": r.get("range")}
+                              for r in ke_neo4j.query(
+                    "MATCH (p:BodhiOntProperty {property_kind:'object'}) "
+                    "WHERE p.bodhi_projection = 'ontology' AND p.prefixed IS NOT NULL "
+                    "OPTIONAL MATCH (p)-[:BODHI_DOMAIN]->(d:BodhiOntClass) "
+                    "OPTIONAL MATCH (p)-[:BODHI_RANGE]->(r:BodhiOntClass) "
+                    "RETURN DISTINCT p.prefixed AS name, p.label AS label, "
+                    "       collect(DISTINCT d.prefixed) AS domain, collect(DISTINCT r.prefixed) AS range "
+                    "ORDER BY name")]
+            except Exception:  # noqa: BLE001  投影不可用就用产物（保持旧行为）
+                proj_classes, proj_props = [], []
+            have_cls = {c["name"] for c in out["classes"]}
+            for name in proj_classes:
+                if name not in have_cls:
+                    meta = ke_ontology.class_meta().get(name) or {}
+                    out["classes"].append({"name": name, "label": meta.get("label") or name,
+                                           "definition": "（来自运行投影：上传导入的模块）"})
+            have_rel = {r["name"] for r in out["relations"]}
+            for prop in proj_props:
+                if prop["name"] not in have_rel:
+                    out["relations"].append({**prop, "note": "（来自运行投影）"})
+            if len(out["classes"]) != len(model["classes"]) or \
+                    len(out["relations"]) != len(model["relations"]):
+                out["source"] = "artifacts+projection"
+                out["note"] = ("已用 Neo4j 投影补录（产物可能过期，见巡检 B5）："
+                               "重编 `tools/ontology-compiler/compile.py compile`、"
+                               "重载 `deploy/bootstrap-neo4j.sh`")
+            return out
     raise RuntimeError("未知本体模型：%s" % model_key)
 
 
