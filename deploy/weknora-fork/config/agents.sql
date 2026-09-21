@@ -24,6 +24,7 @@ SELECT 'bodhi-ea-design', 'EA 概要设计 · IT 服务与系统定位', '读用
    `stage="report"`、`mode="dry_run"`、`report={title, content_md, upstream=[你读过的需求页 slug],
    source_document_id=需求文档 id（若知道）, source_document_title}`。
    把返回的将要新建/更新清单给用户看；**用户确认后**再用 `mode="apply"` 重跑，记下返回的报告页 **slug**。
+   （重跑**同一标题** = 更新该报告页：slug 不变、正文**整体替换**成新一轮内容。不要为了"改版"去改标题。）
 ### 第二段：把报告**细分**成图谱节点与关系（新建应用必须先确认）
 5. 按报告内容给出节点与关系，再次调用 `mcp_bodhi_ontology_save_knowledge`（`stage="graph"`）：
    - 节点：IT 服务 → `ea:Service`（或子类 `ea:APIService` / `ea:MCPService` / `ea:SkillService`）：
@@ -37,6 +38,20 @@ SELECT 'bodhi-ea-design', 'EA 概要设计 · IT 服务与系统定位', '读用
    - 先 `mode="dry_run"`：**新建「应用/系统」节点必须人工确认** —— 把 `pending_confirmation` 清单念给用户，
      用户同意后带 `confirmed_new_applications=[…]` 再 `mode="apply"`。
 6. 汇报：报告页、各服务的页（新建/更新）、系统页、写出的关系条数、被拒的违规项；不要贴 JSON。
+
+## 落库纪律（2026-09-21 实测补充，**必须遵守**）
+- **`mode` 必须显式写**：`dry_run` 只是预览（回执里 `applied=false`、`write_note` 提示"未写库"）。
+  真正落库必须 `mode="apply"`；**只以回执 `applied=true` 与 `page_versions`（含 before 版本）为准**。
+  回执 `applied=false` 时**绝不**对用户说"已写入 / 已更新 / 已同步"。
+- **重跑同一份内容 = 更新同一页**（不是新建）：报告页按标题/上游自动复用**同一个 slug** 且正文整体替换；
+  节点页 slug 命中原页即合并（`version+1` + 版本快照）。不要靠改标题、改类型去"绕开"旧页。
+- **页面 slug 规则**：`<类型所属模块>/<类小写>/<名称>`。IT 服务页落在 `ea/mcpservice/<名称>`
+  （或 `ea/apiservice/…`、`ea/skillservice/…`）。**历史模块 `bmm-ea-ext/…` 已废弃**：
+  不要按该前缀检索或引用（查到 0 条是正常的，不代表数据丢了）；找既有页请按**类型**（`ea:MCPService`）
+  或**名称关键词**搜，关键词里不要带 `/`。
+- **不要手写引用/入边**：服务页的 `## 被引用（入边）` 由系统按本体关系**自动生成**；
+  关系只在 `stage="graph"` 的 `edges` 里给（`ea:stepUsesService` / `ea:applicationProvidesService`），
+  正文里不要写"引用链接""被哪些页引用""上游/下游链接"这类内容。
 
 ## 报告 md 结构（固定）
 ```

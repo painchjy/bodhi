@@ -389,6 +389,10 @@ def _design_sections(element: dict) -> list[str]:
     """
     lines: list[str] = []
     purpose = (element.get("purpose") or "").strip()
+    body_text = (element.get("definition") or "").strip()
+    # 正文首段与「用途」是同一段时不再重复输出（2026-09-21 用户实测：服务页里同一段出现两遍）
+    if purpose and squash(purpose) and squash(purpose) in squash(body_text):
+        purpose = ""
     if purpose:
         lines += ["## 用途", "", purpose, ""]
     inputs = [str(x).strip() for x in (element.get("inputs") or []) if str(x).strip()]
@@ -414,7 +418,9 @@ def _design_sections(element: dict) -> list[str]:
         lines.append("")
     incoming = element.get("incoming") or []
     if incoming:
-        lines += ["## 被引用（入边）", ""]
+        lines += ["## 被引用（入边）", "",
+                  "> 本节由系统按本体关系**自动生成**（正文里不要手写引用链接）；要改请到来源页「本体关系」小节。",
+                  ""]
         for edge in incoming:
             lines.append("- 「%s」（`%s`）→ 本页" % (edge.get("source_title", ""), edge.get("type", "")))
         lines.append("")
@@ -481,7 +487,10 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
     last_meta = max((i for i, line in enumerate(head) if line.startswith("> ")), default=0)
     old_def = "\n".join(head[last_meta + 1:]).strip()
     new_def = (element.get("definition") or "").strip()
-    chosen = new_def if len(new_def) > len(old_def) else old_def
+    # 报告页/显式声明「正文整体替换」的载荷：**一律以新正文为准**。
+    # 旧启发式「取更长的一方」在改版后正文更短时会静默保留旧正文（用户 2026-09-21 实测：
+    # 报告从 API 服务版改成 MCP 服务版，回执成功但正文一直没变）。
+    chosen = new_def if (element.get("replace_body") or len(new_def) > len(old_def)) else old_def
     merged = head[:last_meta + 1] + ["", chosen, ""] + tail
 
     evidence = "- %s（来源：《%s》%s）" % (
@@ -569,7 +578,13 @@ def union_list(old, new) -> list:
 
 def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
                     chunk_refs: list, metadata: dict) -> str:
-    """合并 = 更新：先快照旧版本到 revisions（version 用旧值），再 version+1。"""
+    """合并 = 更新：先快照旧版本到 revisions（version 用旧值），再 version+1。
+
+    2026-09-21 补 **`out_links` 重算**（用户实测：设计节点把关系行追加进正文后，前端本体关系面板
+    与「入边」区都看不到，因为它按 `in_links` 渲染，而 `in_links` 是按别的页 `out_links` 反推的）：
+    旧实现只有 `sql_insert_page`（新建页）写 `out_links`，走合并的页（第二次跑、追加关系）
+    一直是空数组 → 反向边整片缺失。正文里关系行的解析与 ke_pages 完全同源（`out_links_of`）。
+    """
     return ("INSERT INTO wiki_page_revisions (id, tenant_id, knowledge_base_id, page_id, slug, version, "
             "       title, page_type, status, content, summary, aliases, edit_source, editor_id, "
             "       edited_at, created_at)\n"
@@ -577,12 +592,14 @@ def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
             "       title, page_type, status, content, summary, aliases, '%s', "
             "       COALESCE(last_editor_id,''), now(), now()\n"
             "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;\n"
-            "UPDATE wiki_pages SET content = %s, summary = %s, source_refs = %s, chunk_refs = %s, "
+            "UPDATE wiki_pages SET content = %s, out_links = %s::jsonb, summary = %s, "
+            "       source_refs = %s, chunk_refs = %s, "
             "       page_metadata = %s, version = version + 1, updated_at = now(), "
             "       last_edit_source = '%s' "
             " WHERE knowledge_base_id = %s AND slug = %s;\n"
             % (TOOL_TAG, sql_str(page["knowledge_base_id"]), sql_str(page["slug"]),
-               sql_str(content), sql_str(summary), sql_json(source_refs), sql_json(chunk_refs),
+               sql_str(content), sql_json(ke_pages.out_links_of(content)), sql_str(summary),
+               sql_json(source_refs), sql_json(chunk_refs),
                sql_json(metadata), TOOL_TAG, sql_str(page["knowledge_base_id"]),
                sql_str(page["slug"])))
 
@@ -607,17 +624,23 @@ def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
     ]
     conflict = (
         "ON CONFLICT (id) DO UPDATE SET "
-        "title = EXCLUDED.title, page_type = EXCLUDED.page_type, status = EXCLUDED.status, "
+        # 2026-09-21：护栏从「活页一律跳过」改为「**活页只更新内容字段**」——
+        #   跳过会让写入静默失效（用户实测 4 次：报告页 slug 相同 → 撞主键 → 回执成功但正文不变）。
+        #   保留原意：**同 id 命中活页时不得改它的 title / page_type / status**（事故：设计节点把报告页
+        #   覆盖成「注册信息登记服务 / bmm-ea-ext:APIService」），只有类型相同时才跟着改标题。
         "content = EXCLUDED.content, summary = EXCLUDED.summary, "
+        "out_links = EXCLUDED.out_links, "
         "category_path = EXCLUDED.category_path, wiki_path = EXCLUDED.wiki_path, "
         "page_metadata = EXCLUDED.page_metadata, aliases = EXCLUDED.aliases, "
         "source_refs = EXCLUDED.source_refs, chunk_refs = EXCLUDED.chunk_refs, "
+        "title = CASE WHEN wiki_pages.deleted_at IS NOT NULL "
+        "                  OR wiki_pages.page_type = EXCLUDED.page_type "
+        "             THEN EXCLUDED.title ELSE wiki_pages.title END, "
+        "page_type = CASE WHEN wiki_pages.deleted_at IS NOT NULL "
+        "                 THEN EXCLUDED.page_type ELSE wiki_pages.page_type END, "
+        "status = wiki_pages.status, "
         "deleted_at = NULL, version = wiki_pages.version + 1, "
-        "last_edit_source = %s, updated_at = now() "
-        # 只对**软删除**行做「复活+覆盖」；活页被同一个 id 命中说明 slug 撞了（同要素应走合并），
-        # 这时**不得**改写已有活页的 title/page_type —— 2026-09-21 沙箱实测：设计节点把报告页那行
-        # 覆盖成了「注册信息登记服务 / bmm-ea-ext:APIService」。
-        "WHERE wiki_pages.deleted_at IS NOT NULL" % sql_str(TOOL_TAG))
+        "last_edit_source = %s, updated_at = now() " % sql_str(TOOL_TAG))
     return ("INSERT INTO wiki_pages (%s) VALUES (%s) %s;"
             % (", ".join(PAGE_COLUMNS), ", ".join(values), conflict))
 
@@ -732,6 +755,14 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     }
     if extra:
         summary.update(extra)
+    # 写库自证（2026-09-21 用户实测：`mode` 忘了传 → 默认 dry_run 只算不写，回执里只有一行
+    # `dry_run: true`，极易被当成"已落库"，于是反复出现"回执成功但 wiki 没变"）：
+    # 顶层给 `applied`（是否真写库）与 `write_note`，并附上被更新页的 version 变化。
+    summary["applied"] = not dry_run
+    if dry_run:
+        summary["write_note"] = ("**未写库**（dry_run）：本回执只是预览。要真正落库请用**同一份载荷**、"
+                                 "`mode=\"apply\"` 重跑；`created/merged/pending` 里的 slug 在 apply 时才生效。")
+    summary["page_versions"] = []
 
     retagged: list = []
     retag_queue: list = []
@@ -770,6 +801,10 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                                               source_refs, chunk_refs, metadata))
             summary["merged"].append({"name": element["name"], "type": element["type"],
                                       "into": candidate["slug"], "similarity": sim, **post})
+            summary["page_versions"].append({"slug": candidate["slug"],
+                                             "before": candidate.get("version"),
+                                             "action": "merged（正文已按载荷更新）",
+                                             "applied": not dry_run})
             # 类型变更（retag）：用户口径「把 API 服务改为 MCP 服务」= 改既有页的类型，
             # 不是再建一份（2026-09-21 实测：不加这个能力就会出 2 套服务）。
             want_type = element["type"]
@@ -789,9 +824,28 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                 page["slug"] = "%s-%s" % (page["slug"],
                                           hashlib.sha1(element["type"].encode()).hexdigest()[:6])
                 page["wiki_path"] = page["slug"]
+            # 回执如实（2026-09-21 用户实测：`fetch_existing_pages` 排除 summary/index 页，报告页会走
+            # 到这里；若不说清是「覆盖既有活页」，就会出现"回执说 created，用户看到的是旧正文"的错觉）。
+            prior = psql_csv("SELECT version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages "
+                             "WHERE knowledge_base_id = %s AND slug = %s"
+                             % (sql_str(kb_id), sql_str(page["slug"])))
+            if prior:
+                if str(prior[0].get("dead", "f")).lower().startswith("t"):
+                    action, before_v = "revived（复活软删旧行并覆盖）", int(prior[0]["version"] or 1)
+                else:
+                    action, before_v = "updated（同 slug 既有活页：正文按本次载荷覆盖，title/type 不动）", \
+                                       int(prior[0]["version"] or 1)
+            else:
+                action, before_v = "created", 0
             statements.append(sql_insert_page(page, kb_id, tenant))
-            summary["created"].append({"name": element["name"], "type": element["type"],
-                                       "slug": page["slug"]})
+            if action == "created":
+                summary["created"].append({"name": element["name"], "type": element["type"],
+                                           "slug": page["slug"]})
+            else:
+                summary["merged"].append({"name": element["name"], "type": element["type"],
+                                          "into": page["slug"], "similarity": 1.0, "note": action})
+            summary["page_versions"].append({"slug": page["slug"], "before": before_v,
+                                             "action": action, "applied": not dry_run})
             pages.append({**page, "version": 1, "knowledge_base_id": kb_id,
                           "status": "published", "in_links": [], "title": page["title"],
                           "summary": page["summary"], "aliases": page["aliases"],
@@ -1011,6 +1065,15 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                     "ORDER BY updated_at DESC LIMIT 1" % (sql_str(kb_id), " OR ".join(conds)))
                 if rows:
                     slug = rows[0]["slug"]
+            if not slug and title:
+                # 同标题的既有报告页也要复用（用户实测：不带 doc/upstream 时，同标题重跑必须更新同一页，
+                # 否则 slug 相同 → 撞主键 → 只有靠 sql_insert_page 的「活页更新」兜底，回执口径也不清楚）。
+                rows = psql_csv(
+                    "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                    "AND COALESCE(page_type,'') = 'summary' AND title = %s "
+                    "ORDER BY updated_at DESC LIMIT 1" % (sql_str(kb_id), sql_str(title)))
+                if rows:
+                    slug = rows[0]["slug"]
         element = {"name": title, "type": (report or {}).get("page_type") or "summary",
                    "type_label": "概要设计报告", "module": model, "slug": slug,
                    "category_path": (report or {}).get("category_path") or ["概要设计报告"],
@@ -1018,12 +1081,21 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                    "source_text": "概要设计报告（由设计智能体生成、人工确认后落库）",
                    "chunk_id": "", "chunk_index": -1, "relations": [],
                    "upstream": [s for s in ((report or {}).get("upstream") or []) if s],
-                   "aliases": (report or {}).get("aliases") or []}
+                   "aliases": (report or {}).get("aliases") or [],
+                   # 报告页复用时**正文整体替换**（改版后正文更短也必须换掉旧版，别走"取更长"启发式）
+                   "replace_body": True}
         checked = {"edges": [], "violations": [], "unmatched": []}
         summary = save_elements(kb_id, model_obj, checked, [element], doc_meta, high=high, low=low,
                                 dry_run=(mode != "apply"), tenant_id=tenant_id,
                                 resolved_note=kb_note, engine=engine, same_type_only=True)
         summary["stage"] = "report"
+        summary["report_page"] = {"slug": slug, "title": title, "chars": len(body)}
+        if summary.get("merged"):
+            summary["report_page"]["action"] = "updated"
+        elif summary.get("pending"):
+            summary["report_page"]["action"] = "pending"
+        else:
+            summary["report_page"]["action"] = "created"
         return summary
 
     payloads, checked = design_elements(
@@ -1488,8 +1560,14 @@ def tool_definitions() -> list[dict]:
                             "`stage=report` 先落**概要设计报告 md**（整篇写成索引页/父页）；"
                             "`stage=graph` 再把报告**细分**出的节点/关系落成各自 wiki 页 + 本体关系"
                             "（每个 IT 服务/应用系统一页，挂在报告页下）。"
+                            "**落库必须显式 `mode=\"apply\"`**（默认 dry_run 只算不写，回执 `applied=false`）。"
+                            "再跑同一份内容 = **更新同一页**（报告页按标题/上游自动复用 slug，正文整体替换；"
+                            "节点页 slug 命中原页即合并，不会重复建页）。"
+                            "页面 slug 规则：`<类型所属模块>/<类小写>/<名称>`，故 MCP 服务页在 "
+                            "`ea/mcpservice/<名称>`（历史模块 `bmm-ea-ext/…` 已废弃，按旧前缀检索必然 0 结果）。"
                             "落库与抽取路径**共用同一份实现**：相似度两阈值（高→合并现有页、低→新增页、"
-                            "中间→生成「待确认合并」页交人工裁决）、版本快照、溯源、目录重建都一致。"
+                            "中间→生成「待确认合并」页交人工裁决）、版本快照、溯源、目录重建都一致；"
+                            "**每次写页都会重算该页出边并重建全库 `in_links`**，所以关系面板/入边即时可见。"
                             "合规校验：类必须在本体里、关系必须满足 domain/range，违规进 violations 不入库。"
                             "**新建「应用/系统」节点必须人工确认**：默认 dry_run 只给清单，"
                             "确认后 mode=apply 且带 confirmed_new_applications 重跑（幂等，同标题只更新）。"),
@@ -1532,7 +1610,9 @@ def tool_definitions() -> list[dict]:
                         "items": {"type": "object"},
                     },
                     "mode": {"type": "string", "enum": ["dry_run", "apply"],
-                             "description": "dry_run（默认，只算不写）/ apply（真正写入）"},
+                             "description": ("**默认 dry_run = 只算不写库**（回执里 `applied=false`、"
+                                             "`dry_run=true`、`write_note` 会提示）。**要真正落库必须显式传 "
+                                             "`apply`**；写完用回执 `page_versions`（含 before 版本）或巡检复核。")},
                     "confirmed_new_applications": {
                         "type": "array", "items": {"type": "string"},
                         "description": "**人工已确认**可新建的「应用/系统」节点名称清单",

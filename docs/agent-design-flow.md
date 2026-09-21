@@ -153,3 +153,42 @@ $P tools/ke-core/ke_audit.py apply "$SB" --plan-id <id> --confirm
 4. **修 Neo4j 投影**（问题 1 的待办），让严格关系校验与 UI 关系下拉覆盖 `ea-service` / `bmm-fd` / `ea-ownership`。
 5. **FD 精化规则**：需求里 `证件种类 + 证件号码 → 姓名` 成立时，`U1` 的决定集合可最小化 ——
    在报告里给「最小覆盖 + 冗余决定属性」建议（当前 F 规则未覆盖）。
+
+## 9. 落库自证与三个已修坑（2026-09-21 实测）
+
+用户在「手机银行注册、实名验证、签约流程」上连测 4 次，报「工具回执写成功，但库里报告页正文一直是首版」。
+定位到的三个**独立**原因（都已修 + 已用真库验证）：
+
+1. **`fetch_existing_pages()` 排除 `summary`/`index` 页** → 报告页永远进不了合并候选，
+   `stage=report` 永远走「新建」分支；而 slug 由标题推导，**与既有报告页完全相同 → 撞主键**；
+   恰好 `sql_insert_page` 的护栏当时是「活页一律跳过（`WHERE deleted_at IS NOT NULL`）」→
+   **语句静默无操作，回执仍报成功**。这是"报告页改不动"的直接原因。
+   - 修：护栏改为「**活页只更新内容字段，不改 title/page_type/status**」（软删行仍是复活+全覆盖）；
+     报告段按 `doc → upstream → 同标题` 三级复用既有页 slug；回执 `page_versions[].action` 如实区分
+     `created` / `updated（同 slug 既有活页）` / `revived（复活软删行）`。
+2. **合并时"取更长正文"的启发式**：报告改版后正文更短 → 静默保留旧正文。
+   - 修：报告载荷带 `replace_body=True` → **正文整体替换**。
+3. **`out_links` 只在新建页时写**：第二次跑（合并路径）追加的关系行不会进 `out_links`，
+   而 `in_links` 是按 `out_links` 反推的 → 服务页「入边（引入的本体关系）」整片为空。
+   - 修：`sql_update_page` 同步重算 `out_links`（`ke_pages.out_links_of`，与关系行解析同源）；
+     现网已全量重算（企业知识 60 页 / 本体模型 225 页）→ 12 个 `ea/mcpservice/*` 的 `in_links` 全部有值。
+
+**回执怎么读**（智能体与人都适用）：
+- `applied=false` / `dry_run=true` / `write_note` 出现 ⇒ **没写库**，不要报告"已落库"；
+  必须用**同一份载荷** `mode="apply"` 重跑。
+- `page_versions[].before` = 写入前版本；写完后 `before+1`，`last_edit_source=bodhi-onto-mcp`。
+- 报告页 slug 形如 `ea/summary/<标题>`；节点页 slug 形如 `ea/mcpservice/<名称>`。
+  历史模块 `bmm-ea-ext/…` 已废弃（检索 0 条属正常）。
+
+**自检命令**（真库，含 dry_run → apply → 还原）：
+```bash
+/opt/bodhi-venv/bin/python3 - <<'PY'
+import sys; sys.path.insert(0, '/mnt/c/Users/PHJY/source/bodhi2/tools/ontology-mcp')
+import server
+KB = 'dbc2528f-611b-48da-9a71-d7c93975adb4'
+r = {"title": "手机银行注册、实名验证、签约流程 — IT 服务概要设计报告",
+     "content_md": "# 自检\n\n正文替换自检。\n"}
+print(server.save_knowledge(KB, stage='report', model='ea', report=r, mode='dry_run')['applied'])   # False
+print(server.save_knowledge(KB, stage='report', model='ea', report=r, mode='apply')['page_versions'])  # before→+1
+PY
+```
