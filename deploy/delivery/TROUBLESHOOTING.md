@@ -81,7 +81,16 @@ connect() failed (111: Connection refused) while connecting to upstream:
 **说明**：技能由 MCP 承载（`skills/<id>/SKILL.md`，**mtime 缓存**）：改完文件**无需重启**，下一次调用即生效；
 新增技能目录后 MCP 会自动出现在目录里（无需改代码）。若取不到：确认 `skills/` 目录在**仓库根**（与 `tools/` 平级）且 MCP 进程能读。
 
-## 12. 沙箱相关（本交付**不需要**，仅备查）
+**若 `skills()` 回执是 `{"error": "No module named 'yaml'"}`**：这是 MCP 在**没有 PyYAML** 的环境里跑
+（干净容器/精简宿主机）。代码已带零依赖兜底（`tools/ke-core/ke_yamlmini.py`），只要源码是最新版即可；
+升级方式：把 02 包里的 `tools/ke-core/ke_yamlmini.py` 与 `tools/ontology-mcp/server.py` 一起替换后重启 MCP。
+我们实测：在只有 Python + psql 的镜像里 `skills()` 正常返回 3 个技能。
+
+## 12. 打 MCP 镜像时卡在 `apt-get update`
+**根因**：容器里要装 `postgresql-client`（提供 `psql`），而**公网 Debian 源在内网/受限网络下常常不通**。
+**修法**：① `docker build --build-arg APT_MIRROR=<内网 debian 源> ...`；② 或改用**裸机 systemd** 方式（§MCP-SERVER 方式 B）。
+
+## 13. 沙箱相关（本交付**不需要**，仅备查）
 WeKnora 原生技能是"沙箱安装型"（装进快照镜像）。要用需同时满足：`WEKNORA_SANDBOX_DOCKER_ENABLED=true`、
 app 挂载 `docker.sock`（≈宿主机 root）、沙箱基础镜像可用、以及上面的 §1 SSRF 白名单。
 我们已验证可行，但**方案上以 MCP 承载技能为主**（不需要沙箱）；若你们要开，照 `docs/agent-design-flow.md` §11.7。

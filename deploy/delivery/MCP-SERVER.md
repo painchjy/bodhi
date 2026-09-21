@@ -1,8 +1,12 @@
 # MCP 服务部署（bodhi2 ontology-mcp）
 
-> 交付物：`02-mcp-server/bodhi2-mcp.tar.gz`（源码包，**零第三方依赖**：只用 Python 标准库 + `psql` 客户端）
+> 交付物：`02-mcp-server/bodhi2-mcp.tar.gz`（源码包，**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
 > 作用：给 WeKnora 提供 **10 个 MCP 工具**（抽取落库 / 设计落库 / 巡检 / 技能目录 / 总览页 …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
+>
+> **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
+> 的零依赖子集解析（我们逐键比对过，3 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
+> `selfcheck.py` 全绿（initialize / tools/list 10 个 / skills() 3 个）。
 
 ---
 
@@ -63,6 +67,10 @@ cp .env.example .env && vi .env         # BODHI_DB_HOST=postgres / BODHI_DB_PASS
 docker compose -f docker-compose.mcp.yml up -d
 docker logs -f bodhi2-mcp               # 应看到 0.0.0.0:8765
 ```
+
+> **构建卡在 `apt-get update`？（内网常见）** 公网 Debian 源可能不通/极慢。两个办法：
+> ① 用内网源重建：`docker build --build-arg APT_MIRROR=<你们的 debian 镜像> -t bodhi2-mcp:1.0 .`
+> ② 干脆走**裸机方式 B**（宿主机一定有 psql）：只把源码包解到 `/opt/bodhi2`，用 systemd 起（见 §4）。
 
 `docker-compose.mcp.yml`（包内已给，要点三行）：
 

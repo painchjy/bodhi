@@ -1,5 +1,13 @@
 FROM python:3.12-slim
 
+# 构建参数：内网/受限网络下把包源换成你们的镜像（**实测公网 Debian 源可能不通**）
+#   docker build --build-arg APT_MIRROR=mirrors.aliyun.com -t bodhi2-mcp:1.0 .
+ARG APT_MIRROR=
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
 # psql 客户端：MCP 用 `psql` 直连 Postgres（容器部署不做 docker exec；见 ke_db 的 BODHI_DB_HOST 分支）
 RUN apt-get update \
  && apt-get install -y --no-install-recommends postgresql-client \

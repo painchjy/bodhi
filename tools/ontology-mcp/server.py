@@ -93,6 +93,7 @@ import ke_admin  # noqa: E402
 import ke_pages  # noqa: E402
 import ke_docs  # noqa: E402  （按来源文档统计/清理本体实例，2026-09-20）
 import ke_audit  # noqa: E402  （wiki↔图谱↔模型 一致性巡检，只读，2026-09-20 P1）
+import ke_yamlmini  # noqa: E402  （零依赖 YAML 子集：干净容器里没有 PyYAML 时的兜底）
 import ke_neo4j  # noqa: E402  （Neo4j 本体投影；ontology_types 补录、B5 一致性都用它）
 from ke_pages import (  # noqa: E402,F401  （历史脚本 relink_pages.py 已归档，此别名保留兼容）
     REL_LINE, REL_LINE_V2, parse_rel_line, rel_line,
@@ -1366,7 +1367,10 @@ def load_skills() -> dict:
     stamp = _skills_stamp()
     if _SKILLS_CACHE is not None and stamp == _SKILLS_STAMP:
         return dict(_SKILLS_CACHE)
-    import yaml as _yaml
+    try:
+        import yaml as _yaml            # 有 PyYAML 就用它（本机开发环境通常有）
+    except Exception:                    # noqa: BLE001  干净容器没有 PyYAML → 用 ke-core 的子集解析
+        _yaml = None
     out: dict[str, dict] = {}
     for path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
         text = path.read_text(encoding="utf-8")
@@ -1375,7 +1379,7 @@ def load_skills() -> dict:
             parts = text.split("---", 2)
             if len(parts) >= 3:
                 try:
-                    meta = _yaml.safe_load(parts[1]) or {}
+                    meta = (_yaml.safe_load(parts[1]) if _yaml else ke_yamlmini.safe_load(parts[1])) or {}
                 except Exception:  # noqa: BLE001  front-matter 写坏不该让技能整块消失
                     meta = {}
                 body = parts[2].strip()
