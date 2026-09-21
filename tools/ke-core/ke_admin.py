@@ -451,13 +451,34 @@ def compile_artifacts() -> dict:
     return out
 
 
+def _sync_folders(kb: str, prune: bool = False) -> dict:
+    """把「页的 category_path」落成 `wiki_folders` 目录树并把页挂到最深一级。
+
+    为什么每个重投影入口都要调：`ontology_wiki.py project` 只写页（含 category_path），
+    **不建目录也不写 `folder_id`** —— 于是重投影后本体模型库的页在 wiki 树里"看不到"、
+    目录计数为 0（用户 2026-09-21 反馈"目录归类都不正确，目录统计数量也不正确"）。
+    `prune=False`：删除残留空目录属管理动作，交给显式调用（`sync_folders.py --prune`）。
+    """
+    import importlib
+
+    mcp = str(REPO / "tools" / "ontology-mcp")
+    if mcp not in sys.path:
+        sys.path.insert(0, mcp)
+    try:
+        mod = importlib.import_module("sync_folders")
+        stmts = mod.sync_kb(kb, dry_run=False, link_pages=True, prune=prune)
+        return {"ok": True, "statements": stmts}
+    except Exception as exc:  # noqa: BLE001  挂目录失败不应让重投影整体失败
+        return {"ok": False, "error": str(exc)}
+
+
 def regen_wiki(kb_id: str = "") -> dict:
-    """重投影本体 wiki 页（build 生成页面清单 → project 幂等写进本体模型知识库）。"""
+    """重投影本体 wiki 页（build 生成页面清单 → project 幂等写进本体模型知识库 → 挂目录）。"""
     kb = kb_id or ONTOLOGY_KB
     build = _run(REPO / "tools" / "ontology-extract" / "ontology_wiki.py", ["build"])
     project = _run(REPO / "tools" / "ontology-extract" / "ontology_wiki.py",
                    ["project", "--kb-id", kb])
-    return {"kb_id": kb, "build": build, "project": project}
+    return {"kb_id": kb, "build": build, "project": project, "folders": _sync_folders(kb)}
 
 
 def load_model(model: str = "", kb_id: str = "", purge: bool = True,
