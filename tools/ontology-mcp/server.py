@@ -484,10 +484,24 @@ def _design_sections(element: dict) -> list[str]:
     qualified = [r for r in (element.get("relations") or []) if r.get("properties")]
     if qualified:
         lines += [ke_pages.QUAL_SECTION, ""]
+        # 同 (类型, 目标) 合并成一行（如 C 与 R 两条边 → `crudKind=C,R`），
+        # 否则同一键会输出多行，人工与解析都难读（2026-09-21 实测）。
+        merged_qual: dict = {}
+        order: list = []
         for rel in qualified:
+            key = (rel["type"], rel.get("target_slug") or rel.get("target") or "")
+            if key not in merged_qual:
+                merged_qual[key] = {"rel": rel, "props": {}}
+                order.append(key)
+            for k, v in (rel["properties"] or {}).items():
+                old = (merged_qual[key]["props"].get(k) or "").strip()
+                vals = [x for x in (old + "," + str(v)).strip(",").split(",") if x]
+                merged_qual[key]["props"][k] = ",".join(sorted(set(vals)))
+        for key in order:
+            rel = merged_qual[key]["rel"]
             lines.append(ke_pages.rel_qualifier_line(
                 rel.get("label") or rel.get("type"), rel.get("type"), rel.get("target") or "",
-                rel.get("target_slug") or "", rel.get("properties") or {}))
+                rel.get("target_slug") or "", merged_qual[key]["props"]))
         lines.append("")
     incoming = element.get("incoming") or []
     if incoming:
@@ -529,7 +543,16 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
               "- %s（设计生成，无原文片段）" % (element.get("source_text", "").strip()), ""]
     if rels:
         lines += ["## 本体关系", ""]
+        # 同 (类型, 目标) 只写一行：同一操作对同一属性可能有 C 与 R 两条边（crudKind 不同），
+        # 而本小节的行不含 crudKind → 写两行会出现**完全相同的重复行**（巡检 A5 命中；
+        # 2026-09-21 实测：`受理注册申请 → 手机号码` 的 C/R 两条边）。
+        # crudKind 这类限定值统一在「## 关系限定（边属性）」小节里表达。
+        seen_rel = set()
         for rel in rels:
+            key = (rel["type"], rel.get("target_slug") or rel.get("target") or "")
+            if key in seen_rel:
+                continue
+            seen_rel.add(key)
             lines.append(rel_line(rel.get("label") or rel["type"], rel["type"],
                                   rel["target"], rel.get("target_slug") or ""))
         lines.append("")
@@ -1573,7 +1596,10 @@ def crud_model(kb_id: str, service_slug: str) -> dict:
             attr = attributes.setdefault(orel["slug"], {"slug": orel["slug"], "title": orel["target"],
                                                         "key_role": "", "ops": {}})
             for kind in kinds:
-                attr["ops"].setdefault(kind, []).append(op["title"])
+                # 同一操作对同一属性可能有多条同类边（如 C 与 R 分开给）→ 矩阵里**只记一次**
+                bucket = attr["ops"].setdefault(kind, [])
+                if op["title"] not in bucket:
+                    bucket.append(op["title"])
             if not attr["key_role"]:
                 attr_page = _page_row(kb_id, orel["slug"])
                 if attr_page:
