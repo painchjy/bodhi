@@ -45,6 +45,15 @@
     rdfs:comment "服务调用对业务实体状态产生的可观察变更（新增/修改/删除/外部通知）。只读契约不应声明副作用；声明副作用但无幂等键的契约视为高风险。"@zh ;
     rdfs:subClassOf owl:Thing .
 
+### 服务操作：契约下**可单独调用**的一个操作（接口级，2026-09-21 为「服务详细设计」新增）
+# 为什么与契约分开：契约是「对外能力的正式声明」（输入/输出/幂等/副作用/重试），
+# 一个服务可以有多个操作（如「实名核验」与「查询核验结果」）；CRUD 的对象是**操作 → 业务属性**，
+# 只有把操作独立成类，才能把「谁在什么属性上做 C/R/U/D」表达成可校验、可做耦合分析的图。
+:ServiceOperation rdf:type owl:Class ;
+    rdfs:label "服务操作"@zh ;
+    rdfs:comment "IT 服务下一个可独立调用的操作/接口（如 create/verify/query）。声明实现方式(method)、幂等性、事务边界，并通过 operationOperatesOnAttribute 说明它对哪些业务属性做 C/R/U/D —— 服务耦合性与设计合理性分析的基本单位。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
 # ============================================================
 # 二、对象属性
 # ============================================================
@@ -122,6 +131,51 @@
     rdfs:range :FunctionalDependency ;
     rdfs:comment "契约在数据一致性上依赖的函数依赖。声明了幂等键的契约必须至少依赖一条函数依赖，否则无法证明幂等键的决定性（幂等键应取自 determinant 属性集合）。"@zh .
 
+# ---- 服务详细设计（2026-09-21）---------------------------------------------------
+
+:serviceHasOperation rdf:type owl:ObjectProperty ;
+    rdfs:label "包含操作"@zh ;
+    rdfs:domain ea:Service ;
+    rdfs:range :ServiceOperation ;
+    rdfs:comment "IT 服务包含哪些可调用操作（服务 → 操作）。详细设计里「一个服务几个接口」由此表达。"@zh .
+
+:operationOfService rdf:type owl:ObjectProperty ;
+    rdfs:label "属于服务"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range ea:Service ;
+    rdfs:comment "操作归属于哪个 IT 服务（与 serviceHasOperation 互逆）。"@zh ;
+    owl:inverseOf :serviceHasOperation .
+
+:operationOperatesOnAttribute rdf:type owl:ObjectProperty ;
+    rdfs:label "操作业务属性"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "该操作对哪个业务属性做读/写 —— **边限定属性 crudKind 标明 C/R/U/D**（同一操作对同一属性可多次声明不同 crudKind）。服务耦合分析的数据基础：同一属性被多个服务写 = 写耦合热点。"@zh .
+
+:operationAccepts rdf:type owl:ObjectProperty ;
+    rdfs:label "操作输入属性"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "操作的入参对应的业务属性（比契约级 contractHasInput 更细：接口级）。"@zh .
+
+:operationReturns rdf:type owl:ObjectProperty ;
+    rdfs:label "操作输出属性"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "操作的返回对应的业务属性（接口级）。"@zh .
+
+:referencesAttribute rdf:type owl:ObjectProperty ;
+    rdfs:label "外键引用"@zh ;
+    rdfs:domain :BusinessAttribute ;
+    rdfs:range :BusinessAttribute ;
+    rdfs:comment "外键：本属性引用另一个业务属性（通常是被引用实体的主键/唯一键）。取值与 keyRole=FK 配对使用；引用目标必须存在且为 PK/UNIQUE（由巡检 E4 把关）。"@zh .
+
+:serviceOwnsEntity rdf:type owl:ObjectProperty ;
+    rdfs:label "负责业务实体"@zh ;
+    rdfs:domain ea:Service ;
+    rdfs:range ea:BusinessEntity ;
+    rdfs:comment "该服务负责（作为聚合根维护）哪个业务实体 —— 用于判断服务边界是否内聚、以及跨服务的实体读写是否越界。"@zh .
+
 # ============================================================
 # 三、数据属性
 # ============================================================
@@ -168,6 +222,38 @@
     rdfs:range xsd:string ;
     rdfs:comment "依赖类型取值建议：strict（严格成立） / probabilistic（统计成立）。"@zh .
 
+# ---- 服务详细设计（2026-09-21）---------------------------------------------------
+
+:crudKind rdf:type owl:DatatypeProperty ;
+    rdfs:label "CRUD 种类"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range xsd:string ;
+    rdfs:comment "读写语义：C=创建 / R=读取 / U=更新 / D=删除（可多值逗号分隔，如 'C,U'）。**作为 operationOperatesOnAttribute 这条边的限定属性**填写（见落库契约的 edges[].properties）。服务耦合分析：同一属性被≥2个服务以 C/U/D 操作 = 写耦合热点。"@zh .
+
+:operationMethod rdf:type owl:DatatypeProperty ;
+    rdfs:label "实现方式"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range xsd:string ;
+    rdfs:comment "操作的实现形态，建议取值：HTTP GET/POST/PUT/DELETE、SQL、MCP tool 名、函数名等（便于与 API/MCP/Skill 三类服务对齐）。"@zh .
+
+:isIdempotent rdf:type owl:DatatypeProperty ;
+    rdfs:label "幂等"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "该操作是否幂等（true 才允许自动重试）。写操作为 false 且无幂等键时应给出告警。"@zh .
+
+:transactionBoundary rdf:type owl:DatatypeProperty ;
+    rdfs:label "事务边界"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range xsd:string ;
+    rdfs:comment "事务边界说明：single（单实体单表）/ multi-aggregate（跨聚合，应给补偿方案）/ none（无需事务）。跨聚合写操作是耦合评审重点。"@zh .
+
+:keyRole rdf:type owl:DatatypeProperty ;
+    rdfs:label "键角色"@zh ;
+    rdfs:domain :BusinessAttribute ;
+    rdfs:range xsd:string ;
+    rdfs:comment "该业务属性在实体中的键角色：PK（主键）/ FK（外键，必须配 referencesAttribute）/ UNIQUE（唯一键）/ NONE（普通属性，默认）。"@zh .
+
 # ============================================================
 # 四、公理约束（TBox）
 # ============================================================
@@ -210,4 +296,27 @@
     owl:minCardinality 1 ;
     rdfs:comment "业务属性必须归属于至少一个业务实体"@zh
 ] .
+
+# ---- 服务详细设计的公理约束（2026-09-21）----------------------------------------
+
+# 服务操作必须说明它作用于哪些业务属性（否则无法做 CRUD/耦合分析）
+:ServiceOperation rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :operationOperatesOnAttribute ;
+    owl:minCardinality 1 ;
+    rdfs:comment "服务操作必须至少声明一个被操作（读/写）的业务属性"@zh
+] .
+
+# 服务操作必须声明实现方式（HTTP 方法 / MCP tool / 函数名 …）
+:ServiceOperation rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :operationMethod ;
+    owl:minCardinality 1 ;
+    rdfs:comment "服务操作必须声明实现方式（operationMethod）"@zh
+] .
+
+# 说明（OWL 表达不了的条件，由巡检 E 类兜底）：
+#   - keyRole=FK ⇒ 必须有 referencesAttribute，且目标属性 keyRole ∈ {PK, UNIQUE}（E4）
+#   - crudKind 含 C/U/D ⇒ 该操作 isIdempotent=false 时必须给出幂等/重试说明（E3）
+#   - 同一业务属性被 ≥2 个 IT 服务以 C/U/D 操作 ⇒ 写耦合热点（E1）
 
