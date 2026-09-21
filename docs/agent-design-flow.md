@@ -398,3 +398,24 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 性能口径（重要，避免 MCP 60s 硬超时）：一次聚合 ≈30s（12 次 `crud_model` + 1 次批量操作页查询 + 1 次属性页查询），
 巡检 `scope=coupling` ≈0.8s，`save_knowledge(report)` ≈6s → **预览可同步**，渲染+落库走**异步 job**。
 
+### 11.7 原生技能（沙箱）路线：现状与开法（2026-09-21）
+本部署的技能**由 MCP 承载**（§11.1）—— 因为 WeKnora 原生技能是**沙箱安装型**：
+`tenant_skills` 绑 `sandbox_config_id`，上传物是 **zip bundle**，安装时**在沙箱后端构建快照镜像**。
+本机默认 `WEKNORA_SANDBOX_DOCKER_ENABLED=false` 且 app 未挂 `docker.sock`，所以原生路线此前不可用。
+
+**同一份 SKILL.md 两种呈现**已打通到"只差上传"这一步：
+
+| 步骤 | 命令 / 证据 |
+|---|---|
+| ① 打包 bundle（zip + sha256，SKILL.md 在根） | `python3 tools/skills/bundle.py` → `skills/dist/<id>-<version>.zip` + `manifest.json` |
+| ② 开沙箱（**可逆**，⚠️ socket ≈ 宿主 root） | `bash deploy/weknora-fork/enable_sandbox.sh [--apply/--revert]`（改 `.env` + compose 挂载 + 重建 app）|
+| ③ 基础镜像在 daemon 上 | `docker pull wechatopenai/weknora-sandbox:latest`（= compose `sandbox` 服务的镜像）|
+| ④ 建 sandbox config + 上传安装 | `python3 deploy/weknora-fork/register_native_skills.py --list / --ensure-config / --upload` |
+| ⑤ 校验 | `GET /api/v1/skills`（智能体可用清单）、`GET /api/v1/sandbox-configs/{id}/skills`（安装状态）|
+
+Front-matter 要求（Go 侧 `ParseSkillFile` + `parseSkillBundleVersion`）：YAML 合法，且有 `name` / `description` / `version`
+→ 因此给三份 SKILL.md 补了 `description:` 与 `version: 0.1.0`（**原生**要用；MCP 侧照旧读 `when` 等，不受影响）。
+
+> 口径：**MCP 承载仍是主路**（不需要沙箱、改技能免重启、改完即生效）；开沙箱只是把同一份技能再挂到原生技能面，
+> 便于在 UI 的「技能」页里看到/勾选。开与不开都不影响 `skills()` 工具的行为。
+

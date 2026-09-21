@@ -1,6 +1,8 @@
 ---
 id: service_detailed_design
 name: 服务详细设计
+description: 对已入库的 IT 服务做详细设计（操作/接口、属性与主外键、边上的 CRUD、跨服务读依赖声明），并刷出评审总览页。
+version: 0.1.0
 when: 用户要求对**已入库的 IT 服务**做详细设计（说法如：详细设计、接口设计、服务操作、主外键、CRUD、服务耦合分析、服务合理性）。
 models: [ea-service, ea]
 default_model: ea-service

@@ -1,21 +1,32 @@
-"""驱动 bodhi-ea-modeler 跑一轮真实对话（观测用，零写入任务）。
+"""驱动 bodhi-ea-modeler 跑一轮真实对话（观测用）。
 
 - 鉴权：从 DB 取最近未撤销且未过期的 access_token（Bearer）。
 - 建会话：POST /api/v1/sessions
 - 发消息：POST /api/v1/agent-chat/{session}（SSE）
 - 观测：logs/mcp_calls_*.log + messages 表 + 本脚本保存的 SSE 原文
+
+任务（--task）
+--------------
+    read-only      只读验证：看技能目录 → 取技能全文 → 只读核查某服务 → 解释 applied=false
+    design-review  详设复核 + 刷总览：取技能 → 复核某服务的操作/属性/键/依赖（dry_run）
+                   → `service_overview(apply=true)` 刷新总览页（异步，盯回执）
+
+用法
+----
+    python3 deploy/weknora-fork/try_agent_chat.py [--task design-review] [--service <slug>]
 """
+import argparse
 import json
 import pathlib
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
 BASE = 'http://localhost:8080'
 BIZ = 'dbc2528f-611b-48da-9a71-d7c93975adb4'
 ONT = '08810cbd-af86-48d1-bd25-3b2c338e3d68'
-OUT = pathlib.Path('/mnt/c/Users/PHJY/AppData/Local/Temp/agent_run.log')
 
 PROMPT = (
     "这是一次**只读**验证，不要写任何数据、不要 apply。请按顺序做，并把每步的原样回执摘出来：\n"
@@ -25,6 +36,19 @@ PROMPT = (
     "   目前写了哪些业务属性、读了哪些（读的是别的哪个服务写的），并据此说明 E1/E2 结论；\n"
     "4) 最后用一句话说明：回执里 `applied=false` 代表什么。\n"
     "回答里请列出你实际调用的工具名与关键参数。"
+)
+
+PROMPT_DESIGN_REVIEW = (
+    "请对 IT 服务「{service}」做一次**详细设计复核**，并刷新评审总览页。按顺序做，"
+    "每步把工具回执里的数字原样摘出来：\n"
+    "1) 先 `skills()` 看技能目录，再 `skills(skill=\"service_detailed_design\")` 取完整指令与允许的类/关系/数据属性；\n"
+    "2) 只读核对这个服务：操作清单（实现方式/幂等/事务边界）、写哪些业务属性、读哪些（谁写的）、"
+    "键角色，以及跨服务读是否都有 `operationDependsOnOperation` 声明（用 `audit_scan(scope=\"coupling\")`）；\n"
+    "3) 若发现缺口，只用 `save_knowledge(stage=\"graph\", mode=\"dry_run\")` 列出**拟补的边**，"
+    "**不要 apply**（本轮不改数据）；\n"
+    "4) 最后调 `service_overview(kb_id, apply=true)` **异步**刷新「IT 服务详细设计总览」页，"
+    "并用 `extract_status(job_id=...)` 拿到回执（页面 slug 与 created/merged 数原样报出来）。\n"
+    "回答请给出：你调用的工具名 + 关键参数 + 每步数字；不要贴大表。"
 )
 
 
@@ -41,6 +65,18 @@ def call(path: str, body=None, method='POST', accept='application/json', timeout
     return urllib.request.urlopen(req, timeout=timeout)
 
 
+_ap = argparse.ArgumentParser(description='驱动 bodhi-ea-modeler 跑一轮真实对话')
+_ap.add_argument('--task', default='read-only', choices=['read-only', 'design-review'])
+_ap.add_argument('--service', default='签约账户选择服务', help='design-review 的目标服务（标题或 slug）')
+_ap.add_argument('--out', default='', help='SSE 原文落盘路径（默认按 task 命名）')
+_args = _ap.parse_args()
+if _args.task == 'design-review':
+    PROMPT_TEXT = PROMPT_DESIGN_REVIEW.format(service=_args.service)
+    _default_out = '/mnt/c/Users/PHJY/AppData/Local/Temp/agent_run_design_review.log'
+else:
+    PROMPT_TEXT = PROMPT
+    _default_out = '/mnt/c/Users/PHJY/AppData/Local/Temp/agent_run.log'
+OUT = pathlib.Path(_args.out or _default_out)
 log = open(OUT, 'w', encoding='utf-8')
 
 
@@ -84,7 +120,7 @@ if not session_id:
 say('=== 发送消息（SSE，最长 8 分钟）===')
 try:
     with call('/api/v1/agent-chat/%s' % session_id,
-              {'query': PROMPT, 'agent_id': 'bodhi-ea-modeler',
+              {'query': PROMPT_TEXT, 'agent_id': 'bodhi-ea-modeler',
                'knowledge_base_ids': [BIZ, ONT], 'agent_enabled': True,
                'channel': 'web'}, accept='text/event-stream', timeout=480) as resp:
         for raw in resp:

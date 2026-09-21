@@ -1,0 +1,41 @@
+[
+  {
+    "skill": "domain_modeling",
+    "name": "领域知识建模",
+    "version": "0.1.0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 2904,
+    "bundle": "domain_modeling-0.1.0.zip",
+    "sha256": "90970af973533bfd4ec61c40e6e7e7e91a796452d3461ce7ca1d619232b371f9",
+    "problems": []
+  },
+  {
+    "skill": "ea_overview_design",
+    "name": "企架概要设计",
+    "version": "0.1.0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 5110,
+    "bundle": "ea_overview_design-0.1.0.zip",
+    "sha256": "bc88ba38cad14262325f4204ab480001f02ed0afdf3262a1e9e57bc3a3cc2b1d",
+    "problems": []
+  },
+  {
+    "skill": "service_detailed_design",
+    "name": "服务详细设计",
+    "version": "0.1.0",
+    "files": [
+      "EXAMPLE.json",
+      "SKILL.md",
+      "examples/bulk_design.py",
+      "examples/coupling_example.json"
+    ],
+    "bytes": 47471,
+    "bundle": "service_detailed_design-0.1.0.zip",
+    "sha256": "594cd364ffaa8f164f66480af31cf0b3b83b3c838663c8f5f00a65faafc662d0",
+    "problems": []
+  }
+]

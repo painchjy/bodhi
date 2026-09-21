@@ -1,6 +1,8 @@
 ---
 id: domain_modeling
 name: 领域知识建模
+description: 把某一篇文档/资料按本体（EA / BMM）抽取成 wiki 知识页；可用 scope 收窄只抽某几类节点或某几条关系。
+version: 0.1.0
 when: 用户要求把**某一篇文档/资料**按某个本体抽取成 wiki 知识页（说法如：领域知识建模、知识提取、按 EA/BMM 建模、把《X》抽成知识）；也可用于"只抽某几类/某几条关系"的收窄建模。
 models: [ea, bmm]
 default_model: bmm
