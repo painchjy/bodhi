@@ -456,8 +456,10 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         "slug": slug, "title": element["name"], "page_type": element["type"],
         "summary": (element.get("definition") or "")[:500],
         "content": "\n".join(lines).rstrip() + "\n",
-        "category_path": class_category_path(element["type"], model["key"], model["label"],
-                                             element["type_label"]),
+        # 分类路径：设计载荷可显式指定（如报告页用 `["概要设计报告"]`）；否则按本体类推导
+        "category_path": element.get("category_path")
+                          or class_category_path(element["type"], model["key"], model["label"],
+                                                 element["type_label"]),
         "wiki_path": slug, "source_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
         "chunk_refs": [chunk_id] if chunk_id else [],
         "out_links": sorted({r.get("target_slug") for r in rels if r.get("target_slug")}),
@@ -1011,6 +1013,7 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                     slug = rows[0]["slug"]
         element = {"name": title, "type": (report or {}).get("page_type") or "summary",
                    "type_label": "概要设计报告", "module": model, "slug": slug,
+                   "category_path": (report or {}).get("category_path") or ["概要设计报告"],
                    "definition": body, "description": "",
                    "source_text": "概要设计报告（由设计智能体生成、人工确认后落库）",
                    "chunk_id": "", "chunk_index": -1, "relations": [],

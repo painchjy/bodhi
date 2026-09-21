@@ -357,7 +357,16 @@ def check_ontology_artifacts(ctx: dict, rep: Report) -> None:
             "RETURN DISTINCT c.prefixed AS name") if r.get("name")}
         proj_props = {r["name"] for r in ke_neo4j.query(
             "MATCH (p:BodhiOntProperty) WHERE p.bodhi_projection = 'ontology' "
-            "AND p.prefixed IS NOT NULL RETURN DISTINCT p.prefixed AS name") if r.get("name")}
+            "AND p.prefixed IS NOT NULL "
+            "AND toLower(coalesce(p.property_kind, 'object')) <> 'datatype' "
+            "RETURN DISTINCT p.prefixed AS name") if r.get("name")}
+        # 数据属性（datatype）：产物只给**计数**（`stats.datatype_properties`），投影侧单独计数对比。
+        # 早期版本把数据属性混进属性集合，于是 `bmm:definition`、`ea:ai_skill` 等被误报为「投影独有」
+        # （2026-09-21 实测：投影 109 = object 93 + datatype 16，产物 object 72 + datatype 21）。
+        proj_dt = int(ke_neo4j.query(
+            "MATCH (p:BodhiOntProperty) WHERE p.bodhi_projection = 'ontology' "
+            "AND p.prefixed IS NOT NULL AND toLower(coalesce(p.property_kind, '')) = 'datatype' "
+            "RETURN count(p) AS n")[0]["n"] or 0)
     except Exception as exc:  # noqa: BLE001
         rep.add("B5", "medium", ctx["kb_id"], "无法读 Neo4j 本体投影：%s" % exc, PROJECTION_FIX)
         return
@@ -368,6 +377,7 @@ def check_ontology_artifacts(ctx: dict, rep: Report) -> None:
                 ARTIFACT_FIX)
         return
     art_classes, art_props, modules = set(), set(), []
+    art_dt = 0
     for model in (index.get("models") or []):
         modules.append(str(model.get("key") or ""))
         for cls in (model.get("classes") or []):
@@ -376,26 +386,32 @@ def check_ontology_artifacts(ctx: dict, rep: Report) -> None:
         for rel in (model.get("relations") or []):
             if rel.get("name"):
                 art_props.add(rel["name"])
+        art_dt += int((model.get("stats") or {}).get("datatype_properties") or 0)
     only_proj_c = sorted(proj_classes - art_classes)
     only_art_c = sorted(art_classes - proj_classes)
     only_proj_p = sorted(proj_props - art_props)
     only_art_p = sorted(art_props - proj_props)
+    dt_drift = proj_dt - art_dt
     ctx["data"]["ontology_artifacts"] = {
-        "projection": {"classes": len(proj_classes), "properties": len(proj_props)},
+        "projection": {"classes": len(proj_classes), "properties": len(proj_props),
+                       "datatype_properties": proj_dt},
         "artifacts": {"classes": len(art_classes), "properties": len(art_props),
-                      "modules": modules},
+                      "datatype_properties": art_dt, "modules": modules},
         "projection_only": {"classes": only_proj_c[:20], "properties": only_proj_p[:20]},
         "artifacts_only": {"classes": only_art_c[:20], "properties": only_art_p[:20]},
         "fix_commands": {"recompile": ARTIFACT_FIX, "reload_projection": PROJECTION_FIX},
     }
-    if only_proj_c or only_proj_p or only_art_c or only_art_p:
+    if only_proj_c or only_proj_p or only_art_c or only_art_p or dt_drift:
         rep.add("B5", "medium", ctx["kb_id"],
-                "本体投影与编译产物不一致：投影 %d 类/%d 属性，产物 %d 类/%d 属性（产物模块：%s）。"
-                "投影有产物无 → 类 %s；属性 %s。产物有投影无 → 类 %s；属性 %s。"
-                % (len(proj_classes), len(proj_props), len(art_classes), len(art_props),
+                "本体投影与编译产物不一致：投影 %d 类/%d 对象属性/%d 数据属性，"
+                "产物 %d 类/%d 对象属性/%d 数据属性（产物模块：%s）。"
+                "投影有产物无 → 类 %s；对象属性 %s。产物有投影无 → 类 %s；对象属性 %s。"
+                "数据属性差 %+d。"
+                % (len(proj_classes), len(proj_props), proj_dt,
+                   len(art_classes), len(art_props), art_dt,
                    "、".join(m for m in modules[:8] if m) or "—",
                    "、".join(only_proj_c[:6]) or "—", "、".join(only_proj_p[:6]) or "—",
-                   "、".join(only_art_c[:6]) or "—", "、".join(only_art_p[:6]) or "—"),
+                   "、".join(only_art_c[:6]) or "—", "、".join(only_art_p[:6]) or "—", dt_drift),
                 "① 重编产物：%s；② 重载投影：%s（两步都是直接命令，无需计划确认）"
                 % (ARTIFACT_FIX, PROJECTION_FIX))
 
