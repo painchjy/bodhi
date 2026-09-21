@@ -372,6 +372,7 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
     """新要素 -> 页面（与 ontology_wiki/weknora_sync 同风格：能被人读，也能被图谱用）。"""
     slug = element_slug(model["key"], element)
     rels = element.get("relations") or []
+    upstream = [s for s in (element.get("upstream") or []) if s]
     lines = ["# %s（`%s`）" % (element["name"], element["type"]), "",
              "> **本体类型**：%s（`%s`）  " % (element["type_label"], element["type"]),
              "> **来源**：《%s》%s  " % (doc_meta["title"],
@@ -389,20 +390,27 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
             lines.append(rel_line(rel.get("label") or rel["type"], rel["type"],
                                   rel["target"], rel.get("target_slug") or ""))
         lines.append("")
+    if upstream:
+        # 方案 C 溯源：来源**文档**写在 `## 原文依据`；上游**页面**写在这里（设计页没有源文片段）
+        lines += ["## 溯源", ""]
+        for slug in upstream:
+            lines.append("- 上游页面：`%s`" % slug)
+        lines.append("")
     return {
         "slug": slug, "title": element["name"], "page_type": element["type"],
         "summary": (element.get("definition") or "")[:500],
         "content": "\n".join(lines).rstrip() + "\n",
         "category_path": class_category_path(element["type"], model["key"], model["label"],
                                              element["type_label"]),
-        "wiki_path": slug, "source_refs": [doc_meta["id"]],
+        "wiki_path": slug, "source_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
         "chunk_refs": [chunk_id] if chunk_id else [],
         "out_links": sorted({r.get("target_slug") for r in rels if r.get("target_slug")}),
-        "aliases": [element["name"]],
-        "page_metadata": {"ontology": {
-            "model": model["key"], "class": element["type"], "class_label": element["type_label"],
-            "name": element["name"], "generator": TOOL_TAG, "created_at": now_text(),
-        }},
+        "aliases": element.get("aliases") or [element["name"]],
+        "page_metadata": dict({
+            "ontology": {
+                "model": model["key"], "class": element["type"], "class_label": element["type_label"],
+                "name": element["name"], "generator": TOOL_TAG, "created_at": now_text(),
+            }}, **({"design": {"upstream": upstream, "generator": TOOL_TAG}} if upstream else {})),
     }
 
 
@@ -456,8 +464,27 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
             added_relations.append(rel["type"])
         merged.append("")
 
+    upstream = [s for s in (element.get("upstream") or []) if s]
+    added_upstream = []
+    if upstream:
+        if any(line.strip() == "## 溯源" for line in merged):
+            pos = next(i for i, line in enumerate(merged) if line.strip() == "## 溯源")
+            end = next((i for i in range(pos + 1, len(merged)) if merged[i].startswith("## ")),
+                       len(merged))
+            existing = {squash(line) for line in merged[pos + 1:end] if line.strip()}
+            for slug in upstream:
+                item = "- 上游页面：`%s`" % slug
+                if squash(item) not in existing:
+                    merged.insert(end, item)
+                    added_upstream.append(slug)
+                    end += 1
+        else:
+            merged += ["", "## 溯源", ""] + ["- 上游页面：`%s`" % s for s in upstream] + [""]
+            added_upstream = list(upstream)
+
     post = {"definition_upgraded": bool(new_def) and len(new_def) > len(old_def),
-            "evidence_added": added_evidence, "relations_added": added_relations}
+            "evidence_added": added_evidence, "relations_added": added_relations,
+            "upstream_added": added_upstream}
     return "\n".join(merged).rstrip() + "\n", post
 
 
@@ -601,6 +628,281 @@ def sql_rebuild_in_links(kb_id: str) -> str:
     return ke_pages.rebuild_in_links_sql(kb_id)
 
 
+def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_meta: dict,
+                  *, high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW, dry_run: bool = False,
+                  tenant_id: int | None = None, resolved_note: str = "", knowledge_id: str = "",
+                  extra: dict | None = None, engine=None) -> dict:
+    """**落库半段**（抽取路径与设计路径共用）：相似度匹配 → 合并/新增/待确认 → 写页 → 重算 links。
+
+    这段逻辑原先内联在 `extract_and_save` 里（2026-09-20 原样抽出，行为逐字保留）：
+    - 相似度 ≥ high：合并进存量页（定义取更完整、追加证据、关系去重、写入 merge_history）；
+    - 相似度 ≤ low 或无候选：新建页；
+    - 两者之间：生成「待确认合并」页，交人工裁决（`resolve_pending_merge`）。
+    """
+    tenant = tenant_id if tenant_id is not None else get_kb_tenant(kb_id)
+    pages = fetch_existing_pages(kb_id)
+    statements: list[str] = []
+    summary = {
+        "model": model["key"], "kb_id": kb_id, "knowledge_id": knowledge_id,
+        "resolved_note": (resolved_note or "").strip(), "doc_title": doc_meta.get("title", ""),
+        "elements": len(payloads), "relationships": len(checked.get("edges") or []),
+        "created": [], "merged": [], "pending": [],
+        "violations": checked["violations"], "unmatched": checked["unmatched"],
+        "dry_run": dry_run, "thresholds": {"high": high, "low": low},
+        "generated_at": now_text(),
+    }
+    if extra:
+        summary.update(extra)
+
+    for element in payloads:
+        sim, candidate = pick_match(element, pages)
+        # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），
+        # 直接走合并；否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
+        exact = next((p for p in pages if p["slug"] == element_slug(model["key"], element)), None)
+        if exact is not None:
+            sim, candidate = 1.0, exact
+        if candidate is not None and sim >= high:
+            content, post = merge_content(candidate["content"], element, element["chunk_id"],
+                                          element["chunk_index"], doc_meta)
+            source_refs = union_list(candidate.get("source_refs"), [doc_meta["id"]])
+            chunk_refs = union_list(candidate.get("chunk_refs"),
+                                    [element["chunk_id"]] if element["chunk_id"] else [])
+            metadata = candidate.get("page_metadata") or {}
+            ont = metadata.setdefault("ontology", {})
+            ont.setdefault("merge_history", []).append(
+                {"at": now_text(), "doc": doc_meta["title"],
+                 "chunk_index": element["chunk_index"], "similarity": sim, **post})
+            ont["last_merge_at"] = now_text()
+            upstream = [s for s in (element.get("upstream") or []) if s]
+            if upstream:
+                des = metadata.setdefault("design", {})
+                des["upstream"] = sorted(set(list(des.get("upstream") or []) + upstream))
+                des.setdefault("generator", TOOL_TAG)
+            new_summary = (element.get("definition") or candidate.get("summary") or "")[:500]
+            statements.append(sql_update_page(candidate, content, new_summary,
+                                              source_refs, chunk_refs, metadata))
+            summary["merged"].append({"name": element["name"], "type": element["type"],
+                                      "into": candidate["slug"], "similarity": sim, **post})
+            candidate.update({"content": content, "summary": new_summary,
+                              "source_refs": source_refs, "chunk_refs": chunk_refs,
+                              "page_metadata": metadata})
+        elif candidate is None or sim <= low:
+            page = build_new_page(engine or load_engine(), model=model, element=element,
+                                  chunk_id=element["chunk_id"], chunk_index=element["chunk_index"],
+                                  doc_meta=doc_meta)
+            if any(p["slug"] == page["slug"] for p in pages):
+                page["slug"] = "%s-%s" % (page["slug"],
+                                          hashlib.sha1(element["type"].encode()).hexdigest()[:6])
+                page["wiki_path"] = page["slug"]
+            statements.append(sql_insert_page(page, kb_id, tenant))
+            summary["created"].append({"name": element["name"], "type": element["type"],
+                                       "slug": page["slug"]})
+            pages.append({**page, "version": 1, "knowledge_base_id": kb_id,
+                          "status": "published", "in_links": [], "title": page["title"],
+                          "summary": page["summary"], "aliases": page["aliases"],
+                          "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
+        else:
+            page = build_pending_page(model, element, candidate, sim, element["chunk_id"],
+                                      element["chunk_index"], doc_meta, high, low)
+            statements.append(sql_insert_page(page, kb_id, tenant))
+            summary["pending"].append({"name": element["name"], "type": element["type"],
+                                       "pending_slug": page["slug"],
+                                       "candidate": candidate["slug"], "similarity": sim})
+            pages.append({**page, "version": 1, "knowledge_base_id": kb_id,
+                          "status": "published", "in_links": [], "title": page["title"],
+                          "summary": page["summary"], "aliases": page["aliases"],
+                          "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
+
+    if not dry_run and statements:
+        statements.append(sql_rebuild_in_links(kb_id))
+        psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
+        # 落库后**自动重建该知识库的目录树**（用户 2026-09-19 口径）：
+        # 不重建的话前端树是平铺的（老问题）。目录 id 是 UUIDv5 确定性生成、逻辑幂等，
+        # 所以每次落库后同步一遍是安全的；同步失败不影响本次结果（只记录状态）。
+        try:
+            import sync_folders  # 延迟导入：sync_folders 反过来 import server
+            sync_folders.sync_kb(kb_id, dry_run=False, link_pages=True, prune=False)
+            summary["folders_synced"] = True
+        except Exception as exc:  # noqa: BLE001
+            print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
+            summary["folders_synced"] = "failed: %s" % exc
+    return summary
+
+
+def _graph_target_slug(name: str) -> str:
+    """在**本库已落库的页面**里按标题找 slug（设计节点引用需求 wiki 页时用）。"""
+    if not name:
+        return ""
+    rows = psql_csv("SELECT slug FROM wiki_pages WHERE deleted_at IS NULL AND title = %s LIMIT 1"
+                    % sql_str(name))
+    return rows[0]["slug"] if rows else ""
+
+
+def _graph_target_type(name: str) -> str:
+    rows = psql_csv("SELECT COALESCE(page_type,'') AS t FROM wiki_pages WHERE deleted_at IS NULL "
+                    "AND title = %s LIMIT 1" % sql_str(name))
+    return rows[0]["t"] if rows else ""
+
+
+def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_meta: dict,
+                    upstream: list | None = None) -> tuple[list, dict]:
+    """把**概要设计报告**里的节点/关系转成「要素载荷」（与抽取路径同形），并做本体合规校验。
+
+    - 节点：`{name, type, definition, description, source_text?, aliases?}` → 一页；
+    - 关系：`{source, type, target, label?}` → 写进 source 页的 `## 本体关系`；
+    - 校验：类必须在本体里（`ke_ontology.class_meta`），关系的 range 闭包必须包含目标页类型；
+      不合规的进 `violations`（与抽取路径同一口径：违规不入库，回报给调用方）；
+    - `upstream`：上游页 slug（需求页/报告页），写进 `page_metadata.design.upstream` 与正文 `## 溯源`。
+    """
+    meta = ke_ontology.class_meta()
+    violations: list = []
+    slug_by_name: dict = {}
+    upstream = [s for s in (upstream or []) if s]
+    for node in nodes:
+        name = (node.get("name") or "").strip()
+        cls = (node.get("type") or "").strip()
+        if not name or not cls:
+            violations.append({"kind": "node", "name": name, "reason": "缺少 name 或 type"})
+            continue
+        info = meta.get(cls)
+        if not info:
+            violations.append({"kind": "node", "name": name, "type": cls,
+                               "reason": "本体里没有这个类（需先补本体或改用现有类）"})
+            continue
+        node["_module"] = info.get("module") or model_key
+        node["_type_label"] = info.get("label") or cls
+        slug_by_name[name] = element_slug(node["_module"],
+                                         {"name": name, "type": cls})
+
+    outgoing: dict = {}
+    for edge in edges:
+        rel_type = (edge.get("type") or "").strip()
+        src = (edge.get("source") or "").strip()
+        dst = (edge.get("target") or "").strip()
+        closure = ke_ontology.target_closure(rel_type)
+        if not closure:
+            violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
+                               "reason": "本体里没有这个对象属性"})
+            continue
+        dst_type = next((n.get("type") for n in nodes if (n.get("name") or "").strip() == dst), "")
+        dst_slug = slug_by_name.get(dst, "")
+        if not dst_slug:
+            dst_slug, dst_type = _graph_target_slug(dst), (dst_type or _graph_target_type(dst))
+        if not dst_slug:
+            violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
+                               "reason": "目标解析不到页面（既不在本次节点里，也不在本库里）"})
+            continue
+        if dst_type and dst_type not in closure:
+            violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
+                               "reason": "目标页类型 %s 不在 `%s` 的 range 内（%s）"
+                                         % (dst_type, rel_type, "、".join(closure[:6]))})
+            continue
+        outgoing.setdefault(src, []).append({"type": rel_type, "label": edge.get("label", ""),
+                                             "target": dst, "target_slug": dst_slug,
+                                             "source_text": edge.get("source_text", "")})
+
+    accepted = []
+    payloads = []
+    for node in nodes:
+        name = (node.get("name") or "").strip()
+        if name not in slug_by_name:
+            continue
+        rels = outgoing.get(name, [])
+        accepted += [{"source": name, "type": r["type"], "target": r["target"]} for r in rels]
+        payloads.append({
+            "name": name, "type": node["type"], "type_label": node["_type_label"],
+            "module": node["_module"], "definition": node.get("definition") or "",
+            "description": node.get("description") or "",
+            "source_text": node.get("source_text") or "（概要设计，无原文片段）",
+            "chunk_id": "", "chunk_index": -1, "relations": rels,
+            "upstream": upstream, "aliases": node.get("aliases") or [],
+        })
+    return payloads, {"edges": accepted, "violations": violations, "unmatched": []}
+
+
+def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
+                   report: dict | None = None, nodes: list | None = None, edges: list | None = None,
+                   mode: str = "dry_run", confirmed_new_applications: list | None = None,
+                   high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW) -> dict:
+    """**设计落库（不调 LLM）**：两段式，复用抽取路径的 `save_elements`（相似度合并/待确认/版本/目录）。
+
+    - `stage="report"`：把**概要设计报告 md** 整篇写成 wiki 页（索引页/父页）。
+      报告正文放在「定义」位置（所以正文完整保留），来源按方案 C 记到需求文档（`source_refs`），
+      上游页写进正文 `## 溯源` 与 `page_metadata.design.upstream`。
+    - `stage="graph"`：把报告**细分**出的节点/关系写成 wiki 页 + 本体关系（每个 IT 服务/应用系统一页）。
+      节点页通过 `report.slug` 挂到报告页下（`parent_slug`），形成「报告页 → 细分页」的层级，
+      与报告正文一一对应（图谱内容 = 设计 wiki 的细分）。
+    - 合规：类必须在本体里、关系的 range 闭包必须包含目标页类型，违规进 `violations`（不入库）；
+    - 确认：新建「应用/系统」类节点（`bmm-ea-ext:Application` / `ea:Application` / `ITAsset`）
+      **必须**在 `confirmed_new_applications` 里列出，否则只在 dry_run 清单里回报；
+    - 幂等：同标题（同 slug）重跑 = 合并更新，不重复建页。
+    """
+    kb_id, kb_note = resolve_kb_id(kb_id)
+    engine = load_engine()
+    model_obj = engine.pick_model(engine.load_index(engine.DEFAULT_INDEX), model)
+    stage = (stage or "report").strip().lower()
+    mode = (mode or "dry_run").strip().lower()
+    if stage not in ("report", "graph"):
+        raise ValueError("stage 只能是 report / graph")
+    if mode not in ("dry_run", "apply"):
+        raise ValueError("mode 只能是 dry_run / apply")
+    tenant_id = get_kb_tenant(kb_id)
+    confirmed = {str(x).strip() for x in (confirmed_new_applications or []) if str(x).strip()}
+
+    doc_meta = {"id": "", "title": (report or {}).get("source_document_title") or "（无来源文档）"}
+    if (report or {}).get("source_document_id"):
+        doc_meta["id"] = resolve_knowledge_id(kb_id, str(report["source_document_id"]))[0]
+
+    if stage == "report":
+        title = ((report or {}).get("title") or "").strip()
+        body = ((report or {}).get("content_md") or "").strip()
+        if not title or not body:
+            raise ValueError("stage=report 需要 report.title 与 report.content_md")
+        element = {"name": title, "type": (report or {}).get("page_type") or "summary",
+                   "type_label": "概要设计报告", "module": model,
+                   "definition": body, "description": "",
+                   "source_text": "概要设计报告（由设计智能体生成、人工确认后落库）",
+                   "chunk_id": "", "chunk_index": -1, "relations": [],
+                   "upstream": [s for s in ((report or {}).get("upstream") or []) if s],
+                   "aliases": (report or {}).get("aliases") or []}
+        checked = {"edges": [], "violations": [], "unmatched": []}
+        summary = save_elements(kb_id, model_obj, checked, [element], doc_meta, high=high, low=low,
+                                dry_run=(mode != "apply"), tenant_id=tenant_id,
+                                resolved_note=kb_note, engine=engine)
+        summary["stage"] = "report"
+        return summary
+
+    payloads, checked = design_elements(
+        model, model_obj, nodes or [], edges or [], doc_meta,
+        upstream=[s for s in ((report or {}).get("upstream") or []) if s])
+    app_types = ("bmm-ea-ext:Application", "ea:Application", "bmm-ea-ext:ITAsset", "ea:ITAsset")
+    allowed, blocked = [], []
+    for payload in payloads:
+        if payload["type"] in app_types and payload["name"] not in confirmed:
+            blocked.append({"name": payload["name"], "type": payload["type"],
+                            "reason": "新建「应用/系统」节点需人工确认",
+                            "how": "确认后带 confirmed_new_applications=[\"%s\"] 重跑"
+                                   % payload["name"]})
+        else:
+            allowed.append(payload)
+    summary = save_elements(kb_id, model_obj, checked, allowed, doc_meta, high=high, low=low,
+                            dry_run=(mode != "apply"), tenant_id=tenant_id,
+                            resolved_note=kb_note, engine=engine)
+    summary["stage"] = "graph"
+    summary["pending_confirmation"] = blocked
+    report_slug = ((report or {}).get("slug") or "").strip()
+    if report_slug:
+        summary["report_slug"] = report_slug
+        if mode == "apply":
+            for entry in summary["created"] + summary["merged"]:
+                slug = entry.get("slug") or entry.get("into")
+                if slug:
+                    psql("UPDATE wiki_pages SET parent_slug = %s, updated_at = now() "
+                         "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
+                         % (sql_str(report_slug), sql_str(kb_id), sql_str(slug)), stdin=True)
+    return summary
+
+
 def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
                      high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
                      dry_run: bool = False, from_log: str = "") -> dict:
@@ -625,82 +927,11 @@ def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
     result = run_extraction(engine, model_key, doc_title, doc_text, from_log=from_log)
     model, checked = result["model"], result["checked"]
     payloads = element_payloads(engine, checked, pool)
-
-    pages = fetch_existing_pages(kb_id)
-    statements: list[str] = []
-    summary = {
-        "model": model["key"], "kb_id": kb_id, "knowledge_id": knowledge_id,
-        # 参数解析说明：让智能体看到真实 id，下次直接用它（避免再传名称/占位符）
-        "resolved_note": (kb_note + " " + doc_note).strip(),
-        "doc_title": doc_title, "chunks": len(chunks), "chars": len(doc_text),
-        "elements": len(payloads), "relationships": len(checked["edges"]),
-        "created": [], "merged": [], "pending": [],
-        "violations": checked["violations"], "unmatched": checked["unmatched"],
-        "dry_run": dry_run, "thresholds": {"high": high, "low": low},
-        "generated_at": now_text(),
-    }
-
-    for element in payloads:
-        sim, candidate = pick_match(element, pages)
-        if candidate is not None and sim >= high:
-            content, post = merge_content(candidate["content"], element, element["chunk_id"],
-                                          element["chunk_index"], doc_meta)
-            source_refs = union_list(candidate.get("source_refs"), [doc_meta["id"]])
-            chunk_refs = union_list(candidate.get("chunk_refs"),
-                                    [element["chunk_id"]] if element["chunk_id"] else [])
-            metadata = candidate.get("page_metadata") or {}
-            ont = metadata.setdefault("ontology", {})
-            ont.setdefault("merge_history", []).append(
-                {"at": now_text(), "doc": doc_meta["title"],
-                 "chunk_index": element["chunk_index"], "similarity": sim, **post})
-            ont["last_merge_at"] = now_text()
-            new_summary = (element.get("definition") or candidate.get("summary") or "")[:500]
-            statements.append(sql_update_page(candidate, content, new_summary,
-                                              source_refs, chunk_refs, metadata))
-            summary["merged"].append({"name": element["name"], "type": element["type"],
-                                      "into": candidate["slug"], "similarity": sim, **post})
-            candidate.update({"content": content, "summary": new_summary,
-                              "source_refs": source_refs, "chunk_refs": chunk_refs,
-                              "page_metadata": metadata})
-        elif candidate is None or sim <= low:
-            page = build_new_page(engine, model, element, element["chunk_id"],
-                                  element["chunk_index"], doc_meta)
-            if any(p["slug"] == page["slug"] for p in pages):
-                page["slug"] = "%s-%s" % (page["slug"],
-                                          hashlib.sha1(element["type"].encode()).hexdigest()[:6])
-                page["wiki_path"] = page["slug"]
-            statements.append(sql_insert_page(page, kb_id, tenant_id))
-            summary["created"].append({"name": element["name"], "type": element["type"],
-                                       "slug": page["slug"]})
-            pages.append({**page, "version": 1, "knowledge_base_id": kb_id,
-                          "status": "published", "in_links": [], "title": page["title"],
-                          "summary": page["summary"], "aliases": page["aliases"],
-                          "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
-        else:
-            page = build_pending_page(model, element, candidate, sim, element["chunk_id"],
-                                      element["chunk_index"], doc_meta, high, low)
-            statements.append(sql_insert_page(page, kb_id, tenant_id))
-            summary["pending"].append({"name": element["name"], "type": element["type"],
-                                       "pending_slug": page["slug"],
-                                       "candidate": candidate["slug"], "similarity": sim})
-            pages.append({**page, "version": 1, "knowledge_base_id": kb_id,
-                          "status": "published", "in_links": [], "title": page["title"],
-                          "summary": page["summary"], "aliases": page["aliases"],
-                          "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
-
-    if not dry_run and statements:
-        statements.append(sql_rebuild_in_links(kb_id))
-        psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
-        # 抽取落库后**自动重建该知识库的目录树**（用户 2026-09-19 口径）：
-        # 不重建的话前端树是平铺的（老问题）。目录 id 是 UUIDv5 确定性生成、逻辑幂等，
-        # 所以每次抽取后同步一遍是安全的；同步失败不影响本次抽取结果（只记录状态）。
-        try:
-            import sync_folders  # 延迟导入：sync_folders 反过来 import server
-            sync_folders.sync_kb(kb_id, dry_run=False, link_pages=True, prune=False)
-            summary["folders_synced"] = True
-        except Exception as exc:  # noqa: BLE001
-            print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
-            summary["folders_synced"] = "failed: %s" % exc
+    # 落库半段统一走 save_elements（与「设计路径」同一份实现，见 save_knowledge）
+    summary = save_elements(kb_id, model, checked, payloads, doc_meta,
+                            high=high, low=low, dry_run=dry_run, tenant_id=tenant_id,
+                            resolved_note=(kb_note + " " + doc_note), knowledge_id=knowledge_id,
+                            extra={"chunks": len(chunks), "chars": len(doc_text)}, engine=engine)
     return summary
 
 
@@ -1023,6 +1254,59 @@ def tool_definitions() -> list[dict]:
                 "required": ["kb_id"],
             },
         },
+        {
+            "name": "save_knowledge",
+            "description": ("**设计落库（不调用大模型）**：把概要设计内容写成 wiki 页与本体图谱。两段式："
+                            "`stage=report` 先落**概要设计报告 md**（整篇写成索引页/父页）；"
+                            "`stage=graph` 再把报告**细分**出的节点/关系落成各自 wiki 页 + 本体关系"
+                            "（每个 IT 服务/应用系统一页，挂在报告页下）。"
+                            "落库与抽取路径**共用同一份实现**：相似度两阈值（高→合并现有页、低→新增页、"
+                            "中间→生成「待确认合并」页交人工裁决）、版本快照、溯源、目录重建都一致。"
+                            "合规校验：类必须在本体里、关系必须满足 domain/range，违规进 violations 不入库。"
+                            "**新建「应用/系统」节点必须人工确认**：默认 dry_run 只给清单，"
+                            "确认后 mode=apply 且带 confirmed_new_applications 重跑（幂等，同标题只更新）。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "目标知识库 UUID 或名称"},
+                    "stage": {"type": "string", "enum": ["report", "graph"],
+                              "description": "report=先落报告页（返回 slug）；graph=再落细分节点与关系"},
+                    "model": {"type": "string", "description": "本体模型 key，默认 ea"},
+                    "report": {
+                        "type": "object",
+                        "description": ("报告页与溯源信息：{title, content_md(报告全文), slug(可选，"
+                                        "graph 段要用它挂父页), upstream(上游页 slug 数组), "
+                                        "source_document_id(需求文档 id，方案 C 溯源), "
+                                        "source_document_title, page_type(默认 summary)}"),
+                        "properties": {"title": {"type": "string"}, "content_md": {"type": "string"},
+                                       "slug": {"type": "string"},
+                                       "upstream": {"type": "array", "items": {"type": "string"}},
+                                       "source_document_id": {"type": "string"},
+                                       "source_document_title": {"type": "string"}},
+                    },
+                    "nodes": {
+                        "type": "array",
+                        "description": ("细分节点：[{name, type(本体类，如 bmm-ea-ext:Service / "
+                                        "bmm-ea-ext:Application), definition, description, aliases?}]"),
+                        "items": {"type": "object"},
+                    },
+                    "edges": {
+                        "type": "array",
+                        "description": ("关系：[{source, type(本体对象属性，如 bmm-ea-ext:applicationProvidesService / "
+                                        "bmm-ea-ext:stepUsesService), target, label?}]；"
+                                        "target 可以是本次节点名，也可以是库内已有页标题（会解析成 slug）"),
+                        "items": {"type": "object"},
+                    },
+                    "mode": {"type": "string", "enum": ["dry_run", "apply"],
+                             "description": "dry_run（默认，只算不写）/ apply（真正写入）"},
+                    "confirmed_new_applications": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "**人工已确认**可新建的「应用/系统」节点名称清单",
+                    },
+                },
+                "required": ["kb_id", "stage"],
+            },
+        },
     ]
 
 
@@ -1053,6 +1337,13 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "audit_plan":
         return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
                                    str(args.get("scope", "all")))
+    if name == "save_knowledge":
+        return save_knowledge(
+            str(args["kb_id"]), stage=str(args.get("stage", "report")),
+            model=str(args.get("model", "ea")), report=args.get("report"),
+            nodes=args.get("nodes") or [], edges=args.get("edges") or [],
+            mode=str(args.get("mode", "dry_run")),
+            confirmed_new_applications=args.get("confirmed_new_applications") or [])
     raise RuntimeError("未知工具：%s" % name)
 
 

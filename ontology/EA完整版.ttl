@@ -1,17 +1,14 @@
-@prefix :       <http://example.org/ea#> .
-@prefix ea:     <http://example.org/ea#> .
+@prefix :       <http://example.org/bmm-EA-ext#> .
 @prefix bmm:    <http://example.org/bmm#> .
 @prefix owl:    <http://www.w3.org/2002/07/owl#> .
 @prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
-@prefix bodhi:  <http://example.org/bodhi#> .
 
-<http://example.org/ea> rdf:type owl:Ontology ;
+<http://example.org/bmm-EA-ext> rdf:type owl:Ontology ;
     rdfs:label "企业架构框架本体（与BMM扩展本体协同）"@zh ;
     owl:imports <http://example.org/bmm> ;
-    owl:versionIRI <http://example.org/ea/1.0> ;
-    bodhi:expertRole "企业架构建模专家，精通企业架构模型规范"@zh .
+    owl:versionIRI <http://example.org/bmm-EA-ext/1.0> .
 
 
 
@@ -91,18 +88,25 @@
     rdfs:label "硬件资产"@zh ;
     rdfs:comment "硬件资产" .
 
-# ------------------------------------------------------------
-# IT 服务层已暂缓下线（2026-09-17），待与 WeKnora 的 API / MCP 对接方式一起重做。
-# 本次移除的术语（原声明位置在本段）：
-#   类：:Service（IT服务）、:APIService、:MCPService、:SkillService
-#   对象属性：:applicationProvidesService、:stepUsesService
-#            （连带 :Step / :Application 上的两条 someValuesFrom 约束）
-#   数据属性：:ai_skill
-# 连带影响：ea-service 扩展的 easvc:ServiceContract 暂挂顶层，进入 Q5 待拍板清单；
-#          ontology/lexicon/ea.keywords.yaml 的对应词表项已同步删除。
-# 重做时：把术语补回本文件与词表，再跑一次 compile。
-# ------------------------------------------------------------
+:Service            rdf:type owl:Class ;
+    rdfs:label "IT服务"@zh ;
+    rdfs:comment "IT 服务（或称为功能），由应用提供，用于实现步骤" .
 
+# --- IT 服务子类：三种可执行服务形态 ---
+:APIService         rdf:type owl:Class ;
+    rdfs:subClassOf :Service ;
+    rdfs:label "API服务"@zh ;
+    rdfs:comment "传统服务接口，ai_skill 按标准 HTTP API 定义（method/url/headers/params/body/response）"@zh .
+
+:MCPService         rdf:type owl:Class ;
+    rdfs:subClassOf :Service ;
+    rdfs:label "MCP服务"@zh ;
+    rdfs:comment "支持智能体工具调用，ai_skill 以 MCP 规范定义（transport/url 或 command/tool/arguments）"@zh .
+
+:SkillService       rdf:type owl:Class ;
+    rdfs:subClassOf :Service ;
+    rdfs:label "Skill服务"@zh ;
+    rdfs:comment "以 Markdown 形式定义 skill，供 agent 执行"@zh .
 
 # ============================================================
 # 4. 关系属性
@@ -154,7 +158,17 @@
     rdfs:label "由IT资产支撑"@zh ;
     rdfs:comment "步骤由 IT 资产支撑" .
 
-# （原 :applicationProvidesService / :stepUsesService 随 IT 服务层暂缓下线，见「类定义」一节注释）
+:applicationProvidesService   rdf:type owl:ObjectProperty ;
+    rdfs:domain :Application ;
+    rdfs:range :Service ;
+    rdfs:label "提供服务"@zh ;
+    rdfs:comment "应用提供服务/功能" .
+
+:stepUsesService              rdf:type owl:ObjectProperty ;
+    rdfs:domain :Step ;
+    rdfs:range :Service ;
+    rdfs:label "使用IT服务"@zh ;
+    rdfs:comment "步骤使用 IT 服务实现" .
 
 # --- 目标与交付 ---
 :activityDelivers             rdf:type owl:ObjectProperty ;
@@ -197,8 +211,23 @@
 # 4.5 数据属性（Datatype Properties）
 # ============================================================
 
-# 本模块暂无数据属性：原先唯一的 :ai_skill（IT 服务技能定义）
-# 随 IT 服务层一起暂缓下线（见「类定义」一节注释）。
+:ai_skill rdf:type owl:DatatypeProperty ;
+    rdfs:domain :Service ;
+    rdfs:range xsd:string ;
+    rdfs:label "AI技能"@zh ;
+    rdfs:comment """IT 服务关联的 AI 技能/工具定义（JSON 字符串）。按 IT 服务子类采用三种格式之一：
+
+1) API服务（APIService）—— 标准 HTTP API 定义：
+{"type":"api","name":"技能名","description":"说明","method":"GET|POST|PUT|DELETE","url":"https://...","headers":{},"params":{},"body":{},"response":"响应说明"}
+
+2) MCP服务（MCPService）—— MCP 规范定义（供智能体工具调用）：
+{"type":"mcp","name":"技能名","description":"说明","transport":"streamable_http|stdio","url":"http://host/mcp","command":["npx","-y","..."],"tool":"工具名","arguments":{}}
+
+3) Skill服务（SkillService）—— Markdown 形式定义 skill（供 agent 执行）：
+{"type":"skill","name":"技能名","description":"说明","content":"# skill 的 Markdown 内容"}
+
+通用格式（当 IT 服务描述采用"输入参数…… 预期结果……"结构时）：
+{"name":"技能名称","description":"技能功能说明","parameters":[{"name":"参数名","type":"参数类型","description":"参数说明"}],"expected_results":["预期结果要点1","预期结果要点2"]}"""@zh .
 
 # ============================================================
 # 5. 公理约束（TBox）
@@ -246,11 +275,25 @@ bmm:BusinessProcess rdfs:subClassOf [
     owl:someValuesFrom :ITAsset
 ] .
 
+# 步骤必须使用至少一个 IT 服务
+:Step rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :stepUsesService ;
+    owl:someValuesFrom :Service
+] .
+
 # 任务必须至少受一条业务规则约束
 :Task rdfs:subClassOf [
     a owl:Restriction ;
     owl:onProperty :taskGovernedByRule ;
     owl:someValuesFrom bmm:BusinessRule
+] .
+
+# 每个应用至少提供一个服务
+:Application rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :applicationProvidesService ;
+    owl:someValuesFrom :Service
 ] .
 
 # 活动必须交付至少一个产品或业务服务
