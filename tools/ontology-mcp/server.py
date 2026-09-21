@@ -1009,6 +1009,13 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         except Exception as exc:  # noqa: BLE001
             print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
             summary["folders_synced"] = "failed: %s" % exc
+        # 关系撤回（retract）：设计变更要能"减边"，否则旧边留在页面上、巡检跟着失真
+        try:
+            retract_list = checked.get("retract_edges") or []
+            if retract_list:
+                summary["retract"] = retract_relations(kb_id, retract_list)
+        except Exception as exc:  # noqa: BLE001
+            summary["retract"] = {"retracted": [], "missed": [], "error": str(exc)[:160]}
         # 服务详细设计：刷新「服务页的 CRUD 矩阵」（跨页聚合，必须**写库之后**再读才拿得到）
         try:
             svc_types = service_types()
@@ -1022,6 +1029,13 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         except Exception as exc:  # noqa: BLE001
             summary["crud_matrix"] = "failed: %s" % exc
     summary["retagged"] = retagged or [dict(x, ok=None, note="dry_run 未执行") for x in retag_queue]
+    if dry_run:
+        # 撤回是"减边"，dry_run 下不执行，但必须让调用方看到**将要撤回什么**（否则预览不完整）
+        planned = checked.get("retract_edges") or []
+        if planned:
+            summary["retract_planned"] = [{"source": x.get("source"), "type": x.get("type"),
+                                           "target": x.get("target"), "slug": x.get("slug")}
+                                          for x in planned]
     return summary
 
 
@@ -1081,10 +1095,17 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
                                          {"name": name, "type": cls})
 
     outgoing: dict = {}
+    retract_edges: list = []
     for edge in edges:
         rel_type = (edge.get("type") or "").strip()
         src = (edge.get("source") or "").strip()
         dst = (edge.get("target") or "").strip()
+        # 关系撤回（retract）放在**本体校验之前**：撤回可能针对已被废弃的关系类型/目标，
+        # 这时不该因"本体里没有这个对象属性"而被拒（否则改设计永远减不掉旧边）。
+        if edge.get("retract"):
+            dst_slug = slug_by_name.get(dst) or _graph_target_slug(dst) or dst
+            retract_edges.append({"source": src, "type": rel_type, "target": dst, "slug": dst_slug})
+            continue
         closure = ke_ontology.target_closure(rel_type)
         if not closure:
             violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
@@ -1103,6 +1124,7 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
                                "reason": "目标页类型 %s 不在 `%s` 的 range 内（%s）"
                                          % (dst_type, rel_type, "、".join(closure[:6]))})
             continue
+        # ---- 关系撤回（retract）见循环开头（已收集进 retract_edges）
         outgoing.setdefault(src, []).append({"type": rel_type, "label": edge.get("label", ""),
                                              "target": dst, "target_slug": dst_slug,
                                              "properties": dict(edge.get("properties") or {}),
@@ -1153,7 +1175,8 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "chunk_id": "", "chunk_index": -1, "relations": rels,
             "upstream": upstream, "aliases": node.get("aliases") or [],
         })
-    return payloads, {"edges": accepted, "violations": violations, "unmatched": []}
+    return payloads, {"edges": accepted, "violations": violations, "unmatched": [],
+                      "retract_edges": retract_edges}
 
 
 def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
@@ -1521,6 +1544,52 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str) -> dict:
 CRUD_SECTION = "## CRUD 矩阵"
 CRUD_ORDER = ("C", "R", "U", "D")
 _ATTR_VALUE = re.compile(r"^- (?P<name>[^（=]+?)(?:（[^）]*）)?\s*=\s*(?P<value>.+?)\s*$")
+
+
+def _page_slug_by_title(kb_id: str, title: str) -> str:
+    """按标题在**本库**里找 slug（设计载荷里的 source 可能是本批新建的页）。"""
+    if not title:
+        return ""
+    rows = psql_csv("SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                    "AND title = %s ORDER BY updated_at DESC LIMIT 1"
+                    % (sql_str(kb_id), sql_str(title)))
+    return rows[0]["slug"] if rows else ""
+
+
+def retract_relations(kb_id: str, items: list) -> dict:
+    """撤回关系：删掉源页里指向目标的 `## 本体关系` 行 + 同键的 `## 关系限定（边属性）` 行。
+
+    为什么需要：`save_knowledge` 的语义是"只追加/合并"，改设计（例如把某个写方收口）时必须能**减边**；
+    否则旧边永远留在页面上，巡检（E1 写耦合等）也跟着失真。
+    版本快照 + `out_links`/`in_links` 重算由 `ke_pages.rewrite_page_content` 负责。
+    """
+    done, missed = [], []
+    for item in (items or []):
+        src_slug = _page_slug_by_title(kb_id, item.get("source") or "") or \
+                   _page_slug_by_title(kb_id, item.get("source_slug") or "")
+        if not src_slug:
+            missed.append({**item, "why": "源页不存在"})
+            continue
+        page = _page_row(kb_id, src_slug)
+        if not page:
+            missed.append({**item, "why": "源页已删"})
+            continue
+        rel_type = item.get("type") or ""
+        target_slug = item.get("slug") or ""
+        keep, removed = [], 0
+        for line in (page["content"] or "").splitlines():
+            text = line.strip()
+            if text.startswith("- ") and ("（`%s`）" % rel_type) in text \
+                    and (not target_slug or target_slug in text):
+                removed += 1
+                continue
+            keep.append(line)
+        if removed:
+            ke_pages.rewrite_page_content(kb_id, src_slug, "\n".join(keep).rstrip() + "\n")
+            done.append({**item, "source_slug": src_slug, "removed_lines": removed})
+        else:
+            missed.append({**item, "why": "没找到该关系行（可能已删）", "source_slug": src_slug})
+    return {"retracted": done, "missed": missed}
 
 
 def service_types() -> set:
@@ -2118,6 +2187,8 @@ def tool_definitions() -> list[dict]:
                                         "label?, properties?(边限定属性，键 = **源类**声明的数据属性)}]；"
                                         "`properties` 会渲染成页面里独立的 `## 关系限定（边属性）` 小节"
                                         "（不改 `## 本体关系` 的行语法，反向边/审计不受影响）；"
+                                        "**改设计要减边时给 `retract: true`**（撤回该关系：删掉源页里指向 "
+                                        "target 的那一行 + 同键的关系限定行，回执列在 `retract`）；"
                                         "target 可以是本次节点名，也可以是库内已有页标题（会解析成 slug）"),
                         "items": {"type": "object"},
                     },

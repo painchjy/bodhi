@@ -377,6 +377,16 @@ def check_coupling(ctx: dict, rep: Report) -> None:
         for rel in ke_pages.parse_out_relations(page["content"]):
             if rel["type"] == "easvc:serviceHasOperation" and rel["slug"]:
                 ops_by_service.setdefault(page["slug"], []).append(rel["slug"])
+    # 操作级依赖（=「经接口读取」的声明）：op_slug -> {被依赖的 op_slug}
+    op_dep: dict = {}
+    for page in pages.values():
+        for rel in ke_pages.parse_out_relations(page["content"]):
+            if rel["type"] == "easvc:operationDependsOnOperation" and rel["slug"]:
+                op_dep.setdefault(page["slug"], set()).add(rel["slug"])
+    service_of_op = {}
+    for svc_slug, ops in ops_by_service.items():
+        for op_slug in ops:
+            service_of_op[op_slug] = svc_slug
     for page in pages.values():
         if not is_service_type(page.get("page_type") or ""):
             continue
@@ -433,11 +443,26 @@ def check_coupling(ctx: dict, rep: Report) -> None:
                     "评审服务边界（同一属性的写方应收敛到一个服务，或明确主从）")
         cross = readers - writers
         if writers and cross:
-            rep.add("E2", "low", attr_slug,
-                    "读耦合：%s 读由 %s 写的属性"
-                    % ("、".join(sorted(pages.get(r, {}).get("title") or r for r in cross)),
-                       "、".join(sorted(pages.get(w, {}).get("title") or w for w in writers))),
-                    "确认读依赖是否经过接口（不要直接读别的服务的表）")
+            # 读耦合细分（2026-09-21）：声明了 `operationDependsOnOperation` → **经接口**（合理耦合）；
+            # 否则 → **疑似直读**（要评审）。用户口径："E2 保留（合理读耦合）并说明是经接口读取"。
+            via, direct = [], []
+            for reader in sorted(cross):
+                declared = any(service_of_op.get(dep) in writers
+                               for op_slug in ops_by_service.get(reader, [])
+                               for dep in op_dep.get(op_slug, ()))
+                (via if declared else direct).append(reader)
+            names = lambda ss: "、".join(sorted(pages.get(s, {}).get("title") or s for s in ss))
+            if via:
+                rep.add("E2", "low", attr_slug,
+                        "读耦合（**经接口**）：%s 通过声明的操作依赖（`easvc:operationDependsOnOperation`）"
+                        "读取 %s 写的属性 —— 属合理耦合"
+                        % (names(via), names(writers)),
+                        "确认依赖的是稳定对外接口；接口变更时按契约评审")
+            if direct:
+                rep.add("E2", "medium", attr_slug,
+                        "读耦合（**疑似直读**）：%s 读由 %s 写的属性，但没有声明操作依赖"
+                        % (names(direct), names(writers)),
+                        "补 `easvc:operationDependsOnOperation` 走接口，或把读收敛到写方")
     # E4：键一致性
     for page in pages.values():
         attrs = data_attrs(page["content"])

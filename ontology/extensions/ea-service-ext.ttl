@@ -152,6 +152,12 @@
     rdfs:range :BusinessAttribute ;
     rdfs:comment "该操作对哪个业务属性做读/写 —— **边限定属性 crudKind 标明 C/R/U/D**（同一操作对同一属性可多次声明不同 crudKind）。服务耦合分析的数据基础：同一属性被多个服务写 = 写耦合热点。"@zh .
 
+:operationDependsOnOperation rdf:type owl:ObjectProperty ;
+    rdfs:label "操作依赖操作"@zh ;
+    rdfs:domain :ServiceOperation ;
+    rdfs:range :ServiceOperation ;
+    rdfs:comment "本操作通过调用**另一个服务的操作**取得数据/能力（即『经接口读取』，而不是直读对方的数据表）。2026-09-21 新增：服务耦合分析据此把读耦合区分为『经接口（已声明依赖）』与『疑似直读（未声明）』——前者是合理耦合，后者才需要评审。"@zh .
+
 :operationAccepts rdf:type owl:ObjectProperty ;
     rdfs:label "操作输入属性"@zh ;
     rdfs:domain :ServiceOperation ;

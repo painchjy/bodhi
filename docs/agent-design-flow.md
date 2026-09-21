@@ -265,9 +265,20 @@ OWL 表达不了的（FK 配引用、写操作非幂等需说明、同属性被 
 | 检查 | 判定 | 严重度 |
 |---|---|---|
 | E1 写耦合 | 同一业务属性被 **≥2 个服务**以 C/U/D 操作 | medium |
-| E2 读耦合 | 某服务读（R）的属性由**别的服务**写 | low |
+| E2 读耦合·**经接口** | 读方服务**已声明** `easvc:operationDependsOnOperation`（本操作 → 对方查询操作） | low（合理耦合） |
+| E2 读耦合·**疑似直读** | 读了别写的属性但**没声明**操作依赖 | medium |
 | E3 详设完整性 | 服务无操作 / 操作无被操作属性 / 缺 `operationMethod` / 写操作 `isIdempotent=false` 无幂等说明 | low–medium |
 | E4 键一致性 | `keyRole=FK` 无 `referencesAttribute`；引用目标非 PK/UNIQUE；目标页不存在 | medium |
+
+**改设计要能减边**：`save_knowledge` 的关系项支持 `"retract": true` —— 撤回该关系（删掉源页里指向
+target 的 `## 本体关系` 行 + 同键的 `## 关系限定（边属性）` 行，带版本快照与反向边重算），
+回执列在 `retract`（dry_run 时列在 `retract_planned`）。另注意：**要改哪个页的边，那个页必须出现在 `nodes` 里**
+（关系行只对载荷里出现过的节点生效），否则只有"减"生效、"加"落不下去。
+
+**设计收口实测（同一天，企业知识库）**：E1 那条「客户姓名」两个写方 → 把注册服务的写收口到
+`待认证的注册用户.注册姓名`（`手机号码`/`注册状态` 一并挂到该实体），并 `retract` 旧边 →
+**E1 归零**；核查服务补 `operationDependsOnOperation → 查询待核查三要素` 声明 →
+**E2 三条从「疑似直读」(medium) 降为「经接口」(low)**（合理耦合）。
 
 ```bash
 /opt/bodhi-venv/bin/python3 tools/ke-core/ke_audit.py scan <kb> --scope coupling
