@@ -180,6 +180,22 @@ $P tools/ke-core/ke_audit.py apply "$SB" --plan-id <id> --confirm
 - 报告页 slug 形如 `ea/summary/<标题>`；节点页 slug 形如 `ea/mcpservice/<名称>`。
   历史模块 `bmm-ea-ext/…` 已废弃（检索 0 条属正常）。
 
+**同一轮修掉的另外四处**（都与上面这轮实测同源）：
+
+4. **报告页来源文档**：报告段只给了 `source_document_title` 时也要**解析出 `knowledges.id`** 写进
+   `source_refs`（否则正文写「来源：《…需求.md》」而 `source_refs` 空 → 巡检 **C3**，
+   实测报告页命中；设计页的 `source_refs` 还靠它继承）。解析不到的，正文改写成「生成方式：设计智能体」
+   （不再留"来源"字样）。现网已把报告页 `source_refs` 补成 `4747a82d…`（`mb-手机银行开户签约需求.md`）→ C3 归零。
+5. **服务页渲染去重**：正文首段与 `## 用途` 是同一段时不再重复输出；
+   `## 被引用（入边）` 明确标注「由系统按本体关系自动生成」（正文里不要手写引用链接）。
+6. **关系面板数据源**：前端 `BodhiRelationsPanel.vue` 用 **GET** `/bodhi/relations?kb_id=&slug=` 取
+   「出边 + 入边」（写边才用 POST `/bodhi/relations/{add,update,delete}`）。该分支必须在 `do_GET` 链里，
+   否则 GET 落到 `http.server` 兜底 404（HTML）→ **面板永远空白**（用户报"查不到引入的本体关系"）。
+   自检：`curl -sG --data-urlencode kb_id=<kb> --data-urlencode slug=<slug> http://127.0.0.1:8765/bodhi/relations`
+   应返回 `{"out":[…],"in":[…]}`（键是 `in`，不是 `inbound`）。
+7. **`sql_insert_page` 的 `out_links`**：活页更新分支也要写 `out_links`（否则第二次跑追加的关系行
+   不进反向边，`in_links` 依旧空）。
+
 **自检命令**（真库，含 dry_run → apply → 还原）：
 ```bash
 /opt/bodhi-venv/bin/python3 - <<'PY'

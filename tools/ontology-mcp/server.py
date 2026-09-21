@@ -433,18 +433,27 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
     rels = element.get("relations") or []
     upstream = [s for s in (element.get("upstream") or []) if s]
     slug = element_page_slug(model, element)
-    lines = ["# %s（`%s`）" % (element["name"], element["type"]), "",
-             "> **本体类型**：%s（`%s`）  " % (element["type_label"], element["type"]),
-             "> **来源**：《%s》%s  " % (doc_meta["title"],
-                                       (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""),
-             "> **首个版本生成**：%s（`%s`）" % (now_text(), TOOL_TAG), "",
-             (element.get("definition") or "（暂无定义）").strip(), ""]
+    # 无来源文档（设计路径的常见情形）时**不要写"来源"字样**：正文称有来源而 `source_refs` 空会被
+    # 巡检判为 C3（2026-09-21 实测：报告页 v5 命中 "（来源：…"）。改成"生成方式"表述。
+    has_doc = bool(doc_meta.get("id"))
+    head_lines = ["# %s（`%s`）" % (element["name"], element["type"]), "",
+                  "> **本体类型**：%s（`%s`）  " % (element["type_label"], element["type"])]
+    if has_doc:
+        head_lines.append("> **来源**：《%s》%s  " % (
+            doc_meta["title"], (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""))
+    else:
+        head_lines.append("> **生成方式**：设计智能体（未指定来源文档）  ")
+    head_lines.append("> **首个版本生成**：%s（`%s`）" % (now_text(), TOOL_TAG))
+    head_lines += ["", (element.get("definition") or "（暂无定义）").strip(), ""]
+    lines = head_lines
     if element.get("description"):
         lines += ["## 判定依据", "", element["description"].strip(), ""]
     lines += _design_sections(element)
     lines += ["## 原文依据", "",
-              "- %s（来源：《%s》%s）" % (element.get("source_text", "").strip(), doc_meta["title"],
-                                        (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""), ""]
+              ("- %s（来源：《%s》%s）" % (element.get("source_text", "").strip(), doc_meta["title"],
+                                         (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""))
+              if doc_meta.get("id") else
+              "- %s（设计生成，无原文片段）" % (element.get("source_text", "").strip()), ""]
     if rels:
         lines += ["## 本体关系", ""]
         for rel in rels:
@@ -493,9 +502,10 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
     chosen = new_def if (element.get("replace_body") or len(new_def) > len(old_def)) else old_def
     merged = head[:last_meta + 1] + ["", chosen, ""] + tail
 
-    evidence = "- %s（来源：《%s》%s）" % (
+    evidence = ("- %s（来源：《%s》%s）" % (
         element.get("source_text", "").strip(), doc_meta["title"],
-        (" 片段 #%d" % chunk_index) if chunk_index >= 0 else "")
+        (" 片段 #%d" % chunk_index) if chunk_index >= 0 else "")) if doc_meta.get("id") \
+        else ("- %s（设计生成，无原文片段）" % element.get("source_text", "").strip())
     added_evidence = False
     if any(line.strip() == "## 原文依据" for line in merged):
         pos = next(i for i, line in enumerate(merged) if line.strip() == "## 原文依据")
@@ -837,11 +847,18 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                                        int(prior[0]["version"] or 1)
             else:
                 action, before_v = "created", 0
-            statements.append(sql_insert_page(page, kb_id, tenant))
             if action == "created":
+                statements.append(sql_insert_page(page, kb_id, tenant))
                 summary["created"].append({"name": element["name"], "type": element["type"],
                                            "slug": page["slug"]})
             else:
+                # 既有活页（典型：`summary` 报告页被 fetch_existing_pages 排除在合并候选之外）：
+                # 用**本次渲染的整页**覆盖内容 —— 报告页是"生成物"，整体替换可避免旧正文里的过期小节、
+                # 旧措辞（如"（来源：《…》）"）残留；title / page_type / created_at 一律不动。
+                statements.append(sql_update_page({**page, "knowledge_base_id": kb_id},
+                                                  page["content"], page["summary"],
+                                                  page["source_refs"], page["chunk_refs"],
+                                                  page["page_metadata"]))
                 summary["merged"].append({"name": element["name"], "type": element["type"],
                                           "into": page["slug"], "similarity": 1.0, "note": action})
             summary["page_versions"].append({"slug": page["slug"], "before": before_v,
@@ -1026,6 +1043,16 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
     doc_meta = {"id": "", "title": (report or {}).get("source_document_title") or "（无来源文档）"}
     if (report or {}).get("source_document_id"):
         doc_meta["id"] = resolve_knowledge_id(kb_id, str(report["source_document_id"]))[0]
+    elif (report or {}).get("source_document_title"):
+        # 只给了标题也要解析出 id：否则正文写着「来源：《<需求文档>》」而 `source_refs` 为空，
+        # 巡检会判 C3（2026-09-21 实测：报告页 v5 命中；设计页的 source_refs 还靠它继承）。
+        try:
+            doc_meta["id"] = resolve_knowledge_id(kb_id, str(report["source_document_title"]))[0]
+        except Exception:  # noqa: BLE001  解析不到就保持空（渲染会写"生成方式"而不是"来源"）
+            doc_meta["id"] = ""
+        if not doc_meta["id"]:
+            # 解析不到时不要把"来源"字样留在正文里（与 source_refs 空自相矛盾 → C3）
+            doc_meta["title"] = "（无来源文档）"
     if not doc_meta["id"]:
         # 设计页没有源文片段，来源按方案 C 记到**需求文档**；调用方没给文档时，
         # 就从报告页的 source_refs 继承（否则巡检 C1 会把设计页判成"无来源"）。
@@ -1888,9 +1915,15 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/relations", "/bodhi/relations.json"):
+            # ⚠️ 前端 `BodhiRelationsPanel.vue` 用 **GET** `/bodhi/relations?kb_id=&slug=` 取「出边 + 入边」
+            #    （写边才用 POST /bodhi/relations/{add,update,delete}）。2026-09-21 实测 GET 曾落到
+            #    http.server 兜底 404（HTML）→ 关系面板空白（用户报"查不到引入的本体关系"）——
+            #    排查时务必确认本分支在 `do_GET` 链里（而不是只在 `_bodhi_post` 的 handlers 里）。
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
-                data = ke_pages.page_relations(params.get("kb_id", ""), params.get("slug", ""))
+                kb = params.get("kb_id", "") or ""
+                slug = params.get("slug", "") or ""
+                data = ke_pages.page_relations(kb, slug)
                 self._json(data, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/relations 失败：%s" % exc)
