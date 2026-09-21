@@ -15,6 +15,13 @@
 server {
     listen 80;
     server_name localhost;
+    # 运行期解析上游：nginx 默认只在**启动时**解析一次 `proxy_pass` 里的主机名，
+    # app 容器重建后 IP 变 → 仍连旧 IP → `/api/*` 全 502（**前端表现为"登录报错"**，
+    # 2026-09-21 实测）。改用 Docker 内嵌 DNS（127.0.0.11）按 TTL 重解析，
+    # 并配合下面的 `set $app_backend` + 无 URI 的 `proxy_pass` 让解析发生在**每次请求**。
+    # 注意：变量式 proxy_pass 不能带 URI，这里所有 location 的路径都是原样透传（identity）。
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $app_backend "${APP_SCHEME}://${APP_HOST}:${APP_PORT}";
     # Default 50M, configured via MAX_FILE_SIZE_MB env var
     client_max_body_size ${MAX_FILE_SIZE};
 
@@ -95,7 +102,7 @@ server {
     # 本地存储文件代理到后端服务（用于渲染 markdown 中的图片）
     # 精确匹配 /files，避免 Nginx 自动补 / 触发 301
     location = /files {
-        proxy_pass ${APP_SCHEME}://${APP_HOST}:${APP_PORT}/files;
+        proxy_pass $app_backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -105,7 +112,7 @@ server {
     # 资源能力短链 /r/<token>：IM 渠道渲染 resource:// 图片依赖此路由，
     # 缺此段会落进 SPA fallback 返回空白页，图片加载不出来。
     location ^~ /r/ {
-        proxy_pass ${APP_SCHEME}://${APP_HOST}:${APP_PORT};
+        proxy_pass $app_backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -123,14 +130,14 @@ server {
 
         # 正则 location 的 proxy_pass 不能带 URI，原始路径原样透传，
         # 与 /api/ 那条 `proxy_pass .../api/` 的改写结果一致。
-        proxy_pass ${APP_SCHEME}://${APP_HOST}:${APP_PORT};
+        proxy_pass $app_backend;
         include /etc/nginx/api-proxy.conf;
     }
 
     # API请求代理到后端服务
     # APP_SCHEME 默认 http，远程 HTTPS 后端可设为 https
     location /api/ {
-        proxy_pass ${APP_SCHEME}://${APP_HOST}:${APP_PORT}/api/;
+        proxy_pass $app_backend;
         include /etc/nginx/api-proxy.conf;
     }
 

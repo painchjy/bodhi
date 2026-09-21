@@ -106,6 +106,12 @@ echo "   SSRF：$(grep -n '^SSRF_WHITELIST' "$ENV_FILE" || echo '（未设置 SS
 echo "   挂载：$(grep -n 'docker.sock' "$COMPOSE" | head -3)"
 
 ( cd "$WEKNORA_DIR" && docker compose up -d app ) > "$LOG" 2>&1 || { tail -20 "$LOG"; exit 1; }
+# ⚠️ nginx 只在**启动时**解析一次上游主机名（`proxy_pass http://app:8080`）：
+#    app 容器重建后 IP 会变 → nginx 仍连旧 IP → `/api/*` 全部 502 →
+#    **前端表现为"登录报错"**（2026-09-21 实测踩到）。所以每次重建 app 后必须重启 frontend。
+if docker ps --format '{{.Names}}' | grep -q '^WeKnora-frontend$'; then
+  docker restart WeKnora-frontend > /dev/null && echo "== 已重启 WeKnora-frontend（避免 nginx 缓存旧 app IP）"
+fi
 echo "== 重建完成（日志 $LOG）；等健康检查"
 for i in $(seq 1 30); do
   if curl -fsS -m 3 http://127.0.0.1:8080/health > /dev/null 2>&1; then echo "   /health OK（${i}0s 内）"; break; fi

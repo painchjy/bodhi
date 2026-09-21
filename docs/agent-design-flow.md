@@ -437,7 +437,30 @@ INFO  stage=Agent action=tools_ready tool_count=5      # 只剩 5 个 wiki 工�
 `tool_count` 从 5 回到 **15**，`skills/audit_scan/save_knowledge/service_overview` 全部恢复。
 `enable_sandbox.sh` 已内置这一步（`--revert` 时摘除）。
 
-#### 安装生命周期（要有人管）
+#### ⚠️ 重建 app 之后：必须让 nginx 重新解析上游（否则"登录报错"）
+症状（2026-09-21 实测）：前端能打开，但**登录/任何 API 都报错**；前端 nginx 日志刷
+`connect() failed (111: Connection refused) while connecting to upstream: http://172.18.0.6:8080/api/...` → 502。
+
+根因：`proxy_pass` 里的上游主机名 **nginx 只在启动时解析一次**。`docker compose up -d app` 重建 app 后容器 IP 变了，
+nginx 仍连旧 IP。（`deploy_frontend.sh` 里早就写着这个坑："重建后 app 容器 IP 会变，nginx 启动时只解析一次 → 必须 docker restart"。）
+
+两手都要有：
+1. **运维动作**：任何重建 app 之后 `docker restart WeKnora-frontend`
+   （`enable_sandbox.sh` 已内置这一步）。
+2. **根治（已落地）**：`deploy/weknora-fork/frontend/default.conf.template` 里
+   ```nginx
+   resolver 127.0.0.11 valid=10s ipv6=off;          # Docker 内嵌 DNS，按 TTL 重解析
+   set $app_backend "${APP_SCHEME}://${APP_HOST}:${APP_PORT}";
+   ...
+   location /api/ { proxy_pass $app_backend; ... }   # 变量式 proxy_pass → 每次请求重新解析
+   ```
+   模板是**从仓库 bind-mount** 进容器的（`overlay: …/default.conf.template:/etc/nginx/templates/default.conf.template:ro`），
+   所以改完只需 `docker restart WeKnora-frontend`（entrypoint 会重跑 envsubst），**不用重建镜像**。
+   注意：变量式 `proxy_pass` 不能带 URI，以上各 location 的路径都是原样透传（identity，与改前等价）。
+
+验收：`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/api/v1/auth/config` → 200；
+错密码登录 → 400/401（**不是 502**）；`curl http://127.0.0.1/` → 200；`/bodhi/graph?...` → 200。
+
 - 安装是**LLM 驱动**的沙箱会话（`WeKnora Skill Installer`，工具 `edit_skill_file` / `shell_exec` / `write_skill_file`），
   会建 venv、装依赖、最后打**快照镜像**（`tenant_skill_snapshots`：building → active → superseded）。
 - **app 重启会杀掉正在安装的会话** → 行会停在 `installing`。恢复：`POST /api/v1/sandbox-configs/{cfg}/skills/{id}/reinstall`
