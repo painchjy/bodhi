@@ -376,3 +376,25 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 > 排查提示：若 app 侧报 `failed to call tool: ... EOF`，先看 `bodhi-mcp` 的 journal 有没有 `tools/call`
 > 与异常 —— 服务端 handler 抛异常会直接关连接（2026-09-21 实测：日志函数里漏 `import time` 就是这个症状）。
 
+### 11.6 服务详细设计总览（评审页，2026-09-21）
+12 个服务铺开后，评审要看的是**一页**而不是 12×N 个页。所以新增**跨页聚合渲染**（确定性，不调 LLM）：
+
+| 入口 | 用途 |
+|---|---|
+| 工具 `service_overview(kb_id)` | 只读预览（服务/操作/属性/依赖计数 + 前 N 行）|
+| 工具 `service_overview(kb_id, apply=true)` | **异步**渲染并写入/刷新总览页（`extract_status(job_id)` 查回执）|
+| `refresh_design.py --kb <kb> --overview` | 运维/命令行同一份渲染（`--dry-run` 只预览）|
+| `GET /bodhi/overview?kb_id=&format=json` | 前端/curl 取同一份 markdown（或 `format=json` 取结构）|
+| 页面 | `ea/summary/it服务详细设计总览`（`summary`，同 slug 复用 + 正文整体替换，可反复跑）|
+
+页面内容（5 节）：**① 规模与巡检结论**（服务/操作/属性/键计数 + E1/E2/E3/E4）→ **② 服务一览**
+（每服务：操作数 / 作为写方的属性 / 只读属性 / 涉及键）→ **③ 业务属性与键**（键角色 + 所属实体 + 唯一写方；
+写方 `—` = 本流程之外的既有系统，只读）→ **④ 跨服务读依赖**（读方操作 → 被依赖的写方操作 → 写方服务）→
+**⑤ 逐操作明细**（实现方式 / 幂等 / 事务边界 / 写 / 读 + 非幂等写的重试口径）。
+
+实测（2026-09-21，企业知识）：12 服务 / 29 操作 / 32 属性 / 20 条跨服务依赖，总览页 7814 字；
+巡检 `pages=122 findings=12 {E2:12}`（新增总览页**没有**引入 C1/C3 等发现）。
+
+性能口径（重要，避免 MCP 60s 硬超时）：一次聚合 ≈30s（12 次 `crud_model` + 1 次批量操作页查询 + 1 次属性页查询），
+巡检 `scope=coupling` ≈0.8s，`save_knowledge(report)` ≈6s → **预览可同步**，渲染+落库走**异步 job**。
+

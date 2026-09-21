@@ -9,7 +9,7 @@ scope:
   relations: [easvc:serviceHasOperation, easvc:operationOperatesOnAttribute, easvc:operationAccepts, easvc:operationReturns, easvc:referencesAttribute, easvc:hasBusinessAttribute, easvc:attributeOf]
 sources: [graph, document]
 stages: [detail]
-tools: [ontology_types, save_knowledge, skills, wiki_search, wiki_read_page]
+tools: [ontology_types, save_knowledge, service_overview, skills, wiki_search, wiki_read_page]
 inputs:
   service: 必填。目标服务页 slug 或标题（先用 wiki_search 按类型 ea:MCPService 找）
   entity_attributes: 可选。已知的业务实体属性（没有时从实体页/文档里取）
@@ -44,7 +44,10 @@ guard: 键角色不建 Key 类（用 easvc:keyRole）；CRUD 只在边上给（p
    服务页会自动生成 `## CRUD 矩阵`（系统渲染，别自己写表）。
    **`report.upstream` 必须带上「服务页 + 报告页」** —— 设计页的 `source_refs` 从这里继承，
    不带的话新页会被巡检判 C1（"实例页无来源"，high）。
-6. **汇报**：服务 → 操作数 → 属性数与键角色 → 读写分布；然后**念一遍巡检结论**
+6. **刷总览（评审页）**：`service_overview(kb_id)` 先预览（服务数/操作数/属性数/依赖数 + 前若干行），
+   再 `service_overview(kb_id, apply=true)` **异步**刷新「IT 服务详细设计总览」页
+   （**服务一览 / 业务属性与键 / 跨服务读依赖 / 逐操作明细 + 巡检结论**；用 `extract_status(job_id)` 查回执）。
+7. **汇报**：服务 → 操作数 → 属性数与键角色 → 读写分布；然后**念一遍巡检结论**
    （`audit_scan(scope="coupling")`：E1 写耦合 / E2 读耦合 / E3 完整性 / E4 键一致性）。
 
 > 完整样例：同目录 `EXAMPLE.json`（真实数据「身份三要素采集服务」：3 操作 / 5 属性 / 24 条边），
@@ -62,6 +65,8 @@ guard: 键角色不建 Key 类（用 easvc:keyRole）；CRUD 只在边上给（p
 - **改设计要能减边**：给要撤掉的关系加 `"retract": true`（删掉该关系行 + 同键的关系限定行，带版本快照）。
   只加不减会让旧边留在页面上，E1/E2/E4 的结论跟着失真。
 - **要改哪个页的边，那个页必须作为 `nodes` 出现在载荷里**（关系行只对载荷里出现过的节点生效）。
+- **评审看总览页**：别在回答里自己拼大表 —— `service_overview(apply=true)` 生成的那一页就是评审物
+  （服务一览 / 业务属性与键 / 跨服务读依赖 / 逐操作明细 + 巡检结论），服务改过就重刷一次。
 - **一次只做一个服务**（做完落库、跑巡检、再下一个），避免一批 JSON 出错难定位。
 - 写操作 `isIdempotent=false` 时，要么给幂等键，要么在契约里说明重试策略（否则巡检 E3 会提醒）。
 

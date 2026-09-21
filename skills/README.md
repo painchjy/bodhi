@@ -12,7 +12,10 @@
 |---|---|---|---|---|
 | `domain_modeling` | 领域知识建模 | 把**某篇文档**按本体抽成 wiki 知识（可收窄范围） | ea / bmm | `ontology_types`、`extract_and_save`、`extract_status` |
 | `ea_overview_design` | 企架概要设计 | 基于**业务模型**做 IT 服务层设计（报告页 + 服务页） | ea | `wiki_search`/`wiki_read_page`、`save_knowledge` |
-| `service_detailed_design` | 服务详细设计 | 对**已入库服务**做接口/操作/主外键/CRUD 详细设计 | ea + ea-service | `ontology_types`、`save_knowledge`、`audit_scan` |
+| `service_detailed_design` | 服务详细设计 | 对**已入库服务**做接口/操作/主外键/CRUD 详细设计 | ea + ea-service | `ontology_types`、`save_knowledge`、`audit_scan`、`service_overview` |
+
+> 服务详细设计收尾：`service_overview(kb_id, apply=true)` 刷「IT 服务详细设计总览」评审页
+> （服务一览 / 键 / 跨服务读依赖 / 操作明细 + 巡检结论）—— 评审看这一页，不要人在回答里拼表。
 
 新增技能：建目录 + 写 `SKILL.md`（front-matter 必填 `id`/`name`/`when`），MCP 重启后
 `skills()` 自动列出（无需改代码）。

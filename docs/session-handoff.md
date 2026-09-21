@@ -20,9 +20,12 @@
   **v5/v6 新增**（2026-09-19 晚，一次重建）：① 类型改**彩色圆点**（§5.1）；
   ② 知识库头部**「上传自动生成 wiki」开关**（§5.2）；③ 树/列表**多选批量删除**（§5.3）；
   ④ 编辑页**本体类型下拉**（需求 1）；⑤ 阅读区**本体关系维护面板**（需求 2，出边可改/入边只读）。
-- **MCP/本体服务**：`bodhi-mcp.service`（WSL，`--host 0.0.0.0 --port 8765`），5 个工具：
+- **MCP/本体服务**：`bodhi-mcp.service`（WSL，`--host 0.0.0.0 --port 8765`），**10 个工具**：
   `extract_and_save`（**默认异步**，秒回 `job_id`）、`extract_status`、`list_pending_merges`、
-  `resolve_pending_merge`、`ontology_types`。
+  `resolve_pending_merge`、`ontology_types`、`skills`（技能目录/全文，2026-09-21）、
+  `audit_scan` / `audit_plan`（巡检，含 `scope=coupling` E1-E4）、`save_knowledge`（设计落库，支持 `retract`）、
+  `service_overview`（服务详细设计总览，`apply=true` 异步落库）。
+  每次调用落一行到 `logs/mcp_calls_YYYYMMDD.log`（时间/工具/耗时/入参/结果摘要）。
   另有一组给前端用的 **JSON 接口 `/bodhi/*`**（与 `/mcp` 同端口，经 nginx `/bodhi/` 反代）：
   见 §7 速查表。
 - **ke-core 拆分**（需求 3）：新增 `tools/ke-core/`（`ke_db` / `ke_neo4j` / `ke_ontology` / `ke_pages`，

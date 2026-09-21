@@ -1747,6 +1747,178 @@ def refresh_crud_matrix(kb_id: str, service_slugs: list) -> dict:
     return {"refreshed": done, "skipped": skipped}
 
 
+# ---------------------------------------------------------------------------
+# 服务详细设计总览（评审用；确定性渲染，跨页聚合）
+# ---------------------------------------------------------------------------
+OVERVIEW_SLUG = "ea/summary/it服务详细设计总览"
+OVERVIEW_TITLE = "IT 服务详细设计总览"
+OVERVIEW_FOLDER = "服务详细设计"
+_ATTR_OF = "easvc:attributeOf"
+
+
+def service_design_summary(kb_id: str) -> dict:
+    """把库里所有 IT 服务的详设聚合成结构（只读）：服务 → 操作/属性/键/依赖。"""
+    kb_id = resolve_kb_id(kb_id)[0]  # 名称 / UUID 都要能传（2026-09-21 实测：传名字直接返回空）
+    svc_types = sorted(service_types())
+    if not svc_types:
+        return {"services": [], "attributes": {}, "deps": [], "service_count": 0}
+    cond = ", ".join(sql_str(t) for t in svc_types)
+    rows = psql_csv("SELECT slug, title, page_type FROM wiki_pages WHERE knowledge_base_id = %s "
+                    "AND deleted_at IS NULL AND page_type IN (%s) ORDER BY title"
+                    % (sql_str(kb_id), cond))
+    services, attr_writers, attr_of, op_service, deps = {}, {}, {}, {}, []
+    collected = []  # (服务标题, 操作)——操作页稍后**一次批量查**（省 N 次 psql：29 操作 ≈ 12s）
+    for row in rows:
+        model = crud_model(kb_id, row["slug"])
+        writes, reads = {}, {}
+        for attr in model["attributes"].values():
+            for kind in CRUD_ORDER:
+                if kind not in attr["ops"]:
+                    continue
+                target = writes if kind in ("C", "U", "D") else reads
+                target.setdefault(attr["title"], []).extend(attr["ops"][kind])
+                if kind in ("C", "U", "D"):
+                    attr_writers.setdefault(attr["title"], set()).add(row["title"])
+        for op in model["operations"]:
+            op_service[op["slug"]] = row["title"]
+            op["retry"] = (op["attrs"].get("easvc:operationRetryPolicy") or "").strip()
+            collected.append((row["title"], op))
+        services[row["title"]] = {"slug": row["slug"], "page_type": row["page_type"], "model": model,
+                                  "writes": {k: sorted(set(v)) for k, v in writes.items()},
+                                  "reads": {k: sorted(set(v)) for k, v in reads.items()}}
+    op_slugs = [op["slug"] for _t, op in collected if op.get("slug")]
+    op_pages = {}
+    if op_slugs:
+        lst = ", ".join(sql_str(s) for s in op_slugs)
+        for r in psql_csv("SELECT slug, COALESCE(content,'') AS content FROM wiki_pages "
+                          "WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s)"
+                          % (sql_str(kb_id), lst)):
+            op_pages[r["slug"]] = r["content"]
+    for svc_title, op in collected:
+        for rel in ke_pages.parse_out_relations(op_pages.get(op["slug"], "")):
+            if rel["type"] == "easvc:operationDependsOnOperation" and rel["slug"]:
+                deps.append({"reader": svc_title, "op": op["title"],
+                             "dep_op_slug": rel["slug"], "dep_op": rel["target"]})
+    for row in psql_csv("SELECT slug, title, COALESCE(content,'') AS content FROM wiki_pages "
+                        "WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                        "AND page_type = 'easvc:BusinessAttribute'" % sql_str(kb_id)):
+        attrs = detail_attributes(row["content"])
+        ref = next((r for r in ke_pages.parse_out_relations(row["content"])
+                    if r["type"] == _ATTR_OF), None)
+        attr_of[row["title"]] = {"key_role": (attrs.get("easvc:keyRole") or "").strip().upper(),
+                                 "entity": (ref or {}).get("target", ""),
+                                 "writers": sorted(attr_writers.get(row["title"], []))}
+    for item in deps:
+        item["dep_service"] = op_service.get(item["dep_op_slug"], "")
+    return {"services": services, "attributes": attr_of, "deps": deps,
+            "service_count": len(services)}
+
+
+def service_overview_lines(kb_id: str, with_audit: bool = True, data: dict | None = None) -> list[str]:
+    """渲染「IT 服务详细设计总览」Markdown（评审用）。
+
+    `with_audit=False` 时不跑巡检；`data` 可传入已算好的 `service_design_summary()`
+    结果（避免重复聚合：实测一次聚合 ~30s，重复一次就翻倍）。
+    """
+    kb_id = resolve_kb_id(kb_id)[0]
+    data = data or service_design_summary(kb_id)
+    services, attrs = data["services"], data["attributes"]
+    if not services:
+        return []
+    op_total = sum(len(s["model"]["operations"]) for s in services.values())
+    keys = {n: m for n, m in attrs.items() if m["key_role"] in ("PK", "UNIQUE", "FK")}
+    checks = {}
+    if with_audit:
+        try:
+            checks = ke_audit.audit(kb_id, scope="coupling", max_findings=0)["summary"]["checks"]
+        except Exception:  # noqa: BLE001
+            checks = {}
+    lines = ["# %s（自动生成）" % OVERVIEW_TITLE, "",
+             "> 本页由系统按**本体关系**自动生成（服务 → 操作 → 业务属性 → CRUD/键/依赖），**不要手改**。",
+             "> 口径：**写方收敛**（每个业务属性只有一个服务写 → 无 E1）+ 跨服务读一律声明 "
+             "`easvc:operationDependsOnOperation`（**经接口**，E2 为合理耦合）。", "",
+             "## 1. 规模与结论", "",
+             "- 服务 **%d** 个；操作 **%d** 个；业务属性 **%d** 个（键属性 %d：PK %d / UNIQUE %d / FK %d）"
+             % (data["service_count"], op_total, len(attrs), len(keys),
+                sum(1 for m in keys.values() if m["key_role"] == "PK"),
+                sum(1 for m in keys.values() if m["key_role"] == "UNIQUE"),
+                sum(1 for m in keys.values() if m["key_role"] == "FK")),
+             "- 巡检（coupling）：%s"
+             % ("E1 写耦合 **%d**；E2 读耦合 **%d**（经接口）；E3 完整性 **%d**；E4 键一致性 **%d**"
+                % (checks.get("E1", 0), checks.get("E2", 0), checks.get("E3", 0), checks.get("E4", 0))
+                if with_audit else "见 `audit_scan(scope=\"coupling\")`（本页落库时由运维脚本补全）"),
+             "- 生成时间：%s" % datetime.now().strftime("%Y-%m-%d %H:%M"), ""]
+
+    lines += ["## 2. 服务一览", "",
+              "| 服务 | 类型 | 操作 | 本服务作为写方的属性 | 只读的属性（他人写） | 涉及键 |",
+              "|---|---|---|---|---|---|"]
+    for name in sorted(services):
+        svc = services[name]
+        # 「写方」= 有 C/U/D 即算（同一操作对同属性读写并用时两边都出现，故不能相减）
+        own = sorted(set(svc["writes"]))
+        ro = sorted(set(svc["reads"]) - set(svc["writes"]))
+        svc_keys = sorted(k for k in keys if k in set(svc["writes"]) | set(svc["reads"]))
+        lines.append("| %s | `%s` | %d | %s | %s | %s |"
+                     % (name, svc["page_type"], len(svc["model"]["operations"]),
+                        "、".join(own) or "—", "、".join(ro) or "—", "、".join(svc_keys) or "—"))
+    lines.append("")
+
+    lines += ["## 3. 业务属性与键（数据设计）", "",
+              "| 业务属性 | 键角色 | 所属实体 | 写它的服务（唯一） |", "|---|---|---|---|"]
+    for name in sorted(attrs, key=lambda n: (attrs[n]["key_role"] or "Z", n)):
+        meta = attrs[name]
+        lines.append("| %s | %s | %s | %s |" % (name, meta["key_role"] or "非键",
+                                               meta["entity"] or "—", "、".join(meta["writers"]) or "—"))
+    lines += ["",
+              "> 写方为 `—` = 该属性由**本流程之外的既有系统**维护，本设计只读（不是遗漏）；",
+              "> 外键一律用 `easvc:referencesAttribute` 表达（`keyRole` 只标 PK / UNIQUE），"
+              "见各服务页「## CRUD 矩阵」与关系面板。", ""]
+
+    lines += ["## 4. 跨服务读依赖（经接口）", "",
+              "| 读方服务 | 读的操作 | 被依赖的写方操作 | 写方服务 |", "|---|---|---|---|"]
+    for item in sorted(data["deps"], key=lambda x: (x["reader"], x["op"])):
+        lines.append("| %s | %s | %s | %s |" % (item["reader"], item["op"], item["dep_op"],
+                                                item["dep_service"] or "—"))
+    lines.append("")
+    return lines + _overview_detail_lines(services, keys)
+
+
+def _overview_detail_lines(services: dict, keys: dict) -> list[str]:
+    """总览第 5 节：逐服务的操作明细（写/读属性、方法、幂等、事务、重试）。"""
+    lines = ["## 5. 操作明细", ""]
+    for name in sorted(services):
+        svc = services[name]
+        lines += ["### %s（`%s`）" % (name, svc["page_type"]), "",
+                  "| 操作 | 实现方式 | 幂等 | 事务边界 | 写 | 读 |", "|---|---|---|---|---|---|"]
+        for op in svc["model"]["operations"]:
+            a = op["attrs"]
+            lines.append("| %s | %s | %s | %s | %s | %s |"
+                         % (op["title"], a.get("easvc:operationMethod", "—"),
+                            a.get("easvc:isIdempotent", "—"),
+                            a.get("easvc:transactionBoundary", "—"),
+                            "、".join(sorted(k for k, v in svc["writes"].items() if op["title"] in v)) or "—",
+                            "、".join(sorted(k for k, v in svc["reads"].items() if op["title"] in v)) or "—"))
+        retry = [op for op in svc["model"]["operations"] if op.get("retry")]
+        if retry:
+            lines += ["", "非幂等写的重试/补偿口径："]
+            lines += ["- **%s**：%s" % (op["title"], op["retry"]) for op in retry]
+        lines.append("")
+    return lines
+
+
+def refresh_service_overview(kb_id: str, slug: str = "", title: str = "") -> dict:
+    """生成/更新「IT 服务详细设计总览」页（走既有 report 段：同 slug 复用 + 正文整体替换）。"""
+    lines = service_overview_lines(kb_id)
+    if not lines:
+        return {"skipped": "没有已详设的服务"}
+    return save_knowledge(kb_id, stage="report", model="ea", mode="apply",
+                          report={"title": title or OVERVIEW_TITLE,
+                                  "slug": slug or OVERVIEW_SLUG,
+                                  "content_md": "\n".join(lines),
+                                  "category_path": [OVERVIEW_FOLDER],
+                                  "upstream": []})
+
+
 def ontology_types(model_key: str, focus: str = "", classes: list | None = None,
                    relations: list | None = None, with_attributes: bool = True) -> dict:
     """某本体模型的类与关系清单（供智能体选类型/关系）。
@@ -2097,6 +2269,24 @@ def tool_definitions() -> list[dict]:
             }},
         },
         {
+            "name": "service_overview",
+            "description": ("**IT 服务详细设计总览**（评审页）：把所有 IT 服务的详设跨页聚合渲染成一页 —— "
+                            "服务一览（操作数 / 写方属性 / 只读属性 / 涉及键）、业务属性与键、"
+                            "跨服务读依赖（经接口）、逐操作明细（方法/幂等/事务/写读）、规模与巡检结论。"
+                            "不传 `apply` → 只读预览（含统计 + 前若干行，不写库）；"
+                            "`apply=true` → **异步**渲染并写入/刷新总览页（同 slug 复用），"
+                            "用 `extract_status(job_id=...)` 查回执。"
+                            "服务详设改动后刷一遍，评审就看这一页。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "知识库 UUID 或名称（原样传可选清单里的）"},
+                "apply": {"type": "boolean",
+                          "description": "true = 渲染并写总览页（异步）；留空 = 只读预览"},
+                "slug": {"type": "string", "description": "总览页 slug（默认 ea/summary/it服务详细设计总览）"},
+                "title": {"type": "string", "description": "总览页标题（默认 IT 服务详细设计总览）"},
+                "preview_lines": {"type": "integer", "description": "预览返回的 markdown 行数（默认 25）"},
+            }, "required": ["kb_id"]},
+        },
+        {
             "name": "audit_scan",
             "description": ("知识运维**只读体检**：比对 wiki ↔ 本体图谱 ↔ 本体模型，并找出异常数据。"
                             "检查项：悬空出边(A1)、in_links 不一致(A2)、类型/元数据矛盾(A3/A6)、"
@@ -2215,6 +2405,55 @@ def tool_definitions() -> list[dict]:
     ]
 
 
+def service_overview_tool(kb_id: str, apply: bool = False, slug: str = "", title: str = "",
+                          preview_lines: int = 25) -> dict:
+    """工具面：`service_overview(kb_id)` 只读预览；`apply=True` → 落库（异步，见 start_overview_job）。"""
+    data = service_design_summary(kb_id)  # 只聚合一次（~30s），渲染与统计共用
+    lines = service_overview_lines(kb_id, with_audit=True, data=data)
+    if not lines:
+        return {"error": "这个库里还没有已详设的 IT 服务：先按 service_detailed_design 技能做详设"}
+    return {"markdown_lines": len(lines),
+            "service_count": data["service_count"],
+            "operations": sum(len(s["model"]["operations"]) for s in data["services"].values()),
+            "attributes": len(data["attributes"]), "cross_service_deps": len(data["deps"]),
+            "preview": "\n".join(lines[:max(1, int(preview_lines))]),
+            "applied": False, "overview_slug": slug or OVERVIEW_SLUG,
+            "note": ("只读预览。要生成/刷新评审页请再调本工具 **apply=true**"
+                     "（异步落库，用 extract_status(job_id=...) 查回执；落库版会带上巡检结论）。")}
+
+
+def start_overview_job(args: dict) -> dict:
+    """异步刷新总览页（渲染 + 写页要 1-3 分钟，超过 app 侧 MCP 60s 硬超时）。"""
+    kb_id = str(args.get("kb_id", ""))
+    slug = str(args.get("slug", "") or OVERVIEW_SLUG)
+    key = "overview:%s:%s" % (kb_id, slug)
+    with JOBS_LOCK:
+        for job_id in reversed(list(JOBS)):
+            job = JOBS[job_id]
+            if job.get("key") == key and job.get("status") == "running":
+                return {"status": "running", "job_id": job_id, "reused": True,
+                        "note": "同一总览页正在刷新，请用 extract_status(job_id=...) 查回执。"}
+        job_id = uuid.uuid4().hex[:12]
+        JOBS[job_id] = {"status": "running", "started_at": now_text(), "key": key, "tool": "service_overview"}
+
+    def _run() -> None:
+        try:
+            result = refresh_service_overview(kb_id, slug, str(args.get("title", "")))
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "done", "finished_at": now_text()})
+                if isinstance(result, dict):
+                    JOBS[job_id].update(result)
+        except Exception as exc:  # noqa: BLE001
+            print("[mcp] 总览刷新失败 job=%s：%s" % (job_id, exc))
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "failed", "finished_at": now_text(), "error": str(exc)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "job_id": job_id, "started_at": now_text(), "slug": slug,
+            "note": ("总览页刷新已受理（渲染 12 个服务约 1-3 分钟）。请用 extract_status(job_id=...) "
+                     "查回执；**不要**重复调用 apply=true。")}
+
+
 def call_tool(name: str, args: dict) -> dict:
     if name == "extract_and_save":
         # 默认异步受理（app 侧 MCP 60s 硬超时，而抽取要 1-2 分钟）；
@@ -2240,6 +2479,12 @@ def call_tool(name: str, args: dict) -> dict:
                               bool(args.get("with_attributes", True)))
     if name == "skills":
         return skills(str(args.get("skill", "")), str(args.get("model", "")))
+    if name == "service_overview":
+        if args.get("apply"):
+            return start_overview_job(args)
+        return service_overview_tool(str(args["kb_id"]), False,
+                                     str(args.get("slug", "")), str(args.get("title", "")),
+                                     int(args.get("preview_lines", 25)))
     if name == "audit_scan":
         return ke_audit.audit(str(args["kb_id"]), str(args.get("scope", "all")),
                               int(args.get("max_findings", 50)))
@@ -2545,6 +2790,27 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json(data, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/crud 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/overview", "/bodhi/overview.md"):
+            # 「IT 服务详细设计总览」只读渲染（评审用）：不写库、与页面同源。
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                kb = params.get("kb_id", "") or ""
+                lines = service_overview_lines(kb)
+                if params.get("format") == "json":
+                    self._json(service_design_summary(kb), 200, self.CORS)
+                else:
+                    body = "\n".join(lines).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    for k, v in self.CORS.items():
+                        self.send_header(k, v)
+                    self.end_headers()
+                    self.wfile.write(body)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/overview 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/relations", "/bodhi/relations.json"):

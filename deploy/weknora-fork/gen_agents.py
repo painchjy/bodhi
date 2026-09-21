@@ -82,6 +82,7 @@ MODELER_TOOLS = [
     "mcp_bodhi_ontology_list_pending_merges", "mcp_bodhi_ontology_resolve_pending_merge",
     "mcp_bodhi_ontology_save_knowledge",
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
+    "mcp_bodhi_ontology_service_overview",
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
                   "design": DESIGN_TOOLS, "modeler": MODELER_TOOLS}

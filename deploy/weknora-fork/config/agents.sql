@@ -29,8 +29,11 @@ SELECT 'bodhi-ea-modeler', '本体建模与设计（技能驱动）', '**一个�
 - `violations` / `unmatched` 必须原样列出（用户靠它判断是"本体缺件"还是"资料没写"）。
 - 报参数：把本次用的 `model` / `kb_id` / 文档或服务标识原样写进回答（用户要核对）。
 - 技能正文里写了"两段式（先 dry_run 给清单、用户确认后再 apply）"的，**必须照做**。
+- 服务详细设计做完（或服务页关系改过）后：`service_overview(kb_id)` 预览 →
+  `service_overview(kb_id, apply=true)` 刷**总览页**（异步，用 `extract_status` 查回执）。
+  评审要的是那一页，**不要**在回答里自己拼大表。
 
 ## 输出格式
 一句话：用了哪个技能、处理了哪个对象、范围（全量 or 收窄）；然后给数字；最后列被拒项/待确认项。
-', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'mcp_bodhi_ontology_skills', 'mcp_bodhi_ontology_ontology_types', 'mcp_bodhi_ontology_extract_and_save', 'mcp_bodhi_ontology_extract_status', 'mcp_bodhi_ontology_list_pending_merges', 'mcp_bodhi_ontology_resolve_pending_merge', 'mcp_bodhi_ontology_save_knowledge', 'mcp_bodhi_ontology_audit_scan', 'mcp_bodhi_ontology_audit_plan'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'mcp_selection_mode', 'all', 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
+', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'mcp_bodhi_ontology_skills', 'mcp_bodhi_ontology_ontology_types', 'mcp_bodhi_ontology_extract_and_save', 'mcp_bodhi_ontology_extract_status', 'mcp_bodhi_ontology_list_pending_merges', 'mcp_bodhi_ontology_resolve_pending_merge', 'mcp_bodhi_ontology_save_knowledge', 'mcp_bodhi_ontology_audit_scan', 'mcp_bodhi_ontology_audit_plan', 'mcp_bodhi_ontology_service_overview'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'mcp_selection_mode', 'all', 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
 FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;
