@@ -102,6 +102,25 @@ def copy_tree(src: pathlib.Path, dst: pathlib.Path, ignore_pycache: bool = True,
     shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore)
 
 
+def check_mcp_artifacts(stage: pathlib.Path) -> dict:
+    """断言 02 包里**带着运行时必需的编译产物**。
+
+    为什么要断言：`artifacts/` 在 `.gitignore` 里（编译产物不入库），所以**从 git 干净签出的机器出包时
+    02 包会缺 32 个文件**（`artifacts/json_schema|prompts|neo4j|mapping` 等），装上去既没有类型索引也没有
+    提示词 —— 这次排查重复内容时就撞到过。缺了直接报错，别让残缺包流出去。
+    """
+    art = stage / "02-mcp-server" / "artifacts"
+    need = art / "weknora" / "ontology_index.json"
+    files = [p for p in art.rglob("*") if p.is_file()] if art.is_dir() else []
+    if not need.is_file() or len(files) < 20:
+        raise SystemExit(
+            "!! 02 包里的编译产物不完整（%d 个文件，`artifacts/weknora/ontology_index.json` %s）：\n"
+            "   `artifacts/` 被 .gitignore，必须**在有编译产物的机器上出包**，或先跑\n"
+            "   `python3 tools/ontology-compiler/compile.py compile`（需要 rdflib + PyYAML）重新生成。"
+            % (len(files), "存在" if need.is_file() else "缺失"))
+    return {"artifact_files": len(files), "has_index": True}
+
+
 def check_no_machine_ids(stage: pathlib.Path) -> dict:
     """断言交付 SQL 里**没有写死我们这套环境的 UUID**（用户 2026-09-22 抓到的坑）。
 
@@ -356,6 +375,8 @@ def main() -> int:
         print("      %-16s %4d 个文件" % (name, cnt))
     mid = check_no_machine_ids(stage)         # 交付 SQL 不许写死我们环境的 UUID
     print("   ID 断言通过：%d 个 SQL 文件里无写死 UUID（仅保留 MCP 服务自身 id）" % mid["sql_files"])
+    art = check_mcp_artifacts(stage)          # 02 必须带编译产物（artifacts/ 不入 git）
+    print("   编译产物断言通过：%d 个文件，ontology_index.json 在" % art["artifact_files"])
 
     print("== 3/6 打 tar.gz")
     packs = {}
