@@ -1,0 +1,25 @@
+{
+  "//": "bodhi2 项目：Python 静态检查（Pylance / pyright）配置。",
+  "//why": [
+    "server.py 与 tools/** 通过 sys.path.insert 动态加载同目录模块（ke_db / ke_ontology / …），",
+    "编辑器默认看不到这些路径 → 会把 9 个 import 报成「无法解析导入」（徽标 9+）。",
+    "这里把运行期的真实导入路径声明给静态检查器，消掉这类噪声；不改变任何运行期行为。"
+  ],
+  "pythonVersion": "3.10",
+  "extraPaths": [
+    "tools/ke-core",
+    "tools/ontology-extract",
+    "tools/ontology-mcp",
+    "tools/delivery",
+    "tools/ontology-compiler"
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "exclude": [
+    "**/__pycache__",
+    "tools/**/archive",
+    "dist-delivery",
+    "graphify-out",
+    "logs"
+  ]
+}
