@@ -10,9 +10,14 @@
 
 | id | 名称 | 何时用 | 模型 | 主要工具 |
 |---|---|---|---|---|
-| `domain_modeling` | 领域知识建模 | 把**某篇文档**按本体抽成 wiki 知识（可收窄范围） | ea / bmm | `ontology_types`、`extract_and_save`、`extract_status` |
+| `domain_modeling` | 领域知识建模 | 把**某篇文档**按本体抽成 wiki 知识（**分批交互**：一轮一批、可续跑） | ea / bmm | `doc_outline`、`extract_state`、`save_knowledge`、`link_candidates`/`resolve_link_candidate` |
 | `ea_overview_design` | 企架概要设计 | 基于**业务模型**做 IT 服务层设计（报告页 + 服务页） | ea | `wiki_search`/`wiki_read_page`、`save_knowledge` |
 | `service_detailed_design` | 服务详细设计 | 对**已入库服务**做接口/操作/主外键/CRUD 详细设计 | ea + ea-service | `ontology_types`、`save_knowledge`、`audit_scan`、`service_overview` |
+
+> **领域建模已改为分批交互**（v0.2.0，2026-09-21）：`doc_outline` 按切片父子关系组织"合适的上下文"，
+> `budget_tokens` 是**会话参数**（超时就调小，父块会自动按子块细分）；每轮 `save_knowledge(..., session=…)`
+> 回执带**页面编号**（`created[].no`），进度用 `extract_state` 对齐；跨上下文关联先 `link_candidates` 登记、
+> **用户确认后** `resolve_link_candidate(confirm)` 才写入。原异步一次性抽取（`extract_and_save`）**已退役**。
 
 > 服务详细设计收尾：`service_overview(kb_id, apply=true)` 刷「IT 服务详细设计总览」评审页
 > （服务一览 / 键 / 跨服务读依赖 / 操作明细 + 巡检结论）—— 评审看这一页，不要人在回答里拼表。

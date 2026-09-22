@@ -398,6 +398,40 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 性能口径（重要，避免 MCP 60s 硬超时）：一次聚合 ≈30s（12 次 `crud_model` + 1 次批量操作页查询 + 1 次属性页查询），
 巡检 `scope=coupling` ≈0.8s，`save_knowledge(report)` ≈6s → **预览可同步**，渲染+落库走**异步 job**。
 
+### 11.8 领域建模 v2：分批交互（2026-09-21，替代异步一次性抽取）
+用户口径：内网算力有限，**一次交互的输入 token 上限当会话参数**；按切片大小与父子关系组织"合适的上下文"，
+一轮读一批、落一批；每轮回执带**页面名称 + 编号**，所以会话里始终握着整篇文档的索引；跨上下文的关联先向量
+召回候选、**单独确认后**才写入；**原来的异步提取退役**。
+
+**工具面（新增 5 个，`save_knowledge` 新增 `session` 参数）**
+
+| 工具 | 作用 |
+|---|---|
+| `doc_outline(kb_id, knowledge_id, budget_tokens, cursor, batches, with_text)` | 按**父子切片**把文档组织成上下文批次；回执含本批正文、`next_cursor`、`done`、`est_total_batches`、`split_parents` |
+| `extract_state(kb_id, knowledge_id, action)` | **会话页索引**：`pages[{no,title,slug,type,round_no}]`、轮次、游标、待确认候选；`reset` 清状态 |
+| `link_candidates(kb_id, source_slug, relation, candidates, knowledge_id, round_no)` | 登记跨批/跨库的**候选关联**（**不写库**），返回 `candidate_id` |
+| `list_link_candidates(kb_id, knowledge_id, status)` | 列候选（按 id 去重；`pending/confirmed/rejected/all`）|
+| `resolve_link_candidate(kb_id, candidate_id, action)` | 裁决：`confirm` = 真写关系边（页面版本 +1，可回退）；`reject` = 丢弃；驳回后可**复活**再确认 |
+| `save_knowledge(..., session={...})` | 落库时带上会话：回执 `created[].no` = **会话编号**，并回写状态（dry_run 只预览编号）|
+
+**切片怎么组织（`_chunk_units` / `_split_unit`）**
+- WeKnora 的层级切片是 `parent_text`（父）+ `text`（子，`parent_chunk_id` 指父）；**父块已含子块正文**
+  → 上下文用**父块正文**，子块只用于定位（`chunk_refs` / `source_text` 匹配），避免重复喂模型；
+- **父块本身超过预算时按子块细分**（子块成为独立上下文原子，首个原子带父块开头 120 字作归属提示）
+  → 所以"把阈值调小"永远能继续缩小；无子块可拆时在 `oversized_units` 里明示；
+- `budget_tokens` 下限 500（避免荒谬值）；估算用 `chars/1.6`（可用 `BODHI_CHARS_PER_TOKEN` 调）。
+
+**会话状态**：`state/domain_sessions/<kb_id>/<knowledge_id>.json`（页面索引/轮次/游标/候选关联；已 gitignore）。
+**cursor 语义**：按"当前预算"展开后的原子序号 → **中途改预算请从 `cursor=0` 重跑**（落库幂等，同 slug 命中即合并）。
+
+**实测（沙箱库）**：`mb-手机银行开户签约需求.md` 在预算 8000/1500 下 1 批；预算 600 时父块拆成 **8 个子块原子**，
+连取 3 批覆盖 8 个 chunk、**不重不漏**、`done=true`；落库两页拿到编号 **1、2**（dry_run 只预览不落状态）；
+候选关联：登记 → 重复登记被 skip → 驳回 → 再登记**复活** → 确认后页面出边出现真实关系（版本 +1）→ 删除还原。
+
+> 退役说明：`extract_and_save` / `extract_status` **保留但标注已退役**（老脚本/回归测试仍可能调用）；
+> 智能体 `bodhi-ea-modeler` 的工具面已把它们换成上面 5 个（18 个工具）。
+> 详见技能 `skills/domain_modeling/SKILL.md`（v0.2.0）与 `docs/handoff-domain-modeling-v2.md`。
+
 ### 11.7 原生技能（沙箱）路线：现状与开法（2026-09-21）
 本部署的技能**由 MCP 承载**（§11.1）—— 因为 WeKnora 原生技能是**沙箱安装型**：
 `tenant_skills` 绑 `sandbox_config_id`，上传物是 **zip bundle**，安装时**在沙箱后端构建快照镜像**。

@@ -39,6 +39,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import pathlib
 import re
 import subprocess
@@ -196,6 +197,230 @@ def load_engine():
     return extract
 
 
+# ---------------------------------------------------------------------------
+# 领域建模 v2：按切片分批的上下文 + 会话页索引 + 候选关联（单独确认）
+#   用户口径（2026-09-21）：不再一次性异步抽取；按切片大小与父子关系组织"合适的上下文"，
+#   一次交互的输入 token 上限当作**会话参数**（超时就调小阈值重跑）；每轮落库都回执
+#   **页面名称 + 编号**，会话上下文因此始终带着整个文档的索引；跨批/跨库的关联目标若不在
+#   上下文里，先向量召回候选，**单独确认后**才写入领域模型。
+# ---------------------------------------------------------------------------
+DOMAIN_STATE_DIR = REPO / "state" / "domain_sessions"
+try:
+    DEFAULT_ROUND_BUDGET = int(os.environ.get("BODHI_ROUND_BUDGET_TOKENS") or 8000)
+except ValueError:
+    DEFAULT_ROUND_BUDGET = 8000
+try:
+    CHARS_PER_TOKEN = float(os.environ.get("BODHI_CHARS_PER_TOKEN") or 1.6)
+except ValueError:
+    CHARS_PER_TOKEN = 1.6
+
+
+def _state_path(kb_id: str, knowledge_id: str) -> pathlib.Path:
+    safe = re.sub(r"[^0-9a-zA-Z._-]", "_", knowledge_id or "__kb__")
+    return DOMAIN_STATE_DIR / kb_id / ("%s.json" % safe)
+
+
+def _empty_state(kb_id: str, knowledge_id: str) -> dict:
+    return {"kb_id": kb_id, "knowledge_id": knowledge_id, "doc_title": "",
+            "budget_tokens": DEFAULT_ROUND_BUDGET, "cursor": 0, "next_no": 1,
+            "rounds": [], "pages": [], "pending_links": []}
+
+
+def load_domain_state(kb_id: str, knowledge_id: str = "") -> dict:
+    path = _state_path(kb_id, knowledge_id)
+    if not path.is_file():
+        return _empty_state(kb_id, knowledge_id)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return _empty_state(kb_id, knowledge_id)
+    base = _empty_state(kb_id, knowledge_id)
+    base.update(state)
+    return base
+
+
+def save_domain_state(kb_id: str, knowledge_id: str, state: dict) -> pathlib.Path:
+    path = _state_path(kb_id, knowledge_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
+def _est_tokens(text: str) -> int:
+    return int(len(squash(text)) / CHARS_PER_TOKEN) + 1
+
+
+def _chunk_units(knowledge_id: str) -> list[dict]:
+    """把切片按**父子关系**组装成上下文单元：一个 parent_text（父）＋它名下的 text（子）。
+
+    - 父块已经包含子块正文（实测：父 ≈ 子之和 + 头），所以**上下文用父块正文**，
+      子块只用于定位（`chunk_refs`/`source_text` 匹配）；避免重复喂给模型。
+    - 没有父块（非层级切分）时，按顺序把 text 块打包成等大单元。
+    """
+    rows = psql_csv("SELECT id, chunk_index, chunk_type, COALESCE(parent_chunk_id,'') AS parent_id, "
+                    "content FROM chunks WHERE knowledge_id = %s AND deleted_at IS NULL "
+                    "AND COALESCE(is_enabled, true) ORDER BY chunk_index, seq_id, id"
+                    % sql_str(knowledge_id))
+    parents = [r for r in rows if (r.get("chunk_type") or "") == "parent_text"]
+    children: dict[str, list[dict]] = {}
+    for row in rows:
+        if row.get("parent_id"):
+            children.setdefault(row["parent_id"], []).append(row)
+    units: list[dict] = []
+    if parents:
+        for p in parents:
+            kids = children.get(p["id"], [])
+            text = p["content"] or ""
+            units.append({"unit_id": p["id"], "kind": "parent",
+                          "chunk_ids": [p["id"]] + [k["id"] for k in kids],
+                          "child_count": len(kids), "chars": len(text), "text": text,
+                          "parent_head": squash(text)[:120],
+                          "children": [{"id": k["id"], "chars": len(k["content"] or ""),
+                                        "text": k["content"] or "",
+                                        "est_tokens": _est_tokens(k["content"] or "")}
+                                       for k in kids]})
+        # 有父块但有些 text 块没挂父（切分异常）→ 追加成独立单元，避免漏内容
+        orphan = [r for r in rows if (r.get("chunk_type") or "") == "text" and not r.get("parent_id")]
+        for r in orphan:
+            units.append({"unit_id": r["id"], "kind": "orphan_text", "chunk_ids": [r["id"]],
+                          "child_count": 0, "chars": len(r["content"] or ""), "text": r["content"] or "",
+                          "parent_head": "", "children": []})
+    else:
+        buffer, chars, ids = [], 0, []
+        for r in rows:
+            buffer.append(r["content"] or "")
+            ids.append(r["id"])
+            chars += len(r["content"] or "")
+            if chars >= 1500:
+                units.append({"unit_id": ids[0], "kind": "packed_text", "chunk_ids": list(ids),
+                              "child_count": len(ids) - 1, "chars": chars, "text": "\n".join(buffer),
+                              "parent_head": "", "children": []})
+                buffer, chars, ids = [], 0, []
+        if buffer:
+            units.append({"unit_id": ids[0], "kind": "packed_text", "chunk_ids": list(ids),
+                          "child_count": len(ids) - 1, "chars": chars, "text": "\n".join(buffer),
+                          "parent_head": "", "children": []})
+    for u in units:
+        u["est_tokens"] = _est_tokens(u["text"])
+        u["headings"] = [squash((ln or ""))[:60] for ln in (u["text"] or "").splitlines()[:3] if (ln or "").strip()]
+    return units
+
+
+def _split_unit(unit: dict, budget: int) -> list[dict]:
+    """父块本身超过预算时，**按子块细分**（这样"调小阈值"永远能继续缩小）。
+
+    每个子块独立成一个上下文原子；带上父块开头 120 字作为归属提示（便于模型知道自己在读哪一段）。
+    """
+    children = unit.get("children") or []
+    if not children:
+        return [unit]                      # 没有子块可拆：只能整块给（回执里 oversized 会提示）
+    atoms = []
+    for i, child in enumerate(children):
+        prefix = ("【父块：%s…】\n" % unit.get("parent_head", "")) if i == 0 else ""
+        text = prefix + (child.get("text") or "")
+        atoms.append({"unit_id": child["id"], "kind": "child_of",
+                      "parent_id": unit["unit_id"], "chunk_ids": [child["id"]],
+                      "child_count": 0, "chars": len(text), "text": text,
+                      "headings": [squash(text)[:60]],
+                      "est_tokens": _est_tokens(text), "children": []})
+    return atoms
+
+
+def doc_outline(kb_id: str, knowledge_id: str, budget_tokens: int = 0, cursor: int = 0,
+                batches: int = 1, with_text: bool = True) -> dict:
+    """按切片**父子关系**把文档组织成"大小合适"的上下文批次（领域建模 v2 的入口工具）。
+
+    - `budget_tokens`：本批上下文的 token 上限（**会话参数**）。默认取环境变量
+      `BODHI_ROUND_BUDGET_TOKENS`（默认 8000）。**超时就把它调小**再重跑本工具；
+    - `cursor`：从第几个上下文单元开始（上一批回执里的 `next_cursor`）；
+    - `batches`：本次取几批（默认 1，对应"一轮一次交互"）；
+    - `with_text=False`：只给地图（标题/规模），不返回正文（省 token）。
+    """
+    kb_id, _note = resolve_kb_id(kb_id)
+    knowledge_id, doc_title = resolve_knowledge_id(kb_id, knowledge_id)
+    budget = max(500, int(budget_tokens or DEFAULT_ROUND_BUDGET))
+    raw_units = _chunk_units(knowledge_id)
+    if not raw_units:
+        return {"error": "该文档没有可用切片：%s（先等切片完成）" % knowledge_id}
+    # 父块本身超过预算 → 按子块细分（这样"调小阈值"永远能继续缩小上下文）
+    units, split_parents = [], []
+    for u in raw_units:
+        if u["est_tokens"] > budget and (u.get("children") or []):
+            atoms = _split_unit(u, budget)
+            units.extend(atoms)
+            split_parents.append({"parent_unit": u["unit_id"], "atoms": len(atoms)})
+        else:
+            units.append(u)
+    total_chars = sum(u["chars"] for u in units)
+    total_tokens = sum(u["est_tokens"] for u in units)
+    start = max(0, min(int(cursor or 0), len(units)))
+    out_batches, idx = [], start
+    while idx < len(units) and len(out_batches) < max(1, int(batches or 1)):
+        chars, group = 0, []
+        while idx < len(units):
+            unit = units[idx]
+            if group and (chars + unit["chars"]) / CHARS_PER_TOKEN > budget:
+                break
+            group.append(unit)
+            chars += unit["chars"]
+            idx += 1
+        if not group:
+            break
+        out_batches.append({
+            "batch_no": len(out_batches) + 1,
+            "units": [u["unit_id"] for u in group],
+            "chunk_ids": [cid for u in group for cid in u["chunk_ids"]],
+            "child_count": sum(u["child_count"] for u in group),
+            "chars": chars,
+            "est_tokens": int(chars / CHARS_PER_TOKEN) + 1,
+            "headings": [h for u in group for h in u["headings"]][:8],
+            "text": "\n\n---\n\n".join(u["text"] for u in group) if with_text else "",
+        })
+    return {
+        "kb_id": kb_id, "knowledge_id": knowledge_id, "doc_title": doc_title,
+        "budget_tokens": budget, "chars_per_token": CHARS_PER_TOKEN,
+        "total_units": len(units), "total_chars": total_chars,
+        "est_total_tokens": total_tokens,
+        "est_total_batches": max(1, -(-total_tokens // budget)),
+        "cursor": start, "next_cursor": idx, "done": idx >= len(units),
+        "oversized_units": [u["unit_id"] for u in units if u["est_tokens"] > budget],
+        "split_parents": split_parents,
+        "batches": out_batches,
+        "guidance": [
+            "只从本批正文里抽知识：节点/关系必须有本批文本支撑（`source_text` 用原句，便于定位切片）。",
+            "需要的目标节点**不在本批里**时：先用向量检索（wiki_search）找候选，再调 `link_candidates` "
+            "登记候选 —— **不要自己编 slug**，也不要直接写关系。",
+            "本批产出用 `save_knowledge(stage=\"graph\", mode=\"apply\", session={...})` 落库；回执里的 "
+            "`created[].no` 就是页面的**会话编号**（下一轮引用编号/slug，而不是复述全文）。",
+            "一批做完：用回执里的 `session.next_cursor` 作为本工具的 `cursor` 取下一批。",
+            "某轮超时/被截断：把 `budget_tokens` 调小（8000 → 4000 → 2000）重跑本工具；"
+            "父块超过预算时会**自动按子块细分**（回执 `split_parents` 可见）。",
+            "**同一份文档尽量固定预算跑完**；中途改预算则 `cursor` 失效，从头重跑即可 —— "
+            "落库是幂等的（同 slug 命中即合并更新，不会重复建页）。",
+        ],
+    }
+
+
+def extract_state(kb_id: str, knowledge_id: str = "", action: str = "get") -> dict:
+    """会话页索引与进度：每轮落库的**页面名称 + 编号**、已做轮次、待确认候选关联。"""
+    kb_id, _note = resolve_kb_id(kb_id)
+    if action == "reset":
+        state = _empty_state(kb_id, knowledge_id)
+        save_domain_state(kb_id, knowledge_id, state)
+        return {"action": "reset", "kb_id": kb_id, "knowledge_id": knowledge_id, "state": state}
+    if action != "get":
+        raise RuntimeError("action 只能是 get 或 reset")
+    state = load_domain_state(kb_id, knowledge_id)
+    return {
+        "kb_id": kb_id, "knowledge_id": knowledge_id, "doc_title": state.get("doc_title", ""),
+        "budget_tokens": state.get("budget_tokens"), "cursor": state.get("cursor"),
+        "rounds": state.get("rounds", []), "pages_total": len(state.get("pages", [])),
+        "pages": state.get("pages", []), "next_no": state.get("next_no", 1),
+        "pending_links": [x for x in state.get("pending_links", []) if x.get("status") == "pending"],
+        "hint": "页面的 `no` 是本会话编号；引用既有页面用 slug/title，不要重建同名页。",
+    }
+
+
 def fetch_chunks(knowledge_id: str) -> list[dict]:
     rows = psql_csv("SELECT id, chunk_index, chunk_type, content FROM chunks "
                     "WHERE knowledge_id = %s AND deleted_at IS NULL "
@@ -203,6 +428,175 @@ def fetch_chunks(knowledge_id: str) -> list[dict]:
     for row in rows:
         row["chunk_index"] = int(row.get("chunk_index") or 0)
     return rows
+
+
+# --- 候选关联（跨上下文/跨库的关联，必须单独确认后才写库）-------------------
+def _page_row_by_slug(kb_id: str, slug: str) -> dict | None:
+    rows = psql_csv("SELECT slug, title, page_type FROM wiki_pages WHERE knowledge_base_id = %s "
+                    "AND slug = %s AND deleted_at IS NULL LIMIT 1"
+                    % (sql_str(kb_id), sql_str(slug)))
+    return rows[0] if rows else None
+
+
+def link_candidates(kb_id: str, source_slug: str, relation: str, candidates: list,
+                    knowledge_id: str = "", round_no: int = 0) -> dict:
+    """登记**候选关联**（只登记，不写库）。用户确认后用 `resolve_link_candidate` 落地。"""
+    kb_id, _note = resolve_kb_id(kb_id)
+    src = _page_row_by_slug(kb_id, source_slug)
+    if not src:
+        raise RuntimeError("源页不存在：%s（先用 slug 或标题确认它已落库）" % source_slug)
+    if not relation:
+        raise RuntimeError("relation 必填（本体里的关系 prefixed 名，如 bmm:definedBy）")
+    if not isinstance(candidates, list):
+        raise RuntimeError("candidates 必须是数组：[{target_slug, similarity?, reason?}]")
+    state = load_domain_state(kb_id, knowledge_id)
+    added, skipped, reopened = [], [], []
+    for item in candidates:
+        if isinstance(item, str):
+            item = {"target_slug": item}
+        target = str(item.get("target_slug") or item.get("slug") or "").strip()
+        if not target:
+            continue
+        tgt = _page_row_by_slug(kb_id, target)
+        cid = hashlib.sha1(("%s|%s|%s|%s" % (source_slug, relation, target, knowledge_id))
+                           .encode("utf-8")).hexdigest()[:12]
+        existing = next((x for x in state.get("pending_links", []) if x.get("candidate_id") == cid),
+                        None)
+        if existing is not None and existing.get("status") == "pending":
+            skipped.append({"candidate_id": cid, "target_slug": target, "why": "已在待确认队列"})
+            continue
+        if existing is not None:
+            # 之前驳回过（或已确认过）：**复活为待确认**，否则同一对永远无法再提交确认
+            # （candidate_id 是按 source|relation|target|doc 稳定哈希，不是每次新生成）
+            existing.update({"status": "pending", "reopened_at": now_text(),
+                             "similarity": item.get("similarity"),
+                             "reason": str(item.get("reason") or existing.get("reason") or "")[:300],
+                             "round_no": int(round_no or 0),
+                             "target_exists": bool(tgt),
+                             "target_title": (tgt or {}).get("title", ""),
+                             "target_type": (tgt or {}).get("page_type", "")})
+            existing.pop("resolved_at", None)
+            reopened.append({"candidate_id": cid, "target_slug": target,
+                             "prev_status": "rejected_or_confirmed"})
+            added.append(existing)
+            continue
+        record = {"candidate_id": cid, "source_slug": source_slug, "source_title": src["title"],
+                  "relation": relation, "target_slug": target,
+                  "target_title": (tgt or {}).get("title", ""),
+                  "target_exists": bool(tgt), "target_type": (tgt or {}).get("page_type", ""),
+                  "similarity": item.get("similarity"), "reason": str(item.get("reason") or "")[:300],
+                  "round_no": int(round_no or 0), "status": "pending", "created_at": now_text()}
+        state.setdefault("pending_links", []).append(record)
+        added.append(record)
+    save_domain_state(kb_id, knowledge_id, state)
+    return {"kb_id": kb_id, "knowledge_id": knowledge_id, "added": len(added), "skipped": skipped,
+            "reopened": reopened,
+            "items": added, "state_file": str(_state_path(kb_id, knowledge_id)),
+            "note": ("这些**还没有写进领域模型**。把清单交给用户逐条确认后，再调 "
+                     "`resolve_link_candidate(action=\"confirm\")`；`target_exists=false` 的先别确认。")}
+
+
+def _iter_states(kb_id: str, knowledge_id: str = "") -> list[tuple[str, dict]]:
+    if knowledge_id:
+        return [(knowledge_id, load_domain_state(kb_id, knowledge_id))]
+    base = DOMAIN_STATE_DIR / kb_id
+    out = []
+    if base.is_dir():
+        for path in sorted(base.glob("*.json")):
+            out.append((path.stem, load_domain_state(kb_id, path.stem)))
+    return out
+
+
+def list_link_candidates(kb_id: str, knowledge_id: str = "", status: str = "pending") -> dict:
+    """列出候选关联（默认只看待确认的）。
+
+    按 `candidate_id` **去重**（保留同 id 的**最后一条**）：早期版本在"驳回后重新登记"时会
+    append 出重复记录，这里做兼容收敛，避免同一对出现两条。
+    """
+    kb_id, _note = resolve_kb_id(kb_id)
+    latest: dict[str, dict] = {}
+    for kid, state in _iter_states(kb_id, knowledge_id):
+        for rec in state.get("pending_links", []):
+            cid = rec.get("candidate_id") or ""
+            if not cid:
+                continue
+            latest[cid] = {**rec, "knowledge_id": kid}
+    items = [r for r in latest.values()
+             if not status or status == "all" or r.get("status") == status]
+    return {"kb_id": kb_id, "status": status, "count": len(items), "items": items}
+
+
+def resolve_link_candidate(kb_id: str, candidate_id: str, action: str, knowledge_id: str = "") -> dict:
+    """裁决候选关联：`confirm` = 写进领域模型（真关系边）；`reject` = 丢弃。"""
+    kb_id, _note = resolve_kb_id(kb_id)
+    action = (action or "").strip().lower()
+    if action not in ("confirm", "reject"):
+        raise RuntimeError("action 只能是 confirm 或 reject")
+    for kid, state in _iter_states(kb_id, knowledge_id):
+        matches = [rec for rec in state.get("pending_links", [])
+                   if rec.get("candidate_id") == candidate_id]
+        if not matches:
+            continue
+        # 同 id 可能有多条（历史遗留）：**优先取待确认的**，否则取最后一条
+        rec = next((x for x in matches if x.get("status") == "pending"), matches[-1])
+        if rec.get("status") != "pending":
+            return {"candidate_id": candidate_id, "status": rec.get("status"),
+                    "note": "该候选已裁决过，未重复执行"}
+        if action == "reject":
+            rec.update({"status": "rejected", "resolved_at": now_text()})
+            save_domain_state(kb_id, kid, state)
+            return {"candidate_id": candidate_id, "status": "rejected",
+                    "source_slug": rec.get("source_slug"), "target_slug": rec.get("target_slug")}
+        if not rec.get("target_exists"):
+            raise RuntimeError("目标页不存在，不能确认：%s" % rec.get("target_slug"))
+        res = ke_pages.add_relation(kb_id, rec["source_slug"], rec["relation"], rec["target_slug"])
+        version = ((res or {}).get("relations") or {}).get("version") or (res or {}).get("version")
+        rec.update({"status": "confirmed", "resolved_at": now_text(), "page_version": version})
+        save_domain_state(kb_id, kid, state)
+        return {"candidate_id": candidate_id, "status": "confirmed",
+                "source_slug": rec.get("source_slug"), "relation": rec.get("relation"),
+                "target_slug": rec.get("target_slug"), "page_version": version,
+                "apply": res}
+    raise RuntimeError("找不到候选：%s（先用 list_link_candidates 看清单）" % candidate_id)
+
+
+def adopt_session(kb_id: str, session: dict | None, summary: dict) -> dict | None:
+    """把本轮落库结果记进会话索引：给新建页编**会话编号**并回写 `session` 段。"""
+    if not session:
+        return None
+    knowledge_id = str(session.get("knowledge_id") or "")
+    state = load_domain_state(kb_id, knowledge_id)
+    budget = int(session.get("budget_tokens") or state.get("budget_tokens") or DEFAULT_ROUND_BUDGET)
+    cursor = int(session.get("cursor") or 0)
+    dry = bool(summary.get("dry_run"))
+    state["budget_tokens"] = budget
+    if session.get("doc_title"):
+        state["doc_title"] = str(session["doc_title"])
+    assigned = []
+    no_next = int(state.get("next_no") or 1)
+    for entry in summary.get("created") or []:
+        no = no_next
+        entry["no"] = no
+        no_next += 1          # 草稿计数：dry_run 也递增（只用于回执，不落盘）
+        assigned.append({"no": no, "title": entry.get("name"), "slug": entry.get("slug"),
+                         "type": entry.get("type")})
+        if not dry:
+            state["next_no"] = no_next
+            state.setdefault("pages", []).append(
+                {"no": no, "title": entry.get("name"), "slug": entry.get("slug"),
+                 "type": entry.get("type"), "round_no": int(session.get("round_no") or 0),
+                 "at": now_text()})
+    if not dry:
+        state.setdefault("rounds", []).append(
+            {"round_no": int(session.get("round_no") or (len(state.get("rounds", [])) + 1)),
+             "cursor": cursor, "budget_tokens": budget, "created": len(assigned), "at": now_text()})
+        if session.get("next_cursor") is not None:
+            state["cursor"] = int(session["next_cursor"])
+        save_domain_state(kb_id, knowledge_id, state)
+    return {"knowledge_id": knowledge_id, "budget_tokens": budget, "cursor": cursor,
+            "assigned_no": assigned, "pages_total": len(state.get("pages", [])),
+            "next_no": int(state.get("next_no") or 1), "next_cursor": state.get("cursor"),
+            "dry_run": dry, "state_file": str(_state_path(kb_id, knowledge_id))}
 
 
 def split_body_pool(chunks: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -1191,7 +1585,8 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
 def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                    report: dict | None = None, nodes: list | None = None, edges: list | None = None,
                    mode: str = "dry_run", confirmed_new_applications: list | None = None,
-                   high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW) -> dict:
+                   high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
+                   session: dict | None = None) -> dict:
     """**设计落库（不调 LLM）**：两段式，复用抽取路径的 `save_elements`（相似度合并/待确认/版本/目录）。
 
     - `stage="report"`：把**概要设计报告 md** 整篇写成 wiki 页（索引页/父页）。
@@ -1337,6 +1732,13 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                     psql("UPDATE wiki_pages SET parent_slug = %s, updated_at = now() "
                          "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
                          % (sql_str(report_slug), sql_str(kb_id), sql_str(slug)), stdin=True)
+    # 领域建模 v2：把本轮结果记进**会话索引**（新建页编会话编号；dry_run 只预览不落盘）
+    try:
+        adopted = adopt_session(kb_id, session, summary)
+        if adopted:
+            summary["session"] = adopted
+    except Exception as exc:  # noqa: BLE001
+        summary["session"] = {"error": str(exc)[:200]}
     return summary
 
 
@@ -2176,7 +2578,12 @@ def tool_definitions() -> list[dict]:
     return [
         {
             "name": "extract_and_save",
-            "description": ("按本体模型对**一篇文档**做一次抽取，并把结果写入 wiki："
+            "description": ("**[已退役，仅兼容保留]** 一次性异步抽取整篇文档（把全文塞进一次调用）。"
+                            "内网算力有限时必然超时/被截断，且无法按对话调整上下文预算 —— "
+                            "**新流程请用 `domain_modeling` 技能的分批模式**："
+                            "`doc_outline` 取本批上下文 → `save_knowledge(stage=\"graph\", session={...})` 落库续跑。"
+                            "保留原因：老脚本/回归测试仍可能调用。"
+                            "（原行为：按本体模型对**一篇文档**做一次抽取并写入 wiki："
                             "自动做类型/关系合规校验（不合规不入库），"
                             "再按向量相似度与存量比对 —— 高相似直接合并（追加原文证据、"
                             "定义取更完整者、版本+1、可回退），低相似新增页面，中间区间生成"
@@ -2213,7 +2620,9 @@ def tool_definitions() -> list[dict]:
         },
         {
             "name": "extract_status",
-            "description": ("查询本体抽取任务的状态与结果（配合 extract_and_save 的异步模式使用）。"
+            "description": ("**[已退役，仅兼容保留]** 查询旧异步抽取任务的状态与结果"
+                            "（配合 `extract_and_save` 的异步模式）。新流程用 `extract_state` 看"
+                            "分批建模进度（页面编号/轮次/游标）。"
                             "返回 status=running/done/failed，done 时含 created/merged/pending/"
                             "violations/unmatched 明细与 folders_synced（目录是否已重建）。"),
             "inputSchema": {"type": "object",
@@ -2402,9 +2811,90 @@ def tool_definitions() -> list[dict]:
                         "type": "array", "items": {"type": "string"},
                         "description": "**人工已确认**可新建的「应用/系统」节点名称清单",
                     },
+                    "session": {
+                        "type": "object",
+                        "description": ("**领域建模 v2 的分批会话**（可选；只在按批次建模时传）："
+                                        "{knowledge_id(本篇文档), round_no(第几轮), budget_tokens(本轮 token 上限),"
+                                        " cursor(本批起始单元), next_cursor(回执里 doc_outline 给的下一批游标),"
+                                        " doc_title}。带上它时：回执会给每个**新建页**编会话编号 "
+                                        "`created[].no`，并把页面索引/轮次/游标写进会话状态（`extract_state` 可查）。"
+                                        "dry_run 只预览编号，不落状态。"),
+                        "properties": {"knowledge_id": {"type": "string"}, "round_no": {"type": "integer"},
+                                       "budget_tokens": {"type": "integer"}, "cursor": {"type": "integer"},
+                                       "next_cursor": {"type": "integer"}, "doc_title": {"type": "string"}},
+                    },
                 },
                 "required": ["kb_id", "stage"],
             },
+        },
+        {
+            "name": "doc_outline",
+            "description": ("**领域建模 v2 的入口**：按切片**父子关系**把一个文档组织成"
+                            "\"大小合适\"的上下文批次（父块正文 + 子块用于定位），把"
+                            "**一次交互的输入 token 上限**（`budget_tokens`）当会话参数。"
+                            "用法：先 `doc_outline(kb_id, knowledge_id, budget_tokens)` 拿**本批正文** → "
+                            "只从本批抽节点/关系 → `save_knowledge(stage=\"graph\", mode=\"apply\", session={...})` "
+                            "落库 → 用回执的 `session.next_cursor` 取下一批，直到 `done=true`。"
+                            "**超时/被截断就把 budget_tokens 调小**（8000→4000→2000）重跑本工具。"
+                            "`with_text=false` 只要地图（标题/规模）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "知识库 UUID 或名称"},
+                "knowledge_id": {"type": "string", "description": "文档 id 或标题（本篇要建模的文档）"},
+                "budget_tokens": {"type": "integer",
+                                  "description": "本批上下文 token 上限（会话参数；默认取 BODHI_ROUND_BUDGET_TOKENS=8000）"},
+                "cursor": {"type": "integer", "description": "从第几个上下文单元开始（上一批的 next_cursor）"},
+                "batches": {"type": "integer", "description": "本次取几批（默认 1）"},
+                "with_text": {"type": "boolean", "description": "是否返回本批正文（默认 true）"},
+            }, "required": ["kb_id", "knowledge_id"]},
+        },
+        {
+            "name": "extract_state",
+            "description": ("**领域建模会话的页索引与进度**：每轮落库的页面**名称 + 会话编号**"
+                            "（`pages: [{no, title, slug, type, round_no}]`）、已做轮次、游标、"
+                            "待确认候选关联。用途：上下文里不必复述全文 —— 引用编号/slug 即可；"
+                            "跨会话续跑也先调它对齐进度。`action=\"reset\"` 清空该文档的会话状态。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "知识库 UUID 或名称"},
+                "knowledge_id": {"type": "string", "description": "文档 id/标题；留空 = 该库全部文档会话"},
+                "action": {"type": "string", "enum": ["get", "reset"], "description": "默认 get"},
+            }, "required": ["kb_id"]},
+        },
+        {
+            "name": "link_candidates",
+            "description": ("**候选关联登记**（跨批/跨库关联的\"单独确认\"环节）：当节点/关系需要的目标"
+                            "**不在当前上下文**里时，先用向量检索（wiki_search）找到候选页，再用本工具登记。"
+                            "本工具**只登记不写库**，回执含 `candidate_id`；把清单给用户逐条确认后调 "
+                            "`resolve_link_candidate(action=\"confirm\")` 才真正写入领域模型。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "source_slug": {"type": "string", "description": "源页 slug（必须已落库）"},
+                "relation": {"type": "string", "description": "本体关系 prefixed 名，如 bmm:definedBy"},
+                "candidates": {"type": "array", "items": {"type": "object"},
+                               "description": "[{target_slug, similarity?, reason?}]；target_slug 用检索结果的 slug"},
+                "knowledge_id": {"type": "string", "description": "所属文档（把候选归到该会话）"},
+                "round_no": {"type": "integer", "description": "第几轮登记的"},
+            }, "required": ["kb_id", "source_slug", "relation", "candidates"]},
+        },
+        {
+            "name": "list_link_candidates",
+            "description": "列出候选关联（默认 `status=pending`；`all` 看全部含已裁决）。",
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "knowledge_id": {"type": "string", "description": "留空 = 该库全部会话"},
+                "status": {"type": "string", "enum": ["pending", "confirmed", "rejected", "all"]},
+            }, "required": ["kb_id"]},
+        },
+        {
+            "name": "resolve_link_candidate",
+            "description": ("候选关联**裁决**：`confirm` = 写入领域模型（调 `ke_pages.add_relation`，"
+                            "页面版本 +1 并可回退）；`reject` = 丢弃。**必须先拿到用户确认**"
+                            "（`target_exists=false` 的不能确认）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "candidate_id": {"type": "string", "description": "link_candidates 回执里的 candidate_id"},
+                "action": {"type": "string", "enum": ["confirm", "reject"]},
+                "knowledge_id": {"type": "string"},
+            }, "required": ["kb_id", "candidate_id", "action"]},
         },
     ]
 
@@ -2501,7 +2991,27 @@ def call_tool(name: str, args: dict) -> dict:
             model=str(args.get("model", "ea")), report=args.get("report"),
             nodes=args.get("nodes") or [], edges=args.get("edges") or [],
             mode=str(args.get("mode", "dry_run")),
-            confirmed_new_applications=args.get("confirmed_new_applications") or [])
+            confirmed_new_applications=args.get("confirmed_new_applications") or [],
+            session=args.get("session") or None)
+    if name == "doc_outline":
+        return doc_outline(str(args["kb_id"]), str(args.get("knowledge_id", "")),
+                           int(args.get("budget_tokens", 0) or 0), int(args.get("cursor", 0) or 0),
+                           int(args.get("batches", 1) or 1),
+                           bool(args.get("with_text", True)))
+    if name == "extract_state":
+        return extract_state(str(args["kb_id"]), str(args.get("knowledge_id", "")),
+                             str(args.get("action", "get")))
+    if name == "link_candidates":
+        return link_candidates(str(args["kb_id"]), str(args.get("source_slug", "")),
+                               str(args.get("relation", "")), args.get("candidates") or [],
+                               str(args.get("knowledge_id", "")), int(args.get("round_no", 0) or 0))
+    if name == "list_link_candidates":
+        return list_link_candidates(str(args["kb_id"]), str(args.get("knowledge_id", "")),
+                                    str(args.get("status", "pending")))
+    if name == "resolve_link_candidate":
+        return resolve_link_candidate(str(args["kb_id"]), str(args.get("candidate_id", "")),
+                                      str(args.get("action", "")),
+                                      str(args.get("knowledge_id", "")))
     raise RuntimeError("未知工具：%s" % name)
 
 

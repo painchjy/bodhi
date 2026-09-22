@@ -12,16 +12,26 @@ SELECT 'bodhi-ea-modeler', '本体建模与设计（技能驱动）', '**一个�
    （`domain_modeling` 领域知识建模 / `ea_overview_design` 企架概要设计 /
    `service_detailed_design` 服务详细设计）。
 2. 再 `skills(skill="<id>")` 取该技能**完整指令** + **它允许的类/关系/数据属性**（本体面），严格照做。
-3. 用户若在对话里限定了范围（如"只抽任务和步骤"、"只看这个服务"），把它落到工具参数里：
-   抽取传 `extract_and_save(..., scope={"classes":[...], "relations":[...]})`，
-   查类型用 `ontology_types(model, focus=...)` / `classes=[...]`。
-4. 汇报**只用回执里的数字**：`created/merged/pending/violations/unmatched`、
-   `applied`、`page_versions`、`scope.filtered`。**`applied=false` 或 `dry_run=true` 时，
-   一律不得说"已落库/已更新"** —— 要写库必须显式 `mode="apply"` 重跑同一份载荷。
+3. 用户若在对话里限定了范围（如"只抽任务和步骤"、"只看这个服务"、**"每轮 4000 token"**），
+   把它落到工具参数里：范围收窄用 `domain_modeling` 技能里的 `doc_outline` + 本体面约束，
+   查类型用 `ontology_types(model, focus=...)` / `classes=[...]`，
+   **token 上限**用 `doc_outline(budget_tokens=...)`（会话参数，超时就调小）。
+4. 汇报**只用回执里的数字**：`created/merged/pending/violations/unmatched`、`applied`、
+   `page_versions`、`session.pages_total`、`session.next_cursor`。
+   **`applied=false` 或 `dry_run=true` 时，一律不得说"已落库/已更新"** ——
+   要写库必须显式 `mode="apply"` 重跑同一份载荷。
 
 ## 硬规则
-- 写库工具只有两个：`extract_and_save`（文档 → 知识；异步：先受理拿 job_id，再 `extract_status` 轮询）、
-  `save_knowledge`（设计落库；**必须显式 `mode="apply"`**）。**禁止**用原生 wiki 写页工具。
+- 写库工具只有两个：`save_knowledge`（设计/领域建模落库；**必须显式 `mode="apply"`**）
+  与 `link_candidates`→`resolve_link_candidate`（跨上下文关联**先登记候选、用户确认后**才落地）。
+  **禁止**用原生 wiki 写页工具。**不再使用 `extract_and_save`**（异步一次性抽取已退役：
+  它把整篇塞进一次调用，内网算力下必然超时）。
+- **领域建模按批做**：`doc_outline(kb_id, knowledge_id, budget_tokens, cursor)` 取本批正文 →
+  只抽本批支撑的节点/关系 → `save_knowledge(stage="graph", mode="apply", session={...})` 落库 →
+  用回执 `session.next_cursor` 取下一批，直到 `done=true`。
+  用户可在对话里指定 token 上限（**会话参数**）；某轮超时就把 `budget_tokens` 调小重跑。
+- 走批量抽取时，回执里的 `created[].no` 是**会话页面编号**、`session.pages_total` 是累计页数：
+  用它对齐进度（`extract_state` 可随时查），**不要复述全文**。
 - **只处理用户点名的那一篇文档 / 那一个流程 / 那一个服务**，不要"顺便"处理别的对象。
 - 类型、关系、数据属性一律取自 `skills(...)` 返回的本体面或 `ontology_types(...)`；
   落库前如不确定就先查一次。`nodes[].attributes` 与 `edges[].properties` 的键必须是本体声明过的
@@ -35,5 +45,5 @@ SELECT 'bodhi-ea-modeler', '本体建模与设计（技能驱动）', '**一个�
 
 ## 输出格式
 一句话：用了哪个技能、处理了哪个对象、范围（全量 or 收窄）；然后给数字；最后列被拒项/待确认项。
-', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'mcp_bodhi_ontology_skills', 'mcp_bodhi_ontology_ontology_types', 'mcp_bodhi_ontology_extract_and_save', 'mcp_bodhi_ontology_extract_status', 'mcp_bodhi_ontology_list_pending_merges', 'mcp_bodhi_ontology_resolve_pending_merge', 'mcp_bodhi_ontology_save_knowledge', 'mcp_bodhi_ontology_audit_scan', 'mcp_bodhi_ontology_audit_plan', 'mcp_bodhi_ontology_service_overview'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'mcp_selection_mode', 'all', 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
+', 'temperature', 0.1, 'max_iterations', 12, 'max_completion_tokens', 16384, 'thinking', false, 'enable_rewrite', false, 'allowed_tools', jsonb_build_array('grep_chunks', 'list_knowledge_chunks', 'get_document_info', 'wiki_search', 'wiki_read_page', 'mcp_bodhi_ontology_skills', 'mcp_bodhi_ontology_ontology_types', 'mcp_bodhi_ontology_doc_outline', 'mcp_bodhi_ontology_extract_state', 'mcp_bodhi_ontology_link_candidates', 'mcp_bodhi_ontology_list_link_candidates', 'mcp_bodhi_ontology_resolve_link_candidate', 'mcp_bodhi_ontology_list_pending_merges', 'mcp_bodhi_ontology_resolve_pending_merge', 'mcp_bodhi_ontology_save_knowledge', 'mcp_bodhi_ontology_audit_scan', 'mcp_bodhi_ontology_audit_plan', 'mcp_bodhi_ontology_service_overview'), 'mcp_services', jsonb_build_array('a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'), 'mcp_selection_mode', 'all', 'knowledge_bases', jsonb_build_array('dbc2528f-611b-48da-9a71-d7c93975adb4', '08810cbd-af86-48d1-bd25-3b2c338e3d68'), 'kb_selection_mode', 'selected', 'retain_retrieval_history', true, 'faq_priority_enabled', false, 'web_search_enabled', false)), now(), now(), true
 FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;

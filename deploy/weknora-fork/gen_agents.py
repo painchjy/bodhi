@@ -78,7 +78,10 @@ MODELER_TOOLS = [
     "wiki_search", "wiki_read_page",
     "mcp_bodhi_ontology_skills",
     "mcp_bodhi_ontology_ontology_types",
-    "mcp_bodhi_ontology_extract_and_save", "mcp_bodhi_ontology_extract_status",
+    # 领域建模 v2（2026-09-21）：按切片分批、可交互续跑 —— 不再用异步一次性抽取
+    "mcp_bodhi_ontology_doc_outline", "mcp_bodhi_ontology_extract_state",
+    "mcp_bodhi_ontology_link_candidates", "mcp_bodhi_ontology_list_link_candidates",
+    "mcp_bodhi_ontology_resolve_link_candidate",
     "mcp_bodhi_ontology_list_pending_merges", "mcp_bodhi_ontology_resolve_pending_merge",
     "mcp_bodhi_ontology_save_knowledge",
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",

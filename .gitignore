@@ -23,3 +23,6 @@ logs/
 
 # 交付包产物（tar.gz 体积大，不进 git；用 tools/delivery/pack_release.py 重新生成）
 /dist-delivery/
+
+# 领域建模会话状态（运行期数据：页面编号/游标/候选关联）
+/state/
