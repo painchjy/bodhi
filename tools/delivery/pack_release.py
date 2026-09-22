@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import gzip
 import hashlib
 import json
 import pathlib
@@ -173,12 +174,56 @@ def write(path: pathlib.Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _normalize_member(ti: tarfile.TarInfo) -> tarfile.TarInfo:
+    """把 tar 成员的"环境噪声"清零（时间/属主/权限），使打包**可复现**。"""
+    ti.mtime = 0
+    ti.uid = ti.gid = 0
+    ti.uname = ti.gname = ""
+    ti.mode = 0o755 if ti.isdir() else 0o644
+    return ti
+
+
+def write_tar(src: pathlib.Path, out_tar: pathlib.Path, arcname: str) -> None:
+    """打 tar.gz（**可复现**：gzip 无时间戳 + 成员顺序/时间/属主固定）→ 同内容必同 sha256。
+
+    为什么在乎：交付时"这次重打包要不要给客户重发某个包"只需比 sha256 即可判断；
+    否则 tar 里嵌的当前时间会让每次哈希都变，逼人逐个解包比对（我们就这么比过一轮）。
+    """
+    out_tar.parent.mkdir(parents=True, exist_ok=True)
+    members = [src] + sorted((p for p in src.rglob("*")), key=lambda p: p.as_posix())
+    with open(out_tar, "wb") as raw:
+        with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as gz:
+            with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as tf:
+                for path in members:
+                    rel = pathlib.PurePosixPath(arcname)
+                    if path != src:
+                        rel = rel / path.relative_to(src).as_posix()
+                    tf.add(path, arcname=str(rel), recursive=False, filter=_normalize_member)
+
+
 def sha256(path: pathlib.Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
         for block in iter(lambda: fh.read(1 << 20), b""):
             h.update(block)
     return h.hexdigest()
+
+
+def normalize_inner_tar(raw_tar: pathlib.Path, out_gz: pathlib.Path) -> None:
+    """把 `docker save` 的产出**标准化后再 gzip**，使 01 包可复现。
+
+    `docker save` 写出的 tar 里每个成员的 mtime 都是"当时"，所以同样的镜像两次 save 字节不同 →
+    外层 tar.gz 哈希每次都变。这里重排（按名排序）+ 清零时间/属主/权限，再 gzip(mtime=0)。
+    `docker load -i` 不看成员顺序（它顺序扫描找 `index.json` / `manifest.json`），所以照样能加载。
+    """
+    out_gz.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(raw_tar, "r") as src, \
+            open(out_gz, "wb") as raw, \
+            gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as gz, \
+            tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as dst:
+        for ti in sorted(src.getmembers(), key=lambda m: m.name):
+            fh = src.extractfile(ti) if ti.isreg() else None
+            dst.addfile(_normalize_member(ti), fh)
 
 
 def pkg_frontend(stage: pathlib.Path, with_image: bool) -> dict:
@@ -215,10 +260,7 @@ def pkg_frontend(stage: pathlib.Path, with_image: bool) -> dict:
         tar_path = d / "weknora-ui-bodhi2.tar.gz"
         tmp_tar = pathlib.Path(tempfile.gettempdir()) / "weknora-ui-bodhi2.tar"
         if run(["docker", "save", "-o", str(tmp_tar), UI_IMAGE], check=False) == 0:
-            import gzip  # noqa: PLC0415
-            with open(tar_path, "wb") as out_fh, open(tmp_tar, "rb") as fh:
-                with gzip.GzipFile(fileobj=out_fh, mode="wb", compresslevel=6) as gz:
-                    shutil.copyfileobj(fh, gz, 1 << 20)
+            normalize_inner_tar(tmp_tar, tar_path)      # 标准化 → 同一镜像哈希稳定
             tmp_tar.unlink(missing_ok=True)
             info["image_tar"] = tar_path.name
             info["image_sha256"] = sha256(tar_path)
@@ -252,7 +294,7 @@ def pkg_mcp(stage: pathlib.Path, version: str) -> dict:
                  "selfcheck.py", "install.sh"):
         shutil.copy2(PAYLOAD / "mcp" / name, d / name)
     shutil.copy2(DELIVERY / "MCP-SERVER.md", d / "MCP-SERVER.md")
-    write(d / "VERSION", "%s（打包于 %s）\n" % (version, time.strftime("%Y-%m-%d %H:%M")))
+    write(d / "VERSION", "%s\n" % version)   # 不带打包时间（时间在 MANIFEST.generated_at）→ 02 包可复现
     write(d / "README.txt",
           "bodhi2 MCP 服务包（02）\n"
           "=====================\n\n"
@@ -378,12 +420,11 @@ def main() -> int:
     art = check_mcp_artifacts(stage)          # 02 必须带编译产物（artifacts/ 不入 git）
     print("   编译产物断言通过：%d 个文件，ontology_index.json 在" % art["artifact_files"])
 
-    print("== 3/6 打 tar.gz")
+    print("== 3/6 打 tar.gz（可复现：同内容 → 同哈希）")
     packs = {}
     for sub, tar_name in PACKAGES:
         tar_path = out / tar_name
-        with tarfile.open(tar_path, "w:gz", format=tarfile.PAX_FORMAT) as tf:
-            tf.add(stage / sub, arcname=sub)
+        write_tar(stage / sub, tar_path, sub)
         packs[tar_name] = {"sha256": sha256(tar_path), "bytes": tar_path.stat().st_size}
         print("   %-34s %9.1f MB" % (tar_name, tar_path.stat().st_size / 1e6))
 

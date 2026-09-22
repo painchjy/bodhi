@@ -1,0 +1,47 @@
+=== 1) 正式重打包（可复现代码）===
+     bodhi-ea-modeler 脱敏：knowledge_bases → 占位符；model_id → 删除（继承内置智能体的有效模型）；mcp_services → 占位符
+     bodhi-kb-ops 脱敏：knowledge_bases → 占位符；model_id → 删除（继承内置智能体的有效模型）；mcp_services → 占位符
+== 1/6 刷新 DB 种子（本体模型库页面 + 智能体/MCP 登记）
+== 2/6 暂存三个包
+   去重断言通过：147 个文件，无任何内容重复
+      01-frontend        15 个文件
+      02-mcp-server      90 个文件
+      03-manual          42 个文件
+   ID 断言通过：3 个 SQL 文件里无写死 UUID（仅保留 MCP 服务自身 id）
+   编译产物断言通过：32 个文件，ontology_index.json 在
+== 3/6 打 tar.gz（可复现：同内容 → 同哈希）
+   bodhi2-01-frontend.tar.gz               37.3 MB
+   bodhi2-02-mcp-server.tar.gz              0.4 MB
+   bodhi2-03-manual.tar.gz                  0.2 MB
+== 4/6 顶层：只放 MANUAL.md（总指引）+ 清单
+== 5/6 清理临时目录
+== 6/6 完成：dist-delivery/bodhi2-delivery-1.0
+   MANIFEST.json                         0.00 MB
+   MANUAL.md                             0.01 MB
+   README.md                             0.00 MB
+   SHA256SUMS                            0.00 MB
+   bodhi2-01-frontend.tar.gz            37.30 MB
+   bodhi2-02-mcp-server.tar.gz           0.41 MB
+   bodhi2-03-manual.tar.gz               0.24 MB
+
+=== 2) 校验和 ===
+bodhi2-01-frontend.tar.gz: OK
+bodhi2-02-mcp-server.tar.gz: OK
+bodhi2-03-manual.tar.gz: OK
+
+=== 3) 三个包 sha256 ===
+bb3dcac80ce365174f4c4ba8b84d444b0f3ddab27369c486125d74804da54cb5  dist-delivery/bodhi2-delivery-1.0/bodhi2-01-frontend.tar.gz
+5829fcaade4505ba07270fd6a1677e4fa9e91c3a9a70c0057a278d71775df637  dist-delivery/bodhi2-delivery-1.0/bodhi2-02-mcp-server.tar.gz
+84dc8ec6c4bbbce8faee0596f977b8ca5a13f23b26d1742f7ee27a3dc61dd3e7  dist-delivery/bodhi2-delivery-1.0/bodhi2-03-manual.tar.gz
+
+=== 4) 03 包脱敏复核 ===
+  agents.sql model_id 次数：0
+  "knowledge_bases": ["__BIZ_KB_ID__", "__ONTOLOGY_KB_ID__"]
+  非 MCP 服务 id 的 UUID：0
+
+=== 5) 密钥审计 ===
+   受控文件 142 个，干净
+
+结论：交付包与仓库**未发现明文密钥/口令** ✅
+
+=== 6) 清理临时日志 + 提交 ===
