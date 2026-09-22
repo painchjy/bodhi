@@ -6,6 +6,11 @@
 
 ## 0. 包里有什么
 
+> 手册位置：**根目录只放本文件（`MANUAL.md`）**；其余手册（`FRONTEND.md` / `MCP-SERVER.md` / `ONTOLOGY-KB.md` /
+> `KB-CONFIG.md` / `TROUBLESHOOTING.md` / `AGENTS-SQL.md`）与 `docs/`、`ontology/`、`skills/`、`sql/`、在线小工具
+> 都在 **`bodhi2-04-manual.tar.gz`** 里 —— 交接/归档以包内为准（单一来源是仓库 `deploy/delivery/*.md`，
+> `MANIFEST.json` 的 `manual_sha256` 记录了每份哈希）。
+
 | 包 | 内容 | 详细手册 |
 |---|---|---|
 | `bodhi2-01-frontend.tar.gz` | 补丁后的 UI 镜像（`weknora-ui:bodhi2`）+ nginx 模板 + compose overlay + 验收脚本 + 打补丁脚本（若你们要自己构建）| `FRONTEND.md` |
