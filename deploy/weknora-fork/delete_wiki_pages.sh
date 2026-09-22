@@ -42,7 +42,11 @@ while [ $# -gt 0 ]; do
 done
 [ -z "$MODE" ] && { echo "用法见脚本头部注释（--list / --slugs / --type / --prefix / --ours）"; exit 1; }
 
-Q() { docker exec -e PGPASSWORD='postgres123!@#' WeKnora-postgres psql -U postgres -d WeKnora -t -A -F' | ' -c "$1" 2>&1; }
+# 数据库口令：env → WeKnora `.env`（**脚本里不写死口令**）
+BODHI_DB_PASSWORD="${BODHI_DB_PASSWORD:-$(grep -hoP '^(?:DB|POSTGRES)_PASSWORD=\K.*' "${BODHI_WEKNORA_DIR:-/mnt/c/Users/PHJY/source/WeKnora}/.env" 2>/dev/null | head -1)}"
+[ -n "$BODHI_DB_PASSWORD" ] || { echo "!! 未取到数据库口令：设 BODHI_DB_PASSWORD 或 BODHI_WEKNORA_DIR" >&2; exit 1; }
+
+Q() { docker exec -e PGPASSWORD="$BODHI_DB_PASSWORD" WeKnora-postgres psql -U postgres -d WeKnora -t -A -F' | ' -c "$1" 2>&1; }
 
 # KB 名称 → UUID
 if [[ "$KB" =~ ^[0-9a-fA-F-]{36}$ ]]; then KB_ID="$KB"; else

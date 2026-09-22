@@ -44,15 +44,23 @@ def run(cmd: list[str], cwd: pathlib.Path | None = None, check: bool = True) -> 
 
 
 def copy_tree(src: pathlib.Path, dst: pathlib.Path, ignore_pycache: bool = True) -> None:
+    """复制目录树；**排除 `__pycache__` / `.pyc` / `archive`**。
+
+    排除 `archive/` 是交付口径：归档脚本里可能有旧口令写法/旧 API 用法，不进发布包。
+    """
     if not src.exists():
         return
+
     def _ignore(_dir, names):
         out = []
         for n in names:
+            if n == "archive":
+                out.append(n)
             if ignore_pycache and (n == "__pycache__" or n.endswith(".pyc")):
                 out.append(n)
         return out
-    shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore if ignore_pycache else None)
+
+    shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore)
 
 
 def write(path: pathlib.Path, text: str) -> None:
@@ -221,19 +229,33 @@ def main() -> int:
         print("   %-34s %9.1f MB" % (tar_name, tar_path.stat().st_size / 1e6))
 
     print("== 4/6 顶层手册与清单")
+    manual_hashes = {}
     for fname in MANUALS:
         if (DELIVERY / fname).is_file():
             shutil.copy2(DELIVERY / fname, out / fname)
+            manual_hashes[fname] = sha256(out / fname)
     write(out / "README.md",
           "# bodhi2 交付包 %s\n\n先读 **MANUAL.md**（安装部署总指引）。四个包：\n\n"
           "| 包 | 内容 | 手册 |\n|---|---|---|\n"
           "| `bodhi2-01-frontend.tar.gz` | 补丁 UI 镜像 + nginx 模板 + overlay + 验收脚本 | FRONTEND.md |\n"
           "| `bodhi2-02-mcp-server.tar.gz` | MCP 服务源码 + Dockerfile/compose/systemd + 自检 | MCP-SERVER.md |\n"
           "| `bodhi2-03-ontology-kb.tar.gz` | 本体 TTL/编译器/编译产物 + **页面种子** | ONTOLOGY-KB.md |\n"
-          "| `bodhi2-04-manual.tar.gz` | docs/ + ontology/ + 手册 + 注册 SQL | MANUAL.md |\n\n"
+          "| `bodhi2-04-manual.tar.gz` | docs/ + ontology/ + 手册 + 注册 SQL + tools/ | MANUAL.md |\n\n"
+          "## 手册有两份？以哪份为准\n\n"
+          "根目录这 7 份 `*.md` 与 `bodhi2-04-manual.tar.gz` 里的**是同一份内容**（打包时从"
+          "`deploy/delivery/*.md` 同步复制；`MANIFEST.json` 的 `manual_sha256` 记录哈希，可自校验）。\n\n"
+          "- **交接/归档以 `bodhi2-04-manual.tar.gz` 内的为准** —— 它是自包含的：除手册还有 `docs/`（设计文档）、"
+          "`ontology/`（本体规范）、`skills/`（技能全文）、`sql/`（登记 SQL）、`tools/delivery/`（外链体检等小工具）；\n"
+          "- 根目录这份只是**免解压方便阅读**；两者不一致时以包内为准（正常情况下不会，哈希可验）。\n\n"
+          "## 密钥说明\n\n"
+          "发布包**不含任何 API Key / 访问令牌 / 数据库口令**：LLM API key 由你们在内网 WeKnora 里配置"
+          "（只落在你们自己的数据库），数据库口令通过 `BODHI_DB_PASSWORD` 或 WeKnora `.env` 提供（见 `MANUAL.md` §3）。\n\n"
           "校验：`sha256sum -c SHA256SUMS`\n" % args.version)
     manifest = {"version": args.version, "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "ontology_kb": ONTOLOGY_KB, "ui_image": fe.get("image", ""),
+                "manual_sha256": manual_hashes,
+                "manuals_authoritative": "bodhi2-04-manual.tar.gz（根目录同名文件是同一内容的免解压副本）",
+                "secrets_note": "包内不含 API key / token / 数据库口令；请在内网重新配置（MANUAL.md §3）",
                 "packages": packs,
                 "detail": {"frontend": fe, "mcp": mcp, "ontology": ont, "manual": man}}
     write(out / "MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2))

@@ -49,7 +49,8 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 | `BODHI_DB_HOST` | 空 | **设了就直连 TCP**（容器/远端部署推荐）；不设则 `docker exec <容器> psql`（本机开发）|
 | `BODHI_DB_PORT` | `5432` | |
 | `BODHI_DB_USER` | `postgres` | |
-| `BODHI_DB_PASSWORD` | `postgres123!@#` | **改掉** |
+| `BODHI_DB_PASSWORD` | 空 | **必填**（或让 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录）—— 代码里**不再内置任何默认口令**：env → WeKnora `.env` 的 `DB_PASSWORD`/`POSTGRES_PASSWORD` → 都取不到则报错退出 |
+| `BODHI_WEKNORA_DIR` | 空 | WeKnora 部署目录（读它的 `.env` 取口令）；容器部署不需要，直接用 `BODHI_DB_PASSWORD` |
 | `BODHI_DB_NAME` | `WeKnora` | |
 | `BODHI_DB_CONTAINER` | `WeKnora-postgres` | 仅 docker-exec 模式用 |
 | `BODHI_NEO4J_HTTP` | `http://127.0.0.1:7474` | **可选**；不部署 Neo4j 就保持默认 |

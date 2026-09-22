@@ -57,10 +57,21 @@
 
 ## 3. 一次性配置清单（要改的东西全在这）
 
+> **发布包不含任何密钥**：没有 LLM API key、没有访问令牌、没有数据库口令（打包前跑过
+> `tools/delivery/scan_secrets.py` 审计）。下面这些**都要在内网重新配置**：
+
+| 需要重配的东西 | 配在哪 | 说明 |
+|---|---|---|
+| **LLM 模型的 API Key** | **内网 WeKnora 自己的 UI/数据库**（平台 → 模型）| 只落在你们的库里，**从不进交付包**；MCP 侧只用到 `model_id`（UUID）|
+| **数据库口令** | `02-mcp-server/.env` 的 `BODHI_DB_PASSWORD`，或把 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录 | 代码里**不再内置任何默认口令**：env → WeKnora `.env` 的 `DB_PASSWORD`/`POSTGRES_PASSWORD` → 都没有则报错退出 |
+| MCP 服务 URL | WeKnora 平台 → MCP 服务（`http://bodhi-mcp:8765/mcp`）| 用容器 DNS 可免 SSRF 白名单 |
+| `SSRF_WHITELIST_EXTRA`（仅当 MCP URL 用宿主 IP/域名时）| WeKnora `.env` | 见 `TROUBLESHOOTING.md` §1 |
+| Neo4j 口令（可选，本交付不需要）| `.env` 的 `NEO4J_PASSWORD` | 不部署 Neo4j 就不用管 |
+
 1. `02-mcp-server/.env`：`BODHI_DB_HOST/PORT/USER/PASSWORD/NAME`（改成你们的 Postgres）；
 2. WeKnora `.env`（仅当 MCP URL 不是容器 DNS 时）：`SSRF_WHITELIST_EXTRA` 加上 MCP 的主机名/IP；
 3. `mcp_services` 一行：URL 指向 `http://bodhi-mcp:8765/mcp`（SQL 在 `MCP-SERVER.md` §6）；
-4. `custom_agents` 一行：提示词 + `knowledge_bases`（两个库）+ `mcp_services` + `allowed_tools`（15 个）；
+4. `custom_agents` 一行：提示词 + `knowledge_bases`（两个库）+ `mcp_services` + `allowed_tools`（18 个）；
    **SQL 在 `04-manual/AGENTS-SQL.md`**（可回滚）；
 5. `knowledge_bases.wiki_config`：抽取指令按你们领域改（`KB-CONFIG.md` §3）；
 6. 前端 nginx 模板挂载 + `image: weknora-ui:bodhi2`（`FRONTEND.md`）。

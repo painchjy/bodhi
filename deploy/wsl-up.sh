@@ -35,7 +35,9 @@ KB_BIZ=dbc2528f-611b-48da-9a71-d7c93975adb4
 KB_ONT=08810cbd-af86-48d1-bd25-3b2c338e3d68
 
 step() { echo; echo "== $* =="; }
-PG() { docker exec -e PGPASSWORD=postgres123!@# WeKnora-postgres psql -U postgres -d WeKnora -t -A -c "$1" 2>&1; }
+# 数据库口令：env → WeKnora `.env`（**脚本里不写死口令**）
+BODHI_DB_PASSWORD="${BODHI_DB_PASSWORD:-$(grep -hoP '^(?:DB|POSTGRES)_PASSWORD=\K.*' "/mnt/c/Users/PHJY/source/WeKnora/.env" 2>/dev/null | head -1)}"
+PG() { docker exec -e PGPASSWORD="$BODHI_DB_PASSWORD" WeKnora-postgres psql -U postgres -d WeKnora -t -A -c "$1" 2>&1; }
 MCP() { curl -s -m 15 -X POST http://localhost:8765/mcp -H 'Content-Type: application/json' \
         -H 'Accept: application/json' -d "$1" 2>&1; }
 

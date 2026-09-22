@@ -52,7 +52,15 @@ TOOL_TAG = "ontology-extract"
 DB_CONTAINER = "WeKnora-postgres"
 DB_USER = "postgres"
 DB_NAME = "WeKnora"
-DB_PASSWORD = "postgres123!@#"
+# 口令不内置（2026-09-21）：env `BODHI_DB_PASSWORD` → WeKnora `.env` 的 DB_PASSWORD
+DB_PASSWORD = os.environ.get("BODHI_DB_PASSWORD", "")
+if not DB_PASSWORD:
+    for _env in (pathlib.Path(os.environ.get("BODHI_WEKNORA_DIR", "/mnt/c/Users/PHJY/source/WeKnora")) / ".env",):
+        if _env.is_file():
+            for _line in _env.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if _line.strip().startswith(("DB_PASSWORD=", "POSTGRES_PASSWORD=")):
+                    DB_PASSWORD = _line.split("=", 1)[1].strip().strip("'\"")   # 从 .env 取值（不内置口令）
+                    break
 
 # Windows 控制台默认 GBK：含中文/emoji 的输出会抛 UnicodeEncodeError，这里切 UTF-8。
 for _stream in (sys.stdout, sys.stderr):

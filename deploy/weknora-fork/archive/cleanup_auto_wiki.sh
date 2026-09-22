@@ -32,7 +32,7 @@ APPLY=0
 # 清理范围：它自己写的页 **除了** 索引页（slug=index，保留）
 COND="deleted_at IS NULL AND last_edit_source IN ('pipeline','agent') AND slug <> 'index'"
 
-Q() { docker exec -e PGPASSWORD='postgres123!@#' WeKnora-postgres psql -U postgres -d WeKnora -t -A -F' | ' -c "$1" 2>&1; }
+Q() { docker exec -e PGPASSWORD="${BODHI_DB_PASSWORD:-$(grep -hoP '^(?:DB|POSTGRES)_PASSWORD=\K.*' "${BODHI_WEKNORA_DIR:-/mnt/c/Users/PHJY/source/WeKnora}/.env" 2>/dev/null | head -1)}" WeKnora-postgres psql -U postgres -d WeKnora -t -A -F' | ' -c "$1" 2>&1; }
 
 # --- 0) 知识库名称 → UUID（支持直接给 UUID） -------------------------------
 if [[ "$KB" =~ ^[0-9a-fA-F-]{36}$ ]]; then

@@ -43,7 +43,16 @@ OUT_PATH = REPO / "artifacts" / "weknora" / "ontology_wiki.jsonl"
 LOG_DIR = REPO / "logs"
 TOOL_TAG = "ontology-wiki"
 
-DB_CONTAINER, DB_USER, DB_NAME, DB_PASSWORD = "WeKnora-postgres", "postgres", "WeKnora", "postgres123!@#"
+DB_CONTAINER = os.environ.get("BODHI_DB_CONTAINER", "WeKnora-postgres")
+DB_USER = os.environ.get("BODHI_DB_USER", "postgres")
+DB_NAME = os.environ.get("BODHI_DB_NAME", "WeKnora")
+# 口令**不内置**：复用 ke-core 的口径（env `BODHI_DB_PASSWORD` → WeKnora `.env` 的 DB_PASSWORD）。
+try:
+    sys.path.insert(0, str(REPO / "tools" / "ke-core"))
+    import ke_db as _ke_db            # noqa: E402
+    DB_PASSWORD = _ke_db.DB_PASSWORD
+except Exception:                      # noqa: BLE001  独立运行时退化为仅 env
+    DB_PASSWORD = os.environ.get("BODHI_DB_PASSWORD", "")
 
 TYPE_MODULE = "ontology:Module"
 TYPE_CLASS = "ontology:Class"

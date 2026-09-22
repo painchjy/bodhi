@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import pathlib
 import re
 import sys
@@ -70,10 +71,10 @@ for _stream in (sys.stdout, sys.stderr):
         except Exception:  # noqa: BLE001
             pass
 
-NEO4J_HTTP = "http://localhost:7474"
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "password"
-NEO4J_DATABASE = "neo4j"
+NEO4J_HTTP = os.environ.get("BODHI_NEO4J_HTTP", "http://localhost:7474")
+NEO4J_USER = os.environ.get("NEO4J_USERNAME", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")   # 口令不内置（Neo4j 为可选件）
+NEO4J_DATABASE = os.environ.get("BODHI_NEO4J_DB", "neo4j")
 INSTANCE_LABEL = "BodhiInstance"
 
 

@@ -100,7 +100,9 @@ KNOWLEDGE_BASES = [
 ]
 # 本体知识保存工具（MCP 服务）的 id：tools/ontology-mcp/server.py
 MCPSERVICE_IDS = ["a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001"]
-DB_CONTAINER, DB_USER, DB_NAME, DB_PASSWORD = "WeKnora-postgres", "postgres", "WeKnora", "postgres123!@#"
+DB_CONTAINER, DB_USER, DB_NAME = "WeKnora-postgres", "postgres", "WeKnora"
+# 口令不内置：env `BODHI_DB_PASSWORD` → WeKnora `.env` 的 `DB_PASSWORD`/`POSTGRES_PASSWORD`
+WEKNORA_DIR = pathlib.Path(os.environ.get("BODHI_WEKNORA_DIR", "/mnt/c/Users/PHJY/source/WeKnora"))
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -183,9 +185,26 @@ FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LI
     return "".join(parts)
 
 
+def db_password() -> str:
+    """数据库口令：env `BODHI_DB_PASSWORD` → WeKnora `.env` 的 `DB_PASSWORD`（不内置任何默认口令）。"""
+    env_value = os.environ.get("BODHI_DB_PASSWORD")
+    if env_value:
+        return env_value
+    env_file = WEKNORA_DIR / ".env"
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            if key.strip() in ("DB_PASSWORD", "POSTGRES_PASSWORD"):
+                return value.strip().strip("'\"")
+    raise SystemExit("未设置数据库口令：请设 BODHI_DB_PASSWORD，或把 BODHI_WEKNORA_DIR 指向含 .env 的 WeKnora 目录")
+
+
 def run_sql(sql: str) -> None:
     cmd = ["wsl", "-d", "Ubuntu", "-u", "root", "docker", "exec", "-i",
-           "-e", "PGPASSWORD=" + DB_PASSWORD, DB_CONTAINER,
+           "-e", "PGPASSWORD=" + db_password(), DB_CONTAINER,
            "psql", "-U", DB_USER, "-d", DB_NAME, "-v", "ON_ERROR_STOP=1", "-q", "-f", "-"]
     done = subprocess.run(cmd, input=sql, text=True, encoding="utf-8", capture_output=True, check=False)
     print("psql rc=%s %s" % (done.returncode, (done.stderr or "").strip()[:500]))

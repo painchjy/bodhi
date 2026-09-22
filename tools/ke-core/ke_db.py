@@ -25,6 +25,7 @@ import csv as csvlib
 import io
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -41,7 +42,37 @@ for _stream in (sys.stdout, sys.stderr):
 DB_CONTAINER = os.environ.get("BODHI_DB_CONTAINER", "WeKnora-postgres")
 DB_USER = os.environ.get("BODHI_DB_USER", "postgres")
 DB_NAME = os.environ.get("BODHI_DB_NAME", "WeKnora")
-DB_PASSWORD = os.environ.get("BODHI_DB_PASSWORD", "postgres123!@#")
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _password_from_env_file() -> str:
+    """从 WeKnora 部署的 `.env` 取数据库口令 —— **口令绝不写进代码/仓库**。
+
+    查找顺序：`BODHI_WEKNORA_DIR`（推荐显式指定）→ 常见的 `…/source/WeKnora/.env` → 仓库根 `.env`；
+    键名兼容 `DB_PASSWORD` / `POSTGRES_PASSWORD`。
+    """
+    candidates = []
+    if os.environ.get("BODHI_WEKNORA_DIR"):
+        candidates.append(pathlib.Path(os.environ["BODHI_WEKNORA_DIR"]) / ".env")
+    candidates += [pathlib.Path("/mnt/c/Users/PHJY/source/WeKnora/.env"),
+                   REPO_ROOT.parent / "WeKnora" / ".env", REPO_ROOT / ".env"]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+                key, _, value = stripped.partition("=")
+                if key.strip() in ("DB_PASSWORD", "POSTGRES_PASSWORD"):
+                    return value.strip().strip("'\"")
+        except Exception:  # noqa: BLE001
+            continue
+    return ""
+
+
+DB_PASSWORD = os.environ.get("BODHI_DB_PASSWORD") or _password_from_env_file()
 # 容器化/远端部署：设了 BODHI_DB_HOST 就**直连 TCP**（用本机 psql 客户端），
 # 不再 `docker exec`（容器里没有 docker CLI；也不该给 MCP 容器 docker 权限）。
 DB_HOST = os.environ.get("BODHI_DB_HOST", "").strip()
@@ -86,6 +117,10 @@ def _psql_prefix() -> list[str]:
 
 
 def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
+    if not DB_PASSWORD:
+        raise RuntimeError(
+            "未设置数据库口令：请设 `BODHI_DB_PASSWORD`，或设 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录"
+            "（代码里不再内置任何默认口令）")
     cmd = _psql_prefix()
     env = dict(os.environ, PGPASSWORD=DB_PASSWORD) if DB_HOST else None
     if stdin:

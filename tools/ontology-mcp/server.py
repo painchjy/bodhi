@@ -60,7 +60,8 @@ INDEX_PATH = REPO / "artifacts" / "weknora" / "ontology_index.json"
 TOOL_TAG = "bodhi-onto-mcp"
 assert len(TOOL_TAG) <= 16, "TOOL_TAG 超过 last_edit_source 的 varchar(16)"
 
-DB_CONTAINER, DB_USER, DB_NAME, DB_PASSWORD = "WeKnora-postgres", "postgres", "WeKnora", "postgres123!@#"
+DB_CONTAINER, DB_USER, DB_NAME = "WeKnora-postgres", "postgres", "WeKnora"
+# 口令不在此内置：由 `ke_db`（env `BODHI_DB_PASSWORD` → WeKnora `.env`）提供，见下方 import。
 TYPE_PENDING = "ontology:PendingMerge"
 PENDING_PREFIX = "bodhi/pending/"
 
