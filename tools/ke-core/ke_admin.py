@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
 import re
 import subprocess
@@ -31,11 +30,29 @@ if str(HERE) not in sys.path:
 
 import ke_db  # noqa: E402
 import ke_neo4j  # noqa: E402
+import ke_ontology  # noqa: E402
 import ke_pages  # noqa: E402
 
 REPO = HERE.parents[1]
-ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
+# 本体模型知识库：**不再写死 uuid**（客户环境不是我们的 uuid）。
+# 解析顺序见 ke_ontology.resolve_ontology_kb：env → wiki_config 标记 → 库名 → 内容探测。
 PROJECTION_DIR = REPO / "artifacts" / "neo4j"
+
+
+def ontology_kb_id(kb_id: str = "") -> str:
+    """要操作的本体库：显式传优先，否则按特征认；认不出就**报错说清怎么配**（不猜）。"""
+    if (kb_id or "").strip():
+        return kb_id.strip()
+    det = ke_ontology.resolve_ontology_kb()
+    if det.get("id"):
+        return det["id"]
+    raise ValueError(
+        "找不到「本体模型知识库」：请任选一种方式指定 ——\n"
+        "  ① MCP 服务 env：BODHI_ONTOLOGY_KB_ID=<你们的本体库 uuid>\n"
+        "  ② 给库打标记：UPDATE knowledge_bases SET wiki_config = COALESCE(wiki_config,'{}'::jsonb) "
+        "|| '{\"bodhi_ontology_kb\": true}'::jsonb WHERE id='<本体库 uuid>';\n"
+        "  ③ 把库名起成「企业本体模型」（或设 env BODHI_ONTOLOGY_KB_NAME=<你们的库名>）")
+
 
 
 def _run(script: pathlib.Path, args: list[str]) -> dict:
@@ -54,7 +71,7 @@ def purge_model(model: str, kb_id: str = "") -> dict:
     model = (model or "").strip()
     if not model:
         raise ValueError("purge 需要 model（模块 key，如 bmm / ea / ea-service）")
-    kb = kb_id or ONTOLOGY_KB
+    kb = ontology_kb_id(kb_id)
     neo_deleted = 0
     for cypher in (
         "MATCH (n) WHERE n.bodhi_projection = 'ontology' AND n.module = $m DETACH DELETE n",
@@ -474,7 +491,7 @@ def _sync_folders(kb: str, prune: bool = False) -> dict:
 
 def regen_wiki(kb_id: str = "") -> dict:
     """重投影本体 wiki 页（build 生成页面清单 → project 幂等写进本体模型知识库 → 挂目录）。"""
-    kb = kb_id or ONTOLOGY_KB
+    kb = ontology_kb_id(kb_id)
     build = _run(REPO / "tools" / "ontology-extract" / "ontology_wiki.py", ["build"])
     project = _run(REPO / "tools" / "ontology-extract" / "ontology_wiki.py",
                    ["project", "--kb-id", kb])
@@ -484,7 +501,7 @@ def regen_wiki(kb_id: str = "") -> dict:
 def load_model(model: str = "", kb_id: str = "", purge: bool = True,
                compile_first: bool = True, project_wiki: bool = True) -> dict:
     """本体模型的加载编排：编译 → 清理旧模型 → 灌投影 → 重投影 wiki。"""
-    report: dict = {"model": model, "kb_id": kb_id or ONTOLOGY_KB}
+    report: dict = {"model": model, "kb_id": ontology_kb_id(kb_id)}
     if compile_first:
         report["compile"] = compile_artifacts()
     if purge and model:

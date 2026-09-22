@@ -70,6 +70,7 @@
 | **数据库口令** | `02-mcp-server/.env` 的 `BODHI_DB_PASSWORD`，或把 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录 | 代码里**不再内置任何默认口令**：env → WeKnora `.env` 的 `DB_PASSWORD`/`POSTGRES_PASSWORD` → 都没有则报错退出 |
 | MCP 服务 URL | WeKnora 平台 → MCP 服务（`http://bodhi-mcp:8765/mcp`）| 用容器 DNS 可免 SSRF 白名单 |
 | `SSRF_WHITELIST_EXTRA`（仅当 MCP URL 用宿主 IP/域名时）| WeKnora `.env` | 见 `TROUBLESHOOTING.md` §1 |
+| **本体模型知识库的识别**（可选但推荐）| `02-mcp-server/.env` 的 `BODHI_ONTOLOGY_KB_ID`**或**给库打标记 | 见 `ONTOLOGY-KB.md` §2 末与 `FRONTEND.md` §7：不配也能按库名/内容自动认 |
 | Neo4j 口令（可选，本交付不需要）| `.env` 的 `NEO4J_PASSWORD` | 不部署 Neo4j 就不用管 |
 
 1. `02-mcp-server/.env`：`BODHI_DB_HOST/PORT/USER/PASSWORD/NAME`（改成你们的 Postgres）；

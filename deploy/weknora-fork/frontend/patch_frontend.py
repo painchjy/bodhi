@@ -1029,8 +1029,9 @@ def patch_knowledgebase_v6(fe: pathlib.Path) -> None:
     与 WikiBrowser.vue 的 v6「编辑页类型下拉」不是一回事。
 
     - 组件 `BodhiOntologyUpload.vue` 自包含（补丁只插一行标签 + 一个回调）；
-    - 入口只挂在本体模型库：`isOntologyKb` 比对构建期常量 `BODHI_ONTOLOGY_KB_ID`（与
-      `tools/ke-core/ke_admin.ONTOLOGY_KB` 同源，env `ONTOLOGY_KB_ID` 可覆盖）；
+    - 入口只挂在本体模型库：先按构建期常量兜底，再问 MCP `GET /bodhi/ontology/kb?kb_id=…`
+      （服务端按 env → `wiki_config.bodhi_ontology_kb` 标记 → 库名 → `ontology:*` 页数认库，
+      2026-09-22 改：不再只比 uuid，客户换库无需重建前端）；
     - 回调 `onOntologyUploaded()` 刷新一次 wiki 状态（上传会整体重投影本体 wiki 页）。
     """
     path = fe / "src" / "views" / "knowledge" / "KnowledgeBase.vue"
@@ -1052,16 +1053,28 @@ def patch_knowledgebase_v6(fe: pathlib.Path) -> None:
         "const kbId = computed(() => (route.params as any).kbId as string || '');",
         "const kbId = computed(() => (route.params as any).kbId as string || '');\n"
         "\n"
-        "// bodhi2 v6（§6.1）：本体模型知识库页的「上传本体文件」入口。\n"
-        "// 只有本体模型库才显示：id 常量是**构建期**注入（与 tools/ke-core/ke_admin.ONTOLOGY_KB\n"
-        "// 同源，env ONTOLOGY_KB_ID 可覆盖 —— 见 frontend/patch_frontend.py 的 BODHI_ONTOLOGY_KB）。\n"
+        "// bodhi2 v6（§6.1；2026-09-22 修正）：本体模型知识库页的「上传本体文件」入口。\n"
+        "// 判定**不再只靠 uuid**：下面的构建期常量只作离线兜底，真正的判定问服务端\n"
+        "// `GET /bodhi/ontology/kb?kb_id=…` —— MCP 按 env / wiki_config 标记 / 库名 / 内容探测认库，\n"
+        "// 所以客户换库 uuid **不需要重建前端**（见 FRONTEND.md §7 / ONTOLOGY-KB.md）。\n"
         + kb_const +
-        "const isOntologyKb = computed(() => !!kbId.value && kbId.value === BODHI_ONTOLOGY_KB_ID)\n"
+        "const isOntologyKb = ref(!!kbId.value && kbId.value === BODHI_ONTOLOGY_KB_ID)\n"
+        "async function detectOntologyKb(rawId: string) {\n"
+        "  if (!rawId) return\n"
+        "  try {\n"
+        "    const resp = await fetch('/bodhi/ontology/kb?kb_id=' + encodeURIComponent(rawId))\n"
+        "    const data = await resp.json()\n"
+        "    if (data && data.asked && typeof data.asked.is_ontology_kb === 'boolean') {\n"
+        "      isOntologyKb.value = data.asked.is_ontology_kb\n"
+        "    }\n"
+        "  } catch (e) { /* 接口不可用（MCP 未挂/离线）→ 保持构建期判定结果 */ }\n"
+        "}\n"
+        "watch(kbId, (id) => { detectOntologyKb(id) }, { immediate: true })\n"
         "// 上传后本体 wiki 页已整体重投影 → 刷新一次 wiki 状态（面包屑上的 wiki 指示）\n"
         "async function onOntologyUploaded() {\n"
         "  await fetchWikiStatusOnce()\n"
         "}",
-        "isOntologyKb / onOntologyUploaded")
+        "isOntologyKb / onOntologyUploaded / detectOntologyKb")
 
     text = replace_once(
         text,
@@ -1209,10 +1222,24 @@ def patch_version_badge_last(fe: pathlib.Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="给 WeKnora 前端打本体感知补丁")
     parser.add_argument("--fe", required=True, help="前端源码目录（构建副本）")
+    parser.add_argument("--only", default="", choices=["", "v6"],
+                        help="只重打某一处补丁（树已打过补丁时用；v6 = 知识库页「上传本体文件」入口）")
     args = parser.parse_args()
     fe = pathlib.Path(args.fe)
     if not (fe / "src" / "views" / "knowledge" / "wiki" / "WikiBrowser.vue").is_file():
         raise SystemExit("不是有效的前端目录：%s" % fe)
+
+    if args.only == "v6":
+        # 「只重打一处」维护模式（2026-09-22）：树已打过补丁、机器上又没有干净副本时，
+        # 单独更新「上传本体文件」入口的注入代码（判定改为运行时问服务端，见 FRONTEND.md §7）。
+        print("== only=v6：只重打「上传本体文件」入口（不动其它补丁） ==")
+        (fe / "src" / "views" / "knowledge" / "wiki").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(HERE / "BodhiOntologyUpload.vue",
+                     fe / "src" / "views" / "knowledge" / "wiki" / "BodhiOntologyUpload.vue")
+        print("  + src/views/knowledge/wiki/BodhiOntologyUpload.vue")
+        patch_knowledgebase_v6(fe)
+        print("== 完成（only=v6）==")
+        return 0
 
     # 幂等保护（2026-09-19 踩坑）：部分补丁的 new 里包含 old 锚点，判据
     # `new in text and old not in text` 会失效，重复运行就会**重复插入**

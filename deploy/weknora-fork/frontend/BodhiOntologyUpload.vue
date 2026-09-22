@@ -139,6 +139,9 @@
  *
  * 挂载位置：本体模型知识库页（面包屑里，「上传自动生成 wiki」开关右侧；父组件用
  * `isOntologyKb` 限定只有本体模型库才渲染 —— 见 patch_frontend.py 的 patch_knowledgebase_v6）。
+ * 判定口径（2026-09-22 改）：父组件先按构建期常量兜底，再问服务端
+ * `GET /bodhi/ontology/kb?kb_id=…`（按 env / wiki_config 标记 / 库名 / ontology:* 页数认库），
+ * 所以**换本体库 uuid 不需要重建前端**；上传目标库始终由服务端决定（见下方"不传 kb_id"）。
  *
  * 后端（tools/ontology-mcp/server.py，经 nginx `/bodhi/` 反代到 8765）：
  *   GET  /bodhi/ontology/deps?model_id=<key>  → {model_id, dependent_modules[], purge_order[]}

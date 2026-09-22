@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 
@@ -533,6 +534,120 @@ def target_pages(kb_id: str, rel_type: str, exclude_slug: str = "", q: str = "",
     return {"source": "neo4j", "relation_type": rel_type, "classes": allowed,
             "class_labels": [(meta.get(c) or {}).get("label") or c for c in allowed],
             "pages": pages}
+
+
+# ---------------------------------------------------------------------------
+# 「本体模型知识库」的识别（2026-09-22，用户实测：前端按钮不出现）
+# ---------------------------------------------------------------------------
+# 旧做法（前端补丁 v6）：把本体库 uuid 作为**构建期常量**注进 KnowledgeBase.vue，
+# `isOntologyKb = kbId === 常量` —— 客户环境换了库 uuid → 按钮永不出现（且上游若改
+# uuid，我们这边也要重建镜像）。这里改成**按库的特征认**，给出单一真源的解析：
+#   ① env `BODHI_ONTOLOGY_KB_ID`（旧名 `ONTOLOGY_KB_ID` 兼容）—— 显式指定，最权威；
+#   ② 库上打标记：`knowledge_bases.wiki_config->>'bodhi_ontology_kb' = 'true'`（一行 SQL）；
+#   ③ 库名匹配 env `BODHI_ONTOLOGY_KB_NAME`（默认「企业本体模型」；先精确、再包含）；
+#   ④ 内容探测：`wiki_pages` 里 `page_type LIKE 'ontology:%'` 页数最多且 ≥ 阈值的库。
+# 调用方（ke_admin 的默认 kb、MCP 的 `GET /bodhi/ontology/kb`、前端运行时判定）共用本函数。
+ONTOLOGY_MARK_KEY = "bodhi_ontology_kb"
+ONTOLOGY_DEFAULT_NAME = "企业本体模型"
+ONTOLOGY_MIN_PAGES = 10
+
+
+def _kb_candidates() -> list[dict]:
+    """所有知识库 + 各自的 `ontology:*` 页数（一次两条只读查询，库里库数很少）。"""
+    rows = ke_db.psql_csv(
+        "SELECT id, name, COALESCE(wiki_config::text, '{}') AS wiki_config "
+        "FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY created_at")
+    counts = {r["kb"]: int(r["n"] or 0) for r in ke_db.psql_csv(
+        "SELECT knowledge_base_id AS kb, count(*) AS n FROM wiki_pages "
+        "WHERE deleted_at IS NULL AND page_type LIKE 'ontology:%' GROUP BY 1")}
+    out = []
+    for r in rows:
+        wiki = r["wiki_config"] or "{}"
+        out.append({"id": r["id"], "name": r["name"] or "",
+                    "pages": counts.get(r["id"], 0),
+                    "marked": ('"%s"' % ONTOLOGY_MARK_KEY) in wiki and "true" in wiki})
+    return out
+
+
+def _match_kb(cands: list[dict], raw: str) -> dict | None:
+    """把「uuid / uuid 前缀 / 库名（精确或包含）」解析成候选里的一条。"""
+    key = (raw or "").strip()
+    if not key:
+        return None
+    low = key.lower()
+    for c in cands:
+        if c["id"] == key:
+            return c
+    for c in cands:
+        if c["id"].startswith(low):
+            return c
+    for c in cands:
+        if c["name"] == key:
+            return c
+    for c in cands:
+        if key in c["name"] or c["name"] in key:
+            return c
+    return None
+
+
+def resolve_ontology_kb(asked: str = "") -> dict:
+    """认「本体模型知识库」：返回 `{id, name, source, pages, candidates[]}`（认不出 id 为空）。"""
+    env_id = (os.environ.get("BODHI_ONTOLOGY_KB_ID")
+              or os.environ.get("ONTOLOGY_KB_ID") or "").strip()
+    env_name = (os.environ.get("BODHI_ONTOLOGY_KB_NAME") or ONTOLOGY_DEFAULT_NAME).strip()
+    cands = _kb_candidates()
+    hit, source = None, ""
+    if env_id:                                     # ① env 显式指定
+        hit, source = _match_kb(cands, env_id), "env"
+        if hit is None:
+            # env 指到一个库里没有的 id：不静默，交给调用方决定（前端仍可继续按内容判定）
+            hit = {"id": env_id, "name": env_id, "pages": 0,
+                   "note": "env 指定的库不在库里（可能尚未创建/已被删）"}
+    if hit is None:                                # ② wiki_config 标记
+        marked = [c for c in cands if c["marked"]]
+        if marked:
+            hit, source = max(marked, key=lambda c: c["pages"]), "wiki_config"
+    if hit is None and env_name:                   # ③ 库名（精确 → 包含）
+        exact = [c for c in cands if c["name"] == env_name]
+        loose = [c for c in cands if env_name and env_name in c["name"]]
+        if exact or loose:
+            hit, source = (exact or loose)[0], "name"
+    if hit is None:                                # ④ 内容探测（ontology:* 页最多者）
+        rich = [c for c in cands if c["pages"] >= ONTOLOGY_MIN_PAGES]
+        if rich:
+            hit, source = max(rich, key=lambda c: c["pages"]), "pages"
+    return {"id": (hit or {}).get("id", ""), "name": (hit or {}).get("name", ""),
+            "source": source or "none", "pages": int((hit or {}).get("pages", 0)),
+            "note": (hit or {}).get("note", ""), "candidates": cands}
+
+
+def ontology_kb_report(asked: str = "") -> dict:
+    """**只读判定**：`asked`（前端当前打开的知识库）是不是本体模型库；供 `GET /bodhi/ontology/kb` 使用。"""
+    det = resolve_ontology_kb()
+    cands = det.pop("candidates", [])
+    out = {"ontology_kb": det, "asked": None, "candidates": cands,
+           "rule": ("env BODHI_ONTOLOGY_KB_ID/ONTOLOGY_KB_ID → wiki_config.%s=true → "
+                    "库名（默认「%s」）→ ontology:* 页数 ≥ %d" %
+                    (ONTOLOGY_MARK_KEY, ONTOLOGY_DEFAULT_NAME, ONTOLOGY_MIN_PAGES))}
+    if not (asked or "").strip():
+        return out
+    row = _match_kb(cands, asked)
+    if row is None:
+        out["asked"] = {"kb_id": asked, "name": "", "is_ontology_kb": False,
+                        "reason": "库里没有这个知识库（id/名称都对不上）"}
+        return out
+    reasons = []
+    if det["id"] and row["id"] == det["id"]:
+        reasons.append("就是识别出的本体库（source=%s）" % det["source"])
+    if row["marked"]:
+        reasons.append("带标记 wiki_config.%s=true" % ONTOLOGY_MARK_KEY)
+    if row["pages"] >= ONTOLOGY_MIN_PAGES:
+        reasons.append("含 %d 页 ontology:* 页面" % row["pages"])
+    out["asked"] = {"kb_id": row["id"], "name": row["name"],
+                    "is_ontology_kb": bool(reasons),
+                    "reason": "；".join(reasons) or "无本体特征（既无标记，ontology:* 页数 %d < %d）"
+                              % (row["pages"], ONTOLOGY_MIN_PAGES)}
+    return out
 
 
 

@@ -25,6 +25,7 @@
 
 ```bash
 # ① 环境：python3（标准库即可）；数据库访问用 BODHI_DB_* 环境变量（见 MCP-SERVER.md §2）
+#    另外建议设 BODHI_ONTOLOGY_KB_ID=<本体库 uuid>（或先给库打标记，见 §2 末尾）——两者之一即可
 cd /opt/bodhi2
 export BODHI_DB_HOST=127.0.0.1 BODHI_DB_USER=postgres BODHI_DB_PASSWORD=你的口令 BODHI_DB_NAME=WeKnora
 
@@ -55,6 +56,15 @@ psql "postgresql://postgres:口令@127.0.0.1:5432/WeKnora" -v ON_ERROR_STOP=1 -f
 导入的是 `wiki_pages` 行（含 `slug / title / page_type / content / page_metadata / out_links / in_links / version`），
 **不需要** `knowledges`（文档）表 —— 本体页面是"生成型"页面，`source_refs` 为空是**正常的**（巡检对 `ontology:*` 类型豁免 C1）。
 导入后如前端树不显示，跑一次目录重建（或重启 app）：`docker restart WeKnora-app && docker restart WeKnora-frontend`。
+
+**给库打「本体库」标记（推荐做一次）**：前端「上传本体文件」按钮与 MCP 的默认操作库都靠它认库
+（判定顺序见 `FRONTEND.md` §7：env → 标记 → 库名 → `ontology:*` 页数）：
+
+```sql
+UPDATE knowledge_bases
+   SET wiki_config = COALESCE(wiki_config, '{}'::jsonb) || '{"bodhi_ontology_kb": true}'::jsonb
+ WHERE id = '<本体模型知识库 uuid>';
+```
 
 ## 3. 校验（导入/生成之后必须做）
 

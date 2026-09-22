@@ -3009,6 +3009,18 @@ class MCPHandler(BaseHTTPRequestHandler):
                 print("[mcp] /bodhi/ontology/relation-types 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
+        if path in ("/bodhi/ontology/kb", "/bodhi/ontology/kb.json"):
+            # 「当前打开的是不是本体模型库」——**只读判定，不靠 uuid 相等**（2026-09-22，
+            # 用户报「上传本体文件按钮不出现」：旧实现是前端拿构建期常量比 uuid，客户环境必失效）。
+            # 判定顺序：env BODHI_ONTOLOGY_KB_ID/ONTOLOGY_KB_ID → wiki_config.bodhi_ontology_kb=true
+            # → 库名（默认「企业本体模型」）→ 内容探测（ontology:* 页数最多且 ≥ 阈值）。
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_ontology.ontology_kb_report(params.get("kb_id", "")), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/ontology/kb 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
         if path.startswith("/bodhi/ontology/targets"):
             params = dict(urlparse.parse_qsl(parsed.query))
             try:

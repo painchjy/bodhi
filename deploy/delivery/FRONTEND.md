@@ -145,3 +145,51 @@ docker run --rm --entrypoint sh weknora-ui:bodhi2 -c '
   grep -o "https://tdesign.gtimg.com/icon/" /usr/share/nginx/html/assets/tdesign-icon-offline-*.js | wc -l   # → 3（自带的兜底常量）
   ls /usr/share/nginx/html/tdesign-icons/'                                       # → 0.4.1（本地 sprite）
 ```
+
+## 7. 本体模型知识库的识别（2026-09-22 起不再依赖 UUID）
+
+「知识库页显示『上传本体文件』按钮」这件事，需要前端知道**当前打开的是不是本体模型库**。
+
+- **旧做法（会失效）**：把本体库 uuid 作为**构建期常量**注进前端，`kbId === 常量` 才显示 →
+  你们用自己的库（uuid 不同）时按钮**永远不出现**；换个库还得重建镜像。
+- **现在的做法**：构建期常量只作**离线兜底**；页面挂载时问一次 MCP
+  `GET /bodhi/ontology/kb?kb_id=<当前库>`，由服务端判定（返回 `asked.is_ontology_kb`）。
+  **换库不需要重建前端，也不需要改前端代码。**
+
+服务端的判定顺序（`tools/ke-core/ke_ontology.resolve_ontology_kb`，只读）：
+
+| 顺序 | 依据 | 你们怎么配 |
+|---|---|---|
+| ① | MCP 服务 env `BODHI_ONTOLOGY_KB_ID`（旧名 `ONTOLOGY_KB_ID` 也认） | `.env` 里写你们的本体库 uuid（最省事、最明确） |
+| ② | 库上**标记**：`knowledge_bases.wiki_config->>'bodhi_ontology_kb' = 'true'` | 建库后跑一行 SQL（见下） |
+| ③ | 库名（env `BODHI_ONTOLOGY_KB_NAME`，默认「企业本体模型」） | 建库就叫「企业本体模型」，或设 env 指你们的库名 |
+| ④ | 内容探测：`wiki_pages` 里 `ontology:*` 页数 ≥ 10 且最多的那个库 | 导完本体种子/投影后天然满足 |
+
+打标记（推荐，配一次永久有效；对"同一个库里有多套本体库"也稳）：
+
+```sql
+UPDATE knowledge_bases
+   SET wiki_config = COALESCE(wiki_config, '{}'::jsonb) || '{"bodhi_ontology_kb": true}'::jsonb
+ WHERE id = '<你们的本体模型知识库 uuid>';
+```
+
+**自检**（把 kb 换成你们打开的库 uuid；业务库应当返回 `false`）：
+
+```bash
+curl -s 'http://127.0.0.1:8765/bodhi/ontology/kb?kb_id=<kb>' | python3 -m json.tool
+# {
+#   "ontology_kb": {"id": "…", "name": "企业本体模型", "source": "env|wiki_config|name|pages", "pages": 247},
+#   "asked":       {"kb_id": "…", "name": "…", "is_ontology_kb": true,
+#                   "reason": "就是识别出的本体库（source=env）；含 247 页 ontology:* 页面"},
+#   "candidates":  [...每个库的 pages / marked...],
+#   "rule":        "env BODHI_ONTOLOGY_KB_ID/ONTOLOGY_KB_ID → wiki_config.bodhi_ontology_kb=true → 库名（默认「企业本体模型」）→ ontology:* 页数 ≥ 10"
+# }
+```
+
+> 上传**目标**库也由服务端决定（前端不传 `kb_id`），所以判定与上传用的是同一套解析 ——
+> 不会出现"按钮出现在 A 库、文件却传进 B 库"。
+> 若 `source` 是 `none`：说明四种依据都没命中，MCP 日志与 `candidates` 会列出各库的 `pages/marked` 帮你定位。
+>
+> 前置条件同其它 Bodhi 面板：nginx 要把 `/bodhi/` 反代到 MCP（本交付的 nginx 模板已含，见 §2/§4）。
+> 若这条反代没挂，`/bodhi/ontology/kb` 拿不到结果 → 前端退回**构建期常量**判定（客户环境会显示不出来），
+> 此时要么补上反代，要么在构建前端时注入 `ONTOLOGY_KB_ID=<你们的本体库 uuid>`（见 §3）。
