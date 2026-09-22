@@ -6,6 +6,14 @@
 > - `docs/samples/sp-个体工商户经营圈签约需求.md`（**增量需求**：个体工商户经营圈签约）
 > - 背景 / 用途 / 验证过程：`docs/cases/sp-个体工商户经营圈签约-验证说明.md`
 > 现状：**确定性内核已实现并沙箱跑通**（`tools/ke-core/ke_design.py`），LLM 侧的智能体提示词/MCP 暴露是下一步。
+>
+> **2026-09-22 变更（重要）**：整篇异步抽取工具（`extract_and_save` / `extract_status`）已从 MCP 服务**移除**
+> （不是「兼容保留」；原文留痕 `tools/ontology-mcp/archive/async_extract_retired_2026-09-22.py.txt`），
+> 状态查询工具改名为 **`job_status`**（只服务 `service_overview` 异步刷新）。
+> 下文历史表格/章节里出现的 `extract_and_save` 一律按「**分批建模**」理解：
+> `doc_outline` 取本批上下文 → 智能体比对 → `save_knowledge(stage="graph", session={...})` → `extract_state`。
+> 服务端**不再调 LLM**（因此不再需要 `openai` 依赖），范围收窄（旧 `scope` 参数）改由技能里用
+> `ontology_types(model, focus=…)` 选类后分批实现。
 
 ## 0. 设计口径（四条硬规则）
 
@@ -331,7 +339,8 @@ app env `WEKNORA_SANDBOX_DOCKER_ENABLED=false` —— 原生技能不可用。
 
 ### 11.3 合并智能体 `bodhi-ea-modeler`
 - 绑定：企业知识 + 企业本体模型；MCP = bodhi 本体服务；工具 = 读 + `skills` + `ontology_types`
-  + `extract_and_save/extract_status` + `save_knowledge` + 待确认裁决 + `audit_scan/audit_plan`（**无原生写页工具**）。
+  + `doc_outline` / `save_knowledge` / `extract_state` + 候选关联三件套 + 待确认裁决 + `audit_scan/audit_plan`
+  + `service_overview` / `job_status`（**无原生写页工具**；抽取类工具 2026-09-22 已移除）。
 - 提示词很薄（≈1.3k 字符）：**先看技能目录 → 取技能全文 → 照做**；把"回执 `applied=false` 不得说已落库"
   与"只处理点名对象"写成硬规则。
 - 注册/更新：
@@ -342,17 +351,18 @@ app env `WEKNORA_SANDBOX_DOCKER_ENABLED=false` —— 原生技能不可用。
 import pathlib,sys; sys.path.insert(0,'tools/ke-core'); import ke_db
 ke_db.psql('BEGIN;\n'+pathlib.Path('deploy/weknora-fork/config/agents.sql').read_text(encoding='utf-8')+'\nCOMMIT;\n', stdin=True)"
 ```
-- 旧智能体（`bodhi-ontology-bmm` / `bodhi-ontology-ea` / `bodhi-ea-design`）**保留但可停用**（软删即可回滚）：
+- 旧智能体（`bodhi-ontology-bmm` / `bodhi-ontology-ea` / `bodhi-ea-design`）**已于 2026-09-22 全部停用**
+  （软删，可回滚）；`bodhi-ontology-bmm` 是最后停用的那个（它绑的是已退役的整篇抽取工具面）：
 ```sql
 UPDATE custom_agents SET deleted_at = now() WHERE id IN
   ('bodhi-ontology-bmm','bodhi-ontology-ea','bodhi-ea-design');
 ```
 
-### 11.4 按对话收窄范围（`scope`）
-`extract_and_save(..., scope={"classes":[...], "relations":[...]})`：
-服务端把范围写进抽取提示词，**并在结果上再过一遍**（`apply_extract_scope`）——
-范围外的节点/关系进 `unmatched` 并附原因（`scope.filtered` 给出条数），**不静默丢**。
-选范围用 `ontology_types(model, focus="步骤")` 或 `classes=[...]`。
+### 11.4 按对话收窄范围（`scope`，**已随整篇抽取一并移除**）
+旧实现：`extract_and_save(..., scope={"classes":[...], "relations":[...]})` —— 服务端把范围写进抽取提示词，
+再在结果上过一遍（`apply_extract_scope`）。**2026-09-22 起**：抽取侧不再由服务端调 LLM，收窄改为
+「先 `ontology_types(model, focus="步骤")` 选类 → 只把这些类写进本批的 `save_knowledge` 候选」；
+服务端仍会做**确定性合规校验**（类型白名单 + domain→range），范围外的要素进 `unmatched` 并附原因。
 
 ### 11.5 端到端验收（技能驱动是否真的发生）
 ```bash
@@ -371,7 +381,7 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 - **先目录 → 再取全文**（这正是技能驱动的目标行为）；取到全文后它复述了 `scope.classes/relations`、
   `class_attributes`（含 `operationRetryPolicy`）与纪律（E1/E2/A5）；
 - `kb_id` 传错被服务端纠正后自己改正（参数容错在起作用）；
-- **零写库**：该轮没有任何 `save_knowledge/extract_and_save` 调用，wiki 页 `updated_at` 无变化。
+- **零写库**：该轮没有任何 `save_knowledge` 调用，wiki 页 `updated_at` 无变化。
 
 > 排查提示：若 app 侧报 `failed to call tool: ... EOF`，先看 `bodhi-mcp` 的 journal 有没有 `tools/call`
 > 与异常 —— 服务端 handler 抛异常会直接关连接（2026-09-21 实测：日志函数里漏 `import time` 就是这个症状）。
@@ -382,7 +392,7 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 | 入口 | 用途 |
 |---|---|
 | 工具 `service_overview(kb_id)` | 只读预览（服务/操作/属性/依赖计数 + 前 N 行）|
-| 工具 `service_overview(kb_id, apply=true)` | **异步**渲染并写入/刷新总览页（`extract_status(job_id)` 查回执）|
+| 工具 `service_overview(kb_id, apply=true)` | **异步**渲染并写入/刷新总览页（`job_status(job_id)` 查回执）|
 | `refresh_design.py --kb <kb> --overview` | 运维/命令行同一份渲染（`--dry-run` 只预览）|
 | `GET /bodhi/overview?kb_id=&format=json` | 前端/curl 取同一份 markdown（或 `format=json` 取结构）|
 | 页面 | `ea/summary/it服务详细设计总览`（`summary`，同 slug 复用 + 正文整体替换，可反复跑）|
@@ -428,8 +438,10 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 连取 3 批覆盖 8 个 chunk、**不重不漏**、`done=true`；落库两页拿到编号 **1、2**（dry_run 只预览不落状态）；
 候选关联：登记 → 重复登记被 skip → 驳回 → 再登记**复活** → 确认后页面出边出现真实关系（版本 +1）→ 删除还原。
 
-> 退役说明：`extract_and_save` / `extract_status` **保留但标注已退役**（老脚本/回归测试仍可能调用）；
-> 智能体 `bodhi-ea-modeler` 的工具面已把它们换成上面 5 个（18 个工具）。
+> **退役 → 移除（2026-09-22）**：`extract_and_save` / `extract_status` 已**从服务端删掉**（含 `run_extraction` /
+> 任务池里的抽取键等死角代码），原文留痕 `tools/ontology-mcp/archive/async_extract_retired_2026-09-22.py.txt`；
+> `tools/ontology-extract/extract.py` 里的 LLM 调用链与 CLI 入口同样回收（见该包 `archive/`）。
+> 服务端工具面因此从 15 → **14**（`extract_status` 改名为 `job_status`）；智能体 `bodhi-ea-modeler` 仍为 18 个工具。
 > 详见技能 `skills/domain_modeling/SKILL.md`（v0.2.0）与 `docs/handoff-domain-modeling-v2.md`。
 
 ### 11.7 原生技能（沙箱）路线：现状与开法（2026-09-21）

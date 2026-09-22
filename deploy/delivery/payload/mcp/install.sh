@@ -9,7 +9,7 @@ cd "$HERE"
 echo "== 1/5 环境检查"
 command -v docker >/dev/null || { echo "!! 需要 docker"; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "!! 需要 docker compose v2"; exit 1; }
-[ -f ../bodhi2-mcp.tar.gz ] || true
+[ -d tools ] && [ -d artifacts ] || { echo "!! 包不完整：本目录应含 tools/ artifacts/ skills/（02 包解包后就是仓库根）"; exit 1; }
 echo "   docker $(docker version --format '{{.Server.Version}}')"
 
 echo "== 2/5 配置 .env"
@@ -42,7 +42,7 @@ docker compose -f docker-compose.mcp.yml up -d
 sleep 6
 docker logs --tail 5 bodhi2-mcp || true
 python3 selfcheck.py --url http://127.0.0.1:8765/mcp || {
-  echo "!! 自检未通过：看 docker logs bodhi2-mcp，并对照 ../TROUBLESHOOTING.md"
+  echo "!! 自检未通过：看 docker logs bodhi2-mcp，并对照 MCP-SERVER.md（排错总集在 03 包的 TROUBLESHOOTING.md）"
   exit 1; }
 
 cat <<'EOD'
@@ -50,6 +50,6 @@ cat <<'EOD'
 == 下一步 ==
 1) 打开 WeKnora → 平台 → MCP 服务 → 新建，URL 填： http://bodhi2-mcp:8765/mcp
    （容器名是 bodhi2-mcp；同网络 DNS 可直接解析，且能绕开 SSRF 白名单）
-2) 按 ../MCP-SERVER.md §6 注册（UI 或 SQL 都行）
+2) 按 MCP-SERVER.md §6 注册（UI 或 SQL 都行）
 3) 继续交付手册的主流程：本体模型知识库导入 → 业务库配置 → 前端替换 → 智能体注册
 EOD

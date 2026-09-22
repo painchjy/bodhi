@@ -48,7 +48,7 @@ guard: 键角色不建 Key 类（用 easvc:keyRole）；CRUD 只在边上给（p
    不带的话新页会被巡检判 C1（"实例页无来源"，high）。
 6. **刷总览（评审页）**：`service_overview(kb_id)` 先预览（服务数/操作数/属性数/依赖数 + 前若干行），
    再 `service_overview(kb_id, apply=true)` **异步**刷新「IT 服务详细设计总览」页
-   （**服务一览 / 业务属性与键 / 跨服务读依赖 / 逐操作明细 + 巡检结论**；用 `extract_status(job_id)` 查回执）。
+   （**服务一览 / 业务属性与键 / 跨服务读依赖 / 逐操作明细 + 巡检结论**；用 `job_status(job_id)` 查回执）。
 7. **汇报**：服务 → 操作数 → 属性数与键角色 → 读写分布；然后**念一遍巡检结论**
    （`audit_scan(scope="coupling")`：E1 写耦合 / E2 读耦合 / E3 完整性 / E4 键一致性）。
 

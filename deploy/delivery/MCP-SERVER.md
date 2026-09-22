@@ -1,12 +1,13 @@
 # MCP 服务部署（bodhi2 ontology-mcp）
 
-> 交付物：`02-mcp-server/bodhi2-mcp.tar.gz`（源码包，**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **15 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 …）
+> 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
+> 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
+> 作用：给 WeKnora 提供 **14 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
 > 的零依赖子集解析（我们逐键比对过，3 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list 10 个 / skills() 3 个）。
+> `selfcheck.py` 全绿（initialize / tools/list 14 个 / skills() 3 个）。
 
 ---
 
@@ -33,14 +34,15 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 ├── tools/ke-core/             ← ke_db / ke_pages / ke_ontology / ke_audit / ke_docs / ke_admin / ke_neo4j
 ├── tools/ontology-extract/    ← ontology_wiki.py（本体知识库投影；server 会 import）
 ├── skills/<id>/SKILL.md       ← 技能库（单一来源）
-├── artifacts/weknora/         ← ontology_index.json（类型/关系枚举、颜色、图例）
-├── ontology/                  ← TTL 源（编译产出用；服务运行时不强制）
+├── artifacts/                 ← 编译产物（ontology_index.json / prompts / json_schema / neo4j；**运行时读**）
+├── ontology/uploads/          ← 仅**上传暂存**目录（本体真源 TTL 在 03-manual 包的 `ontology/`）
 ├── logs/                      ← 工具调用日志 mcp_calls_YYYYMMDD.log（**容器里必须可写**）
 └── .env                       ← 可选（配置见下；`engine.load_env` 会读它）
 ```
 
-> 这些都在 `bodhi2-mcp.tar.gz` 里；解包即得到上述结构：
-> `sudo mkdir -p /opt/bodhi2 && sudo tar -xzf bodhi2-mcp.tar.gz -C /opt/bodhi2`
+> 包内**就是**上面的结构（2026-09-22 起不再套内层 `bodhi2-mcp.tar.gz`）：
+> `tar -xzf bodhi2-02-mcp-server.tar.gz` → `cd 02-mcp-server` 即「仓库根」；
+> 想放到 `/opt/bodhi2` 用：`sudo mkdir -p /opt/bodhi2 && sudo tar -xzf bodhi2-02-mcp-server.tar.gz -C /opt/bodhi2 --strip-components=1`
 
 ## 2. 环境变量（唯一配置面）
 
@@ -61,12 +63,12 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 ## 3. 部署方式 A：容器（推荐；与 WeKnora 同一 compose 网络）
 
 ```bash
-sudo mkdir -p /opt/bodhi2 && sudo tar -xzf bodhi2-mcp.tar.gz -C /opt/bodhi2
-cd /opt/bodhi2/02-mcp-server
-docker build -t bodhi2-mcp:1.0 .        # 包内 Dockerfile：python:3.12-slim + postgresql-client
-cp .env.example .env && vi .env         # BODHI_DB_HOST=postgres / BODHI_DB_PASSWORD=…
+tar -xzf bodhi2-02-mcp-server.tar.gz     # → 02-mcp-server/（就是仓库根形状）
+cd 02-mcp-server
+cp .env.example .env && vi .env          # BODHI_DB_HOST=postgres / BODHI_DB_PASSWORD=…
+docker build -t bodhi2-mcp:1.0 .         # 构建上下文含 tools/ artifacts/ skills/（包内 Dockerfile）
 docker compose -f docker-compose.mcp.yml up -d
-docker logs -f bodhi2-mcp               # 应看到 0.0.0.0:8765
+docker logs -f bodhi2-mcp                # 应看到 0.0.0.0:8765
 ```
 
 > **构建卡在 `apt-get update`？（内网常见）** 公网 Debian 源可能不通/极慢。两个办法：
@@ -91,8 +93,8 @@ services:
 ## 4. 部署方式 B：裸机（systemd）
 
 ```bash
-sudo tar -xzf bodhi2-mcp.tar.gz -C /opt/bodhi2
-sudo cp /opt/bodhi2/02-mcp-server/bodhi2-mcp.service /etc/systemd/system/
+sudo mkdir -p /opt/bodhi2 && sudo tar -xzf bodhi2-02-mcp-server.tar.gz -C /opt/bodhi2 --strip-components=1
+sudo cp /opt/bodhi2/bodhi2-mcp.service /etc/systemd/system/
 sudo vi /etc/systemd/system/bodhi2-mcp.service     # 改 WorkingDirectory / Environment
 sudo systemctl daemon-reload && sudo systemctl enable --now bodhi2-mcp
 journalctl -u bodhi2-mcp -f
@@ -121,28 +123,32 @@ import sys; sys.path.insert(0, 'tools/ke-core'); import ke_db
 print('知识库：', [r['name'] for r in ke_db.psql_csv(
     "SELECT name FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY created_at")])
 PY
-# 3) MCP 协议自检（tools/list 必须 10 个工具 + skills() 返回 3 个技能）
+# 3) MCP 协议自检（tools/list 必须 14 个工具 + skills() 返回 3 个技能）
 python3 /opt/bodhi2/02-mcp-server/selfcheck.py --url http://127.0.0.1:8765/mcp
 ```
 
-`selfcheck.py` 期望输出（15 个工具）：
+`selfcheck.py` 期望输出（14 个工具）：
 
 ```
 initialize  OK（session=…）
-tools/list  OK（15 个）：extract_and_save, extract_status, list_pending_merges, resolve_pending_merge,
-                        ontology_types, skills, service_overview, audit_scan, audit_plan, save_knowledge,
-                        doc_outline, extract_state, link_candidates, list_link_candidates, resolve_link_candidate
+tools/list  OK（14 个）：list_pending_merges, resolve_pending_merge, ontology_types, skills, job_status,
+                        service_overview, audit_scan, audit_plan, save_knowledge, doc_outline, extract_state,
+                        link_candidates, list_link_candidates, resolve_link_candidate
 skills()    OK（3 个：domain_modeling / ea_overview_design / service_detailed_design）
 ```
 
-> `extract_and_save` / `extract_status` 是**已退役**的旧异步抽取（仅兼容保留）；领域建模现走
-> `doc_outline` + `extract_state` + `save_knowledge(session=…)` + 候选关联三件套（见 `04-manual/docs/agent-design-flow.md` §11.8）。
+> **2026-09-22 变更**：整篇异步抽取工具（`extract_and_save` / `extract_status`）**已移除**（不是"兼容保留"）；
+> 领域建模走 `doc_outline` + `extract_state` + `save_knowledge(session=…)` + 候选关联三件套
+> （见 `03-manual/docs/agent-design-flow.md` §11.8）。
+> 原来的状态查询工具改名为 **`job_status`** —— 现在只服务 `service_overview(apply=true)` 的异步刷新回执。
+> 原文留痕：`tools/ontology-mcp/archive/async_extract_retired_2026-09-22.py.txt`。
+> 依赖也随之简化：**服务端不调 LLM → 不需要 `openai`**；`rdflib`/`PyYAML` 只有编译本体时才要。
 
 ## 6. 在 WeKnora 里注册这个 MCP 服务
 
 **UI**：平台 → MCP 服务 → 新建 → 传输 `streamable-http` → URL `http://bodhi-mcp:8765/mcp`。
 
-**SQL**（可脚本化；`04-manual/AGENTS-SQL.md` 里有配套的智能体注册）：
+**SQL**（可脚本化；`03-manual/AGENTS-SQL.md` 里有配套的智能体注册）：
 
 ```sql
 INSERT INTO mcp_services (id, tenant_id, name, description, enabled, transport_type, url, created_at, updated_at)
@@ -157,7 +163,7 @@ ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, enabled = true, updated_at = 
 > 私网地址 / `host.docker.internal` 会被拒（app 日志：`MCP service URL failed SSRF validation`），
 > 现象是**智能体的 MCP 工具全部消失**（tool_count 从 15 掉到 5，只剩 wiki 工具）。
 > 修法：WeKnora 的 `.env` 里给 `SSRF_WHITELIST_EXTRA` 加上该主机名 / IP / CIDR，然后重建 app。
-> 详见 `04-manual/TROUBLESHOOTING.md` §1。
+> 详见 `03-manual/TROUBLESHOOTING.md` §1。
 
 ## 7. 升级 / 回滚
 

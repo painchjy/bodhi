@@ -54,7 +54,7 @@ connect() failed (111: Connection refused) while connecting to upstream:
 **修法**：把上游页 slug 填进 `report.upstream` 重跑；或用运维脚本修（`docs/bodhi-ops-audit.md` P2 的 `plan → apply --confirm`）。
 
 ## 6. 智能体说"已落库"但其实没写（`applied=false`）
-**根因**：`save_knowledge` / `extract_and_save` 默认是 **dry_run**（只出清单）。回执里 `dry_run=true` / `applied=false`。
+**根因**：`save_knowledge` 默认是 **dry_run**（只出清单）。回执里 `dry_run=true` / `applied=false`。
 **修法**：要真写必须显式 `mode="apply"` 重跑同一份载荷；提示词里已明确规定"`applied=false` 不得说已落库"。
 **核对**：`logs/mcp_calls_*.log` 有没有 `applied=true`；或看页面 `version` 是否 +1。
 

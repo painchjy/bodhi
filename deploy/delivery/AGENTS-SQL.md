@@ -34,11 +34,11 @@ done
 
 | 智能体 | 提示词 | 工具面（`allowed_tools`） | 备注 |
 |---|---|---|---|
-| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + 10 个 `mcp_bodhi_ontology_*` | **不给** `wiki_write_page`：写库只走 MCP |
+| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + 13 个 `mcp_bodhi_ontology_*`（含 `skills`/`ontology_types`/`service_overview`；**无**抽取类） | **不给** `wiki_write_page`：写库只走 MCP |
 | `bodhi-kb-ops` | 「知识运维」——只做体检与清理计划，绝不改数据 | 5 个 wiki 工具 + `audit_scan`/`audit_plan` | 执行清理始终由人确认（`plan → apply --confirm`）|
 
 技能（3 个）由 MCP 下发、**不写进提示词**：`domain_modeling` / `ea_overview_design` / `service_detailed_design`
-（源在 `04-manual/skills/<id>/SKILL.md`，改完即生效，无需重启/重新注册智能体）。
+（源在 `02-mcp-server/skills/<id>/SKILL.md`，改完即生效，无需重启/重新注册智能体）。
 
 ## 3. 落库后立即验收
 
@@ -46,7 +46,7 @@ done
 # ① 智能体在位
 psql "$PSQL_URL" -At -F' | ' -c "SELECT id, name, deleted_at IS NULL AS live FROM custom_agents WHERE id LIKE 'bodhi-%'"
 
-# ② 工具面 15 个、MCP 已挂
+# ② 工具面 18 个（5 wiki + 13 MCP）、MCP 已挂
 psql "$PSQL_URL" -At -c "SELECT jsonb_array_length(config->'allowed_tools') || ' 工具 / MCP=' || (config->'mcp_services')::text FROM custom_agents WHERE id='bodhi-ea-modeler'"
 
 # ③ 真跑一轮（让智能体先 skills() 再报目录）——用交付里的驱动脚本或 App 里直接对话

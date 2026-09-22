@@ -61,7 +61,8 @@ python3 ke_pages.py relations dbc2528f-611b-48da-9a71-d7c93975adb4 'bmm/business
 
 ## 5. 后续拆分建议（未做，已记入交接单）
 
-- `server.py` 的**抽取合并流水线**（`build_new_page` / `merge_content` / `extract_and_save`
+- `server.py` 的**落库合并流水线**（`build_new_page` / `merge_content` / `save_knowledge`；
+  原整篇抽取 `extract_and_save` 已于 2026-09-22 移除，见 `tools/ontology-mcp/archive/`）
   / 相似度）体积最大，可整体搬成 `ke-core/extract_pipeline.py`，`server.py` 只留 MCP 壳；
 - `graph_page.py` 的 HTML/JS（内嵌字符串）可拆成模板文件，便于单独改图；
 - `reason.py` 落地时把 S1–S9 / O1–O5 判定写成纯函数（无 IO，便于 CI 断言）。

@@ -1,0 +1,771 @@
+# LLM 调用链与抽取 CLI 退役留痕（2026-09-22）
+# 原 `extract.py` 里「调 LLM / 写 Neo4j 图 / CLI 入口」的部分，回收原因同上。
+# 本文件**不参与运行**。
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `start_extract_job`（顶层 def，已回收）=====
+def start_extract_job(args: dict) -> dict:
+    """受理一次抽取并立即返回；同名同文档的任务会复用（幂等）。"""
+    existing = find_existing_job(args)
+    if existing:
+        job_id, job = existing
+        return {"status": job.get("status", "running"), "job_id": job_id,
+                "reused": True, "started_at": job.get("started_at"),
+                "note": ("同一篇文档已有抽取任务（未重复发起）。请用 "
+                         "extract_status(job_id=...) 查询该任务；确需重跑请传 fresh=true。"),
+                **_job_brief(job)}
+
+    key = job_key(args)
+    job_id = uuid.uuid4().hex[:12]
+    with JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "started_at": now_text(), "key": key}
+        if len(JOBS) > 30:  # 只保留最近若干条，避免长跑进程内存膨胀
+            for stale in list(JOBS)[:-30]:
+                if JOBS[stale].get("status") != "running":
+                    JOBS.pop(stale, None)
+
+    def _run() -> None:
+        try:
+            result = extract_and_save(
+                str(args["model"]), str(args["kb_id"]), str(args["knowledge_id"]),
+                high=float(args.get("high", DEFAULT_HIGH)),
+                low=float(args.get("low", DEFAULT_LOW)),
+                dry_run=bool(args.get("dry_run", False)),
+                from_log=str(args.get("from_log", "")),
+                scope=args.get("scope") or None)
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "done", "finished_at": now_text(),
+                                     "doc_title": result.get("doc_title", "")})
+                JOBS[job_id].update(result)
+        except Exception as exc:  # noqa: BLE001
+            print("[mcp] 异步抽取失败 job=%s：%s" % (job_id, exc))
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "failed", "finished_at": now_text(),
+                                     "error": str(exc)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "status": "started", "job_id": job_id, "started_at": now_text(),
+        "note": ("抽取已受理并开始执行（约 1-2 分钟）。请立即用 extract_status(job_id=...) "
+                 "查询进度与结果；**不要**再次调用 extract_and_save 以免重复抽取。"),
+    }
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `find_existing_job`（顶层 def，已回收）=====
+def find_existing_job(args: dict) -> tuple[str, dict] | None:
+    """按去重键找已有的任务：在跑的、或最近的（无论成败）都复用，避免重复抽取。
+
+    2026-09-19 用户实测：智能体每"查询进度"都会再调一次 extract_and_save，
+    旧实现每次都新建 job → 同一篇文档被反复抽取。现在同组只保留一个任务，
+    重复调用直接返回原 job_id；要强制重跑请换 knowledge_id 或显式传 fresh=true。
+    """
+    if args.get("fresh"):
+        return None
+    key = job_key(args)
+    with JOBS_LOCK:
+        for job_id in reversed(list(JOBS)):
+            job = JOBS[job_id]
+            if job.get("key") == key:
+                return job_id, job
+    return None
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `job_key`（顶层 def，已回收）=====
+def job_key(args: dict) -> str:
+    """任务去重键：同一（知识库, 文档, 模型）视为同一次抽取。"""
+    return "|".join([str(args.get("kb_id", "")).strip(),
+                     str(args.get("knowledge_id", "")).strip(),
+                     str(args.get("model", "")).strip()])
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `extract_and_save`（顶层 def，已回收）=====
+def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
+                     high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
+                     dry_run: bool = False, from_log: str = "",
+                     scope: dict | None = None) -> dict:
+    engine = load_engine()
+    # 参数容错（2026-09-19）：智能体常传知识库名称、或 d1 之类的占位符，
+    # 这里统一解析成真实 UUID，并把解析说明回传给智能体（避免下次再传错）。
+    kb_id, kb_note = resolve_kb_id(kb_id)
+    knowledge_id, doc_note = resolve_knowledge_id(kb_id, knowledge_id)
+    tenant_id = get_kb_tenant(kb_id)
+    doc_rows = psql_csv("SELECT id, title FROM knowledges WHERE id = %s" % sql_str(knowledge_id))
+    if not doc_rows:
+        raise RuntimeError("文档不存在：%s" % knowledge_id)
+    doc_title = doc_rows[0]["title"] or knowledge_id
+    doc_meta = {"id": knowledge_id, "title": doc_title}
+
+    chunks = fetch_chunks(knowledge_id)
+    if not chunks:
+        raise RuntimeError("文档没有可用片段：%s" % knowledge_id)
+    body, pool = split_body_pool(chunks)
+    doc_text = "\n\n---\n\n".join((c["content"] or "").strip() for c in body)
+
+    result = run_extraction(engine, model_key, doc_title, doc_text, from_log=from_log, scope=scope)
+    model, checked = result["model"], result["checked"]
+    payloads = element_payloads(engine, checked, pool)
+    # 落库半段统一走 save_elements（与「设计路径」同一份实现，见 save_knowledge）
+    summary = save_elements(kb_id, model, checked, payloads, doc_meta,
+                            high=high, low=low, dry_run=dry_run, tenant_id=tenant_id,
+                            resolved_note=(kb_note + " " + doc_note), knowledge_id=knowledge_id,
+                            extra={"chunks": len(chunks), "chars": len(doc_text)}, engine=engine)
+    return summary
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `element_payloads`（顶层 def，已回收）=====
+# ---------------------------------------------------------------------------
+# 主流程：抽取一次 → 合规校验 → 匹配 → 合并/新增/待确认
+# ---------------------------------------------------------------------------
+def element_payloads(engine, checked: dict, pool: list[dict]) -> list[dict]:
+    """把校验后的 nodes/edges 整理成"待落页要素"（含出向关系与来源片段）。"""
+    slug_by_name = {node["name"]: element_slug(node["module"], node) for node in checked["nodes"]}
+    outgoing: dict[str, list[dict]] = {}
+    for edge in checked["edges"]:
+        outgoing.setdefault(edge["source"], []).append({
+            "type": edge["type"], "label": edge["label"], "target": edge["target"],
+            "target_slug": slug_by_name.get(edge["target"], ""),
+            "source_text": edge.get("source_text", ""),
+        })
+    payloads = []
+    for node in checked["nodes"]:
+        chunk_id, chunk_index = locate_chunk(node.get("source_text", ""), pool)
+        payloads.append({
+            "name": node["name"], "type": node["type"], "type_label": node["type_label"],
+            "module": node["module"], "definition": node["definition"],
+            "description": node.get("description", ""), "source_text": node.get("source_text", ""),
+            "chunk_id": chunk_id, "chunk_index": chunk_index,
+            "relations": outgoing.get(node["name"], []),
+        })
+    return payloads
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `run_extraction`（顶层 def，已回收）=====
+def run_extraction(engine, model_key: str, doc_name: str, doc_text: str,
+                   from_log: str = "", scope: dict | None = None) -> dict:
+    """调用 LLM 抽取一次并做本体校验（不写任何库）；`scope` = 本次收窄范围。"""
+    index = engine.load_index(engine.DEFAULT_INDEX)
+    model = engine.pick_model(index, model_key)
+    system = engine.build_system_prompt(model, engine.load_light(model, engine.DEFAULT_PROMPTS))
+    env = engine.load_env(REPO / ".env")
+    user = engine.build_user_prompt(doc_name, doc_text, [])
+    extra = scope_instructions(scope, model)
+    if extra:
+        user = user + "\n" + "\n".join(extra)
+    if from_log:
+        raw = engine.read_raw_from_log(pathlib.Path(from_log))
+    else:
+        cfg = {
+            "api_key": env.get("LLM_API_KEY", ""),
+            "base_url": env.get("LLM_BASE_URL", "https://api.deepseek.com"),
+            "model": env.get("LLM_MODEL", "deepseek-flash"),
+            "temperature": float(env.get("LLM_TEMPERATURE", "0.1")),
+            "max_tokens": int(env.get("LLM_MAX_TOKENS", "32768")),
+            "json_mode": env.get("LLM_JSON_MODE", "1") == "1",
+        }
+        raw, _meta = engine.call_llm(cfg, system, user, method="mcp_extraction")
+    checked = engine.validate(engine.parse_json(raw), model, doc_name)
+    checked = apply_extract_scope(checked, scope)
+    return {"model": model, "checked": checked, "raw_len": len(raw)}
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `apply_extract_scope`（顶层 def，已回收）=====
+def apply_extract_scope(checked: dict, scope: dict | None) -> dict:
+    """按收窄范围过滤抽取结果：范围外的节点/关系移入 `unmatched`（**不静默丢**）。
+
+    为什么在服务端再过一遍：提示词是"请求"，模型不一定照做；收窄必须由确定性代码兜底，
+    否则用户以为"只抽了任务与步骤"，库里却混进全量类型。
+    """
+    classes = {str(x).strip() for x in ((scope or {}).get("classes") or []) if str(x).strip()}
+    relations = {str(x).strip() for x in ((scope or {}).get("relations") or []) if str(x).strip()}
+    if not classes and not relations:
+        return checked
+    kept_nodes, moved = [], []
+    for node in checked.get("nodes") or []:
+        if classes and node.get("type") not in classes:
+            moved.append({"name": node.get("name"), "type": node.get("type"),
+                          "reason": "不在本次收窄范围（classes）"})
+            continue
+        kept_nodes.append(node)
+    kept_names = {n.get("name") for n in kept_nodes}
+    kept_edges = []
+    for edge in checked.get("edges") or []:
+        if relations and edge.get("type") not in relations:
+            moved.append({"name": "%s→%s" % (edge.get("source"), edge.get("target")),
+                          "type": edge.get("type"), "reason": "不在本次收窄范围（relations）"})
+            continue
+        if classes and (edge.get("source") not in kept_names or edge.get("target") not in kept_names):
+            moved.append({"name": "%s→%s" % (edge.get("source"), edge.get("target")),
+                          "type": edge.get("type"), "reason": "关系端点在收窄范围外"})
+            continue
+        kept_edges.append(edge)
+    checked["nodes"], checked["edges"] = kept_nodes, kept_edges
+    checked["unmatched"] = list(checked.get("unmatched") or []) + moved
+    checked["scope"] = {"classes": sorted(classes), "relations": sorted(relations),
+                        "filtered": len(moved)}
+    return checked
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `scope_instructions`（顶层 def，已回收）=====
+def scope_instructions(scope: dict | None, model: dict) -> list[str]:
+    """把「本次收窄范围」编译成提示词片段（`scope.classes` / `scope.relations`）。"""
+    scope = scope or {}
+    classes = [str(x).strip() for x in (scope.get("classes") or []) if str(x).strip()]
+    relations = [str(x).strip() for x in (scope.get("relations") or []) if str(x).strip()]
+    if not classes and not relations:
+        return []
+    meta = ke_ontology.class_meta()
+    lines = ["", "【本次收窄范围】（用户指定，优先于上面的全量清单）",
+             "- 只抽取这些类：%s" % "、".join("%s（%s）" % (c, (meta.get(c) or {}).get("label") or "")
+                                              for c in classes) if classes else "- 类：不限制（仍按全量清单）",
+             "- 只允许这些关系：%s" % "、".join(relations) if relations else "- 关系：不限制（仍按全量清单）",
+             "- 范围外的内容**不要输出**（服务端会把范围外的要素移入 unmatched 并说明原因）。"]
+    return lines
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `split_body_pool`（顶层 def，已回收）=====
+def split_body_pool(chunks: list[dict]) -> tuple[list[dict], list[dict]]:
+    body = [c for c in chunks if c.get("chunk_type") == "parent_text"]
+    if not body:
+        texts = [c for c in chunks if c.get("chunk_type") == "text"]
+        pool = texts or [c for c in chunks if c.get("chunk_type") != "summary"]
+        if pool:
+            body = [max(pool, key=lambda c: len(c["content"] or ""))]
+    pool = [c for c in chunks if c.get("chunk_type") == "text"] or body
+    return body, pool
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原 `fetch_chunks`（顶层 def，已回收）=====
+def fetch_chunks(knowledge_id: str) -> list[dict]:
+    rows = psql_csv("SELECT id, chunk_index, chunk_type, content FROM chunks "
+                    "WHERE knowledge_id = %s AND deleted_at IS NULL "
+                    "ORDER BY chunk_index, id" % sql_str(knowledge_id))
+    for row in rows:
+        row["chunk_index"] = int(row.get("chunk_index") or 0)
+    return rows
+
+
+
+
+# ===== [异步抽取退役 2026-09-22] 原工具 schema `extract_and_save`（已回收）=====
+        {
+            "name": "extract_and_save",
+            "description": ("**[已退役，仅兼容保留]** 一次性异步抽取整篇文档（把全文塞进一次调用）。"
+                            "内网算力有限时必然超时/被截断，且无法按对话调整上下文预算 —— "
+                            "**新流程请用 `domain_modeling` 技能的分批模式**："
+                            "`doc_outline` 取本批上下文 → `save_knowledge(stage=\"graph\", session={...})` 落库续跑。"
+                            "保留原因：老脚本/回归测试仍可能调用。"
+                            "（原行为：按本体模型对**一篇文档**做一次抽取并写入 wiki："
+                            "自动做类型/关系合规校验（不合规不入库），"
+                            "再按向量相似度与存量比对 —— 高相似直接合并（追加原文证据、"
+                            "定义取更完整者、版本+1、可回退），低相似新增页面，中间区间生成"
+                            "「待确认合并」页由人工裁决。**只需调用一次**，不要自己重复读源文或"
+                            "自己判断与存量是否重复。"
+                            "`scope` 支持**按对话收窄范围**（只抽某几类/某几条关系）："
+                            "服务端会把它写进提示词，并**在结果上再过一遍**（范围外的要素进 unmatched 并说明原因）。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "model": {"type": "string", "description": "本体模型 key：bmm / ea"},
+                    "kb_id": {"type": "string", "description": "目标知识库 UUID"},
+                    "knowledge_id": {"type": "string", "description": "源文档（knowledge）UUID"},
+                    "scope": {
+                        "type": "object",
+                        "description": ("本次收窄范围（可选）：{classes:[\"ea:Step\",\"ea:Task\"], "
+                                        "relations:[\"ea:taskHasStep\"]}。"
+                                        "取值从 `ontology_types(model, focus=…)` 里挑；"
+                                        "不传 = 按该模型全量清单抽取。"),
+                        "properties": {"classes": {"type": "array", "items": {"type": "string"}},
+                                       "relations": {"type": "array", "items": {"type": "string"}}},
+                    },
+                    "high": {"type": "number", "description": "合并阈值，默认 0.90"},
+                    "low": {"type": "number", "description": "新增阈值，默认 0.75"},
+                    "dry_run": {"type": "boolean", "description": "只算不写，默认 false"},
+                    "wait": {"type": "boolean",
+                             "description": ("默认 false = 立即受理并后台执行（推荐，避免调用超时）；"
+                                             "true = 同步等待结果（可能超过 60 秒，仅在本地调试时用）")},
+                    "from_log": {"type": "string",
+                                 "description": "调试用：从指定日志文件复放原始 LLM 输出，不发起真实调用"},
+                },
+                "required": ["model", "kb_id", "knowledge_id"],
+            },
+        },
+
+
+# ===== [异步抽取退役 2026-09-22] 原工具 schema `extract_status`（已回收）=====
+        {
+            "name": "extract_status",
+            "description": ("**[已退役，仅兼容保留]** 查询旧异步抽取任务的状态与结果"
+                            "（配合 `extract_and_save` 的异步模式）。新流程用 `extract_state` 看"
+                            "分批建模进度（页面编号/轮次/游标）。"
+                            "返回 status=running/done/failed，done 时含 created/merged/pending/"
+                            "violations/unmatched 明细与 folders_synced（目录是否已重建）。"),
+            "inputSchema": {"type": "object",
+                            "properties": {"job_id": {"type": "string",
+                                                      "description": "extract_and_save 返回的 job_id"}}},
+        },
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `main`（顶层 def，已回收）=====
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def main() -> int:
+    parser = argparse.ArgumentParser(description="本体驱动的知识提取（校验后写 Neo4j）")
+    parser.add_argument("--doc", required=True, help="待抽取的文档（.md/.txt）")
+    parser.add_argument("--model", default="ea", help="本体模型 key（当前可选：bmm / ea）")
+    parser.add_argument("--kb", default="bodhi-poc", help="写入图里的知识库标记（便于区分批次）")
+    parser.add_argument("--dry-run", action="store_true", help="只导出提示词，不调 LLM（省额度）")
+    parser.add_argument("--no-write", action="store_true", help="调 LLM 但不写 Neo4j")
+    parser.add_argument("--max-chars", type=int, default=24000, help="文档截断长度（默认 24000）")
+    parser.add_argument("--index", default=str(DEFAULT_INDEX), help="本体目录产物路径")
+    parser.add_argument("--env-file", default=str(REPO / ".env"), help="LLM 配置所在 .env")
+    parser.add_argument("--from-log", default="", help="复用某份调试日志里的 LLM 返回，跳过本次调用（省额度）")
+    args = parser.parse_args()
+
+    doc_path = pathlib.Path(args.doc)
+    if not doc_path.is_file():
+        raise SystemExit("文档不存在：%s" % doc_path)
+    text = doc_path.read_text(encoding="utf-8")
+    if len(text) > args.max_chars:
+        print("[Bodhi]   ⚠ 文档 %d 字符，先截断到 %d（正式版按 chunk 分片）"
+              % (len(text), args.max_chars))
+        text = text[: args.max_chars]
+
+    index = load_index(pathlib.Path(args.index))
+    model = pick_model(index, args.model)
+    light = load_light(model, DEFAULT_PROMPTS)
+    system = build_system_prompt(model, light)
+
+    env = load_env(pathlib.Path(args.env_file))
+    existing: list[dict] = []
+    if not args.dry_run:
+        try:
+            existing = fetch_existing(model)
+            print("[Bodhi]   存量要素 %d 条（已注入提示词）" % len(existing))
+        except SystemExit as exc:
+            print("[Bodhi]   ⚠ 取存量失败（%s），按无存量继续" % exc)
+    user = build_user_prompt(doc_path.name, text, existing)
+
+    print("[Bodhi]   模型=%s（%s）｜专家角色=%s" % (model["key"], model["label"], model["expert_role"]))
+    print("[Bodhi]   可用类型 %d 个 / 可用关系 %d 条"
+          % (len(allowed_classes(model)), len(allowed_relations(model))))
+    print("[Bodhi]   system %d 字符（其中轻量版 %d）/ user %d 字符"
+          % (len(system), len(light), len(user)))
+
+    if args.dry_run:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        out = LOG_DIR / "last_prompt_preview.md"
+        out.write_text("# system\n\n%s\n\n# user\n\n%s\n" % (system, user), encoding="utf-8")
+        print("[Bodhi]   ✅ dry-run：提示词已写到 %s（未调用 LLM）"
+              % out.relative_to(REPO).as_posix())
+        return 0
+
+    cfg = {
+        "api_key": env.get("LLM_API_KEY", ""),
+        "base_url": env.get("LLM_BASE_URL", "https://api.deepseek.com"),
+        "model": env.get("LLM_MODEL", "deepseek-flash"),
+        "temperature": float(env.get("LLM_TEMPERATURE", "0.1")),
+        "max_tokens": int(env.get("LLM_MAX_TOKENS", "32768")),
+        "json_mode": env.get("LLM_JSON_MODE", "1") == "1",
+    }
+    if args.from_log:
+        raw = read_raw_from_log(pathlib.Path(args.from_log))
+        print("[Bodhi]   ♻ 复用日志里的 LLM 返回（%d 字符），本次未调用 LLM" % len(raw))
+    else:
+        raw, _meta = call_llm(cfg, system, user)
+    result = parse_json(raw)
+    checked = validate(result, model, doc_path.name)
+
+    print("[Bodhi]   解析：要素 %d / 关系 %d / 违规 %d / unmatched %d"
+          % (len(checked["nodes"]), len(checked["edges"]),
+             len(checked["violations"]), len(checked["unmatched"])))
+    for violation in checked["violations"][:10]:
+        print("           ⚠ 违规 %s: %s（%s）"
+              % (violation["kind"], violation["value"], violation["name"]))
+    if checked["unknown_targets"]:
+        print("           ⚠ 关系端点未定义：%s" % ", ".join(checked["unknown_targets"][:10]))
+    if checked["unmatched"]:
+        print("           · unmatched（未归类）前 5 条：")
+        for item in checked["unmatched"][:5]:
+            print("             - %s（%s）" % (item.get("name"), item.get("reason")))
+
+    if args.no_write:
+        print("[Bodhi]   --no-write：跳过写库")
+        return 0
+
+    stats = write_graph(model, checked["nodes"], checked["edges"], args.kb)
+    print("[Bodhi]   ✅ 已写 Neo4j：节点 %d 个 / 关系 %d 条（kb=%s）"
+          % (stats["nodes_written"], stats["edges_attempted"], args.kb))
+    print("[Bodhi]   在 http://localhost:7474 里粘贴下面任一条查看：")
+    print("             MATCH (n:BodhiInstance) WHERE n.module = '%s' RETURN n LIMIT 100" % model["key"])
+    print("             MATCH (a:BodhiInstance)-[r]->(b:BodhiInstance) RETURN a, r, b LIMIT 200")
+    print("             MATCH (n:BodhiInstance) RETURN n.type AS 类型, count(*) AS 数量 ORDER BY 数量 DESC")
+    return 0
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `fetch_existing`（顶层 def，已回收）=====
+def fetch_existing(model: dict, limit: int = 200) -> list[dict]:
+    """取该模块的存量要素（供提示词注入，见 docs/weknora-fork.md §8.2）。"""
+    body = neo4j_commit([{
+        "statement": (
+            "MATCH (n:%s) WHERE n.module = $module "
+            "RETURN n.type AS type, n.name AS name, n.definition AS definition LIMIT $limit"
+        ) % INSTANCE_LABEL,
+        "parameters": {"module": model["key"], "limit": limit},
+    }])
+    rows = body["results"][0]["data"] if body.get("results") else []
+    return [{"type": r["row"][0], "name": r["row"][1], "definition": r["row"][2]} for r in rows]
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `lookup_existing_type`（顶层 def，已回收）=====
+def lookup_existing_type(name: str) -> str:
+    body = neo4j_commit([{
+        "statement": "MATCH (n:%s {name: $name}) RETURN n.type AS type LIMIT 1" % INSTANCE_LABEL,
+        "parameters": {"name": name},
+    }])
+    rows = body["results"][0]["data"] if body.get("results") else []
+    if rows:
+        return rows[0]["row"][0]
+    raise SystemExit("关系端点 %r 既不在本次结果里，也不在图里（可能是 LLM 用了未定义的 name）" % name)
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `_type_of`（顶层 def，已回收）=====
+def _type_of(edges: list[dict], nodes: list[dict], name: str) -> str:
+    """关系端点要素的类型：先查本次新建节点，再查图里已有节点（存量关系）。"""
+    for node in nodes:
+        if node["name"] == name:
+            return node["type"]
+    return lookup_existing_type(name)
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `write_graph`（顶层 def，已回收）=====
+def write_graph(model: dict, nodes: list[dict], edges: list[dict], kb: str) -> dict:
+    """写实例层：节点 label = BodhiInstance + 模块__类；边 = 关系本地名（大写）。"""
+    node_statements, edge_statements = [], []
+    for node in nodes:
+        # 节点 label 用「类型前缀__类名」（前缀取自节点自身的 type，这样跨模块引用的
+        # 外部类（如 bmm:DesiredResult）也能得到正确的 label）
+        label = "%s__%s" % (node["type"].split(":", 1)[0], node["type"].split(":", 1)[-1])
+        node_statements.append({
+            "statement": (
+                "MERGE (n:%s:%s {key: $key}) "
+                "ON CREATE SET n.created_at = timestamp(), n.authoritative = true "
+                "SET n.name = $name, n.type = $type, n.type_label = $type_label, "
+                "    n.module = $module, n.kb = $kb, n.definition = $definition, "
+                "    n.source_doc = $doc, n.source_text = $source_text, "
+                "    n.updated_at = timestamp() "
+                "RETURN n.key"
+            ) % (INSTANCE_LABEL, label),
+            "parameters": {
+                "key": node_key(node), "name": node["name"], "type": node["type"],
+                "type_label": node["type_label"], "module": node["module"], "kb": kb,
+                "definition": node["definition"], "doc": node["doc"],
+                "source_text": node["source_text"],
+            },
+        })
+    for edge in edges:
+        edge_statements.append({
+            "statement": (
+                "MATCH (a:%s {key: $sk}), (b:%s {key: $tk}) "
+                "MERGE (a)-[r:%s {key: $rkey}]->(b) "
+                "SET r.label = $label, r.type = $type, r.source_doc = $doc, "
+                "    r.source_text = $source_text, r.updated_at = timestamp() "
+                "RETURN type(r)"
+            ) % (INSTANCE_LABEL, INSTANCE_LABEL, rel_label(edge["type"])),
+            "parameters": {
+                "sk": "%s|%s" % (_type_of(edges, nodes, edge["source"]), edge["source"]),
+                "tk": "%s|%s" % (_type_of(edges, nodes, edge["target"]), edge["target"]),
+                "rkey": "%s|%s|%s" % (edge["type"], edge["source"], edge["target"]),
+                "label": edge["label"], "type": edge["type"], "doc": edge["doc"],
+                "source_text": edge["source_text"],
+            },
+        })
+    result = neo4j_commit(node_statements + edge_statements)
+    written_nodes = sum(1 for s in result.get("results", [])[:len(node_statements)] if s.get("data"))
+    return {"nodes_written": written_nodes, "edges_attempted": len(edge_statements)}
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `neo4j_commit`（顶层 def，已回收）=====
+# ---------------------------------------------------------------------------
+# Neo4j 写入（HTTP API，零驱动依赖）+ 存量读取
+# ---------------------------------------------------------------------------
+def neo4j_commit(statements: list[dict]) -> dict:
+    """调用 Neo4j 的 HTTP 事务端点执行一批 Cypher。"""
+    payload = json.dumps({"statements": statements}).encode("utf-8")
+    request = urllib.request.Request(
+        "%s/db/%s/tx/commit" % (NEO4J_HTTP, NEO4J_DATABASE), data=payload, method="POST")
+    token = base64.b64encode(("%s:%s" % (NEO4J_USER, NEO4J_PASSWORD)).encode("utf-8")).decode("ascii")
+    request.add_header("Authorization", "Basic " + token)
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:600]
+        raise SystemExit("Neo4j 返回 %s：%s" % (exc.code, detail))
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit("连不上 Neo4j（%s）：%s（先用 docker ps 确认 WeKnora-neo4j 在跑）"
+                         % (NEO4J_HTTP, exc))
+    if body.get("errors"):
+        raise SystemExit("Cypher 执行失败：%s" % json.dumps(body["errors"], ensure_ascii=False)[:600])
+    return body
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `build_user_prompt`（顶层 def，已回收）=====
+def validate(result: dict, model: dict, doc_name: str) -> dict:
+    """本体约束校验：类型白名单 + 关系 domain/range。违规不写图，进 violations。"""
+    class_by_name = {c["name"]: c for c in allowed_classes(model)}
+    rel_by_name = {r["name"]: r for r in allowed_relations(model)}
+    nodes, edges, violations = [], [], []
+
+    for element in result.get("elements") or []:
+        type_name = (element.get("type") or "").strip()
+        name = (element.get("name") or "").strip()
+        if type_name not in class_by_name:
+            violations.append({"kind": "unknown_class", "value": type_name, "name": name})
+            continue
+        if not name:
+            violations.append({"kind": "missing_name", "value": type_name, "name": ""})
+            continue
+        nodes.append({
+            "name": name,
+            "type": type_name,
+            "type_label": class_by_name[type_name].get("label") or type_name,
+            "module": model["key"],
+            "definition": (element.get("definition") or "").strip(),
+            "description": (element.get("description") or "").strip(),
+            "source_text": (element.get("source_text") or "").strip(),
+            "source_span": (element.get("source_span") or "").strip(),
+            "doc": doc_name,
+        })
+
+    known = {n["name"] for n in nodes} | {e["name"] for e in (result.get("existing_used") or [])}
+    for relation in result.get("relationships") or []:
+        type_name = (relation.get("type") or "").strip()
+        src = (relation.get("source_element") or "").strip()
+        dst = (relation.get("target_element") or "").strip()
+        spec = rel_by_name.get(type_name)
+        if spec is None:
+            violations.append({"kind": "unknown_relation", "value": type_name,
+                               "name": "%s->%s" % (src, dst)})
+            continue
+        if not src or not dst:
+            violations.append({"kind": "missing_endpoint", "value": type_name, "name": ""})
+            continue
+        edges.append({
+            "type": type_name,
+            "label": spec.get("label") or type_name,
+            "source": src,
+            "target": dst,
+            "source_text": (relation.get("source_text") or "").strip(),
+            "source_span": (relation.get("source_span") or "").strip(),
+            "doc": doc_name,
+        })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "violations": violations,
+        "unmatched": result.get("unmatched") or [],
+        "notes": result.get("notes") or "",
+        "unknown_targets": sorted({e["source"] for e in edges if e["source"] not in known}
+                                  | {e["target"] for e in edges if e["target"] not in known}),
+    }
+
+def build_user_prompt(doc_name: str, text: str, existing: list[dict]) -> str:
+    if existing:
+        lines = ["## 已有要素（同名或同义时，关系请直接引用它们的 name；不要重复新建）"]
+        for item in existing[:200]:
+            lines.append("- [%s] %s | %s" % (item["type"], item["name"], (item.get("definition") or "")[:200]))
+        existing_block = "\n".join(lines)
+    else:
+        existing_block = "## 已有要素\n（无，所有识别均为新建）"
+    return existing_block + """
+
+## 文档：%s
+<content>
+%s
+</content>
+""" % (doc_name, text)
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `read_raw_from_log`（顶层 def，已回收）=====
+def read_raw_from_log(path: pathlib.Path) -> str:
+    """从已保存的调试日志里取回 LLM 原始返回（配合 --from-log 复用上一次调用，省额度）。"""
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    marker = "--- LLM 原始返回 ---"
+    index = text.find(marker)
+    if index == -1:
+        raise SystemExit("日志里找不到「%s」段：%s" % (marker, path))
+    return text[index + len(marker):].strip()
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `call_llm`（顶层 def，已回收）=====
+def call_llm(cfg: dict, system: str, user: str, method: str = "extraction") -> tuple[str, dict]:
+    """调用 LLM（OpenAI 兼容），返回 (原始文本, 元信息)。
+
+    优先用 `openai` 包；没装则退回标准库实现 —— 因为提取服务要跑在 WSL 里，
+    不该被一个 pip 依赖卡住（这个兜底也顺带让整个工具链零依赖）。
+    """
+    if not cfg.get("api_key"):
+        raise SystemExit("缺少 LLM_API_KEY（写在仓库根的 .env 里）")
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    started = time.time()
+    backend = "openai"
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"], timeout=600)
+        kwargs = {
+            "model": cfg["model"], "messages": messages,
+            "temperature": cfg["temperature"], "max_tokens": cfg["max_tokens"],
+        }
+        if cfg.get("json_mode"):
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit("LLM 调用失败：%s" % exc)
+        raw = (response.choices[0].message.content or "")
+        finish_reason = response.choices[0].finish_reason or ""
+        usage = getattr(response, "usage", None)
+    except ImportError:
+        backend = "stdlib"
+        print("[Bodhi]   ℹ 未安装 openai 包，使用标准库 HTTP 调用")
+        try:
+            raw, finish_reason, usage = _call_llm_stdlib(cfg, messages)
+        except SystemExit:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit("LLM 调用失败（stdlib）：%s" % exc)
+    save_log(method, messages, raw, finish_reason, usage)
+    print("[Bodhi]   ⏱ LLM 用时 %.1fs，返回 %d 字符，finish_reason=%s（backend=%s）"
+          % (time.time() - started, len(raw), finish_reason, backend))
+    return raw, {"finish_reason": finish_reason, "usage": str(usage), "backend": backend}
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `_call_llm_stdlib`（顶层 def，已回收）=====
+def _call_llm_stdlib(cfg: dict, messages: list[dict]) -> tuple[str, str, str]:
+    """标准库版本的 OpenAI 兼容调用（WSL 服务里没装 openai 包时的兜底）。
+
+    只用到 chat/completions，足够本项目（提示词 + JSON 输出）。返回
+    (文本, finish_reason, usage 文本)。
+    """
+    body: dict = {
+        "model": cfg["model"],
+        "messages": messages,
+        "temperature": cfg["temperature"],
+        "max_tokens": cfg["max_tokens"],
+    }
+    if cfg.get("json_mode"):
+        body["response_format"] = {"type": "json_object"}
+    request = urllib.request.Request(
+        cfg["base_url"].rstrip("/") + "/chat/completions",
+        data=json.dumps(body).encode("utf-8"), method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Authorization", "Bearer " + cfg["api_key"])
+    with urllib.request.urlopen(request, timeout=600) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if payload.get("error"):
+        raise SystemExit("LLM 返回错误：%s" % json.dumps(payload["error"], ensure_ascii=False)[:400])
+    choice = (payload.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    # 有些网关把思维链放在 reasoning_content，正文仍取 content
+    raw = (message.get("content") or message.get("reasoning_content") or "")
+    finish = choice.get("finish_reason") or ""
+    return raw, finish, str(payload.get("usage") or {})
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `save_log`（顶层 def，已回收）=====
+# ---------------------------------------------------------------------------
+# LLM 调用 + 日志（格式沿用历史实现 extraction_service.py::_save_log，该模块已随 src/ 删除）
+# ---------------------------------------------------------------------------
+def save_log(method: str, messages: list[dict], raw_response: str,
+             finish_reason: str = "", usage=None) -> pathlib.Path:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = LOG_DIR / ("ontology_%s_%s.log" % (method, ts))
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("=== 提取调试日志 %s ===\n\n" % ts)
+        handle.write("finish_reason: %s\n" % finish_reason)
+        handle.write("usage: %s\n\n" % usage)
+        for i, msg in enumerate(messages):
+            handle.write("--- Message[%d] role=%s ---\n" % (i, msg["role"]))
+            handle.write(msg["content"])
+            handle.write("\n\n")
+        handle.write("--- LLM 原始返回 ---\n")
+        handle.write(raw_response or "(空)")
+        handle.write("\n")
+    print("[Bodhi]   📝 LLM调试日志已保存: %s" % path.relative_to(REPO).as_posix())
+    return path
+
+
+
+
+# ===== [LLM/CLI 抽取退役 2026-09-22] 原 `build_system_prompt`（顶层 def，已回收）=====
+def build_system_prompt(model: dict, light: str) -> str:
+    classes = allowed_classes(model)
+    relations = allowed_relations(model)
+    external = external_class_names(model)
+    cls_lines = "\n".join(
+        "- %s（%s）：%s%s" % (c["name"], c["label"] or c["name"],
+                             c["definition"] or "无定义",
+                             "　← 来自依赖模块" if c["name"] in external else "")
+        for c in classes
+    )
+    rel_lines = "\n".join(
+        "- %s（%s）：%s → %s"
+        % (r["name"], r["label"] or r["name"],
+           ",".join(r["domain"]) or "?", ",".join(r["range"]) or "?")
+        for r in relations
+    )
+    body = SYSTEM_TEMPLATE.format(
+        expert_role=model["expert_role"],
+        model_label=model["label"],
+        classes=cls_lines,
+        relations=rel_lines,
+        example_class=classes[0]["name"] if classes else "bmm:Goal",
+        example_relation=relations[0]["name"] if relations else "bmm:realizes",
+    )
+    return "## 本体模型轻量版\n\n%s\n\n%s" % (light, body)
+
+

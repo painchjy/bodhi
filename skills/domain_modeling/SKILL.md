@@ -52,7 +52,9 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
 
 ## 纪律
 
-- **不要调用 `extract_and_save`**（原异步一次性抽取已退役：它把整篇塞进一次调用，内网必然超时）。
+- **不要指望「整篇一次性抽取」**：该工具已于 2026-09-22 从 MCP 服务端**移除**（原文留痕
+  `tools/ontology-mcp/archive/async_extract_retired_2026-09-22.py.txt`）—— 它把整篇塞进一次调用，内网必然超时；
+  请按本技能**分批**走 `doc_outline` → `save_knowledge(stage="graph", session=…)` → `extract_state`。
 - **不编 slug、不猜目标**：引用的页一律用检索结果里的 `slug`；找不到就登记候选或先建页。
 - `nodes[].attributes` / `edges[].properties` 的键必须是 `skills(...)` 给的本体面里**声明过的数据属性**
   （未声明的会被回报为 `violations`，不拦写入，但要告诉用户"需要补本体"）。

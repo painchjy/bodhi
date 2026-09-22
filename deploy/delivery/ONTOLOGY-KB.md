@@ -1,12 +1,15 @@
 # 本体模型知识库（交付与导入指引）
 
-> 交付物：`03-ontology-kb/`
-> - `ontology/` —— TTL 单一真源：`EA完整版.ttl`、`BMM完整版.ttl`、`extensions/*.ttl`（服务详设/归属/FD 扩展）、`shapes/*`、`lexicon/*`
-> - `tools/ontology-compiler/` —— 编译器（TTL → artifacts）
-> - `tools/ontology-extract/ontology_wiki.py` —— 把编译产物投影成「本体模型」知识库页面
-> - `artifacts/weknora/` —— 编译产物：`ontology_index.json`（类型/关系枚举/颜色）、`ontology_wiki.jsonl`（**247 页**页面清单）、`extract_config.*.json`
-> - `seed/` —— **可直接导入的种子**（无需 Python/编译器）：`ontology_kb_pages.sql`、`ontology_kb.json`、`kb_row.sql`
-> - `refresh_ontology_kb.sh` —— 一键：编译 → 生成清单 → 投影 → 重启容器
+> 交付物：**`bodhi2-03-manual.tar.gz`**（文档 + 本体真源）与 **`bodhi2-02-mcp-server.tar.gz`**（工具 + 编译产物）
+> - 03 包：`ontology/` —— TTL 单一真源：`EA完整版.ttl`、`BMM完整版.ttl`、`extensions/*.ttl`（服务详设/归属/FD 扩展）、`shapes/*`、`lexicon/*`；
+>   `seed/` —— **可直接导入的种子**（无需 Python/编译器）：`ontology_kb_pages.sql`、`ontology_kb.json`、`kb_row.sql`；
+>   `refresh_ontology_kb.sh` —— 一键：编译 → 生成清单 → 投影 → 重启容器；
+> - 02 包：`tools/ontology-compiler/` —— 编译器（TTL → artifacts，需 `rdflib`+`PyYAML`）；
+>   `tools/ontology-extract/ontology_wiki.py` —— 把编译产物投影成「本体模型」知识库页面；
+>   `artifacts/` —— 编译产物：`weknora/ontology_index.json`（类型/关系枚举/颜色）、`weknora/ontology_wiki.jsonl`（页面清单）、
+>   `weknora/extract_config.*.json`、`prompts/`、`json_schema/`、`neo4j/`（投影脚本）。
+>
+> **两个包解到同一父目录**即得上文与下文命令假设的仓库布局（`ontology/` 与 `tools/`、`artifacts/` 同级）。 本包**不含**编译产物 `artifacts/shacl/`（与 `ontology/shapes/*.ttl` 逐字节相同，只留真源；编译器会重新生成）。
 
 ## 0. 「本体模型知识库」是什么、为什么必须有
 
@@ -25,10 +28,10 @@
 cd /opt/bodhi2
 export BODHI_DB_HOST=127.0.0.1 BODHI_DB_USER=postgres BODHI_DB_PASSWORD=你的口令 BODHI_DB_NAME=WeKnora
 
-# ② 编译 TTL → artifacts（幂等；只读写仓库内文件）
+# ② 编译 TTL → artifacts（幂等；只读写仓库内文件）—— 编译器在 02 包 `tools/ontology-compiler/`
 python3 tools/ontology-compiler/compile.py compile --diff
 
-# ③ 生成页面清单（247 页）
+# ③ 生成页面清单（投影工具在 02 包 `tools/ontology-extract/`）
 python3 tools/ontology-extract/ontology_wiki.py build
 
 # ④ 投影进知识库（**幂等**：先删 last_edit_source='ontology-wiki' 的旧页，再写）
@@ -87,6 +90,6 @@ curl -s "http://127.0.0.1:8765/bodhi/audit?kb_id=<业务库>" | head -c 400
 | 知识库 | 内容 | 来源 | 谁写它 |
 |---|---|---|---|
 | **企业本体模型**（本包） | 类/关系/属性/模块页 | TTL 编译 | 只用本包的脚本（人来跑）|
-| 企业知识（业务） | 流程、活动、任务、服务、实体… 实例页 | 文档抽取 + 设计落库 | 智能体（`extract_and_save` / `save_knowledge`）|
+| 企业知识（业务） | 流程、活动、任务、服务、实体… 实例页 | 文档抽取（分批）+ 设计落库 | 智能体（`save_knowledge`，走 `domain_modeling` 技能）|
 
 业务库的智能体在**查类型**时读前者；写实例时只写后者。两个库可以都给智能体绑定（智能体配置里 `knowledge_bases` 两项都填）。

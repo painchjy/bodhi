@@ -6,20 +6,19 @@
 
 ## 0. 包里有什么
 
-> 手册位置：**根目录只放本文件（`MANUAL.md`）**；其余手册（`FRONTEND.md` / `MCP-SERVER.md` / `ONTOLOGY-KB.md` /
-> `KB-CONFIG.md` / `TROUBLESHOOTING.md` / `AGENTS-SQL.md`）与 `docs/`、`ontology/`、`skills/`、`sql/`、在线小工具
-> 都在 **`bodhi2-04-manual.tar.gz`** 里 —— 交接/归档以包内为准（单一来源是仓库 `deploy/delivery/*.md`，
+> 手册位置：**根目录只放本文件（`MANUAL.md`）**；各包自带自己的部署手册（`FRONTEND.md` 在 01、`MCP-SERVER.md` 在 02），
+> `ONTOLOGY-KB.md` / `KB-CONFIG.md` / `TROUBLESHOOTING.md` / `AGENTS-SQL.md` 与 `docs/`、`ontology/`（**本体真源 TTL**）、
+> `sql/`、`seed/`、维护工具都在 **`bodhi2-03-manual.tar.gz`** 里 —— 交接/归档以包内为准（单一来源是仓库 `deploy/delivery/*.md`，
 > `MANIFEST.json` 的 `manual_sha256` 记录了每份哈希）。
 
 | 包 | 内容 | 详细手册 |
 |---|---|---|
 | `bodhi2-01-frontend.tar.gz` | 补丁后的 UI 镜像（`weknora-ui:bodhi2`）+ nginx 模板 + compose overlay + 验收脚本 + 打补丁脚本（若你们要自己构建）| `FRONTEND.md` |
-| `bodhi2-02-mcp-server.tar.gz` | MCP 服务源码（`tools/ontology-mcp` + `tools/ke-core` + `skills` + `artifacts/weknora`）+ Dockerfile + compose 片段 + systemd + 自检脚本 | `MCP-SERVER.md` |
-| `bodhi2-03-ontology-kb.tar.gz` | 本体 TTL 真源 + 编译器 + 投影工具 + 编译产物 + **可直接导入的种子**（248 页本体模型库）| `ONTOLOGY-KB.md` |
-| `bodhi2-04-manual.tar.gz` | 配置手册成册：`docs/`（全部设计文档）+ `ontology/`（本体规范）+ 本手册与四份子手册 + 智能体注册 SQL | 本文件 + `KB-CONFIG.md` + `TROUBLESHOOTING.md` |
+| `bodhi2-02-mcp-server.tar.gz` | MCP 服务**整包（就是仓库根）**：`tools/`（服务 + 编译/投影工具）+ `artifacts/`（编译产物）+ `skills/` + Dockerfile + compose + systemd + 自检 | `MCP-SERVER.md` |
+| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源**：`docs/` + `ontology/`（TTL/词表/shapes）+ **可直接导入的种子**（248 页本体模型库）+ 登记 SQL + 维护工具 | 本文件 + `ONTOLOGY-KB.md` + `KB-CONFIG.md` + `TROUBLESHOOTING.md` + `AGENTS-SQL.md` |
 | `MANIFEST.json` / `SHA256SUMS` | 版本、文件清单、校验和 | — |
 
-**四张图看懂彼此关系**
+**一张图看懂彼此关系**
 
 ```
                  ┌─────────────── 你们已有的 WeKnora 部署 ───────────────┐
@@ -31,7 +30,7 @@
                                     │ MCP(HTTP)
                                   app/智能体 ── 按 skills/<id>/SKILL.md 干活
                                     │
-                        本体模型知识库（248 页，类型真源，由 03 包导入）
+                        本体模型知识库（248 页，类型真源；由 03 包的种子导入或 02 包编译器生成）
                         业务知识库（你们的文档 → 实例页，由智能体写入）
 ```
 
@@ -39,12 +38,12 @@
 
 | 步 | 动作 | 验收（不通过就别往下走）|
 |---|---|---|
-| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（10 个）` |
-| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 10 个 |
-| **3** | 导入本体模型知识库（`bodhi2-03`：编译投影 or 种子导入）| 页数 **248**（类 52 / 关系 80 / 属性 107 / 模块 6 / 轻量版 2 / 索引 1）|
+| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（14 个）` |
+| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 14 个 |
+| **3** | 导入本体模型知识库（`bodhi2-03`：**种子导入**最省事；或用 02 包的编译器按 TTL 重新生成）| 页数 **248**（类 52 / 关系 80 / 属性 107 / 模块 6 / 轻量版 2 / 索引 1）|
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
 | **5** | 替换前端（`bodhi2-01`）+ 挂载 nginx 模板 | `deploy_frontend.sh check` 全绿；类型下拉能看到 `easvc:*` |
-| **6** | 注册智能体（`AGENTS-SQL.md`：提示词 + 两个库 + MCP + 15 个工具）| 让智能体跑一轮"先 `skills()` 看目录"的任务，能正常列出 3 个技能 |
+| **6** | 注册智能体（`AGENTS-SQL.md`：提示词 + 两个库 + MCP + 18 个工具）| 让智能体跑一轮"先 `skills()` 看目录"的任务，能正常列出 3 个技能 |
 | **7** | 端到端验证 | 见 §4「验收清单」|
 
 > **只想要本体建模/设计能力、暂时不动前端**也可以：1→2→3→4→6 就能跑（前端替换只影响"类型下拉/本体图谱 tab/关系面板"这些可视化）。
@@ -77,7 +76,7 @@
 2. WeKnora `.env`（仅当 MCP URL 不是容器 DNS 时）：`SSRF_WHITELIST_EXTRA` 加上 MCP 的主机名/IP；
 3. `mcp_services` 一行：URL 指向 `http://bodhi-mcp:8765/mcp`（SQL 在 `MCP-SERVER.md` §6）；
 4. `custom_agents` 一行：提示词 + `knowledge_bases`（两个库）+ `mcp_services` + `allowed_tools`（18 个）；
-   **SQL 在 `04-manual/AGENTS-SQL.md`**（可回滚）；
+   **SQL 在 `03-manual/AGENTS-SQL.md`**（可回滚）；
 5. `knowledge_bases.wiki_config`：抽取指令按你们领域改（`KB-CONFIG.md` §3）；
 6. 前端 nginx 模板挂载 + `image: weknora-ui:bodhi2`（`FRONTEND.md`）。
 
@@ -85,8 +84,8 @@
 
 | # | 检查 | 期望 |
 |---|---|---|
-| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（10 个）` + `skills() OK（3 个）` |
-| 2 | 智能体一轮只读任务 | `tool_count=15`；`logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录 |
+| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（14 个）` + `skills() OK（3 个）` |
+| 2 | 智能体一轮只读任务 | `tool_count=18`；`logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录 |
 | 3 | 本体模型库 | 248 页；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
 | 4 | 业务库上传+抽取 | 页面类型都在本体里，`source_refs` 非空（无 C1）|
 | 5 | `curl <mcp>/bodhi/audit?kb_id=<业务库>` | 无 **C1/C3** 类"无来源"发现；A1/A2 若有，按提示修 |
@@ -99,7 +98,7 @@
 |---|---|
 | 看智能体到底调了什么 | `tail -f logs/mcp_calls_YYYYMMDD.log`（时间/工具/耗时/入参/结果摘要）|
 | 一致性巡检 | `curl "<mcp>/bodhi/audit?kb_id=<kb>"`；清理走 `plan → apply --confirm`（**不自动修**）|
-| 本体演进 | 改 TTL → `refresh_ontology_kb.sh`（编译+投影）；类清单变了记得重建前端 |
+| 本体演进 | 改 TTL（**03 包** `ontology/`）→ `refresh_ontology_kb.sh`（编译+投影；借用 **02 包** `tools/`，解到同一父目录即可）；类清单变了记得重建前端 |
 | 技能演进 | 直接改 `skills/<id>/SKILL.md`（MCP 按 mtime 热读，**不用重启**）|
 | 重建过 app 容器 | `docker restart WeKnora-frontend`（交付模板已含运行期解析，仍建议一把）|
 | 备份 | Postgres 常规备份即可（`wiki_pages` / `knowledges` / `mcp_services` / `custom_agents`）；MCP 服务本身无状态 |

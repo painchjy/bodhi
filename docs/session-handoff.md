@@ -20,8 +20,9 @@
   **v5/v6 新增**（2026-09-19 晚，一次重建）：① 类型改**彩色圆点**（§5.1）；
   ② 知识库头部**「上传自动生成 wiki」开关**（§5.2）；③ 树/列表**多选批量删除**（§5.3）；
   ④ 编辑页**本体类型下拉**（需求 1）；⑤ 阅读区**本体关系维护面板**（需求 2，出边可改/入边只读）。
-- **MCP/本体服务**：`bodhi-mcp.service`（WSL，`--host 0.0.0.0 --port 8765`），**15 个工具**：
-  `extract_and_save` / `extract_status`（**已退役，仅兼容保留**）、`list_pending_merges`、
+- **MCP/本体服务**：`bodhi-mcp.service`（WSL，`--host 0.0.0.0 --port 8765`），**14 个工具**：
+  （2026-09-22 起：`extract_and_save` / `extract_status` **已移除**；状态查询改名 `job_status`）
+  `list_pending_merges`、
   `resolve_pending_merge`、`ontology_types`、`skills`（技能目录/全文，2026-09-21）、
   `audit_scan` / `audit_plan`（巡检，含 `scope=coupling` E1-E4）、`save_knowledge`（设计落库，支持 `retract` 与
   `session` 会话编号）、`service_overview`（服务详细设计总览，`apply=true` 异步落库）、
@@ -38,8 +39,9 @@
   已按 `artifacts/neo4j/00_constraints.cypher` → `10_ontology.cypher` 幂等灌入：
   模块 5 / 类 47 / 对象属性 70 / 数据属性 20 / 限制 26 / 枚举值 7；
   边 `BODHI_SUBCLASS_OF 24`、`BODHI_DOMAIN 90`、`BODHI_RANGE 92`、`BODHI_INVERSE_OF 5`。
-- **已验证的端到端链路**：智能体只处理**用户指定的那篇**文档 → 调一次 `extract_and_save`
-  → 后台抽 1~2 分钟 → 写库（`last_edit_source=bodhi-onto-mcp`）→ **自动重建两级目录** → 回报明细。
+- **已验证的端到端链路（2026-09-19 抽取年代，工具已退役；链路本身仍成立）**：智能体只处理**用户指定的那篇**文档
+  → 抽取（当年是整篇一次；现为 `doc_outline` 分批 + `save_knowledge`）
+  → 写库（`last_edit_source=bodhi-onto-mcp`）→ **自动重建两级目录** → 回报明细。
   真实结果示例：29 要素 / 19 关系 / 5 新增 / 19 合并 / 0 违规 / 7 未匹配（含名称与理由）。
 - **数据**：企业知识库（`dbc2528f-611b-48da-9a71-d7c93975adb4`）我们的页 **100**；
   本体模型库（`08810cbd-af86-48d1-bd25-3b2c338e3d68`）TTL 编译页 125。
@@ -60,7 +62,7 @@
 | # | 任务 | 入口 | 规模 |
 |---|---|---|---|
 | 1 | **知识推理引擎**（需求主线下一步）：把本体自带 SHACL 编译成规则 JSON（`--emit-rules`）→ `tools/ke-core/reason.py` 判定内核 → `derive` 幂等落库 → MCP 工具 `reason_validate`/`reason_derive`。**前置条件本轮已备齐**：Neo4j 投影已灌库、`ke_ontology` 可按类筛属性/闭包、关系维护能造出规则需要的实例 | 规格：`docs/bodhi-reasoning.md`（S1–S9 / O1–O5 已抽好）；规则源：`artifacts/shacl/*`、`ontology/shapes/*` | **大**（单独开一轮） |
-| 2 | `server.py` **继续拆分**（需求 3 的下一步）：抽取合并流水线（`build_new_page` / `merge_content` / `extract_and_save` / 相似度）整体搬到 `ke-core/extract_pipeline.py`，`server.py` 只留 MCP 壳；`graph_page.py` 的内嵌 HTML/JS 抽成模板文件 | `tools/ontology-mcp/server.py`（本轮已把 DB/本体/页面维护拆到 `tools/ke-core/`） | 中 |
+| 2 | `server.py` **继续拆分**（需求 3 的下一步）：落库合并流水线（`build_new_page` / `merge_content` / `save_knowledge` / 相似度）整体搬到 `ke-core/extract_pipeline.py`，`server.py` 只留 MCP 壳；`graph_page.py` 的内嵌 HTML/JS 抽成模板文件 | `tools/ontology-mcp/server.py`（本轮已把 DB/本体/页面维护拆到 `tools/ke-core/`） | 中 |
 | 3 | index 索引页与 wiki 同步（上游 `pipeline` 维护的 105 字短文，版本在涨但**不覆盖我们的 SQL 写入**） | 方案 A/B/C 见上轮讨论；若走 B 需先查 app 触发 wiki ingest 的接口/队列键 | 中 |
 | 4 | 前端 v5/v6 视觉复核（用户侧看一眼：圆点颜色、开关位置、多选删除、类型下拉、关系面板） | — | 微 |
 | 5 | **本体文件加载功能**（用户 2026-09-19 提出的待办）：在「企业本体模型」知识库里**选择本体文件 → 加载**；除了更新 Neo4j 图谱，还要**把每个 class 生成/更新 wiki 页写进 PG**，这样点图谱节点就能直接看到该类的 wiki（当前模型图的节点 slug 是 `bmm:Goal` 这类类型名，取不到 wiki 页） | 后端：`POST /api/ontology/load`（`src/api/ontology.py`）+ `ontology_wiki.py`；前端：模型图右侧详情面板 | 中 |

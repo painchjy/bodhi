@@ -76,7 +76,7 @@ docker compose build frontend && docker compose up -d --no-build frontend
 | 4 | 打开任一实例页 → 右侧关系面板 | 出边可编辑、入边只读 |
 | 5 | 编辑页 → 本体类型下拉 | 能看到 `easvc:ServiceOperation` 等类型（说明 `ontologyTypes.ts` 生效）|
 | 6 | `curl -s -o /dev/null -w '%{http_code}' http://<host>/bodhi/graph?kb_id=<kb>&model=ea` | `200`（说明 `/bodhi/` → MCP 通了）|
-| 7 | 平台 → MCP 服务 | 能看到 `bodhi_ontology`，且**启用的工具里有 10 个** |
+| 7 | 平台 → MCP 服务 | 能看到 `bodhi_ontology`，且**启用的工具里有 14 个** |
 
 ## 5. 两个必须知道的坑
 

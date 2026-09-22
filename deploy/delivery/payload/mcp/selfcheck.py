@@ -43,7 +43,8 @@ def rpc(url: str, method: str, params: dict | None, session: str = "", rpc_id: i
 def main() -> int:
     ap = argparse.ArgumentParser(description="bodhi2 MCP 自检（只读）")
     ap.add_argument("--url", default="http://127.0.0.1:8765/mcp")
-    ap.add_argument("--expect-tools", type=int, default=15)
+    ap.add_argument("--expect-tools", type=int, default=14,
+                    help="期望的工具个数（2026-09-22：14 —— 整篇异步抽取已退役）")
     args = ap.parse_args()
     ok = True
 

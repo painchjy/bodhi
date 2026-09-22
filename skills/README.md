@@ -17,7 +17,7 @@
 > **领域建模已改为分批交互**（v0.2.0，2026-09-21）：`doc_outline` 按切片父子关系组织"合适的上下文"，
 > `budget_tokens` 是**会话参数**（超时就调小，父块会自动按子块细分）；每轮 `save_knowledge(..., session=…)`
 > 回执带**页面编号**（`created[].no`），进度用 `extract_state` 对齐；跨上下文关联先 `link_candidates` 登记、
-> **用户确认后** `resolve_link_candidate(confirm)` 才写入。原异步一次性抽取（`extract_and_save`）**已退役**。
+> **用户确认后** `resolve_link_candidate(confirm)` 才写入。原异步一次性抽取（`extract_and_save`）已于 **2026-09-22 从服务端移除**（不是「兼容保留」）。
 
 > 服务详细设计收尾：`service_overview(kb_id, apply=true)` 刷「IT 服务详细设计总览」评审页
 > （服务一览 / 键 / 跨服务读依赖 / 操作明细 + 巡检结论）—— 评审看这一页，不要人在回答里拼表。

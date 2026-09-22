@@ -9,10 +9,14 @@
 
 本服务暴露的工具
 ----------------
-- `extract_and_save(model, kb_id, knowledge_id, ...)`
-    取片段（正文用 parent_text、溯源用子块）→ **一次** LLM 抽取（复用 extract.py 引擎）
-    → 本体合规校验（类型白名单 + domain→range）→ 逐要素向量匹配后
-    **合并 / 新增 / 待人工确认**，并写 wiki 页面（含版本快照，可回退）。
+- 建模/落库（`domain_modeling` 技能的分批流程）：`doc_outline` / `save_knowledge` /
+    `extract_state` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate`；
+    落库半段 `save_elements`（合规校验 + 相似度匹配 → 合并/新增/待确认 + 写页/版本）不变。
+- 详设/巡检/总览/技能：`service_*`、`list_pending_merges`、`resolve_pending_merge`、
+    `ontology_types`、`skills`、`job_status`（异步任务回执）。
+- **2026-09-22 退役**：整篇异步抽取工具（`extract_and_save` 及其状态查询 `extract_status`）
+    已移除，原文留痕在 `tools/ontology-mcp/archive/async_extract_retired_2026-09-22.py.txt`。
+    MCP 侧**不再持有 LLM 调用链** → `openai` 依赖随之去掉；`rdflib` 仅本体编译工具需要。
 - `list_pending_merges(kb_id)`：列出"疑似重复待确认"项。
 - `resolve_pending_merge(kb_id, pending_slug, action)`：人工裁决（merge | create）。
 - `ontology_types(model)`：返回该模块的可用类与关系（供智能体自查）。
@@ -422,15 +426,6 @@ def extract_state(kb_id: str, knowledge_id: str = "", action: str = "get") -> di
     }
 
 
-def fetch_chunks(knowledge_id: str) -> list[dict]:
-    rows = psql_csv("SELECT id, chunk_index, chunk_type, content FROM chunks "
-                    "WHERE knowledge_id = %s AND deleted_at IS NULL "
-                    "ORDER BY chunk_index, id" % sql_str(knowledge_id))
-    for row in rows:
-        row["chunk_index"] = int(row.get("chunk_index") or 0)
-    return rows
-
-
 # --- 候选关联（跨上下文/跨库的关联，必须单独确认后才写库）-------------------
 def _page_row_by_slug(kb_id: str, slug: str) -> dict | None:
     rows = psql_csv("SELECT slug, title, page_type FROM wiki_pages WHERE knowledge_base_id = %s "
@@ -600,17 +595,6 @@ def adopt_session(kb_id: str, session: dict | None, summary: dict) -> dict | Non
             "dry_run": dry, "state_file": str(_state_path(kb_id, knowledge_id))}
 
 
-def split_body_pool(chunks: list[dict]) -> tuple[list[dict], list[dict]]:
-    body = [c for c in chunks if c.get("chunk_type") == "parent_text"]
-    if not body:
-        texts = [c for c in chunks if c.get("chunk_type") == "text"]
-        pool = texts or [c for c in chunks if c.get("chunk_type") != "summary"]
-        if pool:
-            body = [max(pool, key=lambda c: len(c["content"] or ""))]
-    pool = [c for c in chunks if c.get("chunk_type") == "text"] or body
-    return body, pool
-
-
 def squash(text: str) -> str:
     return "".join((text or "").split())
 
@@ -622,86 +606,6 @@ def locate_chunk(source_text: str, pool: list[dict]) -> tuple[str, int]:
             if needle in squash(chunk["content"]):
                 return chunk["id"], chunk["chunk_index"]
     return "", -1
-
-
-def scope_instructions(scope: dict | None, model: dict) -> list[str]:
-    """把「本次收窄范围」编译成提示词片段（`scope.classes` / `scope.relations`）。"""
-    scope = scope or {}
-    classes = [str(x).strip() for x in (scope.get("classes") or []) if str(x).strip()]
-    relations = [str(x).strip() for x in (scope.get("relations") or []) if str(x).strip()]
-    if not classes and not relations:
-        return []
-    meta = ke_ontology.class_meta()
-    lines = ["", "【本次收窄范围】（用户指定，优先于上面的全量清单）",
-             "- 只抽取这些类：%s" % "、".join("%s（%s）" % (c, (meta.get(c) or {}).get("label") or "")
-                                              for c in classes) if classes else "- 类：不限制（仍按全量清单）",
-             "- 只允许这些关系：%s" % "、".join(relations) if relations else "- 关系：不限制（仍按全量清单）",
-             "- 范围外的内容**不要输出**（服务端会把范围外的要素移入 unmatched 并说明原因）。"]
-    return lines
-
-
-def apply_extract_scope(checked: dict, scope: dict | None) -> dict:
-    """按收窄范围过滤抽取结果：范围外的节点/关系移入 `unmatched`（**不静默丢**）。
-
-    为什么在服务端再过一遍：提示词是"请求"，模型不一定照做；收窄必须由确定性代码兜底，
-    否则用户以为"只抽了任务与步骤"，库里却混进全量类型。
-    """
-    classes = {str(x).strip() for x in ((scope or {}).get("classes") or []) if str(x).strip()}
-    relations = {str(x).strip() for x in ((scope or {}).get("relations") or []) if str(x).strip()}
-    if not classes and not relations:
-        return checked
-    kept_nodes, moved = [], []
-    for node in checked.get("nodes") or []:
-        if classes and node.get("type") not in classes:
-            moved.append({"name": node.get("name"), "type": node.get("type"),
-                          "reason": "不在本次收窄范围（classes）"})
-            continue
-        kept_nodes.append(node)
-    kept_names = {n.get("name") for n in kept_nodes}
-    kept_edges = []
-    for edge in checked.get("edges") or []:
-        if relations and edge.get("type") not in relations:
-            moved.append({"name": "%s→%s" % (edge.get("source"), edge.get("target")),
-                          "type": edge.get("type"), "reason": "不在本次收窄范围（relations）"})
-            continue
-        if classes and (edge.get("source") not in kept_names or edge.get("target") not in kept_names):
-            moved.append({"name": "%s→%s" % (edge.get("source"), edge.get("target")),
-                          "type": edge.get("type"), "reason": "关系端点在收窄范围外"})
-            continue
-        kept_edges.append(edge)
-    checked["nodes"], checked["edges"] = kept_nodes, kept_edges
-    checked["unmatched"] = list(checked.get("unmatched") or []) + moved
-    checked["scope"] = {"classes": sorted(classes), "relations": sorted(relations),
-                        "filtered": len(moved)}
-    return checked
-
-
-def run_extraction(engine, model_key: str, doc_name: str, doc_text: str,
-                   from_log: str = "", scope: dict | None = None) -> dict:
-    """调用 LLM 抽取一次并做本体校验（不写任何库）；`scope` = 本次收窄范围。"""
-    index = engine.load_index(engine.DEFAULT_INDEX)
-    model = engine.pick_model(index, model_key)
-    system = engine.build_system_prompt(model, engine.load_light(model, engine.DEFAULT_PROMPTS))
-    env = engine.load_env(REPO / ".env")
-    user = engine.build_user_prompt(doc_name, doc_text, [])
-    extra = scope_instructions(scope, model)
-    if extra:
-        user = user + "\n" + "\n".join(extra)
-    if from_log:
-        raw = engine.read_raw_from_log(pathlib.Path(from_log))
-    else:
-        cfg = {
-            "api_key": env.get("LLM_API_KEY", ""),
-            "base_url": env.get("LLM_BASE_URL", "https://api.deepseek.com"),
-            "model": env.get("LLM_MODEL", "deepseek-flash"),
-            "temperature": float(env.get("LLM_TEMPERATURE", "0.1")),
-            "max_tokens": int(env.get("LLM_MAX_TOKENS", "32768")),
-            "json_mode": env.get("LLM_JSON_MODE", "1") == "1",
-        }
-        raw, _meta = engine.call_llm(cfg, system, user, method="mcp_extraction")
-    checked = engine.validate(engine.parse_json(raw), model, doc_name)
-    checked = apply_extract_scope(checked, scope)
-    return {"model": model, "checked": checked, "raw_len": len(raw)}
 
 
 # ---------------------------------------------------------------------------
@@ -1219,32 +1123,6 @@ def build_pending_page(model: dict, element: dict, candidate: dict, similarity: 
     }
 
 
-# ---------------------------------------------------------------------------
-# 主流程：抽取一次 → 合规校验 → 匹配 → 合并/新增/待确认
-# ---------------------------------------------------------------------------
-def element_payloads(engine, checked: dict, pool: list[dict]) -> list[dict]:
-    """把校验后的 nodes/edges 整理成"待落页要素"（含出向关系与来源片段）。"""
-    slug_by_name = {node["name"]: element_slug(node["module"], node) for node in checked["nodes"]}
-    outgoing: dict[str, list[dict]] = {}
-    for edge in checked["edges"]:
-        outgoing.setdefault(edge["source"], []).append({
-            "type": edge["type"], "label": edge["label"], "target": edge["target"],
-            "target_slug": slug_by_name.get(edge["target"], ""),
-            "source_text": edge.get("source_text", ""),
-        })
-    payloads = []
-    for node in checked["nodes"]:
-        chunk_id, chunk_index = locate_chunk(node.get("source_text", ""), pool)
-        payloads.append({
-            "name": node["name"], "type": node["type"], "type_label": node["type_label"],
-            "module": node["module"], "definition": node["definition"],
-            "description": node.get("description", ""), "source_text": node.get("source_text", ""),
-            "chunk_id": chunk_id, "chunk_index": chunk_index,
-            "relations": outgoing.get(node["name"], []),
-        })
-    return payloads
-
-
 def sql_rebuild_in_links(kb_id: str) -> str:
     """按 out_links 重算 in_links（wiki 图谱的反向边）。实现见 ke_pages。
 
@@ -1260,7 +1138,8 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                   extra: dict | None = None, engine=None, same_type_only: bool = False) -> dict:
     """**落库半段**（抽取路径与设计路径共用）：相似度匹配 → 合并/新增/待确认 → 写页 → 重算 links。
 
-    这段逻辑原先内联在 `extract_and_save` 里（2026-09-20 原样抽出，行为逐字保留）：
+    这段逻辑原先内联在**已退役的整篇抽取工具**里（2026-09-20 原样抽出，行为逐字保留；
+    抽取工具 2026-09-22 退役，本函数现由设计/建模路径 `save_knowledge` 使用）：
     - 相似度 ≥ high：合并进存量页（定义取更完整、追加证据、关系去重、写入 merge_history）；
     - 相似度 ≤ low 或无候选：新建页；
     - 两者之间：生成「待确认合并」页，交人工裁决（`resolve_pending_merge`）。
@@ -1845,39 +1724,6 @@ def skills(skill: str = "", model: str = "") -> dict:
             "source": item["path"].replace(str(REPO) + "/", "")}
 
 
-def extract_and_save(model_key: str, kb_id: str, knowledge_id: str,
-                     high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
-                     dry_run: bool = False, from_log: str = "",
-                     scope: dict | None = None) -> dict:
-    engine = load_engine()
-    # 参数容错（2026-09-19）：智能体常传知识库名称、或 d1 之类的占位符，
-    # 这里统一解析成真实 UUID，并把解析说明回传给智能体（避免下次再传错）。
-    kb_id, kb_note = resolve_kb_id(kb_id)
-    knowledge_id, doc_note = resolve_knowledge_id(kb_id, knowledge_id)
-    tenant_id = get_kb_tenant(kb_id)
-    doc_rows = psql_csv("SELECT id, title FROM knowledges WHERE id = %s" % sql_str(knowledge_id))
-    if not doc_rows:
-        raise RuntimeError("文档不存在：%s" % knowledge_id)
-    doc_title = doc_rows[0]["title"] or knowledge_id
-    doc_meta = {"id": knowledge_id, "title": doc_title}
-
-    chunks = fetch_chunks(knowledge_id)
-    if not chunks:
-        raise RuntimeError("文档没有可用片段：%s" % knowledge_id)
-    body, pool = split_body_pool(chunks)
-    doc_text = "\n\n---\n\n".join((c["content"] or "").strip() for c in body)
-
-    result = run_extraction(engine, model_key, doc_title, doc_text, from_log=from_log, scope=scope)
-    model, checked = result["model"], result["checked"]
-    payloads = element_payloads(engine, checked, pool)
-    # 落库半段统一走 save_elements（与「设计路径」同一份实现，见 save_knowledge）
-    summary = save_elements(kb_id, model, checked, payloads, doc_meta,
-                            high=high, low=low, dry_run=dry_run, tenant_id=tenant_id,
-                            resolved_note=(kb_note + " " + doc_note), knowledge_id=knowledge_id,
-                            extra={"chunks": len(chunks), "chars": len(doc_text)}, engine=engine)
-    return summary
-
-
 # ---------------------------------------------------------------------------
 # 待确认裁决 + 查询工具
 # ---------------------------------------------------------------------------
@@ -2456,13 +2302,10 @@ def ontology_types(model_key: str, focus: str = "", classes: list | None = None,
 # 异步任务层（2026-09-19 实测的必要性）
 #   app 侧 MCP 客户端的超时是**硬编码 60 秒且无配置项**（app env / 上游 compose 里都没有
 #   MCP 超时开关），而单次抽取的 LLM 调用就要 ~57s → 同步调用必然 context deadline exceeded。
-#   因此工具改为「立即受理 + 后台执行」，用 extract_status 轮询结果。
+#   因此工具改为「立即受理 + 后台执行」，用 job_status 轮询结果。
 # ---------------------------------------------------------------------------
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
-JOB_KEEP = {"status", "started_at", "finished_at", "doc_title", "created", "merged",
-            "pending", "violations", "unmatched", "folders_synced", "elements",
-            "relationships", "error"}
 
 
 DETAIL_KEYS = ("created", "merged", "pending", "violations", "unmatched")
@@ -2488,80 +2331,14 @@ def _job_brief(result: dict) -> dict:
     return out
 
 
-def job_key(args: dict) -> str:
-    """任务去重键：同一（知识库, 文档, 模型）视为同一次抽取。"""
-    return "|".join([str(args.get("kb_id", "")).strip(),
-                     str(args.get("knowledge_id", "")).strip(),
-                     str(args.get("model", "")).strip()])
+def job_status(job_id: str = "") -> dict:
+    """查询**异步任务**的状态/结果（当前唯一用户：`service_overview` 刷新）。
 
+    不给 job_id 则列出最近的任务。
 
-def find_existing_job(args: dict) -> tuple[str, dict] | None:
-    """按去重键找已有的任务：在跑的、或最近的（无论成败）都复用，避免重复抽取。
-
-    2026-09-19 用户实测：智能体每"查询进度"都会再调一次 extract_and_save，
-    旧实现每次都新建 job → 同一篇文档被反复抽取。现在同组只保留一个任务，
-    重复调用直接返回原 job_id；要强制重跑请换 knowledge_id 或显式传 fresh=true。
+    沿革：本工具原名 `job_status`，只服务于「整篇异步抽取」；该抽取已于 2026-09-22
+    退役（改为 `domain_modeling` 技能分批交互），任务池保留给总览页刷新，故改名去歧义。
     """
-    if args.get("fresh"):
-        return None
-    key = job_key(args)
-    with JOBS_LOCK:
-        for job_id in reversed(list(JOBS)):
-            job = JOBS[job_id]
-            if job.get("key") == key:
-                return job_id, job
-    return None
-
-
-def start_extract_job(args: dict) -> dict:
-    """受理一次抽取并立即返回；同名同文档的任务会复用（幂等）。"""
-    existing = find_existing_job(args)
-    if existing:
-        job_id, job = existing
-        return {"status": job.get("status", "running"), "job_id": job_id,
-                "reused": True, "started_at": job.get("started_at"),
-                "note": ("同一篇文档已有抽取任务（未重复发起）。请用 "
-                         "extract_status(job_id=...) 查询该任务；确需重跑请传 fresh=true。"),
-                **_job_brief(job)}
-
-    key = job_key(args)
-    job_id = uuid.uuid4().hex[:12]
-    with JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "started_at": now_text(), "key": key}
-        if len(JOBS) > 30:  # 只保留最近若干条，避免长跑进程内存膨胀
-            for stale in list(JOBS)[:-30]:
-                if JOBS[stale].get("status") != "running":
-                    JOBS.pop(stale, None)
-
-    def _run() -> None:
-        try:
-            result = extract_and_save(
-                str(args["model"]), str(args["kb_id"]), str(args["knowledge_id"]),
-                high=float(args.get("high", DEFAULT_HIGH)),
-                low=float(args.get("low", DEFAULT_LOW)),
-                dry_run=bool(args.get("dry_run", False)),
-                from_log=str(args.get("from_log", "")),
-                scope=args.get("scope") or None)
-            with JOBS_LOCK:
-                JOBS[job_id].update({"status": "done", "finished_at": now_text(),
-                                     "doc_title": result.get("doc_title", "")})
-                JOBS[job_id].update(result)
-        except Exception as exc:  # noqa: BLE001
-            print("[mcp] 异步抽取失败 job=%s：%s" % (job_id, exc))
-            with JOBS_LOCK:
-                JOBS[job_id].update({"status": "failed", "finished_at": now_text(),
-                                     "error": str(exc)})
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {
-        "status": "started", "job_id": job_id, "started_at": now_text(),
-        "note": ("抽取已受理并开始执行（约 1-2 分钟）。请立即用 extract_status(job_id=...) "
-                 "查询进度与结果；**不要**再次调用 extract_and_save 以免重复抽取。"),
-    }
-
-
-def extract_status(job_id: str = "") -> dict:
-    """查询异步抽取的状态/结果；不给 job_id 则列出最近的任务。"""
     with JOBS_LOCK:
         if job_id:
             job = JOBS.get(job_id)
@@ -2577,59 +2354,6 @@ def extract_status(job_id: str = "") -> dict:
 
 def tool_definitions() -> list[dict]:
     return [
-        {
-            "name": "extract_and_save",
-            "description": ("**[已退役，仅兼容保留]** 一次性异步抽取整篇文档（把全文塞进一次调用）。"
-                            "内网算力有限时必然超时/被截断，且无法按对话调整上下文预算 —— "
-                            "**新流程请用 `domain_modeling` 技能的分批模式**："
-                            "`doc_outline` 取本批上下文 → `save_knowledge(stage=\"graph\", session={...})` 落库续跑。"
-                            "保留原因：老脚本/回归测试仍可能调用。"
-                            "（原行为：按本体模型对**一篇文档**做一次抽取并写入 wiki："
-                            "自动做类型/关系合规校验（不合规不入库），"
-                            "再按向量相似度与存量比对 —— 高相似直接合并（追加原文证据、"
-                            "定义取更完整者、版本+1、可回退），低相似新增页面，中间区间生成"
-                            "「待确认合并」页由人工裁决。**只需调用一次**，不要自己重复读源文或"
-                            "自己判断与存量是否重复。"
-                            "`scope` 支持**按对话收窄范围**（只抽某几类/某几条关系）："
-                            "服务端会把它写进提示词，并**在结果上再过一遍**（范围外的要素进 unmatched 并说明原因）。"),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "model": {"type": "string", "description": "本体模型 key：bmm / ea"},
-                    "kb_id": {"type": "string", "description": "目标知识库 UUID"},
-                    "knowledge_id": {"type": "string", "description": "源文档（knowledge）UUID"},
-                    "scope": {
-                        "type": "object",
-                        "description": ("本次收窄范围（可选）：{classes:[\"ea:Step\",\"ea:Task\"], "
-                                        "relations:[\"ea:taskHasStep\"]}。"
-                                        "取值从 `ontology_types(model, focus=…)` 里挑；"
-                                        "不传 = 按该模型全量清单抽取。"),
-                        "properties": {"classes": {"type": "array", "items": {"type": "string"}},
-                                       "relations": {"type": "array", "items": {"type": "string"}}},
-                    },
-                    "high": {"type": "number", "description": "合并阈值，默认 0.90"},
-                    "low": {"type": "number", "description": "新增阈值，默认 0.75"},
-                    "dry_run": {"type": "boolean", "description": "只算不写，默认 false"},
-                    "wait": {"type": "boolean",
-                             "description": ("默认 false = 立即受理并后台执行（推荐，避免调用超时）；"
-                                             "true = 同步等待结果（可能超过 60 秒，仅在本地调试时用）")},
-                    "from_log": {"type": "string",
-                                 "description": "调试用：从指定日志文件复放原始 LLM 输出，不发起真实调用"},
-                },
-                "required": ["model", "kb_id", "knowledge_id"],
-            },
-        },
-        {
-            "name": "extract_status",
-            "description": ("**[已退役，仅兼容保留]** 查询旧异步抽取任务的状态与结果"
-                            "（配合 `extract_and_save` 的异步模式）。新流程用 `extract_state` 看"
-                            "分批建模进度（页面编号/轮次/游标）。"
-                            "返回 status=running/done/failed，done 时含 created/merged/pending/"
-                            "violations/unmatched 明细与 folders_synced（目录是否已重建）。"),
-            "inputSchema": {"type": "object",
-                            "properties": {"job_id": {"type": "string",
-                                                      "description": "extract_and_save 返回的 job_id"}}},
-        },
         {
             "name": "list_pending_merges",
             "description": "列出「待确认合并」项（相似度处于两个阈值之间，需人工裁决）。",
@@ -2683,13 +2407,24 @@ def tool_definitions() -> list[dict]:
             }},
         },
         {
+            "name": "job_status",
+            "description": ("查询**异步任务回执**（当前用于 `service_overview(apply=true)` 的总览页刷新，"
+                            "渲染 12 个服务约 1-3 分钟）。不传 `job_id` → 列出最近任务概览。"
+                            "整篇抽取工具已于 2026-09-22 退役：建模改用 `domain_modeling` 技能的分批"
+                            "流程（`doc_outline` → `save_knowledge(stage=\"graph\", session={...})` "
+                            "→ `extract_state`）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "job_id": {"type": "string", "description": "异步受理回执里的 job_id（留空 = 列出最近任务）"},
+            }},
+        },
+        {
             "name": "service_overview",
             "description": ("**IT 服务详细设计总览**（评审页）：把所有 IT 服务的详设跨页聚合渲染成一页 —— "
                             "服务一览（操作数 / 写方属性 / 只读属性 / 涉及键）、业务属性与键、"
                             "跨服务读依赖（经接口）、逐操作明细（方法/幂等/事务/写读）、规模与巡检结论。"
                             "不传 `apply` → 只读预览（含统计 + 前若干行，不写库）；"
                             "`apply=true` → **异步**渲染并写入/刷新总览页（同 slug 复用），"
-                            "用 `extract_status(job_id=...)` 查回执。"
+                            "用 `job_status(job_id=...)` 查回执。"
                             "服务详设改动后刷一遍，评审就看这一页。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string", "description": "知识库 UUID 或名称（原样传可选清单里的）"},
@@ -2914,7 +2649,7 @@ def service_overview_tool(kb_id: str, apply: bool = False, slug: str = "", title
             "preview": "\n".join(lines[:max(1, int(preview_lines))]),
             "applied": False, "overview_slug": slug or OVERVIEW_SLUG,
             "note": ("只读预览。要生成/刷新评审页请再调本工具 **apply=true**"
-                     "（异步落库，用 extract_status(job_id=...) 查回执；落库版会带上巡检结论）。")}
+                     "（异步落库，用 job_status(job_id=...) 查回执；落库版会带上巡检结论）。")}
 
 
 def start_overview_job(args: dict) -> dict:
@@ -2927,7 +2662,7 @@ def start_overview_job(args: dict) -> dict:
             job = JOBS[job_id]
             if job.get("key") == key and job.get("status") == "running":
                 return {"status": "running", "job_id": job_id, "reused": True,
-                        "note": "同一总览页正在刷新，请用 extract_status(job_id=...) 查回执。"}
+                        "note": "同一总览页正在刷新，请用 job_status(job_id=...) 查回执。"}
         job_id = uuid.uuid4().hex[:12]
         JOBS[job_id] = {"status": "running", "started_at": now_text(), "key": key, "tool": "service_overview"}
 
@@ -2945,24 +2680,13 @@ def start_overview_job(args: dict) -> dict:
 
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "started", "job_id": job_id, "started_at": now_text(), "slug": slug,
-            "note": ("总览页刷新已受理（渲染 12 个服务约 1-3 分钟）。请用 extract_status(job_id=...) "
+            "note": ("总览页刷新已受理（渲染 12 个服务约 1-3 分钟）。请用 job_status(job_id=...) "
                      "查回执；**不要**重复调用 apply=true。")}
 
 
 def call_tool(name: str, args: dict) -> dict:
-    if name == "extract_and_save":
-        # 默认异步受理（app 侧 MCP 60s 硬超时，而抽取要 1-2 分钟）；
-        # wait=true 才同步等待（本地调试用）。
-        if not args.get("wait") and not args.get("from_log"):
-            return start_extract_job(args)
-        return extract_and_save(
-            str(args["model"]), str(args["kb_id"]), str(args["knowledge_id"]),
-            high=float(args.get("high", DEFAULT_HIGH)),
-            low=float(args.get("low", DEFAULT_LOW)),
-            dry_run=bool(args.get("dry_run", False)),
-            from_log=str(args.get("from_log", "")))
-    if name == "extract_status":
-        return extract_status(str(args.get("job_id", "")))
+    if name == "job_status":
+        return job_status(str(args.get("job_id", "")))
     if name == "list_pending_merges":
         return list_pending_merges(str(args["kb_id"]))
     if name == "resolve_pending_merge":
@@ -3129,8 +2853,11 @@ class MCPHandler(BaseHTTPRequestHandler):
                 "protocolVersion": params.get("protocolVersion") or PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-                "instructions": ("本体知识保存工具：extract_and_save 一次调用即完成"
-                                 "「读片段 → 抽取 → 合规校验 → 与存量向量比对 → 合并/新增/待确认」。"),
+                "instructions": ("本体知识保存工具：按 `domain_modeling` 技能**分批**工作 —— "
+                                 "`doc_outline` 取本批上下文 → 自己比对后 "
+                                 "`save_knowledge(stage=\"graph\")` 落库 → `extract_state` 看会话进度；"
+                                 "服务端只做确定性校验与写入。整篇抽取工具（原名 `extract_and_save`）"
+                                 "已于 2026-09-22 退役。"),
             }
         elif method == "ping":
             result = {}

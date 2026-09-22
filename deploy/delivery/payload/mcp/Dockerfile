@@ -14,13 +14,15 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# 期望的包内布局（与 server.py 的 REPO=parents[2] 假设一致）：
-#   tools/ontology-mcp tools/ke-core tools/ontology-extract skills artifacts/weknora ontology logs .env
+# 期望的包内布局（与 server.py 的 REPO=parents[2] 假设一致，**02 包解出来就是这个形状**）：
+#   tools/ artifacts/ skills/ logs/ ontology/uploads/ .env
+# 注：本体真源 TTL 在 03-manual 包里（服务运行不需要）；artifacts/ 里的编译产物是运行时索引。
 COPY tools/ /app/tools/
 COPY skills/ /app/skills/
 COPY artifacts/ /app/artifacts/
 COPY ontology/ /app/ontology/
-COPY .env /app/.env
+# 用模板作为容器内默认配置（BODHI_DB_* 由 compose 的 env_file/环境变量覆盖）
+COPY .env.example /app/.env
 RUN mkdir -p /app/logs
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1

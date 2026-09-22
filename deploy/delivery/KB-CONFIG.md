@@ -7,7 +7,7 @@
 
 | 知识库名称（建议） | 内容 | 谁写 | 怎么来 |
 |---|---|---|---|
-| **企业本体模型** | 类 / 关系 / 数据属性 / 模块（248 页）| 只有本项目的脚本（人跑）| 导入 `03-ontology-kb/seed/` 或按 TTL 编译投影（见 `ONTOLOGY-KB.md`）|
+| **企业本体模型** | 类 / 关系 / 数据属性 / 模块（248 页）| 只有本项目的脚本（人跑）| 导入 `03-manual/seed/` 或按 TTL 编译投影（见 `ONTOLOGY-KB.md`）|
 | **企业知识**（名字随意） | 你们的流程、活动、任务、服务、实体等**实例页** | 智能体（抽取 + 设计落库）| 上传文档后由智能体抽取；设计页由智能体落库 |
 
 > 两个库都要**绑定给智能体**（智能体配置 `knowledge_bases` 两项都填）：前者用来**查类型**，后者用来**读业务内容/落库**。
@@ -75,7 +75,8 @@ UPDATE knowledge_bases SET extract_config = '{"enabled": false}'::jsonb, updated
 ## 4. 「上传自动生成 wiki」开关
 
 知识库头部有这个开关（我们打的补丁之一）。打开后：上传文档 → 切片 → **自动生成 wiki 页**（走上面的 `wiki_config`）。
-不开也能用：你们可以让智能体用 `extract_and_save` 按**技能**抽取（更可控，能指定只抽某几类）。
+不开也能用：让智能体按 **`domain_modeling` 技能分批抽**（`doc_outline` 取本批上下文 → 智能体自己比对 →
+`save_knowledge` 落库 → `extract_state` 续跑），比「整篇一次性抽取」更可控，也能指定只抽某几类/某几条关系。
 
 > 抽取结果进入"待确认合并队列"时：`list_pending_merges` 查看，`resolve_pending_merge` 决定合并/新建；
 > 阈值在工具参数里（`high`/`low`）。
@@ -94,13 +95,14 @@ UPDATE knowledge_bases SET extract_config = '{"enabled": false}'::jsonb, updated
 
 在 `custom_agents` 里（UI：智能体 → 编辑），一次配好四件事：
 
-1. `config.system_prompt` —— 提示词（我们给的「本体建模与设计」提示词，见 `04-manual/AGENTS-SQL.md`）；
+1. `config.system_prompt` —— 提示词（我们给的「本体建模与设计」提示词，见 `03-manual/AGENTS-SQL.md`）；
 2. `config.knowledge_bases` —— **两个库的 uuid**；
 3. `config.mcp_services` —— `['<bodhi_ontology 的 mcp_services.id>']` + `config.mcp_selection_mode='all'`；
-4. `config.allowed_tools` —— 15 个：5 个 wiki 工具（`grep_chunks`/`list_knowledge_chunks`/`get_document_info`/
-   `wiki_search`/`wiki_read_page`）+ 10 个 `mcp_bodhi_ontology_*`（**不要**给 `wiki_write_page`，写库只走 MCP）。
+4. `config.allowed_tools` —— 18 个：5 个 wiki 工具（`grep_chunks`/`list_knowledge_chunks`/`get_document_info`/
+   `wiki_search`/`wiki_read_page`）+ 13 个 `mcp_bodhi_ontology_*`（**不要**给 `wiki_write_page`，写库只走 MCP；
+   抽取类工具已于 2026-09-22 退役，建模改用 `doc_outline` / `save_knowledge` / `extract_state`）。
 
-一条 SQL 落库的完整示例在 `04-manual/AGENTS-SQL.md`（含可回滚的 `DELETE/INSERT`）。
+一条 SQL 落库的完整示例在 `03-manual/AGENTS-SQL.md`（含可回滚的 `DELETE/INSERT`）。
 
 ## 7. 验收清单
 

@@ -72,7 +72,7 @@ DESIGN_TOOLS = [
 ]
 # 「本体建模与设计（技能驱动）」：**合并智能体**（= 抽取 + 概要设计 + 详细设计，差异全在技能里）。
 # 工具是上面几套的并集 + `skills`（技能目录/指令）+ `audit_scan/audit_plan`（详设后念巡检结论）。
-# 仍然**不给原生写页工具**：写库只能走 extract_and_save / save_knowledge。
+# 仍然**不给原生写页工具**：写库只能走 `save_knowledge`（分批建模；原 `extract_and_save` 已于 2026-09-22 移除）。
 MODELER_TOOLS = [
     "grep_chunks", "list_knowledge_chunks", "get_document_info",
     "wiki_search", "wiki_read_page",
