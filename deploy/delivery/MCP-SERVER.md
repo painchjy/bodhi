@@ -1,7 +1,7 @@
 # MCP 服务部署（bodhi2 ontology-mcp）
 
 > 交付物：`02-mcp-server/bodhi2-mcp.tar.gz`（源码包，**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **10 个 MCP 工具**（抽取落库 / 设计落库 / 巡检 / 技能目录 / 总览页 …）
+> 作用：给 WeKnora 提供 **15 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
@@ -124,14 +124,18 @@ PY
 python3 /opt/bodhi2/02-mcp-server/selfcheck.py --url http://127.0.0.1:8765/mcp
 ```
 
-`selfcheck.py` 期望输出：
+`selfcheck.py` 期望输出（15 个工具）：
 
 ```
 initialize  OK（session=…）
-tools/list  OK（10 个）：extract_and_save, extract_status, list_pending_merges, resolve_pending_merge,
-                        ontology_types, skills, service_overview, audit_scan, audit_plan, save_knowledge
+tools/list  OK（15 个）：extract_and_save, extract_status, list_pending_merges, resolve_pending_merge,
+                        ontology_types, skills, service_overview, audit_scan, audit_plan, save_knowledge,
+                        doc_outline, extract_state, link_candidates, list_link_candidates, resolve_link_candidate
 skills()    OK（3 个：domain_modeling / ea_overview_design / service_detailed_design）
 ```
+
+> `extract_and_save` / `extract_status` 是**已退役**的旧异步抽取（仅兼容保留）；领域建模现走
+> `doc_outline` + `extract_state` + `save_knowledge(session=…)` + 候选关联三件套（见 `04-manual/docs/agent-design-flow.md` §11.8）。
 
 ## 6. 在 WeKnora 里注册这个 MCP 服务
 
