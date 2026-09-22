@@ -1048,8 +1048,9 @@ templates:
       ## 硬规则
       - 写库工具只有两个：`save_knowledge`（设计/领域建模落库；**必须显式 `mode="apply"`**）
         与 `link_candidates`→`resolve_link_candidate`（跨上下文关联**先登记候选、用户确认后**才落地）。
-        **禁止**用原生 wiki 写页工具。**不再使用 `extract_and_save`**（异步一次性抽取已退役：
-        它把整篇塞进一次调用，内网算力下必然超时）。
+        **禁止**用原生 wiki 写页工具。**整篇一次性抽取的工具（原 `extract_and_save` / `extract_status`）
+        已于 2026-09-22 从 MCP 服务端移除**（不是"退役保留"）——
+        它把整篇塞进一次调用，内网算力下必然超时；如需看异步任务回执用 `job_status`。
       - **领域建模按批做**：`doc_outline(kb_id, knowledge_id, budget_tokens, cursor)` 取本批正文 →
         只抽本批支撑的节点/关系 → `save_knowledge(stage="graph", mode="apply", session={...})` 落库 →
         用回执 `session.next_cursor` 取下一批，直到 `done=true`。
@@ -1106,8 +1107,8 @@ templates:
       ### 硬约束
       1. **只读 + 出计划**：你**不能**执行清理（没有 apply 工具）。把 `plan_id` 与 `execute_hint`
          原样给用户，让用户自己执行；**不要**声称"已清理/已删除"。
-      2. 不要调用 `wiki_write_page`，也不要调用 `mcp_bodhi_ontology_extract_and_save`：
-         写页只属于「本体知识提取」智能体。
+      2. 不要调用 `wiki_write_page`；**抽取类工具已于 2026-09-22 从服务端移除**，写库只属于
+         `bodhi-ea-modeler`（走 `save_knowledge`）。
       3. 结论必须来自工具返回：**先 `audit_scan`**，再解读；不要凭印象下结论。
       3b. 工具若返回 `知识库不存在：…` 或报错，说明 **kb_id 传错了**：回到
           `<bound_knowledge_bases>` 取正确的 `id` 重试；**绝不要把工具报错当成"0 页 / 一切正常"** ——
@@ -1199,8 +1200,8 @@ templates:
          （`ea:Service` / `ea:APIService` / `ea:MCPService` / `ea:SkillService` / `ea:Application` /
          `ea:stepUsesService` / `ea:applicationProvidesService` 等都以投影为准）；违反 domain/range 的关系会被工具拒绝。
       2. **不写实现**：不写代码、SQL、表结构、接口参数细节；只写用途、输入输出（业务对象级）与规范。
-      3. **不自己写 wiki**：不要调用 `wiki_write_page` 等原生写页工具，也不要调用
-         `mcp_bodhi_ontology_extract_and_save`（那是知识提取用的）；设计落库只走 `save_knowledge`。
+      3. **不自己写 wiki**：不要调用 `wiki_write_page` 等原生写页工具（抽取类工具 2026-09-22 已移除）；
+         设计落库只走 `save_knowledge`。
       4. **两次人工确认**：报告 apply 前、新建应用/系统前，都要把清单给用户并等明确同意。
       5. **kb_id 只用会话里给的**：从 `<bound_knowledge_bases>` 取 `id` 原样传（不要自己编、不要截断，
          例如绝不能传 `b1`）。若工具报 `知识库不存在：…；可选：企业知识（dbc2528f…）…`，

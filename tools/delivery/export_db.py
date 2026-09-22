@@ -23,6 +23,41 @@ import ke_db  # noqa: E402
 
 KB_PLACEHOLDER = "__ONTOLOGY_KB_ID__"
 MCP_URL_PLACEHOLDER = "__MCP_URL__"
+BIZ_KB_PLACEHOLDER = "__BIZ_KB_ID__"
+# agent 配置里**必须脱敏**的键：值是我们这套环境里的 UUID，客户库里不存在同名对象
+# - `knowledge_bases` / `knowledge_base_ids`：知识库绑定（app 实际读前者）
+# - `model_id` / `rerank_model_id` / `vlm_model_id` / `asr_model_id`：模型 UUID
+KB_KEYS = ("knowledge_bases", "knowledge_base_ids")
+MODEL_KEYS = ("model_id", "rerank_model_id", "vlm_model_id", "asr_model_id")
+MCP_KEYS = ("mcp_services",)
+MCP_SERVICE_PLACEHOLDER = "__MCP_SERVICE_ID__"
+_UUID_RE = __import__("re").compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def scrub_agent_config(cfg: dict) -> list[str]:
+    """把「只在我们环境里成立」的 UUID 换成占位符 / 删除；返回改动说明。
+
+    2026-09-22 修：原实现只写了 `knowledge_base_ids`（**app 不读这个键**），
+    真正的 `knowledge_bases` 与 `model_id` 原样带出 → 交付 SQL 里写死了我们库的
+    知识库 UUID（连开发沙箱库都带出）和 `deepseek-flash` 的模型 UUID，客户照抄必然绑不上。
+    """
+    notes: list[str] = []
+    for key in KB_KEYS:
+        if key in cfg:
+            cfg[key] = [BIZ_KB_PLACEHOLDER, KB_PLACEHOLDER]
+            notes.append("%s → 占位符" % key)
+    for key in MODEL_KEYS:
+        if cfg.get(key):
+            cfg.pop(key)
+            notes.append("%s → 删除（继承内置智能体的有效模型）" % key)
+    for key in MCP_KEYS:
+        if key in cfg:
+            cfg[key] = [MCP_SERVICE_PLACEHOLDER]
+            notes.append("%s → 占位符" % key)
+    bad = sorted(set(_UUID_RE.findall(json.dumps(cfg, ensure_ascii=False))))
+    if bad:   # 断言：脱敏后不允许再出现任何 UUID 字面量
+        raise SystemExit("!! agent 配置里仍有写死的 UUID，客户库不会有：%s" % "、".join(bad))
+    return notes
 PAGE_COLUMNS = (
     "id, tenant_id, knowledge_base_id, slug, title, page_type, status, content, summary, "
     "parent_slug, folder_id, category_path, wiki_path, depth, sort_order, source_refs, "
@@ -114,18 +149,25 @@ def export_agents(out: pathlib.Path) -> dict:
             continue
         row = rows[0]
         cfg = json.loads(row["config"] or "{}")
-        cfg["knowledge_base_ids"] = ["__BIZ_KB_ID__", "__ONTOLOGY_KB_ID__"]
-        cfg["mcp_services"] = ["__MCP_SERVICE_ID__"]
+        notes = scrub_agent_config(cfg)     # 含 mcp_services → __MCP_SERVICE_ID__
         cfg["mcp_selection_mode"] = "all"
+        if notes:
+            print("     %s 脱敏：%s" % (agent_id, "；".join(notes)))
         parts.append("""-- %s（%s）
+-- 装前替换：__BIZ_KB_ID__（业务知识库）、__ONTOLOGY_KB_ID__（企业本体模型库）、__MCP_SERVICE_ID__（见 mcp_service.sql）
+--           模型：**故意不写 `model_id`** —— 沿用内置智能体（`is_builtin=true` 的第一条）的有效模型；
+--           要指定就装完在 UI 里选，或执行：
+--             UPDATE custom_agents SET config = config || jsonb_build_object('model_id', '<你们的 chat 模型 uuid>')
+--             WHERE id = %s;
 DELETE FROM custom_agents WHERE id = %s;
 INSERT INTO custom_agents (id, name, description, avatar, is_builtin, tenant_id, created_by,
                            config, created_at, updated_at, runnable_by_viewer)
 SELECT %s, %s, %s, '', false, t.tenant_id, COALESCE(t.created_by, ''),
        (t.config || %s::jsonb), now(), now(), true
 FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;
-""" % (row["name"], agent_id, sql_lit(agent_id), sql_lit(agent_id), sql_lit(row["name"]),
-       sql_lit(row["description"] or ""), sql_lit(json.dumps(cfg, ensure_ascii=False))))
+""" % (row["name"], agent_id, sql_lit(agent_id), sql_lit(agent_id), sql_lit(agent_id),
+       sql_lit(row["name"]), sql_lit(row["description"] or ""),
+       sql_lit(json.dumps(cfg, ensure_ascii=False))))
         rollback.append("UPDATE custom_agents SET deleted_at = now() WHERE id = %s;  -- 停用 %s"
                         % (sql_lit(agent_id), row["name"]))
         done.append(agent_id)

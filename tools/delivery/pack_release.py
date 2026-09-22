@@ -42,6 +42,7 @@ import collections
 import hashlib
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -99,6 +100,28 @@ def copy_tree(src: pathlib.Path, dst: pathlib.Path, ignore_pycache: bool = True,
         return out
 
     shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore)
+
+
+def check_no_machine_ids(stage: pathlib.Path) -> dict:
+    """断言交付 SQL 里**没有写死我们这套环境的 UUID**（用户 2026-09-22 抓到的坑）。
+
+    `export_db.py` 在生成时已脱敏并自带断言；这里是**打包侧的第二道闸**（覆盖所有 SQL，
+    也防止将来有人手改 SQL 又把某个 id 写回去）。白名单只有 MCP 服务自身的固定 id
+    （它在 `mcp_service.sql` 里被 INSERT，并被 `agents.sql` 用 `__MCP_SERVICE_ID__` 引用）。
+    """
+    allow = {"a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001"}
+    uuid_re = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    hits: list[str] = []
+    scanned = 0
+    for f in sorted((stage / "03-manual" / "sql").glob("*.sql")):
+        scanned += 1
+        for found in set(uuid_re.findall(f.read_text(encoding="utf-8"))):
+            if found not in allow:
+                hits.append("%s: %s" % (f.name, found))
+    if hits:
+        raise SystemExit("!! 交付 SQL 里写死了我们环境的 UUID（客户库里不存在这些对象）：\n   "
+                         + "\n   ".join(hits))
+    return {"sql_files": scanned, "machine_ids": 0}
 
 
 def check_no_duplicates(stage: pathlib.Path) -> dict:
@@ -272,6 +295,37 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
             "layout": sorted(p.name for p in d.iterdir())}
 
 
+def prepare_out_dir(out: pathlib.Path) -> None:
+    """准备输出目录：已存在则清空（**先整体删，删不掉就清内容复用**）。
+
+    DrvFs（/mnt/c）上目录偶尔会因 Windows 侧句柄/属性而 `rmdir` 失败（实测：`rm -rf` 与
+    `rename` 都被拒，但目录内的文件可以删）。这种情况下**清空内容继续用同一个目录**，
+    而不是让打包崩掉或产出到意外路径。
+    """
+    if not out.exists():
+        out.mkdir(parents=True)
+        return
+    try:
+        shutil.rmtree(out)
+    except OSError as exc:
+        print("   !! 旧目录整体删不掉（%s）→ 改为清空内容复用" % exc)
+    if out.exists():
+        stuck: list[str] = []
+        for child in sorted(out.iterdir()):
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            except OSError as exc:
+                stuck.append("%s（%s）" % (child.name, exc))
+        if stuck:
+            raise SystemExit("!! 旧目录里这些条目删不掉，无法复用 %s：\n   %s\n"
+                             "   请关掉占用它们的程序（资源管理器/编辑器/解压工具）或换 --out 目录。"
+                             % (out, "\n   ".join(stuck)))
+    out.mkdir(parents=True, exist_ok=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="打 bodhi2 交付包")
     ap.add_argument("--version", default=time.strftime("%Y%m%d"), help="版本号（默认日期）")
@@ -281,9 +335,7 @@ def main() -> int:
     args = ap.parse_args()
 
     out = pathlib.Path(args.out) / ("bodhi2-delivery-%s" % args.version)
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
+    prepare_out_dir(out)
 
     print("== 1/6 刷新 DB 种子（本体模型库页面 + 智能体/MCP 登记）")
     seed_dir = pathlib.Path(tempfile.mkdtemp(prefix="bodhi-seed-"))
@@ -302,6 +354,8 @@ def main() -> int:
     print("   去重断言通过：%d 个文件，无任何内容重复" % dup["unique_files"])
     for name, cnt in sorted(dup["per_package"].items()):
         print("      %-16s %4d 个文件" % (name, cnt))
+    mid = check_no_machine_ids(stage)         # 交付 SQL 不许写死我们环境的 UUID
+    print("   ID 断言通过：%d 个 SQL 文件里无写死 UUID（仅保留 MCP 服务自身 id）" % mid["sql_files"])
 
     print("== 3/6 打 tar.gz")
     packs = {}
@@ -348,6 +402,7 @@ def main() -> int:
                 "ontology_kb": ONTOLOGY_KB, "ui_image": fe.get("image", ""),
                 "packages_count": len(PACKAGES),
                 "no_duplicate_contents": True,
+                "no_machine_specific_ids": True,
                 "unique_files": dup["unique_files"], "files_per_package": dup["per_package"],
                 "manual_sha256": manual_hashes,
                 "manuals_authoritative": ("按包归属：根目录 MANUAL.md；FRONTEND.md→01；MCP-SERVER.md→02；"

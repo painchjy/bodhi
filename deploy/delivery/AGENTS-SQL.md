@@ -1,9 +1,12 @@
 # 智能体与 MCP 登记 SQL（可脚本化、可回滚）
 
-> 位置：`04-manual/sql/`（由 `tools/delivery/export_db.py --agents` 生成）
+> 位置：`03-manual/sql/`（由 `tools/delivery/export_db.py --agents` 生成）
 > - `mcp_service.sql` —— 登记 bodhi2 MCP 服务
 > - `agents.sql` —— 登记两个智能体：`bodhi-ea-modeler`（技能驱动：抽取 + 概要设计 + 详细设计）、`bodhi-kb-ops`（只读巡检与清理计划）
 > - `ROLLBACK.sql` —— 停用智能体 + 删除 MCP 服务行
+>
+> **不写死的三样东西**（2026-09-22 修）：SQL 里**不含**我们这套环境的任何 UUID ——
+> 知识库绑定与 MCP 服务 id 都是占位符；**`model_id` 故意不写**（沿用内置智能体的有效模型）。
 
 ## 1. 要先替换三个占位符
 
@@ -13,6 +16,26 @@
 | `__BIZ_KB_ID__` | 业务知识库 uuid | `SELECT id,name FROM knowledge_bases WHERE deleted_at IS NULL;` |
 | `__ONTOLOGY_KB_ID__` | 本体模型知识库 uuid | 同上 |
 | `__MCP_SERVICE_ID__` | MCP 服务行 id（默认就是 `a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001`）| 与 `mcp_service.sql` 里的 id 一致 |
+
+### 关于 `model_id`（为什么不写）
+
+`custom_agents.config.model_id` 是**每个 WeKnora 实例自己的** chat 模型 UUID（我们的开发机上是
+`deepseek-flash`；你们库里是你们配的那个）—— 写进交付 SQL 必然对不上。所以 `agents.sql` 的
+`INSERT` 是「克隆内置智能体 config 再覆盖我们的字段」：**不注入 `model_id`，自动继承内置智能体的有效模型**。
+
+要显式指定（可选）：
+
+```sql
+-- 看你们可用的 chat 模型
+SELECT id, name, type FROM models WHERE type = 'KnowledgeQA';
+-- 指定给某个智能体（示例 id 换成上一行的结果）
+UPDATE custom_agents SET config = config || jsonb_build_object('model_id', '<chat 模型 uuid>')
+WHERE id = 'bodhi-ea-modeler';
+```
+
+> 同理，`rerank_model_id` / `vlm_model_id` / `asr_model_id` 也在导出时被剥掉（我们环境里是空的，客户库里更不该继承）。
+> `export_db.py` 有一道断言：**脱敏后 agent 配置里不允许再出现任何 UUID 字面量**，出现就报错 ——
+> 防止我们环境的 id 再被带进交付包。
 
 ```bash
 # 一键替换 + 落库（把四个变量填好）
