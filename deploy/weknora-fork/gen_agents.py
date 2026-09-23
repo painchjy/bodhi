@@ -135,7 +135,9 @@ def sql_literal(text: str) -> str:
 def build_sql(templates: dict[str, str]) -> str:
     parts = ["-- 由 deploy/weknora-fork/gen_agents.py 生成：克隆已有智能体的 config，覆盖本体提取相关字段",
              "-- ⚠️ bmm/ea 的提示词这里是 yaml 里的**长版**；线上用的是 set_agent_prompt_lean.py 的精简版。",
-             "--    只想新建/更新运维智能体：python gen_agents.py --only ops（避免覆盖精简提示词）。"]
+             "--    只想新建/更新运维智能体：python gen_agents.py --only ops（避免覆盖精简提示词）。",
+             "-- 租户固定 10000（2026-09-22 用户口径：mcp 服务与智能体都用 10000，客户自己会改）；",
+             "-- 模型与知识库**不预置**（留空，装完在界面里配）。"]
     for key, content in templates.items():
         agent_id = AGENT_IDS.get(key, "bodhi-ontology-%s" % key)
         overrides = {
@@ -151,11 +153,9 @@ def build_sql(templates: dict[str, str]) -> str:
             "thinking": False,
             "enable_rewrite": False,
             "allowed_tools": TOOLS_BY_AGENT.get(key, ALLOWED_TOOLS),
-            # 本体知识「保存工具」通过 MCP 挂载（tools/ontology-mcp/server.py）：
-            # 一次调用完成抽取+合规+两阈值合并，智能体不再自己判断重复。
             "mcp_services": MCPSERVICE_IDS,
             "mcp_selection_mode": "all",             # 与既有两个智能体一致（不设时上游可能只暴露部分工具）
-            "knowledge_bases": KNOWLEDGE_BASES,      # 会话里"能选哪些库"取决于这个字段
+            "knowledge_bases": [],                   # 2026-09-22：留空，装完在界面里绑
             "kb_selection_mode": "selected",
             "retain_retrieval_history": True,
             "faq_priority_enabled": False,
@@ -175,12 +175,13 @@ def build_sql(templates: dict[str, str]) -> str:
         overrides_sql = "jsonb_build_object(%s)" % ", ".join(pairs)
         parts.append("""
 -- %s
+-- 租户固定 10000；模型/知识库留空（装完在界面里配）；MCP 服务 id 见 mcp_service.sql
 DELETE FROM custom_agents WHERE id = %s;
 INSERT INTO custom_agents (id, name, description, avatar, is_builtin, tenant_id, created_by,
                            config, created_at, updated_at, runnable_by_viewer)
-SELECT %s, %s, %s, '', false, t.tenant_id, COALESCE(t.created_by, ''),
-       (t.config || %s), now(), now(), true
-FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;
+SELECT %s, %s, %s, '', false, 10000, '',
+       COALESCE((SELECT config FROM custom_agents WHERE is_builtin = true
+                  ORDER BY created_at LIMIT 1), '{}'::jsonb) || %s, now(), now(), true;
 """ % (NAMES[key], sql_literal(agent_id), sql_literal(agent_id), sql_literal(NAMES[key]),
        sql_literal(DESCRIPTIONS[key]), overrides_sql))
     return "".join(parts)

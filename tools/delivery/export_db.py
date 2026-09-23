@@ -151,20 +151,27 @@ def export_agents(out: pathlib.Path) -> dict:
         cfg = json.loads(row["config"] or "{}")
         notes = scrub_agent_config(cfg)     # 含 mcp_services → __MCP_SERVICE_ID__
         cfg["mcp_selection_mode"] = "all"
+        cfg["knowledge_bases"] = []         # 2026-09-22 用户口径：知识库**留空**，装完在界面里绑
+        cfg.pop("knowledge_base_ids", None)
+        notes = [("knowledge_bases → 留空（装完在界面里绑）" if n.startswith("knowledge_bases")
+                  else n) for n in notes]
+        notes = [("knowledge_bases → 留空（装完在界面里绑）" if n.startswith("knowledge_bases")
+                  else n) for n in notes]
+        notes = [("knowledge_bases → 留空（装完在界面里绑）" if n.startswith("knowledge_bases")
+                  else n) for n in notes]
         if notes:
             print("     %s 脱敏：%s" % (agent_id, "；".join(notes)))
         parts.append("""-- %s（%s）
--- 装前替换：__BIZ_KB_ID__（业务知识库）、__ONTOLOGY_KB_ID__（企业本体模型库）、__MCP_SERVICE_ID__（见 mcp_service.sql）
---           模型：**故意不写 `model_id`** —— 沿用内置智能体（`is_builtin=true` 的第一条）的有效模型；
---           要指定就装完在 UI 里选，或执行：
---             UPDATE custom_agents SET config = config || jsonb_build_object('model_id', '<你们的 chat 模型 uuid>')
---             WHERE id = %s;
+-- 装前替换：仅 __MCP_SERVICE_ID__（见 mcp_service.sql，默认 a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001）
+-- 租户固定 10000（用户口径）；模型与知识库留空 —— 装完在「平台 → 智能体」里选；
+-- 模型要显式指定时：UPDATE custom_agents SET config = config || jsonb_build_object('model_id', '<你们 chat 模型 uuid>')
+--                   WHERE id = %s;
 DELETE FROM custom_agents WHERE id = %s;
 INSERT INTO custom_agents (id, name, description, avatar, is_builtin, tenant_id, created_by,
                            config, created_at, updated_at, runnable_by_viewer)
-SELECT %s, %s, %s, '', false, t.tenant_id, COALESCE(t.created_by, ''),
-       (t.config || %s::jsonb), now(), now(), true
-FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LIMIT 1) t;
+SELECT %s, %s, %s, '', false, 10000, '',
+       COALESCE((SELECT config FROM custom_agents WHERE is_builtin = true
+                  ORDER BY created_at LIMIT 1), '{}'::jsonb) || %s::jsonb, now(), now(), true;
 """ % (row["name"], agent_id, sql_lit(agent_id), sql_lit(agent_id), sql_lit(agent_id),
        sql_lit(row["name"]), sql_lit(row["description"] or ""),
        sql_lit(json.dumps(cfg, ensure_ascii=False))))
@@ -174,13 +181,15 @@ FROM (SELECT * FROM custom_agents WHERE is_builtin = true ORDER BY created_at LI
     (sql_dir / "agents.sql").write_text("\n".join(parts), encoding="utf-8")
     (sql_dir / "mcp_service.sql").write_text(
         "-- bodhi2 MCP 服务登记（URL 用容器 DNS 可绕开 SSRF 白名单）\n"
+        "-- 租户固定 10000；transport_type 用 'http-streamable'（与 UI 保存的一致，2026-09-22 修：\n"
+        "--   旧版写成 streamable_http，且 tenant_id 误取 tenants.tenant_id（该列不存在）导致整条失败）\n"
         "INSERT INTO mcp_services (id, tenant_id, name, description, enabled, transport_type, url,\n"
-        "                          created_at, updated_at)\n"
-        "SELECT 'a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001', t.tenant_id, 'bodhi_ontology',\n"
-        "       '本体知识保存工具（抽取/设计落库、巡检、技能）', true, 'streamable_http',\n"
-        "       %s, now(), now()\n"
-        "FROM tenants t ORDER BY t.id LIMIT 1\n"
-        "ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, enabled = true, updated_at = now();\n"
+        "                          headers, is_builtin, created_at, updated_at)\n"
+        "SELECT 'a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001', 10000, 'bodhi_ontology',\n"
+        "       '本体知识保存工具（抽取/设计落库、巡检、技能）', true, 'http-streamable',\n"
+        "       %s, '{}'::jsonb, false, now(), now()\n"
+        "ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, enabled = true,\n"
+        "       transport_type = EXCLUDED.transport_type, updated_at = now();\n"
         % sql_lit(MCP_URL_PLACEHOLDER), encoding="utf-8")
     (sql_dir / "ROLLBACK.sql").write_text(
         "UPDATE custom_agents SET deleted_at = now() WHERE id IN (%s);\n"

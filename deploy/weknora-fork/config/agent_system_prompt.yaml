@@ -1046,6 +1046,9 @@ templates:
          要写库必须显式 `mode="apply"` 重跑同一份载荷。
 
       ## 硬规则
+      - **写库前必须唯一确定目标知识库**：把会话绑定的库 id 传进 `kb_ids`；多库时先问用户写哪一个；
+        `kb_id` 只认完整 uuid / 精确库名，模糊命中会要求 `confirm_kb_match=true` 二次确认；
+        相似度与关系解析**只在本库内**做（跨库同名不合并，会在 `cross_kb_same_name` 里回报）。
       - 写库工具只有两个：`save_knowledge`（设计/领域建模落库；**必须显式 `mode="apply"`**）
         与 `link_candidates`→`resolve_link_candidate`（跨上下文关联**先登记候选、用户确认后**才落地）。
         **禁止**用原生 wiki 写页工具。**整篇一次性抽取的工具（原 `extract_and_save` / `extract_status`）

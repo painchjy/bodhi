@@ -435,9 +435,12 @@ def _page_row_by_slug(kb_id: str, slug: str) -> dict | None:
 
 
 def link_candidates(kb_id: str, source_slug: str, relation: str, candidates: list,
-                    knowledge_id: str = "", round_no: int = 0) -> dict:
+                    knowledge_id: str = "", round_no: int = 0,
+                    kb_ids: list | None = None, confirm_kb_match: bool = False) -> dict:
     """登记**候选关联**（只登记，不写库）。用户确认后用 `resolve_link_candidate` 落地。"""
-    kb_id, _note = resolve_kb_id(kb_id)
+    kb_id, _note, block = resolve_write_kb(kb_id, kb_ids, confirm_kb_match)
+    if block:
+        return block
     src = _page_row_by_slug(kb_id, source_slug)
     if not src:
         raise RuntimeError("源页不存在：%s（先用 slug 或标题确认它已落库）" % source_slug)
@@ -522,9 +525,12 @@ def list_link_candidates(kb_id: str, knowledge_id: str = "", status: str = "pend
     return {"kb_id": kb_id, "status": status, "count": len(items), "items": items}
 
 
-def resolve_link_candidate(kb_id: str, candidate_id: str, action: str, knowledge_id: str = "") -> dict:
+def resolve_link_candidate(kb_id: str, candidate_id: str, action: str, knowledge_id: str = "",
+                           kb_ids: list | None = None, confirm_kb_match: bool = False) -> dict:
     """裁决候选关联：`confirm` = 写进领域模型（真关系边）；`reject` = 丢弃。"""
-    kb_id, _note = resolve_kb_id(kb_id)
+    kb_id, _note, block = resolve_write_kb(kb_id, kb_ids, confirm_kb_match)
+    if block:
+        return block
     action = (action or "").strip().lower()
     if action not in ("confirm", "reject"):
         raise RuntimeError("action 只能是 confirm 或 reject")
@@ -627,6 +633,65 @@ def resolve_kb_id(raw: str) -> tuple[str, str]:
     """
     kb_id, _name, note = ke_db.resolve_kb_id(raw)
     return kb_id, note
+
+
+def kb_choices() -> list[dict]:
+    """可选知识库清单（给「需要选择 / 需要确认」的回执用）。"""
+    return [{"id": r["id"], "name": r["name"], "pages": None} for r in psql_csv(
+        "SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY updated_at DESC")]
+
+
+def resolve_write_kb(kb_id: str = "", kb_ids: list | None = None,
+                     confirm: bool = False) -> tuple[str, str, dict | None]:
+    """**写库**的目标库解析：唯一确定 + 模糊需二次确认（2026-09-22 用户口径）。
+
+    为什么不能沿用读路径的宽松解析：会话可能绑定**多个**知识库（`<bound_knowledge_bases>`），
+    智能体若随手传个含糊名称，宽松解析会静默命中"另一个库" → 回执成功但用户在自己的库里看不到。
+    因此写路径：
+
+    | 情形 | 行为 |
+    |---|---|
+    | `kb_id` 精确（完整 uuid / **精确**库名） | 直接写 |
+    | `kb_id` 模糊（uuid 前缀 / 名称包含）且唯一命中 | **必须二次确认**（`confirm_kb_match=true`） |
+    | `kb_id` 未给 + 会话只绑 1 个库（`kb_ids`） | 用那个库 |
+    | `kb_id` 未给 + 会话绑了多个库 | **拒绝写** → `need_kb_selection`（请用户指明） |
+    | 命中 0 个 / 多个 / 占位符 | 拒绝写 → `kb_unresolved` + 可选清单 |
+
+    返回 `(uuid, note, block)`；`block` 非 None 时**不要写库**，直接把它作为工具回执返回。
+    """
+    ids = [str(x).strip() for x in (kb_ids or []) if str(x).strip()]
+    raw = (kb_id or "").strip()
+    if not raw:
+        if len(ids) == 1:
+            raw = ids[0]
+        elif len(ids) > 1:
+            return "", "", {
+                "kb_unresolved": "multi_kb_session", "need_kb_selection": True,
+                "bound_kb_ids": ids, "candidates": kb_choices(),
+                "how": ("本次会话绑定了 %d 个知识库：**写操作必须明确唯一的目标库**。"
+                        "请让用户指明写入哪一个，然后带 `kb_id=<该库 uuid 或精确名>` 重跑；"
+                        "只读操作（doc_outline / extract_state / audit_scan …）不受限制。" % len(ids))}
+        else:
+            return "", "", {
+                "kb_unresolved": "no_kb", "need_kb_selection": True,
+                "candidates": kb_choices(),
+                "how": ("没给 `kb_id` 也没提供会话绑定的库清单（`kb_ids`）："
+                        "请把 `<bound_knowledge_bases>` 里的 id 传进 `kb_ids`（多库时会要求用户指明），"
+                        "或直接传 `kb_id`")}
+    try:
+        uid, name, mode = ke_db.resolve_kb_candidate(raw)
+    except ValueError as exc:
+        return "", "", {"kb_unresolved": "not_found", "need_kb_selection": True,
+                        "asked": raw, "candidates": kb_choices(), "how": str(exc)}
+    if mode == "fuzzy" and not confirm:
+        return "", "", {
+            "kb_unresolved": "fuzzy_match", "need_kb_confirm": True,
+            "matched": {"kb_id": uid, "name": name,
+                        "how": "按 uuid 前缀 / 名称包含匹配到唯一库"},
+            "how": ("模糊匹配即使只命中 1 个也必须确认：请改传**完整 uuid 或精确库名**，"
+                    "或带 `confirm_kb_match=true` 重跑（表示「就是它」）")}
+    note = "" if mode == "exact" else ("（kb_id「%s」按模糊匹配解析为 %s，已二次确认）" % (raw, uid))
+    return uid, note, None
 
 
 def resolve_knowledge_id(kb_id: str, raw: str) -> tuple[str, str]:
@@ -815,6 +880,62 @@ def _design_sections(element: dict) -> list[str]:
     return lines
 
 
+# ---------------------------------------------------------------------------
+# 技能上下文（2026-09-22）：同一套落库代码被三个技能复用，**文案必须跟着技能走**
+#   domain_modeling          领域建模（从文档抽 → 节点应当有原文引用）
+#   ea_overview_design       企架概要设计（设计生成 → 无原文片段）
+#   service_detailed_design  服务详细设计（设计生成 → 无原文片段）
+# 旧实现把"概要设计"写死 → 领域建模的页面上也写"概要设计…/无原文片段"（用户实测报过）。
+# `context` 是**可选**参数：不传时保持旧口径（design = 概要设计），向后兼容。
+# ---------------------------------------------------------------------------
+SKILL_CONTEXTS = {
+    "domain_modeling": {
+        "label": "领域建模",
+        "report_label": "领域建模报告",
+        "report_category": "领域建模报告",
+        "report_source": "领域建模报告（由领域建模智能体按文档分批生成、人工确认后落库）",
+        "no_quote": "（领域建模：未提供原文引用 —— 请在该节点的 source_text 里给出原文片段）",
+        "generated_by": "领域建模智能体（未指定来源文档）",
+        "evidence_generated": "领域建模：无原文片段（请补 source_text）",
+    },
+    "ea_overview_design": {
+        "label": "企架概要设计",
+        "report_label": "概要设计报告",
+        "report_category": "概要设计报告",
+        "report_source": "概要设计报告（由企架概要设计智能体生成、人工确认后落库）",
+        "no_quote": "（概要设计，无原文片段）",
+        "generated_by": "企架概要设计智能体（未指定来源文档）",
+        "evidence_generated": "概要设计生成，无原文片段",
+    },
+    "service_detailed_design": {
+        "label": "服务详细设计",
+        "report_label": "服务详细设计报告",
+        "report_category": "服务详细设计报告",
+        "report_source": "服务详细设计报告（由服务详细设计智能体生成、人工确认后落库）",
+        "no_quote": "（详细设计，无原文片段）",
+        "generated_by": "服务详细设计智能体（未指定来源文档）",
+        "evidence_generated": "详细设计生成，无原文片段",
+    },
+    # 兼容旧调用（不传 context 时的历史口径）
+    "design": {
+        "label": "设计",
+        "report_label": "概要设计报告",
+        "report_category": "概要设计报告",
+        "report_source": "概要设计报告（由设计智能体生成、人工确认后落库）",
+        "no_quote": "（概要设计，无原文片段）",
+        "generated_by": "设计智能体（未指定来源文档）",
+        "evidence_generated": "设计生成，无原文片段",
+    },
+}
+
+
+def context_meta(context: str = "") -> dict:
+    """取技能上下文文案（未知/空 → `design`，保持旧行为）。"""
+    key = (context or "").strip().lower()
+    return {"id": key if key in SKILL_CONTEXTS else "design",
+            **SKILL_CONTEXTS.get(key, SKILL_CONTEXTS["design"])}
+
+
 def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_index: int,
                    doc_meta: dict) -> dict:
     """新要素 -> 页面（与 ontology_wiki/weknora_sync 同风格：能被人读，也能被图谱用）。"""
@@ -830,7 +951,7 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         head_lines.append("> **来源**：《%s》%s  " % (
             doc_meta["title"], (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""))
     else:
-        head_lines.append("> **生成方式**：设计智能体（未指定来源文档）  ")
+        head_lines.append("> **生成方式**：%s  " % context_meta(doc_meta.get("context"))["generated_by"])
     head_lines.append("> **首个版本生成**：%s（`%s`）" % (now_text(), TOOL_TAG))
     head_lines += ["", (element.get("definition") or "（暂无定义）").strip(), ""]
     lines = head_lines
@@ -841,7 +962,8 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
               ("- %s（来源：《%s》%s）" % (element.get("source_text", "").strip(), doc_meta["title"],
                                          (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""))
               if doc_meta.get("id") else
-              "- %s（设计生成，无原文片段）" % (element.get("source_text", "").strip()), ""]
+              "- %s（%s）" % (element.get("source_text", "").strip(),
+                              context_meta(doc_meta.get("context"))["evidence_generated"]), ""]
     if rels:
         lines += ["## 本体关系", ""]
         # 同 (类型, 目标) 只写一行：同一操作对同一属性可能有 C 与 R 两条边（crudKind 不同），
@@ -909,7 +1031,8 @@ def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: i
     evidence = ("- %s（来源：《%s》%s）" % (
         element.get("source_text", "").strip(), doc_meta["title"],
         (" 片段 #%d" % chunk_index) if chunk_index >= 0 else "")) if doc_meta.get("id") \
-        else ("- %s（设计生成，无原文片段）" % element.get("source_text", "").strip())
+        else ("- %s（%s）" % (element.get("source_text", "").strip(),
+                             context_meta(doc_meta.get("context"))["evidence_generated"]))
     added_evidence = False
     if any(line.strip() == "## 原文依据" for line in merged):
         pos = next(i for i, line in enumerate(merged) if line.strip() == "## 原文依据")
@@ -1146,6 +1269,22 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     """
     tenant = tenant_id if tenant_id is not None else get_kb_tenant(kb_id)
     pages = fetch_existing_pages(kb_id)
+    # 跨库引用护栏（2026-09-22）：关系目标只允许指本库的页（本库已有 + 本次要建的）。
+    # 旧实现会因 `_graph_target_slug` 全库查而把**别的知识库**的 slug 写进本库页 → 回执成功但本库没记录。
+    known_slugs = {p["slug"] for p in pages} | {p.get("slug") for p in payloads if p.get("slug")}
+    dropped_relations: list = []
+    for payload in payloads:
+        kept = []
+        for rel in payload.get("relations") or []:
+            ts = str(rel.get("target_slug") or "").strip()
+            if ts and ts not in known_slugs:
+                dropped_relations.append({
+                    "source": payload.get("name"), "relation": rel.get("type"),
+                    "target": rel.get("target"), "target_slug": ts,
+                    "reason": "目标 slug 不属于本知识库（跨库引用已丢弃；请在本库先建该节点）"})
+                continue
+            kept.append(rel)
+        payload["relations"] = kept
     statements: list[str] = []
     summary = {
         "model": model["key"], "kb_id": kb_id, "knowledge_id": knowledge_id,
@@ -1154,6 +1293,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         "created": [], "merged": [], "pending": [],
         "violations": checked["violations"], "unmatched": checked["unmatched"],
         "dry_run": dry_run, "thresholds": {"high": high, "low": low},
+        "dropped_relations": dropped_relations,
         "generated_at": now_text(),
     }
     if extra:
@@ -1322,34 +1462,62 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     return summary
 
 
-def _graph_target_slug(name: str) -> str:
-    """在**本库已落库的页面**里按标题找 slug（设计节点引用需求 wiki 页时用）。"""
+def _graph_target_slug(kb_id: str, name: str) -> str:
+    """在**本库**已落库的页面里按标题找 slug（设计节点引用需求 wiki 页时用）。
+
+    2026-09-22 修（用户实测"保存成功但自己库里没有记录"）：旧实现没有
+    `knowledge_base_id` 过滤 → 同名节点会命中**别的知识库**的页，该 slug 被写进本库页的
+    关系行/out_links，于是"回执成功、本库却没有那个节点"。跨库一律不认。
+    """
     if not name:
         return ""
-    rows = psql_csv("SELECT slug FROM wiki_pages WHERE deleted_at IS NULL AND title = %s LIMIT 1"
-                    % sql_str(name))
+    rows = psql_csv("SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s "
+                    "AND deleted_at IS NULL AND title = %s LIMIT 1" % (sql_str(kb_id), sql_str(name)))
     return rows[0]["slug"] if rows else ""
 
 
-def _graph_target_type(name: str) -> str:
-    rows = psql_csv("SELECT COALESCE(page_type,'') AS t FROM wiki_pages WHERE deleted_at IS NULL "
-                    "AND title = %s LIMIT 1" % sql_str(name))
+def _graph_target_type(kb_id: str, name: str) -> str:
+    rows = psql_csv("SELECT COALESCE(page_type,'') AS t FROM wiki_pages WHERE knowledge_base_id = %s "
+                    "AND deleted_at IS NULL AND title = %s LIMIT 1" % (sql_str(kb_id), sql_str(name)))
     return rows[0]["t"] if rows else ""
 
 
+def _other_kb_same_name(kb_id: str, names: list[str]) -> list[dict]:
+    """同名页**只存在于别的知识库**时的清单（只读回报，用于解释"为什么本库新建/为什么不算命中"）。"""
+    names = [n for n in {str(x).strip() for x in names} if n]
+    if not names:
+        return []
+    lst = ", ".join(sql_str(n) for n in names)
+    rows = psql_csv(
+        "SELECT p.title, p.slug, p.knowledge_base_id AS kb, k.name AS kb_name "
+        "FROM wiki_pages p LEFT JOIN knowledge_bases k ON k.id = p.knowledge_base_id "
+        "WHERE p.deleted_at IS NULL AND p.knowledge_base_id <> %s AND p.title IN (%s) "
+        "ORDER BY p.title" % (sql_str(kb_id), lst))
+    return [{"name": r["title"], "other_kb_id": r["kb"], "other_kb_name": r["kb_name"] or "",
+             "slug": r["slug"]} for r in rows]
+
+
 def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_meta: dict,
-                    upstream: list | None = None) -> tuple[list, dict]:
-    """把**概要设计报告**里的节点/关系转成「要素载荷」（与抽取路径同形），并做本体合规校验。
+                    upstream: list | None = None, kb_id: str = "",
+                    context: str = "") -> tuple[list, dict]:
+    """把**设计报告/建模结果**里的节点/关系转成「要素载荷」（与抽取路径同形），并做本体合规校验。
 
     - 节点：`{name, type, definition, description, source_text?, aliases?}` → 一页；
     - 关系：`{source, type, target, label?}` → 写进 source 页的 `## 本体关系`；
     - 校验：类必须在本体里（`ke_ontology.class_meta`），关系的 range 闭包必须包含目标页类型；
       不合规的进 `violations`（与抽取路径同一口径：违规不入库，回报给调用方）；
-    - `upstream`：上游页 slug（需求页/报告页），写进 `page_metadata.design.upstream` 与正文 `## 溯源`。
+    - `upstream`：上游页 slug（需求页/报告页），写进 `page_metadata.design.upstream` 与正文 `## 溯源`；
+    - `kb_id`（2026-09-22 新增，**必传才能跨页找目标**）：目标解析只认**本库**的页 —— 同名但属于
+      别的知识库的页一律不认（旧实现全库按标题找 → 关系写到别的库的 slug，回执成功而本库没记录）；
+      这类"只在别库同名"的会在 `cross_kb_same_name` 里回报，便于向用户解释。
+    - `context`（2026-09-22 新增）：技能上下文（`domain_modeling` / `ea_overview_design` /
+      `service_detailed_design`），决定占位文案（如缺 `source_text` 时写哪句）。
     """
     meta = ke_ontology.class_meta()
+    ctx = context_meta(context)
     violations: list = []
     slug_by_name: dict = {}
+    unresolved: list[str] = []          # 关系目标既不在本次节点、也不在本库 → 待做跨库同名回报
     upstream = [s for s in (upstream or []) if s]
     for node in nodes:
         name = (node.get("name") or "").strip()
@@ -1386,7 +1554,7 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
         # 关系撤回（retract）放在**本体校验之前**：撤回可能针对已被废弃的关系类型/目标，
         # 这时不该因"本体里没有这个对象属性"而被拒（否则改设计永远减不掉旧边）。
         if edge.get("retract"):
-            dst_slug = slug_by_name.get(dst) or _graph_target_slug(dst) or dst
+            dst_slug = slug_by_name.get(dst) or _graph_target_slug(kb_id, dst) or dst
             retract_edges.append({"source": src, "type": rel_type, "target": dst, "slug": dst_slug})
             continue
         closure = ke_ontology.target_closure(rel_type)
@@ -1397,10 +1565,11 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
         dst_type = next((n.get("type") for n in nodes if (n.get("name") or "").strip() == dst), "")
         dst_slug = slug_by_name.get(dst, "")
         if not dst_slug:
-            dst_slug, dst_type = _graph_target_slug(dst), (dst_type or _graph_target_type(dst))
+            dst_slug, dst_type = _graph_target_slug(kb_id, dst), (dst_type or _graph_target_type(kb_id, dst))
         if not dst_slug:
+            unresolved.append(dst)
             violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
-                               "reason": "目标解析不到页面（既不在本次节点里，也不在本库里）"})
+                               "reason": "目标解析不到页面（既不在本次节点里，也**不在本库**）"})
             continue
         if dst_type and dst_type not in closure:
             violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
@@ -1416,7 +1585,7 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
         props = dict(edge.get("properties") or {})
         if props:
             src_type = next((n.get("type") for n in nodes
-                             if (n.get("name") or "").strip() == src), "") or _graph_target_type(src)
+                             if (n.get("name") or "").strip() == src), "") or _graph_target_type(kb_id, src)
             allowed_src = ke_ontology.data_properties_for(src_type)
             for prop_name in props:
                 if prop_name not in allowed_src:
@@ -1454,19 +1623,25 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "attributes": node.get("attributes") or {},
             "retag": bool(node.get("retag")),   # true = 合并进既有页时**同时把该页类型改成 element 的类型**
             "incoming": incoming_map.get(name, []),
-            "source_text": node.get("source_text") or "（概要设计，无原文片段）",
+            "source_text": node.get("source_text") or ctx["no_quote"],
             "chunk_id": "", "chunk_index": -1, "relations": rels,
-            "upstream": upstream, "aliases": node.get("aliases") or [],
+            "upstream": upstream, "aliases": node.get("aliases") or [], "context": ctx["id"],
         })
+    cross_kb = _other_kb_same_name(kb_id, unresolved)
     return payloads, {"edges": accepted, "violations": violations, "unmatched": [],
-                      "retract_edges": retract_edges}
+                      "retract_edges": retract_edges,
+                      "cross_kb_same_name": cross_kb,
+                      "note": ("目标不在本库、但**同名页存在于其它知识库**：这些目标按"
+                               "「本库没有」处理（不跨库合并、不入库）；要连到别库的页，"
+                               "请先在本库建立对应节点。") if cross_kb else ""}
 
 
-def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
+def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
                    report: dict | None = None, nodes: list | None = None, edges: list | None = None,
                    mode: str = "dry_run", confirmed_new_applications: list | None = None,
                    high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
-                   session: dict | None = None) -> dict:
+                   session: dict | None = None, kb_ids: list | None = None,
+                   confirm_kb_match: bool = False, context: str = "") -> dict:
     """**设计落库（不调 LLM）**：两段式，复用抽取路径的 `save_elements`（相似度合并/待确认/版本/目录）。
 
     - `stage="report"`：把**概要设计报告 md** 整篇写成 wiki 页（索引页/父页）。
@@ -1480,7 +1655,10 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
       **必须**在 `confirmed_new_applications` 里列出，否则只在 dry_run 清单里回报；
     - 幂等：同标题（同 slug）重跑 = 合并更新，不重复建页。
     """
-    kb_id, kb_note = resolve_kb_id(kb_id)
+    kb_id, kb_note, block = resolve_write_kb(kb_id, kb_ids, confirm_kb_match)
+    if block:
+        return block
+    ctx = context_meta(context)
     engine = load_engine()
     model_obj = engine.pick_model(engine.load_index(engine.DEFAULT_INDEX), model)
     stage = (stage or "report").strip().lower()
@@ -1492,7 +1670,8 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
     tenant_id = get_kb_tenant(kb_id)
     confirmed = {str(x).strip() for x in (confirmed_new_applications or []) if str(x).strip()}
 
-    doc_meta = {"id": "", "title": (report or {}).get("source_document_title") or "（无来源文档）"}
+    doc_meta = {"id": "", "title": (report or {}).get("source_document_title") or "（无来源文档）",
+                "context": ctx["id"]}
     if (report or {}).get("source_document_id"):
         doc_meta["id"] = resolve_knowledge_id(kb_id, str(report["source_document_id"]))[0]
     elif (report or {}).get("source_document_title"):
@@ -1561,10 +1740,10 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                 if rows:
                     slug = rows[0]["slug"]
         element = {"name": title, "type": (report or {}).get("page_type") or "summary",
-                   "type_label": "概要设计报告", "module": model, "slug": slug,
-                   "category_path": (report or {}).get("category_path") or ["概要设计报告"],
+                   "type_label": ctx["report_label"], "module": model, "slug": slug,
+                   "category_path": (report or {}).get("category_path") or [ctx["report_category"]],
                    "definition": body, "description": "",
-                   "source_text": "概要设计报告（由设计智能体生成、人工确认后落库）",
+                   "source_text": ctx["report_source"],
                    "chunk_id": "", "chunk_index": -1, "relations": [],
                    "upstream": [s for s in ((report or {}).get("upstream") or []) if s],
                    "aliases": (report or {}).get("aliases") or [],
@@ -1575,7 +1754,11 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                                 dry_run=(mode != "apply"), tenant_id=tenant_id,
                                 resolved_note=kb_note, engine=engine, same_type_only=True)
         summary["stage"] = "report"
-        summary["report_page"] = {"slug": slug, "title": title, "chars": len(body)}
+        summary["context"] = ctx["id"]
+        summary["report_page"] = {"slug": slug, "title": title, "chars": len(body),
+                                  "type_label": ctx["report_label"],
+                                  "category_path": (element.get("category_path")
+                                                    or [ctx["report_category"]])}
         if summary.get("merged"):
             summary["report_page"]["action"] = "updated"
         elif summary.get("pending"):
@@ -1586,7 +1769,8 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
 
     payloads, checked = design_elements(
         model, model_obj, nodes or [], edges or [], doc_meta,
-        upstream=[s for s in ((report or {}).get("upstream") or []) if s])
+        upstream=[s for s in ((report or {}).get("upstream") or []) if s],
+        kb_id=kb_id, context=ctx["id"])
     app_types = ("bmm-ea-ext:Application", "ea:Application", "bmm-ea-ext:ITAsset", "ea:ITAsset")
     allowed, blocked = [], []
     for payload in payloads:
@@ -1602,6 +1786,11 @@ def save_knowledge(kb_id: str, *, stage: str = "report", model: str = "ea",
                             resolved_note=kb_note, engine=engine, same_type_only=True)
     summary["stage"] = "graph"
     summary["pending_confirmation"] = blocked
+    summary["context"] = ctx["id"]
+    # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"
+    summary["cross_kb_same_name"] = checked.get("cross_kb_same_name") or []
+    if checked.get("cross_kb_same_name"):
+        summary["cross_kb_note"] = checked.get("note")
     report_slug = ((report or {}).get("slug") or "").strip()
     if report_slug:
         summary["report_slug"] = report_slug
@@ -1727,7 +1916,26 @@ def skills(skill: str = "", model: str = "") -> dict:
 # ---------------------------------------------------------------------------
 # 待确认裁决 + 查询工具
 # ---------------------------------------------------------------------------
-def list_pending_merges(kb_id: str) -> dict:
+def list_pending_merges(kb_id: str = "", kb_ids: list | None = None) -> dict:
+    """列出「待确认合并」项（只读）。
+
+    单库：传 `kb_id`；**多库**（会话绑了多个库）：传 `kb_ids`（`<bound_knowledge_bases>` 的 id 清单）
+    —— 逐个库查，每项带 `kb_id`/`kb_name`，不做跨库合并（同名不同义）。
+    """
+    ids = [str(x).strip() for x in (kb_ids or []) if str(x).strip()]
+    if ids:
+        merged, per = [], []
+        for raw in ids:
+            try:
+                uid, name, _note = ke_db.resolve_kb_id(raw)
+            except ValueError as exc:
+                per.append({"asked": raw, "error": str(exc)[:200]})
+                continue
+            res = list_pending_merges(uid)
+            merged += [{**item, "kb_id": uid, "kb_name": name} for item in res["items"]]
+            per.append({"kb_id": uid, "kb_name": name, "count": res["count"]})
+        return {"multi": True, "count": len(merged), "per_kb": per, "items": merged,
+                "note": "多库清单：每条都带 kb_id；裁决时请把对应 kb_id 传给 resolve_pending_merge"}
     # 参数容错：智能体常传知识库名称（如「企业知识」）或占位符，这里先解析成真实 UUID，
     # 否则按错误的 id 查询会返回空清单（2026-09-19 用户实测：报告 5 条待确认却查到 0 条）。
     kb_id, _note = resolve_kb_id(kb_id)
@@ -1747,8 +1955,11 @@ def list_pending_merges(kb_id: str) -> dict:
     return {"kb_id": kb_id, "count": len(items), "items": items}
 
 
-def resolve_pending_merge(kb_id: str, pending_slug: str, action: str) -> dict:
-    kb_id, _note = resolve_kb_id(kb_id)   # 同上：支持用知识库名称调用
+def resolve_pending_merge(kb_id: str, pending_slug: str, action: str,
+                          kb_ids: list | None = None, confirm_kb_match: bool = False) -> dict:
+    kb_id, _note, block = resolve_write_kb(kb_id, kb_ids, confirm_kb_match)   # 写入口：唯一库 + 模糊需确认
+    if block:
+        return block
     rows = psql_csv("SELECT id, tenant_id, page_metadata::text AS meta, source_refs::text AS refs, "
                     "chunk_refs::text AS chunks FROM wiki_pages WHERE knowledge_base_id = %s "
                     "AND slug = %s AND deleted_at IS NULL" % (sql_str(kb_id), sql_str(pending_slug)))
@@ -2358,8 +2569,13 @@ def tool_definitions() -> list[dict]:
             "name": "list_pending_merges",
             "description": "列出「待确认合并」项（相似度处于两个阈值之间，需人工裁决）。",
             "inputSchema": {"type": "object",
-                            "properties": {"kb_id": {"type": "string"}},
-                            "required": ["kb_id"]},
+                            "properties": {"kb_id": {"type": "string"},
+                    "kb_ids": {"type": "array", "items": {"type": "string"},
+                               "description": ("会话里绑定的知识库 id 清单（`<bound_knowledge_bases>` 原样传）。"
+                                               "**写操作**：>1 个且未传 kb_id 会被拒（要求用户指明）；"
+                                               "恰好 1 个时等价于显式指定。**读操作**：多库一起查")},
+                            },
+                            "required": []},
         },
         {
             "name": "resolve_pending_merge",
@@ -2368,7 +2584,16 @@ def tool_definitions() -> list[dict]:
                 "type": "object",
                 "properties": {"kb_id": {"type": "string"},
                                "pending_slug": {"type": "string"},
-                               "action": {"type": "string", "enum": ["merge", "create"]}},
+                               "action": {"type": "string", "enum": ["merge", "create"]},
+                    "kb_ids": {"type": "array", "items": {"type": "string"},
+                               "description": ("会话里绑定的知识库 id 清单（`<bound_knowledge_bases>` 原样传）。"
+                                               "**写操作**：>1 个且未传 kb_id 会被拒（要求用户指明）；"
+                                               "恰好 1 个时等价于显式指定。**读操作**：多库一起查")},
+                    "confirm_kb_match": {"type": "boolean",
+                                        "description": ("模糊匹配（uuid 前缀 / 名称包含）命中唯一库时的**二次确认**："
+                                                        "true 才允许写；精确匹配（完整 uuid / 精确库名）不需要")},
+                },
+
                 "required": ["kb_id", "pending_slug", "action"],
             },
         },
@@ -2448,7 +2673,9 @@ def tool_definitions() -> list[dict]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "kb_id": {"type": "string", "description": "知识库 UUID"},
+                    "kb_id": {"type": "string", "description": "知识库 UUID（单库巡检）"},
+                    "kb_ids": {"type": "array", "items": {"type": "string"},
+                               "description": "多库巡检：会话绑定的库 id 清单（每库一份独立报告）"},
                     "scope": {"type": "string", "enum": list(ke_audit.SCOPES),
                               "description": "all(默认) / wiki(A) / model(B) / source(C) / dupes(D)"},
                     "max_findings": {"type": "integer",
@@ -2496,7 +2723,18 @@ def tool_definitions() -> list[dict]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "kb_id": {"type": "string", "description": "目标知识库 UUID 或名称"},
+                    "kb_id": {"type": "string", "description": "目标知识库 UUID 或精确库名（**写库前必须唯一确定**）"},
+                    "kb_ids": {"type": "array", "items": {"type": "string"},
+                               "description": ("会话里绑定的知识库 id 清单（`<bound_knowledge_bases>` 原样传）。"
+                                               "**写操作**：>1 个且未传 kb_id 会被拒（要求用户指明）；"
+                                               "恰好 1 个时等价于显式指定。**读操作**：多库一起查")},
+                    "confirm_kb_match": {"type": "boolean",
+                                        "description": ("模糊匹配（uuid 前缀 / 名称包含）命中唯一库时的**二次确认**："
+                                                        "true 才允许写；精确匹配（完整 uuid / 精确库名）不需要")},
+                    "context": {"type": "string",
+                                "enum": ["domain_modeling", "ea_overview_design", "service_detailed_design"],
+                                "description": ("本技能上下文：决定文案（缺 source_text 时写哪句、报告页标题/分类）。"
+                                                "不传时按旧口径（概要设计）渲染")},
                     "stage": {"type": "string", "enum": ["report", "graph"],
                               "description": "report=先落报告页（返回 slug）；graph=再落细分节点与关系"},
                     "model": {"type": "string", "description": "本体模型 key，默认 ea"},
@@ -2603,6 +2841,12 @@ def tool_definitions() -> list[dict]:
                             "`resolve_link_candidate(action=\"confirm\")` 才真正写入领域模型。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
+                "kb_ids": {"type": "array", "items": {"type": "string"},
+                           "description": ("会话绑定的知识库 id 清单。**写操作**：>1 个且未传 kb_id 会被拒"
+                                           "（要求用户指明）；恰好 1 个时等价于显式指定")},
+                "confirm_kb_match": {"type": "boolean",
+                                     "description": ("模糊匹配（uuid 前缀 / 名称包含）命中唯一库时的二次确认："
+                                                     "true 才允许写；精确匹配不需要")},
                 "source_slug": {"type": "string", "description": "源页 slug（必须已落库）"},
                 "relation": {"type": "string", "description": "本体关系 prefixed 名，如 bmm:definedBy"},
                 "candidates": {"type": "array", "items": {"type": "object"},
@@ -2627,12 +2871,47 @@ def tool_definitions() -> list[dict]:
                             "（`target_exists=false` 的不能确认）。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
+                "kb_ids": {"type": "array", "items": {"type": "string"},
+                           "description": "会话绑定的知识库 id 清单（多库且未传 kb_id 时会被拒，要求用户指明）"},
+                "confirm_kb_match": {"type": "boolean",
+                                     "description": "模糊匹配命中唯一库时的二次确认（true 才允许写）"},
                 "candidate_id": {"type": "string", "description": "link_candidates 回执里的 candidate_id"},
                 "action": {"type": "string", "enum": ["confirm", "reject"]},
                 "knowledge_id": {"type": "string"},
             }, "required": ["kb_id", "candidate_id", "action"]},
         },
     ]
+
+
+def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
+               max_findings: int = 50) -> dict:
+    """**只读**巡检（`ke_audit.audit` 的入口）。
+
+    - 单库：传 `kb_id`；
+    - **多库**：传 `kb_ids`（会话绑定的库清单）→ 逐库巡检，`per_kb[]` 里每库一份报告；
+      计数**不跨库合并**（同名不同类型/不同语义是常态，合并会误导）。
+    """
+    ids = [str(x).strip() for x in (kb_ids or []) if str(x).strip()]
+    if ids:
+        per = []
+        for raw in ids:
+            try:
+                uid, name, _note = ke_db.resolve_kb_id(raw)
+            except ValueError as exc:
+                per.append({"asked": raw, "error": str(exc)[:200]})
+                continue
+            rep = ke_audit.audit(uid, scope, max_findings)
+            per.append({"kb_id": uid, "kb_name": name, "report": rep})
+        return {"multi": True, "count": len(per), "per_kb": per,
+                "note": "多库巡检：每库一份独立报告（findings 不跨库合并）"}
+    if not (kb_id or "").strip():
+        return {"error": "需要 kb_id（单库）或 kb_ids（多库，会话绑定的库清单）"}
+    uid, note = resolve_kb_id(kb_id)
+    rep = ke_audit.audit(uid, scope, max_findings)
+    rep["kb_id"] = uid
+    if note:
+        rep["resolved_note"] = note
+    return rep
 
 
 def service_overview_tool(kb_id: str, apply: bool = False, slug: str = "", title: str = "",
@@ -2654,7 +2933,11 @@ def service_overview_tool(kb_id: str, apply: bool = False, slug: str = "", title
 
 def start_overview_job(args: dict) -> dict:
     """异步刷新总览页（渲染 + 写页要 1-3 分钟，超过 app 侧 MCP 60s 硬超时）。"""
-    kb_id = str(args.get("kb_id", ""))
+    kb_id, kb_note, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
+                                            bool(args.get("confirm_kb_match")))
+    if block:
+        return block
+    args = {**args, "kb_id": kb_id}
     slug = str(args.get("slug", "") or OVERVIEW_SLUG)
     key = "overview:%s:%s" % (kb_id, slug)
     with JOBS_LOCK:
@@ -2688,10 +2971,11 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "job_status":
         return job_status(str(args.get("job_id", "")))
     if name == "list_pending_merges":
-        return list_pending_merges(str(args["kb_id"]))
+        return list_pending_merges(str(args.get("kb_id", "")), args.get("kb_ids") or None)
     if name == "resolve_pending_merge":
         return resolve_pending_merge(str(args["kb_id"]), str(args["pending_slug"]),
-                                     str(args["action"]))
+                                     str(args["action"]), kb_ids=args.get("kb_ids") or None,
+                                     confirm_kb_match=bool(args.get("confirm_kb_match")))
     if name == "ontology_types":
         return ontology_types(str(args["model"]), str(args.get("focus", "")),
                               args.get("classes") or None, args.get("relations") or None,
@@ -2705,8 +2989,8 @@ def call_tool(name: str, args: dict) -> dict:
                                      str(args.get("slug", "")), str(args.get("title", "")),
                                      int(args.get("preview_lines", 25)))
     if name == "audit_scan":
-        return ke_audit.audit(str(args["kb_id"]), str(args.get("scope", "all")),
-                              int(args.get("max_findings", 50)))
+        return audit_scan(str(args.get("kb_id", "")), args.get("kb_ids") or None,
+                          str(args.get("scope", "all")), int(args.get("max_findings", 50)))
     if name == "audit_plan":
         return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
                                    str(args.get("scope", "all")))
@@ -2717,7 +3001,9 @@ def call_tool(name: str, args: dict) -> dict:
             nodes=args.get("nodes") or [], edges=args.get("edges") or [],
             mode=str(args.get("mode", "dry_run")),
             confirmed_new_applications=args.get("confirmed_new_applications") or [],
-            session=args.get("session") or None)
+            session=args.get("session") or None, kb_ids=args.get("kb_ids") or None,
+            confirm_kb_match=bool(args.get("confirm_kb_match")),
+            context=str(args.get("context", "")))
     if name == "doc_outline":
         return doc_outline(str(args["kb_id"]), str(args.get("knowledge_id", "")),
                            int(args.get("budget_tokens", 0) or 0), int(args.get("cursor", 0) or 0),
@@ -2729,14 +3015,18 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "link_candidates":
         return link_candidates(str(args["kb_id"]), str(args.get("source_slug", "")),
                                str(args.get("relation", "")), args.get("candidates") or [],
-                               str(args.get("knowledge_id", "")), int(args.get("round_no", 0) or 0))
+                               str(args.get("knowledge_id", "")), int(args.get("round_no", 0) or 0),
+                               kb_ids=args.get("kb_ids") or None,
+                               confirm_kb_match=bool(args.get("confirm_kb_match")))
     if name == "list_link_candidates":
         return list_link_candidates(str(args["kb_id"]), str(args.get("knowledge_id", "")),
                                     str(args.get("status", "pending")))
     if name == "resolve_link_candidate":
         return resolve_link_candidate(str(args["kb_id"]), str(args.get("candidate_id", "")),
                                       str(args.get("action", "")),
-                                      str(args.get("knowledge_id", "")))
+                                      str(args.get("knowledge_id", "")),
+                                      kb_ids=args.get("kb_ids") or None,
+                                      confirm_kb_match=bool(args.get("confirm_kb_match")))
     raise RuntimeError("未知工具：%s" % name)
 
 

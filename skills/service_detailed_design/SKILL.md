@@ -42,7 +42,9 @@ guard: 键角色不建 Key 类（用 easvc:keyRole）；CRUD 只在边上给（p
 4. **定 CRUD**：用 `easvc:operationOperatesOnAttribute` 边把「操作 → 属性」连起来，
    **在读写在边上给**：`properties={"easvc:crudKind": "C,U"}`（可多值，逗号分隔）。
    读操作 `R`，写操作 `C/U/D`。
-5. **落库**：`save_knowledge(stage="graph", mode="dry_run")` 先看清单，用户确认后 `mode="apply"`；
+5. **落库**：`save_knowledge(stage="graph", mode="dry_run",
+- 落库时带 `context="service_detailed_design"`（文案按服务详细设计渲染）。
+   kb_ids=[…会话绑定的库 id…])` 先看清单，用户确认后 `mode="apply"`；
    服务页会自动生成 `## CRUD 矩阵`（系统渲染，别自己写表）。
    **`report.upstream` 必须带上「服务页 + 报告页」** —— 设计页的 `source_refs` 从这里继承，
    不带的话新页会被巡检判 C1（"实例页无来源"，high）。
@@ -56,6 +58,22 @@ guard: 键角色不建 Key 类（用 easvc:keyRole）；CRUD 只在边上给（p
 > 照着改成目标服务即可。
 
 ## 纪律
+
+## 写库前置（硬规则，2026-09-22）
+
+**写操作必须唯一确定目标知识库**：会话可能同时绑定多个库（查询/检索可以多库，**保存只能落一个**）。
+
+1. 把会话绑定的库清单（`<bound_knowledge_bases>` 里的 `id`）原样传给 `kb_ids`；
+2. `kb_ids` > 1 且用户没点名写哪个库 → 服务端**拒绝写**并回 `need_kb_selection: true` + 候选清单：
+   **必须问用户"写进哪一个库"**，拿到答复后带 `kb_id=<完整 uuid 或精确库名>` 重跑；
+3. `kb_id` 只认**完整 uuid**或**精确库名**；uuid 前缀 / 名称包含（模糊）会回 `need_kb_confirm: true`
+   → 改传完整 uuid，或在用户确认后带 `confirm_kb_match=true` 重跑；
+4. 库名不要含糊（只写"企业"这种）——命中多个会被拒，命中一个也要确认。
+
+> **相似度与关系解析都只在本库内**：目标节点若只存在于别的知识库，回执会出现
+> `cross_kb_same_name` 并把它计入 `violations`（**绝不跨库合并**——同名不代表同义）。
+> 要连到那个节点，先在本库建立它，或改用本库内的等价节点。
+
 - **主外键不建类**：`keyRole` 是数据属性（PK/FK/UNIQUE/NONE），外键用 `referencesAttribute` 指过去。
 - **CRUD 只在边上给**（`edges[].properties.easvc:crudKind`），不要在正文里手写表格 ——
   `## CRUD 矩阵` 由服务端确定性渲染；`## 关系限定（边属性）` 也是服务端写的。

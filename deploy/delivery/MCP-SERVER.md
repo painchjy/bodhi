@@ -137,6 +137,24 @@ tools/list  OK（14 个）：list_pending_merges, resolve_pending_merge, ontolog
 skills()    OK（3 个：domain_modeling / ea_overview_design / service_detailed_design）
 ```
 
+> **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
+> `resolve_link_candidate` / `resolve_pending_merge` / `service_overview(apply=true)` 新增
+> `kb_ids`（会话绑定的库清单）与 `confirm_kb_match`；`save_knowledge` 另加 `context`（技能上下文）。
+> 多库会话下不指定 `kb_id` → **拒绝写**（`need_kb_selection`）；`kb_id` 模糊命中（uuid 前缀/名称包含）
+> → 需 `confirm_kb_match=true`。读工具 `audit_scan` / `list_pending_merges` 也支持 `kb_ids`（多库）。
+>
+> **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
+> `resolve_link_candidate` / `resolve_pending_merge` / `service_overview(apply=true)` 新增
+> `kb_ids`（会话绑定的库清单）与 `confirm_kb_match`；`save_knowledge` 另加 `context`（技能上下文）。
+> 多库会话下不指定 `kb_id` → **拒绝写**（`need_kb_selection`）；`kb_id` 模糊命中（uuid 前缀/名称包含）
+> → 需 `confirm_kb_match=true`。读工具 `audit_scan` / `list_pending_merges` 也支持 `kb_ids`（多库）。
+>
+> **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
+> `resolve_link_candidate` / `resolve_pending_merge` / `service_overview(apply=true)` 新增
+> `kb_ids`（会话绑定的库清单）与 `confirm_kb_match`；`save_knowledge` 另加 `context`（技能上下文）。
+> 多库会话下不指定 `kb_id` → **拒绝写**（`need_kb_selection`）；`kb_id` 模糊命中（uuid 前缀/名称包含）
+> → 需 `confirm_kb_match=true`。读工具 `audit_scan` / `list_pending_merges` 也支持 `kb_ids`（多库）。
+>
 > **2026-09-22 变更**：整篇异步抽取工具（`extract_and_save` / `extract_status`）**已移除**（不是"兼容保留"）；
 > 领域建模走 `doc_outline` + `extract_state` + `save_knowledge(session=…)` + 候选关联三件套
 > （见 `03-manual/docs/agent-design-flow.md` §11.8）。

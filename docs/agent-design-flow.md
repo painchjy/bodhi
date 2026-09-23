@@ -514,3 +514,18 @@ nginx 仍连旧 IP。（`deploy_frontend.sh` 里早就写着这个坑："重建�
 - 观察：`docker ps | grep sandbox`（安装容器在不在）、`tenant_skills.status`、`GET /sandbox-configs/{cfg}/skills`。
 - `GET /api/v1/skills` 只在**技能可用**时返回条目（`skills_available` 字段）；安装中途会是 `false`。
 
+### 11.9 写库目标库唯一化 · 跨库隔离 · 文案按技能（2026-09-22）
+
+用户实测两件事：① 领域建模会话可绑多个知识库，写库时含糊的 `kb_id` 会**静默写进别的库**（回执成功、
+自己的库里没有记录）；② 领域建模的页面/报告写着「概要设计…/无原文片段」（三技能共用一份落库代码，
+文案写死）。修复：
+
+| 问题 | 根因（改前） | 现在 |
+|---|---|---|
+| 写库目标库不唯一 | `ke_db.resolve_kb_id` 支持"名称包含匹配"，写路径也用它；会话绑了几个库服务端不知道 | 新增 `ke_db.resolve_kb_candidate`（exact/fuzzy）+ `server.resolve_write_kb`：多库未指定 → 拒（`need_kb_selection`）；模糊命中=1 → 需 `confirm_kb_match=true`；精确（完整 uuid / 精确库名）直通 |
+| 跨库"合并"假象 | `_graph_target_slug/_type` 按标题在**全库**找页（少了 `knowledge_base_id` 过滤）→ 把别库的 slug 写进本库页的 `## 本体关系`/`out_links` | 两处加库过滤；`save_elements` 落库前**再断言** relation.target_slug 属于本库，越界的进 `dropped_relations`；目标只存在于别库时回 `cross_kb_same_name`（**不跨库合并**） |
+| 文案串技能 | `design_elements` 写死 `（概要设计，无原文片段）`；报告页 `type_label/category_path/source_text` 写死「概要设计报告」 | 新增 `context`（`domain_modeling` / `ea_overview_design` / `service_detailed_design`，缺省=旧口径）→ `SKILL_CONTEXTS` 决定占位文案与报告页文案；三个技能文档已写明要显式传 `context` |
+| 读范围 | 我们 MCP 的读工具都是单库 | `audit_scan` / `list_pending_merges` 支持 `kb_ids`（多库逐库，不跨库合并计数）；**全库检索**仍是 app 原生工具（`grep_chunks`/`wiki_search`）按会话绑定库决定 |
+
+回执里新增/常用的字段：`need_kb_selection` / `need_kb_confirm` / `matched` / `bound_kb_ids` /
+`cross_kb_same_name` / `dropped_relations` / `context`。

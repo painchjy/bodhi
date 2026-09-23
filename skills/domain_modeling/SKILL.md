@@ -24,6 +24,21 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
 > 内网算力有限：**一次交互的输入 token 上限就是会话参数**（`budget_tokens`）。
 > 某轮超时/被截断 → **把阈值调小**重跑，父块会自动按子块细分。
 
+## 写库前置（硬规则，2026-09-22）
+
+**写操作必须唯一确定目标知识库**：会话可能同时绑定多个库（查询/检索可以多库，**保存只能落一个**）。
+
+1. 把会话绑定的库清单（`<bound_knowledge_bases>` 里的 `id`）原样传给 `kb_ids`；
+2. `kb_ids` > 1 且用户没点名写哪个库 → 服务端**拒绝写**并回 `need_kb_selection: true` + 候选清单：
+   **必须问用户"写进哪一个库"**，拿到答复后带 `kb_id=<完整 uuid 或精确库名>` 重跑；
+3. `kb_id` 只认**完整 uuid**或**精确库名**；uuid 前缀 / 名称包含（模糊）会回 `need_kb_confirm: true`
+   → 改传完整 uuid，或在用户确认后带 `confirm_kb_match=true` 重跑；
+4. 库名不要含糊（只写"企业"这种）——命中多个会被拒，命中一个也要确认。
+
+> **相似度与关系解析都只在本库内**：目标节点若只存在于别的知识库，回执会出现
+> `cross_kb_same_name` 并把它计入 `violations`（**绝不跨库合并**——同名不代表同义）。
+> 要连到那个节点，先在本库建立它，或改用本库内的等价节点。
+
 ## 固定动作（每轮）
 
 1. **对齐进度**：`extract_state(kb_id, knowledge_id)`。
@@ -34,7 +49,9 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
    - `total_units / est_total_tokens / est_total_batches` 让你先告诉用户"这篇大概要做几批"。
 3. **只从本批抽知识**：节点（类）与关系（对象属性）必须能由本批文本支撑；
    每条节点给 `source_text`（**原句**，用于定位切片）。
-4. **落库**：`save_knowledge(stage="graph", mode="dry_run")` 先预览 → 用户确认后 `mode="apply"`，
+4. **落库**：`save_knowledge(stage="graph", mode="dry_run",
+- 落库时带 `context="domain_modeling"`（决定页面文案：`## 原文依据` 会写「领域建模：无原文片段」而不是「概要设计…」；报告页标题/分类也按技能走）。
+   kb_ids=[…会话绑定的库 id…])` 先预览 → 用户确认后 `mode="apply"`，
    并带上 **`session`**：
    ```json
    {"session": {"knowledge_id": "<id>", "round_no": 1, "budget_tokens": 600,

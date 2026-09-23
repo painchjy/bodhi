@@ -33,7 +33,9 @@ guard: 两段都要人工确认；落库必须 mode="apply"；新建应用/系�
    **正常/异常案例 ASSERTION**（`assertions[{id, kind:"N|E", assertion}]`）；有可执行技能定义时才填
    `attributes`（数据属性，如 `ea:ai_skill`）。
 3. **定位实现系统**：判断服务由哪个现有应用实现；找不到合适才建议新建（写清职责与边界）。
-4. **第一段（报告）**：形成报告 md（下面结构），调 `save_knowledge(stage="report", mode="dry_run")`：
+4. **第一段（报告）**：形成报告 md（下面结构），调
+- 落库时带 `context="ea_overview_design"`（报告页类型/分类=「概要设计报告」）。
+   `save_knowledge(stage="report", mode="dry_run", context="ea_overview_design")`：
    `report={title, content_md, upstream=[你读过的页 slug], source_document_id/title}`。
    把将要新建/更新的清单给用户看；**用户确认后同载荷 `mode="apply"` 重跑**，记下返回的报告页 **slug**。
    （重跑**同一标题** = 更新该报告页：slug 不变、正文整体替换 —— 不要为"改版"改标题。）
@@ -57,6 +59,22 @@ guard: 两段都要人工确认；落库必须 mode="apply"；新建应用/系�
 ```
 
 ## 落库纪律（必须遵守）
+
+## 写库前置（硬规则，2026-09-22）
+
+**写操作必须唯一确定目标知识库**：会话可能同时绑定多个库（查询/检索可以多库，**保存只能落一个**）。
+
+1. 把会话绑定的库清单（`<bound_knowledge_bases>` 里的 `id`）原样传给 `kb_ids`；
+2. `kb_ids` > 1 且用户没点名写哪个库 → 服务端**拒绝写**并回 `need_kb_selection: true` + 候选清单：
+   **必须问用户"写进哪一个库"**，拿到答复后带 `kb_id=<完整 uuid 或精确库名>` 重跑；
+3. `kb_id` 只认**完整 uuid**或**精确库名**；uuid 前缀 / 名称包含（模糊）会回 `need_kb_confirm: true`
+   → 改传完整 uuid，或在用户确认后带 `confirm_kb_match=true` 重跑；
+4. 库名不要含糊（只写"企业"这种）——命中多个会被拒，命中一个也要确认。
+
+> **相似度与关系解析都只在本库内**：目标节点若只存在于别的知识库，回执会出现
+> `cross_kb_same_name` 并把它计入 `violations`（**绝不跨库合并**——同名不代表同义）。
+> 要连到那个节点，先在本库建立它，或改用本库内的等价节点。
+
 - **`mode` 必须显式写**：`dry_run` 只是预览（回执 `applied=false` + `write_note`）；要落库必须 `apply`。
   **只以回执 `applied=true` 与 `page_versions` 为准**；`applied=false` 时绝不说"已写入/已更新"。
 - **重跑同一份内容 = 更新同一页**（报告页正文整体替换；节点页 slug 命中原页即合并），不要靠改标题绕开旧页。

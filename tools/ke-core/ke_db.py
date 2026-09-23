@@ -180,6 +180,56 @@ def resolve_kb_id(raw: str) -> tuple[str, str, str]:
                      % (raw or "(空)", options))
 
 
+def resolve_kb_candidate(raw: str) -> tuple[str, str, str]:
+    """**写路径**用的解析：返回 `(id, name, mode)`，`mode` ∈ `exact` / `fuzzy`。
+
+    与 `resolve_kb_id`（读路径，宽松）的区别：
+    - `exact`：**完整 UUID** 或库名**归一化后完全相等** → 唯一无歧义，可直接用；
+    - `fuzzy`：**UUID 前缀**或**名称包含**且只命中 1 个 → 不算精确，调用方必须**二次确认**
+      （2026-09-22 用户口径：模糊命中=1 也要确认，只有精确匹配不用）；
+    - 命中 0 个 / 多个 / 参数为空或占位符 → 抛 ValueError（带可选清单，供调用方纠正）。
+    """
+    raw = (raw or "").strip()
+    rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
+                    "ORDER BY updated_at DESC")
+    options = "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in rows) or "（无）"
+    if not raw:
+        raise ValueError("kb_id 不能为空：**写库必须明确指定一个知识库**；可选：%s" % options)
+    if raw.startswith("__") and raw.endswith("__"):
+        raise ValueError("kb_id 还是占位符「%s」：请换成真实的知识库 uuid（或精确库名）；可选：%s"
+                         % (raw, options))
+    if re.fullmatch(r"[0-9a-fA-F-]{36}", raw):
+        hit = [r for r in rows if r["id"].lower() == raw.lower()]
+        if hit:
+            return hit[0]["id"], hit[0]["name"], "exact"
+        raise ValueError("知识库不存在：%s（按 UUID 找，没有这个库）；可选：%s" % (raw, options))
+    if re.fullmatch(r"[0-9a-fA-F-]{4,35}", raw):
+        hit = [r for r in rows if r["id"].lower().startswith(raw.lower())]
+        if len(hit) == 1:
+            return hit[0]["id"], hit[0]["name"], "fuzzy"
+        if len(hit) > 1:
+            raise ValueError("UUID 前缀不唯一：%s → %s" % (raw, "、".join(r["name"] for r in hit)))
+
+    def _norm(text: str) -> str:
+        return re.sub(r"[\s\u3000]+", "", text or "")
+
+    want = _norm(raw)
+    exact = [r for r in rows if _norm(r["name"]) == want]
+    if len(exact) == 1:
+        return exact[0]["id"], exact[0]["name"], "exact"
+    if len(exact) > 1:
+        raise ValueError("知识库名称重复：%s → %s；请改用 id"
+                         % (raw, "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in exact)))
+    loose = [r for r in rows if _norm(r["name"]) in want or want in _norm(r["name"])]
+    if len(loose) == 1:
+        return loose[0]["id"], loose[0]["name"], "fuzzy"
+    if len(loose) > 1:
+        raise ValueError("知识库名称不唯一（包含匹配命中 %d 个）：%s → %s；请改用 id"
+                         % (len(loose), raw,
+                            "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in loose)))
+    raise ValueError("知识库不存在：%s；**请把可选清单里的 id 原样传给 kb_id**，可选：%s" % (raw, options))
+
+
 def sql_str(value) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 

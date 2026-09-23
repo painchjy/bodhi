@@ -5,23 +5,31 @@
 > - `agents.sql` —— 登记两个智能体：`bodhi-ea-modeler`（技能驱动：抽取 + 概要设计 + 详细设计）、`bodhi-kb-ops`（只读巡检与清理计划）
 > - `ROLLBACK.sql` —— 停用智能体 + 删除 MCP 服务行
 >
-> **不写死的三样东西**（2026-09-22 修）：SQL 里**不含**我们这套环境的任何 UUID ——
-> 知识库绑定与 MCP 服务 id 都是占位符；**`model_id` 故意不写**（沿用内置智能体的有效模型）。
+> **2026-09-22 口径（简化 + 去硬编码）**：
+> - 租户（`mcp_services.tenant_id` 与智能体的 `tenant_id`）**固定写 10000**（用户口径；你们按需改）；
+> - **模型留空、知识库留空** —— 装完在「平台 → MCP 服务 / 智能体」界面里配；
+> - 需要替换的只有一个：**`__MCP_URL__`**（`__MCP_SERVICE_ID__` 默认就是 `a7c1f0d2-…`，两边一致）；
+> - SQL 里**不含**我们这套环境的其它 UUID（`export_db.py` 有断言保证）。
 
-## 1. 要先替换三个占位符
+## 1. 要先替换的占位符
 
 | 占位符 | 换成 | 从哪拿 |
 |---|---|---|
 | `__MCP_URL__` | `http://bodhi2-mcp:8765/mcp`（容器 DNS，推荐）或 `http://<宿主机IP>:8765/mcp` | 你部署 MCP 时用的地址 |
-| `__BIZ_KB_ID__` | 业务知识库 uuid | `SELECT id,name FROM knowledge_bases WHERE deleted_at IS NULL;` |
-| `__ONTOLOGY_KB_ID__` | 本体模型知识库 uuid | 同上 |
-| `__MCP_SERVICE_ID__` | MCP 服务行 id（默认就是 `a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001`）| 与 `mcp_service.sql` 里的 id 一致 |
+| `__MCP_SERVICE_ID__` | MCP 服务行 id（默认就是 `a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001`，两边一致，通常不用动）| 与 `mcp_service.sql` 里的 id 一致 |
 
-### 关于 `model_id`（为什么不写）
+> **租户固定 10000**（`mcp_services.tenant_id` 与两个智能体的 `tenant_id` 都写 10000，2026-09-22 用户口径）。
+> 你们库里租户不是 10000 时，把两个 SQL 里的 `10000` 一起改掉再执行（改一处漏一处会插不进去）。
+> 顺带修掉的两个坑：旧版 `mcp_service.sql` 误取 `tenants.tenant_id`（该列**不存在**，只跑出
+> `column t.tenant_id does not exist`）、`transport_type` 写成 `streamable_http`
+> —— 现在写死 `10000` + `http-streamable`，实测可在库上跑通。
 
-`custom_agents.config.model_id` 是**每个 WeKnora 实例自己的** chat 模型 UUID（我们的开发机上是
-`deepseek-flash`；你们库里是你们配的那个）—— 写进交付 SQL 必然对不上。所以 `agents.sql` 的
-`INSERT` 是「克隆内置智能体 config 再覆盖我们的字段」：**不注入 `model_id`，自动继承内置智能体的有效模型**。
+### 关于 `model_id` 与知识库（为什么留空）
+
+`config.model_id` / `config.knowledge_bases` 都是**每个实例自己的**值（模型 uuid、库 uuid），
+写进交付 SQL 必然对不上 —— 所以**留空**，装完在界面里选（也可用下面 SQL 指定模型）。
+`agents.sql` 的 `INSERT` 仍会「克隆内置智能体 config 再覆盖我们的字段」，所以上游默认项
+（`agent_mode`、`max_iterations` 等）自动带上，你们不用逐字段造。
 
 要显式指定（可选）：
 
@@ -38,14 +46,13 @@ WHERE id = 'bodhi-ea-modeler';
 > 防止我们环境的 id 再被带进交付包。
 
 ```bash
-# 一键替换 + 落库（把四个变量填好）
+# 一键替换 + 落库（只有 URL 是必须填的）
 MCP_URL='http://bodhi2-mcp:8765/mcp'
-BIZ_KB='<业务库 uuid>'; ONT_KB='<本体模型库 uuid>'; MCP_ID='a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'
+MCP_ID='a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'
 PSQL_URL='postgresql://postgres:口令@127.0.0.1:5432/WeKnora'
 
 for f in sql/mcp_service.sql sql/agents.sql; do
-  sed -e "s|__MCP_URL__|$MCP_URL|g" -e "s|__BIZ_KB_ID__|$BIZ_KB|g" \
-      -e "s|__ONTOLOGY_KB_ID__|$ONT_KB|g" -e "s|__MCP_SERVICE_ID__|$MCP_ID|g" "$f" > "/tmp/$(basename "$f")"
+  sed -e "s|__MCP_URL__|$MCP_URL|g" -e "s|__MCP_SERVICE_ID__|$MCP_ID|g" "$f" > "/tmp/$(basename "$f")"
   psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f "/tmp/$(basename "$f")"
 done
 ```
