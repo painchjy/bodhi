@@ -24,7 +24,7 @@ B（图谱 ↔ 模型）：B1 类型不在模型 / B2 关系不在模型 / B3 ra
   B4（本体模型库）投影与页不一致
   B5（本体投影 ↔ 编译产物不一致）：修复**直接给命令**（重编产物 / 重载投影），不走 plan_id
 C（来源异常）：C1 无来源实例页 / C2 来源文档已删或不存在 / C3 正文称有来源但 `source_refs` 空 /
-  C4 图侧实例无溯源
+  C4 图侧实例无溯源 / **C5 建模会话记着的页不在本库**（2026-09-24：跨库同 slug 撞主键的存量体检）
 D（重复/幂等）：D1 同语义多页 / D2 软删残留与活页并存 / D3 孤儿版本快照
 
 用法
@@ -49,6 +49,10 @@ import ke_db  # noqa: E402
 import ke_neo4j  # noqa: E402
 import ke_ontology  # noqa: E402
 import ke_pages  # noqa: E402
+
+REPO = HERE.parents[1]
+# 领域建模会话状态（`state/domain_sessions/<kb>/<knowledge>.json`）：C5 检查读它
+SESSION_STATE_DIR = REPO / "state" / "domain_sessions"
 
 try:                                              # ke_docs 与 ke_audit 同在 ke-core
     import ke_docs  # noqa: E402
@@ -615,6 +619,58 @@ def check_sources(ctx: dict, rep: Report) -> None:
 
 
 # ---------------------------------------------------------------------------
+# C5（2026-09-24）：领域建模会话状态里记的页**不在本库**
+# ---------------------------------------------------------------------------
+# 历史 bug（用户实测）：页 id 只按 slug 派生（UUIDv5）→ 两个知识库里的同名页 id 相同 →
+# `INSERT … ON CONFLICT (id) DO UPDATE` 更新了**别的库**那一行，本库没有该页，回执却报成功
+# （目标库 11 页全部落在别的库）。已修：id 并入 kb + upsert 同库守卫 + 写后对账；
+# 本检查用来**发现存量**（哪些会话页落错、实际落在哪个库）。
+def check_session_pages(ctx: dict, rep: Report) -> None:
+    kb_id = ctx["kb_id"]
+    base = SESSION_STATE_DIR / kb_id
+    if not base.is_dir():
+        ctx["data"]["session_pages"] = {"sessions": 0, "pages": 0, "missed": 0}
+        return
+    sessions = pages_seen = missed_total = 0
+    for path in sorted(base.glob("*.json")):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        entries = state.get("pages") or []
+        if not entries:
+            continue
+        sessions += 1
+        slugs = [str(p.get("slug") or "") for p in entries]
+        slugs = [s for s in slugs if s]
+        pages_seen += len(slugs)
+        if not slugs:
+            continue
+        lst = ", ".join(ke_db.sql_str(s) for s in slugs)
+        rows = ke_db.psql_csv(
+            "SELECT slug, left(knowledge_base_id::text,8) AS kb FROM wiki_pages "
+            "WHERE deleted_at IS NULL AND slug IN (%s)" % lst)
+        here = {r["slug"] for r in rows if r["kb"] == kb_id[:8]}
+        elsewhere = {}
+        for r in rows:
+            if r["kb"] != kb_id[:8]:
+                elsewhere.setdefault(r["slug"], []).append(r["kb"])
+        for slug in slugs:
+            if slug in here:
+                continue
+            missed_total += 1
+            where = "、".join(elsewhere.get(slug) or []) or "（该 slug 在库里不存在）"
+            rep.add("C5", "high", slug,
+                    "建模会话记着这一页，但**本库没有**它（实际落点：%s）—— 会话 %s"
+                    % (where, path.stem[:24]),
+                    "历史 bug：页 id 只按 slug 派生 → 跨库撞主键、upsert 更新了别库那一行。"
+                    "修复已上线（id 含库 + 同库守卫 + 写后对账）；存量请重跑该文档的建模批次"
+                    "落进本库，并人工核对别库那几页是否需回退/删除")
+    ctx["data"]["session_pages"] = {"sessions": sessions, "pages": pages_seen,
+                                    "missed": missed_total}
+
+
+# ---------------------------------------------------------------------------
 # D. 重复 / 幂等残留
 # ---------------------------------------------------------------------------
 def check_dupes(ctx: dict, rep: Report) -> None:
@@ -1077,6 +1133,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_ontology_artifacts(ctx, rep)
     if scope in ("all", "source"):
         check_sources(ctx, rep)
+        check_session_pages(ctx, rep)
     if scope in ("all", "dupes"):
         check_dupes(ctx, rep)
     if scope in ("all", "coupling"):

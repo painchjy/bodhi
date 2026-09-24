@@ -908,8 +908,14 @@ def sql_json(value) -> str:
     return sql_str(json.dumps(value, ensure_ascii=False)) + "::jsonb"
 
 
-def page_id_for(slug: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-ontology:" + slug))
+def page_id_for(kb_id: str, slug: str) -> str:
+    """(知识库, slug) → 确定性页 id。
+
+    2026-09-24 修：旧实现只按 slug 派生（`bodhi-ontology:<slug>`）→ 与别的库里同名页 id 相同，
+    跨库会撞主键（与 MCP 侧同一个 bug）。投影前会先按库删旧页（`project` 里的 DELETE），
+    所以换 id 只会让本库的这几页重建一次，不产生重复页。
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-ontology:%s|%s" % (kb_id, slug)))
 
 
 def project(pages: list[dict], kb_id: str) -> str:
@@ -924,7 +930,7 @@ def project(pages: list[dict], kb_id: str) -> str:
            % (sql_str(kb_id), sql_str(TOOL_TAG))]
     for page in pages:
         values = [
-            sql_str(page_id_for(page["slug"])), str(tenant_id), sql_str(kb_id),
+            sql_str(page_id_for(kb_id, page["slug"])), str(tenant_id), sql_str(kb_id),
             sql_str(page["slug"]), sql_str(page["title"]), sql_str(page["page_type"]),
             sql_str("published"), sql_str(page["content"]), sql_str(page["summary"]),
             sql_str(""), sql_str(""), sql_json(page["category_path"]),

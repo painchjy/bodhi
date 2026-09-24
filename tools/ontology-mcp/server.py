@@ -187,8 +187,41 @@ def cosine(a: list[float], b: list[float]) -> float:
 #   `_docker_prefix` / `psql` / `psql_csv` / `sql_str` / `sql_json` 已移到
 #   tools/ke-core/ke_db.py，并在文件头 import 回来（名字不变，下游脚本无感）。
 # ---------------------------------------------------------------------------
-def page_id_for(slug: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:" + slug))
+def page_id_for(kb_id: str, slug: str) -> str:
+    """**(知识库, slug) → 确定性页 id**。
+
+    2026-09-24 修（用户实测）：旧实现只按 slug 派生 → **两个知识库里的同名页 id 相同** →
+    `INSERT ... ON CONFLICT (id) DO UPDATE` 会把**别的库那一行**更新掉（回执却报成功、
+    本库查不到该页）。现在把 kb 并入派生，跨库天然不冲突。
+    迁移策略见 `_resolve_page_id`：本库已有同 slug 的页一律**沿用其现有 id**（老数据零迁移）。
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s" % (kb_id, slug)))
+
+
+def _resolve_page_id(kb_id: str, slug: str) -> tuple[str, str]:
+    """给 `(kb_id, slug)` 定一个**本库内唯一**的页 id，并说明用的哪种方式。
+
+    ① 本库已有同 slug 的页 → **沿用它的现有 id**（继续更新它，不产生重复页；老数据零迁移）；
+    ② 否则用 `page_id_for(kb_id, slug)`；该 id 若**属于别的知识库**（历史遗留的纯 slug 派生），
+       加后缀再派生，直到拿到"空闲 / 属本库"的 id。
+
+    返回 `(id, how)`，`how` ∈ `existing` / `new` / `suffixed`。
+    """
+    rows = psql_csv("SELECT id FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s "
+                    "ORDER BY version DESC LIMIT 1" % (sql_str(kb_id), sql_str(slug)))
+    if rows:
+        return rows[0]["id"], "existing"
+    base = page_id_for(kb_id, slug)
+    for n in range(0, 50):
+        cand = base if n == 0 else str(uuid.uuid5(
+            uuid.NAMESPACE_URL, "bodhi-element:%s|%s|%d" % (kb_id, slug, n)))
+        owner = psql_csv("SELECT knowledge_base_id AS kb FROM wiki_pages WHERE id = %s"
+                         % sql_str(cand))
+        if not owner:
+            return cand, ("new" if n == 0 else "suffixed")
+        if owner[0]["kb"] == kb_id:
+            return cand, "new"
+    raise RuntimeError("给（kb=%s, slug=%s）找不到可用页 id（已试 50 个后缀）" % (kb_id, slug))
 
 
 # ---------------------------------------------------------------------------
@@ -1156,15 +1189,23 @@ def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
 
 
 def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
-    """插入新页；若该 slug 派生的确定性 id 已存在（含**软删除**的旧页）则改为复活+更新。
+    """插入新页；id 由 `(kb_id, slug)` 决定（见 `_resolve_page_id`），本库已有同 slug 页时沿用其 id。
 
+    历史背景
+    --------
     2026-09-19 实测崩溃：page id 由 slug 派生（UUIDv5），而上游的重复检查只看内存里
     加载到的活页（deleted_at IS NULL）。用户删文档后旧页是**软删除**、id 仍占着，
     于是重复抽取会 INSERT 撞主键（wiki_pages_pkey）→ 整批事务回滚 → 工具报错。
     用 ON CONFLICT(id) DO UPDATE 一次解决：复活、覆盖内容、版本+1、标记来源。
+
+    2026-09-24 实测（用户报「保存成功但知识全在别的知识库」）：id 只按 slug 派生 → 跨库撞主键，
+    upsert 把**别的库那一行**更新了。现在 ① id 包含 kb ② upsert 加**同库守卫**
+    （`WHERE wiki_pages.knowledge_base_id = EXCLUDED.knowledge_base_id`）——
+    任何情况下都不会再更新别的知识库的行。
     """
+    pid, _how = _resolve_page_id(kb_id, page["slug"])
     values = [
-        sql_str(page_id_for(page["slug"])), str(tenant_id), sql_str(kb_id),
+        sql_str(pid), str(tenant_id), sql_str(kb_id),
         sql_str(page["slug"]), sql_str(page["title"]), sql_str(page["page_type"]),
         sql_str("published"), sql_str(page["content"]), sql_str(page["summary"]),
         sql_str(""), sql_str(""), sql_json(page["category_path"]), sql_str(page["wiki_path"]),
@@ -1191,7 +1232,10 @@ def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
         "                 THEN EXCLUDED.page_type ELSE wiki_pages.page_type END, "
         "status = wiki_pages.status, "
         "deleted_at = NULL, version = wiki_pages.version + 1, "
-        "last_edit_source = %s, updated_at = now() " % sql_str(TOOL_TAG))
+        "last_edit_source = %s, updated_at = now() "
+        # 同库守卫（2026-09-24）：撞主键时若那一行属于**别的知识库**，DO UPDATE 不生效
+        # （宁可写不进去也不能改写别库；正常情况下 `_resolve_page_id` 已保证 id 属本库）
+        "WHERE wiki_pages.knowledge_base_id = EXCLUDED.knowledge_base_id" % sql_str(TOOL_TAG))
     return ("INSERT INTO wiki_pages (%s) VALUES (%s) %s;"
             % (", ".join(PAGE_COLUMNS), ", ".join(values), conflict))
 
@@ -1415,6 +1459,26 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     if not dry_run and statements:
         statements.append(sql_rebuild_in_links(kb_id))
         psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
+        # 写后对账（2026-09-24）：回执里的每个 slug 必须**在本库**查得到 ——
+        # 否则就是"回执成功、库里没有"（历史 bug：页 id 只按 slug 派生 → upsert 更新了别库那一行）。
+        # 这里把它变成**显式的失败**：`applied` 回拨为 False + missing 清单，提示不要向用户汇报成功。
+        wanted = [e.get("slug") for e in summary["created"]] \
+            + [e.get("into") for e in summary["merged"]] \
+            + [e.get("pending_slug") for e in summary["pending"]]
+        wanted = [s for s in wanted if s]
+        if wanted:
+            rows = psql_csv("SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s "
+                            "AND deleted_at IS NULL AND slug IN (%s)"
+                            % (sql_str(kb_id), ", ".join(sql_str(s) for s in wanted)))
+            got = {r["slug"] for r in rows}
+            missing = [s for s in wanted if s not in got]
+            summary["write_check"] = {"kb_id": kb_id, "expected": len(wanted),
+                                      "verified": len(got), "missing": missing}
+            if missing:
+                summary["applied"] = False
+                summary["write_check"]["note"] = (
+                    "这些 slug 未在本库落库 —— **不要向用户汇报成功**；请重跑本批或按清单排查"
+                    "（历史原因：跨知识库同 slug 撞主键，旧实现会更新到别的库）")
         # 类型变更（retag）：批量写完后逐条改类型（快照 + 重建 category_path），再统一同步一次目录
         for item in retag_queue:
             try:
