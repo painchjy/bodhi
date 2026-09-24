@@ -827,7 +827,7 @@ def check_governance(ctx: dict, rep: Report) -> None:
         mine_slug = next((p["slug"] for p in mine
                           if (p["page_type"], _norm_title(p["title"])) == key), "")
         rep.add("F1", "low", key[1],
-                "同一实例知识在 %d 个库都有：本库 `%s`（%s）；别库 %s —— 需租户指认**权威知识**，"
+                "同一实例知识**本库 + 另 %d 个库**都有：本库 `%s`（%s）；别库 %s —— 需租户指认**权威知识**，"
                 "其余库按副本与权威版本**单向绑定**"
                 % (len({r["kb"] for r in rowset}), mine_slug, key[0],
                    "、".join("%s/%s（%s）" % (r["kb"], r["slug"], r["kb_name"]) for r in rowset[:3])),
