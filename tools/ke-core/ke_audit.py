@@ -27,6 +27,8 @@ C（来源异常）：C1 无来源实例页 / C2 来源文档已删或不存在 
   C4 图侧实例无溯源 / **C5 建模会话记着的页不在本库**（2026-09-24：跨库同 slug 撞主键的存量体检）
 D（重复/幂等）：D1 同语义多页 / D2 软删残留与活页并存 / D3 孤儿版本快照 /
   **D4 同库同 slug 多行（影子页）** / **D5 页 id 非规范派生**（2026-09-24 加固）
+F（治理，2026-09-24 用户口径）：F1 跨库同实例候选（需指认权威）/ F2 权威·副本绑定漂移 /
+  F3 原文依据不达标（缺摘录或只有占位文案）；设计见 `docs/knowledge-governance.md`
 
 用法
 ----
@@ -36,6 +38,7 @@ D（重复/幂等）：D1 同语义多页 / D2 软删残留与活页并存 / D3 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -62,7 +65,7 @@ except Exception:  # noqa: BLE001
     ke_docs = None  # type: ignore
 
 SEV = {"high": 0, "medium": 1, "low": 2}
-SCOPES = ("all", "wiki", "model", "source", "dupes", "coupling")
+SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "coupling")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
@@ -761,6 +764,144 @@ def check_dupes(ctx: dict, rep: Report) -> None:
 
 
 # ---------------------------------------------------------------------------
+# F（治理）：跨库实例的权威/副本 + 溯源质量（2026-09-24 用户口径）
+#   F1 跨库同实例候选：同 (模型, 类, 归一化名称) 的实例页在多个知识库都有 → 需租户指认**权威知识**；
+#   F2 权威/副本绑定漂移：master 缺失（detached）/ 权威版本已前进（outdated）/ 副本被本地改写；
+#   F3 原文依据不达标：实例页缺「## 原文依据」摘录，或只有「（…无原文片段）」占位文案。
+#   设计与决策点见 `docs/knowledge-governance.md`。本组**只读**（不写任何数据）。
+# ---------------------------------------------------------------------------
+PLACEHOLDER_QUOTE_RE = re.compile(r"[（(][^）)]*无原文[^）)]*[）)]")
+
+
+def _meta_full(text: str) -> dict:
+    """整份 `page_metadata`（`_page_meta` 只取 `ontology` 子字典）。"""
+    try:
+        val = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return val if isinstance(val, dict) else {}
+
+
+def _governance_section(content: str, header: str) -> str | None:
+    """取正文里某个 `## ` 小节的内容（到下一个 `## ` 或文尾）；没有该小节返回 None。"""
+    lines = (content or "").splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == header.strip():
+            start = i + 1
+            break
+    if start is None:
+        return None
+    body: list[str] = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def _sha1(text: str) -> str:
+    return "sha1:" + hashlib.sha1((text or "").encode("utf-8")).hexdigest()
+
+
+def check_governance(ctx: dict, rep: Report) -> None:
+    kb_id = ctx["kb_id"]
+    mine = [p for p in ctx["pages"] if _is_instance(p["page_type"])]
+
+    # ---- F1 跨库同实例候选（需指认权威）-------------------------------------
+    keys = {(p["page_type"], _norm_title(p["title"])) for p in mine}
+    others: dict = {}
+    if keys:
+        rows = ke_db.psql_csv(
+            "SELECT left(w.knowledge_base_id::text, 8) AS kb, COALESCE(k.name, '') AS kb_name, "
+            "       w.slug, COALESCE(w.title, '') AS title, COALESCE(w.page_type, '') AS page_type "
+            "  FROM wiki_pages w LEFT JOIN knowledge_bases k ON k.id = w.knowledge_base_id "
+            " WHERE w.deleted_at IS NULL AND w.knowledge_base_id <> %s "
+            "   AND position(':' in COALESCE(w.page_type, '')) > 0 "
+            " LIMIT 5000" % ke_db.sql_str(kb_id))
+        for row in rows:
+            key = (row["page_type"], _norm_title(row["title"]))
+            if key in keys:
+                others.setdefault(key, []).append(row)
+    for key, rowset in sorted(others.items())[:20]:
+        mine_slug = next((p["slug"] for p in mine
+                          if (p["page_type"], _norm_title(p["title"])) == key), "")
+        rep.add("F1", "low", key[1],
+                "同一实例知识在 %d 个库都有：本库 `%s`（%s）；别库 %s —— 需租户指认**权威知识**，"
+                "其余库按副本与权威版本**单向绑定**"
+                % (len({r["kb"] for r in rowset}), mine_slug, key[0],
+                   "、".join("%s/%s（%s）" % (r["kb"], r["slug"], r["kb_name"]) for r in rowset[:3])),
+                "裁决与绑定方案见 docs/knowledge-governance.md §B（元数据写 `page_metadata.authority`）")
+    ctx["data"]["cross_kb_instance_candidates"] = len(others)
+    check_governance_rest(ctx, rep, mine)
+
+
+def check_governance_rest(ctx: dict, rep: Report, mine: list) -> None:
+    """F2 权威/副本绑定漂移 + F3 原文依据不达标（F1 见 `check_governance`）。"""
+    # ---- F2 权威/副本绑定漂移 ---------------------------------------------
+    bindings = 0
+    for page in ctx["pages"]:
+        auth = _meta_full(page.get("meta")).get("authority")
+        if not isinstance(auth, dict) or str(auth.get("role") or "") != "replica":
+            continue
+        bindings += 1
+        master = auth.get("master") if isinstance(auth.get("master"), dict) else {}
+        m_kb = str((master or {}).get("kb_id") or "")
+        m_slug = str((master or {}).get("slug") or "")
+        if not (m_kb and m_slug):
+            rep.add("F2", "medium", page["slug"], "副本已登记权威但缺 `master{kb_id, slug}`",
+                    "补全绑定信息（`/bodhi/authority/decide`）")
+            continue
+        mrows = ke_db.psql_csv(
+            "SELECT COALESCE(version,1) AS version, COALESCE(content,'') AS content "
+            "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+            % (ke_db.sql_str(m_kb), ke_db.sql_str(m_slug)))
+        if not mrows:
+            rep.add("F2", "medium", page["slug"],
+                    "绑定失效：权威页 %s/%s 不存在或已删（detached）" % (m_kb[:8], m_slug),
+                    "重新指认权威或解除绑定")
+            continue
+        m_version = int(mrows[0]["version"] or 1)
+        bound_v = int(auth.get("master_version") or 0)
+        if bound_v and m_version > bound_v:
+            rep.add("F2", "medium", page["slug"],
+                    "副本绑定在权威 v%s，权威已到 v%s（outdated）—— 需**评估下游影响**后升级绑定"
+                    % (bound_v, m_version),
+                    "评估引用本页的页/边 → 升级绑定（docs/knowledge-governance.md §B）")
+        if auth.get("master_hash") and auth["master_hash"] != _sha1(mrows[0]["content"]):
+            rep.add("F2", "low", page["slug"], "绑定的权威正文指纹与权威当前正文不一致（权威被改过）",
+                    "复核后重绑（升级绑定版本）")
+        if auth.get("replica_hash") and auth["replica_hash"] != _sha1(page["content"]):
+            rep.add("F2", "medium", page["slug"],
+                    "副本正文在绑定后被**本地改写**（local_drift）—— 单向绑定要求副本只读",
+                    "回滚到权威版本，或把本地补充移进 `page_metadata.local_notes` 后重绑")
+    ctx["data"]["replica_bindings"] = bindings
+
+    # ---- F3 原文依据不达标 ------------------------------------------------
+    with_quote = no_section = placeholder_only = 0
+    for page in mine:
+        body = _governance_section(page["content"], "## 原文依据")
+        if body is None:
+            no_section += 1
+            if no_section <= 20:
+                rep.add("F3", "low", page["slug"], "实例页没有「## 原文依据」小节 —— 无法溯源",
+                        "补 `source_text`（逐字摘录）重跑；综合型知识改用 `sources[]`+`synthesis` 声明")
+            continue
+        text = (body or "").strip()
+        quotes = [x for x in text.splitlines() if x.strip().startswith(">")]
+        if not text or PLACEHOLDER_QUOTE_RE.search(text) or (quotes and
+                all(PLACEHOLDER_QUOTE_RE.search(x) for x in quotes)):
+            placeholder_only += 1
+            if placeholder_only <= 20:
+                rep.add("F3", "low", page["slug"], "「原文依据」只有占位文案（没有任何逐字摘录）",
+                        "补 `source_text`；综合型知识用 `sources[]` + `synthesis{mode,confidence,owner}`")
+            continue
+        with_quote += 1
+    ctx["data"]["source_text_quality"] = {"with_quote": with_quote, "no_section": no_section,
+                                          "placeholder_only": placeholder_only}
+
+
+# ---------------------------------------------------------------------------
 # P2：计划(只读) → 人工确认 → 执行（**硬删**；用户 2026-09-20 口径：不得自动修）
 # ---------------------------------------------------------------------------
 PURGE_KINDS = ("no_source_pages", "deleted_source_pages", "mixed_source_refs",
@@ -1152,7 +1293,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
           page_limit: int = 5000) -> dict:
     """只读一致性巡检（**不写任何数据**）。
 
-    scope：`all` / `wiki`(A) / `model`(B) / `source`(C) / `dupes`(D)。
+    scope：`all` / `wiki`(A) / `model`(B) / `source`(C) / `dupes`(D) / `governance`(F)。
     返回 `{summary, totals, findings[], data}`：`totals` 是**完整计数**，
     `findings` 最多 `max_findings` 条（按严重度排序）。
     """
@@ -1189,6 +1330,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     if scope in ("all", "dupes"):
         check_dupes(ctx, rep)
         check_page_identity(ctx, rep)
+    if scope in ("all", "governance"):
+        check_governance(ctx, rep)
     if scope in ("all", "coupling"):
         check_coupling(ctx, rep)
 
