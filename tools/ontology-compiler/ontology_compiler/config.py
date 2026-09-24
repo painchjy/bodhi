@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -188,7 +189,53 @@ def build_modules() -> dict[str, ModuleSpec]:
             kind="extension",
             affects=("bmm", "ea"),
         ),
-    }
+    } | registry_modules()          # 上传注册的扩展模块（同名覆盖，2026-09-24）
+
+
+# --------------------------------------------------------------------------
+# 上传注册表（2026-09-24）：`ontology/extensions/_registry.json`
+#   前端「上传本体文件」勾选「编译并生效」时，ke_admin 会把 TTL 落到 EXTENSIONS_DIR，
+#   并把模块元数据登记到这里；本文件与其它导入器都读它。
+#   为什么用 sidecar JSON 而不是往 build_modules() 里写死：服务端不该改源码（易冲突、难回滚）；
+#   登记表是**数据**，可 git 追踪、可单独回滚；正式产物仍只由 compile.py 生成。
+# --------------------------------------------------------------------------
+REGISTRY_PATH = EXTENSIONS_DIR / "_registry.json"
+
+
+def registry_modules() -> dict[str, ModuleSpec]:
+    """读上传注册表 → ModuleSpec；文件缺失/坏行都**静默跳过**（不能让编译被一条坏数据打断）。"""
+    if not REGISTRY_PATH.is_file():
+        return {}
+    try:
+        data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict[str, ModuleSpec] = {}
+    for item in (data.get("modules") or []):
+        try:
+            key = str(item.get("key") or "").strip().lower()
+            rel = str(item.get("file") or "").strip()
+            if not key or not rel:
+                continue
+            prefix = str(item.get("prefix") or key).strip()
+            namespace = str(item.get("namespace") or "").strip()
+            spec = ModuleSpec(
+                key=key,
+                prefix=prefix,
+                label=str(item.get("label") or key),
+                short_label=str(item.get("short_label") or prefix.upper()),
+                ontology_iri=str(item.get("ontology_iri") or ""),
+                namespace=namespace,
+                files=(REPO_ROOT / rel,),
+                kind="extension",
+                affects=tuple(item.get("affects") or ()),
+            )
+            if namespace:
+                NS.setdefault(prefix, namespace)     # cypher 占位符 / 提示词也认得这个前缀
+            out[key] = spec
+        except Exception:  # noqa: BLE001
+            continue
+    return out
 
 
 def module_keys(modules: dict[str, ModuleSpec] | None = None) -> list[str]:

@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import subprocess
@@ -37,6 +38,110 @@ REPO = HERE.parents[1]
 # 本体模型知识库：**不再写死 uuid**（客户环境不是我们的 uuid）。
 # 解析顺序见 ke_ontology.resolve_ontology_kb：env → wiki_config 标记 → 库名 → 内容探测。
 PROJECTION_DIR = REPO / "artifacts" / "neo4j"
+# 上传的扩展模块：TTL 落到这里（真源）并登记进 `_registry.json`，编译器/导入器都读它。
+EXTENSIONS_DIR = REPO / "ontology" / "extensions"
+EXT_REGISTRY = EXTENSIONS_DIR / "_registry.json"
+
+
+def _index_totals() -> dict:
+    """读编译产物的规模（模块/类/关系/属性…）—— 用来回报"这次编译改了什么"。"""
+    path = REPO / "artifacts" / "weknora" / "ontology_index.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    return {k: int(v) for k, v in (data.get("totals") or {}).items()
+            if isinstance(v, (int, float))}
+
+
+def _ensure_expert_role(ttl_text: str, key: str, iri: str) -> tuple[str, list[str]]:
+    """上传的扩展模块若没声明 `bodhi:expertRole`，自动补一条默认值。
+
+    为什么必须补：编译器对每个模块都要求专家角色（见 `ontology_compiler/config.EXPERT_ROLE` 与
+    `docs/weknora-fork.md` §8.5），缺了会直接报"模块 X 缺少专家角色"而**整次编译失败**
+    （2026-09-24 实测：上传即编译时踩到）。这里只做"能编过"的最小补全，并把补了什么回报出来。
+
+    补法：确保 `@prefix bodhi:` 存在，再在**末尾追加**一条针对该模块 ontology IRI 的语句 ——
+    不动原文件里的任何已有语句（Turtle 允许多条语句描述同一主体）。
+    返回 `(新文本, 注入项清单)`。
+    """
+    if re.search(r"expertRole", ttl_text or ""):
+        return ttl_text, []
+    if not iri:
+        raise ValueError("TTL 里没有 `a owl:Ontology` 声明（拿不到本体 IRI），"
+                         "无法自动补 bodhi:expertRole；请在 TTL 里声明 <...> a owl:Ontology")
+    injected: list[str] = []
+    text = ttl_text or ""
+    if not re.search(r"@prefix\s+bodhi:\s*<http://example\.org/bodhi#>", text):
+        text = "@prefix bodhi: <http://example.org/bodhi#> .\n" + text
+        injected.append("@prefix bodhi:")
+    text = text.rstrip("\n") + (
+        '\n\n<%s> bodhi:expertRole "外部导入模块 %s：负责本模块类与关系的抽取、维护与校验" .\n'
+        % (iri, key))
+    injected.append("bodhi:expertRole（默认值；可在 TTL 里改写）")
+    return text, injected
+
+
+def _index_module_keys() -> list[str]:
+    """编译产物里的模块 key 清单（回报"这次编译新增/认识了哪些模块"）。"""
+    path = REPO / "artifacts" / "weknora" / "ontology_index.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    models = data.get("models") or data.get("modules") or []
+    keys = []
+    for item in models:
+        if isinstance(item, dict) and item.get("key"):
+            keys.append(str(item["key"]))
+        elif isinstance(item, str):
+            keys.append(item)
+    return sorted(keys)
+
+
+def _register_extension(meta: dict) -> dict:
+    """把上传模块登记进 `ontology/extensions/_registry.json`（同名覆盖，临时文件+替换=原子写）。"""
+    import datetime
+
+    entries: list[dict] = []
+    if EXT_REGISTRY.is_file():
+        try:
+            entries = json.loads(EXT_REGISTRY.read_text(encoding="utf-8")).get("modules") or []
+        except Exception:  # noqa: BLE001
+            entries = []
+    entry = {**meta, "file": "ontology/extensions/%s-ext.ttl" % meta["key"],
+             "registered_at": datetime.datetime.now().isoformat(timespec="seconds")}
+    entries = [e for e in entries if str(e.get("key")) != meta["key"]] + [entry]
+    EXT_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    tmp = EXT_REGISTRY.with_name("_registry.json.tmp")
+    tmp.write_text(json.dumps({"modules": entries}, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
+    tmp.replace(EXT_REGISTRY)
+    return entry
+
+
+def repair_all(kb_id: str = "", compile_first: bool = True, project_wiki: bool = True) -> dict:
+    """**运维修复**（幂等）：编译产物 → 灌 Neo4j 投影 → 重投影本体库 wiki → 一致性体检。
+
+    用途：崩溃/手工改动/换机器后，让 **真源 TTL → artifacts → Neo4j → wiki** 四层重新一致。
+    可以在任何时刻重复执行（编译与投影都是幂等 MERGE；wiki 投影先删自己的页再写）。
+    """
+    kb = ontology_kb_id(kb_id)
+    report: dict = {"kb_id": kb}
+    if compile_first:
+        report["compile"] = compile_artifacts()
+        report["totals"] = _index_totals()
+    report["apply"] = apply_projection()
+    if project_wiki:
+        report["wiki"] = regen_wiki(kb)
+    try:
+        import ke_audit          # 延迟导入：ke_audit 反过来会 import 本模块的常量
+        rep = ke_audit.audit(kb, scope="all", max_findings=40)
+        report["audit"] = {"totals": rep.get("totals"), "summary": rep.get("summary"),
+                           "session_pages": (rep.get("data") or {}).get("session_pages")}
+    except Exception as exc:  # noqa: BLE001
+        report["audit"] = {"error": str(exc)[:200]}
+    return report
 
 
 def ontology_kb_id(kb_id: str = "") -> str:
@@ -388,10 +493,25 @@ def _registered_module_keys() -> list[str]:
 
 
 def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki: bool = False,
-               kb_id: str = "") -> dict:
-    """把上传内容落进 `ontology/uploads/`（gitignore），再走 `import_ttl()`。
+               kb_id: str = "", write_source: bool = True, compile_after: bool = True,
+               apply_after: bool = False) -> dict:
+    """前端「上传本体文件」的完整链路（2026-09-24 打通）：
 
-    落盘只为留痕/可追溯（同名覆盖，加时间戳前缀防冲突）；真正的真源判断走 env/config 那套不变。
+    ```
+    ① 留痕：TTL 落 ontology/uploads/<时间戳>-<名>.ttl
+    ② 图库：import_ttl()（级联删下游 → 解析 → 灌 Neo4j，只执行本模块语句）
+    ③ 真源（write_source，默认开）：TTL 落 ontology/extensions/<key>-ext.ttl
+       并登记进 ontology/extensions/_registry.json → **编译器从此认得这个模块**
+    ④ 编译并生效（compile_after，默认开）：compile.py compile → artifacts 更新
+       →（可选 apply_after，默认关）全量回放投影 →（可选）regen_wiki() 重投影本体库
+       → 回执里给出**编译了什么**（totals before→after 与 delta、认识的模块清单）
+    ```
+
+    为什么要 `apply_after` 默认关：②已经把这个模块的语句写进了图库，而**全量回放**要逐条执行
+    整份投影 cypher（实测几十秒到几分钟）—— 上传路径不需要它；整库一致性交给运维
+    `ke_admin.py repair`（编译 + 全量回放 + 重投影 + 体检，幂等）。
+
+    两个开关都默认打开；关掉 `write_source` 就回到旧行为（只更新图库、不动产物）。
     """
     import time
 
@@ -405,7 +525,9 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     target = UPLOAD_DIR / ("%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), safe))
     target.write_text(content, encoding="utf-8")
     try:
-        return import_ttl(target, module=module, project_wiki=project_wiki, kb_id=kb_id)
+        # project_wiki 统一放到**编译之后**执行（旧实现是导入后立刻投影，那时产物还是旧的）
+        out = import_ttl(target, module=module, project_wiki=False, kb_id=kb_id)
+        out["upload_saved"] = str(target.relative_to(REPO))
     except Exception:
         # 导入失败（例如依赖未就绪）→ 不要留下"看似已上传"的文件：改名标记为被拒（便于事后查看）
         try:
@@ -413,6 +535,65 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
         except OSError:
             pass
         raise
+
+    if not write_source:
+        if project_wiki:
+            out["wiki"] = regen_wiki(kb_id)
+        out["note"] = ("只更新了图库（write_source=false）：类型校验 / 前端类型下拉 / 投影回放仍以"
+                       "**编译产物**为准，新类会被判「本体里没有这个类」；要完整生效请打开该开关"
+                       "（或把 TTL 放进 ontology/extensions/ 登记后再跑 `ke_admin.py repair`）")
+        return out
+
+    # ③ 落真源 + 登记（编译器读 _registry.json）
+    ext_path = EXTENSIONS_DIR / ("%s-ext.ttl" % out["module"])
+    ext_path.parent.mkdir(parents=True, exist_ok=True)
+    # 编译器要求每个模块有 bodhi:expertRole；缺了就补一条默认值（并把"补了什么"回报出来）
+    source_text, injected = _ensure_expert_role(content, out["module"],
+                                                out.get("ontology_iri") or "")
+    ext_path.write_text(source_text, encoding="utf-8")
+    entry = _register_extension({
+        "key": out["module"],
+        "prefix": out.get("prefix") or out["module"],
+        "namespace": out.get("namespace") or "",
+        "ontology_iri": out.get("ontology_iri") or "",
+        "label": out["module"],
+        "affects": [],
+    })
+    out["source"] = {"file": str(ext_path.relative_to(REPO)), "registered": entry,
+                     "injected": injected,
+                     "note": ("为了让编译通过，真源副本里自动补了：%s" % "、".join(injected))
+                             if injected else "原样写入（TTL 已含全部必需声明）"}
+
+    if not compile_after:
+        out["note"] = ("已落真源并登记（编译器下次运行会包含它）；本次未编译（compile_after=false）"
+                       "—— 需要时跑 `ke_admin.py repair`（编译+灌投影+重投影+体检）")
+        return out
+
+    # ④ 编译并生效（并把"编译了什么"回报出来）
+    before, keys_before = _index_totals(), _index_module_keys()
+    out["compile"] = compile_artifacts()
+    after, keys_after = _index_totals(), _index_module_keys()
+    out["compiled"] = {
+        "artifact": "artifacts/weknora/ontology_index.json",
+        "totals_before": before, "totals_after": after,
+        "delta": {k: after.get(k, 0) - before.get(k, 0) for k in sorted(set(before) | set(after))},
+        "modules": keys_after,
+        "modules_added": sorted(set(keys_after) - set(keys_before)),
+        "registered_extensions": sorted(
+            str(e.get("key")) for e in (json.loads(EXT_REGISTRY.read_text(encoding="utf-8")).get("modules") or [])
+            if isinstance(e, dict) and e.get("key")) if EXT_REGISTRY.is_file() else [],
+    }
+    if apply_after:
+        out["apply"] = apply_projection()
+    else:
+        out["apply"] = {"skipped": True,
+                        "reason": ("本模块语句已由导入步骤写入图库，无需全量回放；"
+                                   "要重建整库投影一致性请跑 `ke_admin.py repair`（编译+回放+重投影+体检）")}
+    if project_wiki:
+        out["wiki"] = regen_wiki(kb_id)
+    out["note"] = ("已把该 TTL 纳入真源（ontology/extensions/）并**自动编译**：类型校验、前端类型下拉与"
+                   "本体库 wiki 现在都以新产物为准（详见回执 compiled.delta）")
+    return out
 
 
 def apply_projection() -> dict:
@@ -532,6 +713,8 @@ if __name__ == "__main__":  # 运维自测：python3 ke_admin.py purge <model> |
         out = cascade_purge(args[1])
     elif cmd == "load":
         out = load_model(args[1] if len(args) > 1 else "", purge=True)
+    elif cmd == "repair":                          # 运维修复：编译 → 灌投影 → 重投影 wiki → 体检
+        out = repair_all(args[1] if len(args) > 1 else "")
     else:
         print(__doc__)
         sys.exit(1)

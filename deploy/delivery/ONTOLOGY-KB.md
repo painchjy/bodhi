@@ -103,3 +103,44 @@ curl -s "http://127.0.0.1:8765/bodhi/audit?kb_id=<业务库>" | head -c 400
 | 企业知识（业务） | 流程、活动、任务、服务、实体… 实例页 | 文档抽取（分批）+ 设计落库 | 智能体（`save_knowledge`，走 `domain_modeling` 技能）|
 
 业务库的智能体在**查类型**时读前者；写实例时只写后者。两个库可以都给智能体绑定（智能体配置里 `knowledge_bases` 两项都填）。
+
+## 6. 上传 TTL 现在会**自动编译**（2026-09-24 打通）
+
+前端「上传本体文件」对话框里有两个开关，**默认都打开**：
+
+| 开关 | 默认 | 作用 |
+|---|---|---|
+| **上传后编译并生效** | ✅ 开 | TTL 落进真源 `ontology/extensions/<key>-ext.ttl` + 登记 `ontology/extensions/_registry.json` → 自动 `compile.py compile`（artifacts 更新）→ 回执给出**编译了什么**（`compiled.delta`：模块/类/关系/属性 的 before→after）|
+| 重投影本体 wiki 页 | ✅ 开 | 编译完成后再把「本体模型知识库」重投影一遍（页 + 目录）|
+
+- 关闭「上传后编译并生效」= 老行为：**只更新图库**（Neo4j），产物不动 → 智能体校验仍会说
+  「本体里没有这个类」、前端类型下拉也不认它（这是以前的坑，现在默认不走这条路了）。
+- **缺 `bodhi:expertRole` 会自动补**：编译器要求每个模块声明专家角色，否则整次编译失败；
+  上传时若缺，服务端会在**真源副本**里补一条默认值（回执 `source.injected` 会写清楚），原上传件不动。
+- **全量投影回放默认不做**（`apply_after=false`）：导入步骤已把本模块语句写进图库；全量回放要逐条执行
+  整份投影 cypher（实测几十秒到几分钟），那是**运维修复**的事（见下）。要强制回放可传 `apply_after=true`。
+
+### 运维修复（崩溃/手工改动导致四层不一致时）
+
+```
+真源 TTL ──compile──► artifacts/（编译产物）──apply──► Neo4j 投影 ──project──► 本体知识库 wiki
+```
+
+任一层被破坏（或换机器重建）都可以用**幂等**的修复入口恢复：
+
+```bash
+# 编译 → 全量回放投影 → 重投影 wiki → 一致性体检（含 C5：会话页是否落错库）
+/opt/bodhi-venv/bin/python3 tools/ke-core/ke_admin.py repair [kb_id]
+
+# 也可以走 HTTP（MCP 服务）
+curl -s -X POST http://127.0.0.1:8765/bodhi/ontology/repair \
+     -H 'Content-Type: application/json' -d '{"compile": true, "project_wiki": true}'
+```
+
+体检项里与本体相关的：
+- **C5**：领域建模会话记着的页**不在本库**（历史跨库同 slug 撞主键的存量，见 `ke_audit`）→ 需要重跑建模或人工处理；
+- **C1/C3**：实例页无来源 / 正文称有来源但 `source_refs` 空；
+- **B4/B5**：模型库页与 Neo4j 投影、编译产物不一致 → 跑一次 `repair` 即可对齐。
+
+> 页数变少的常见原因：投影会按 **Neo4j 实况做减法**。若 Neo4j 里缺对象属性/模块节点，
+> 投影出的页就会少于产物规模 → 先 `apply_projection()`（`repair` 已包含）再投影。

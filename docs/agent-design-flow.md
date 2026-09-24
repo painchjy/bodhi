@@ -529,3 +529,33 @@ nginx 仍连旧 IP。（`deploy_frontend.sh` 里早就写着这个坑："重建�
 
 回执里新增/常用的字段：`need_kb_selection` / `need_kb_confirm` / `matched` / `bound_kb_ids` /
 `cross_kb_same_name` / `dropped_relations` / `context`。
+
+### 11.10 上传 TTL 自动编译 + 运维修复（2026-09-24）
+
+**背景**：上传 TTL 以前只更新 Neo4j 图库（"零产物"），而编译产物 `artifacts/weknora/ontology_index.json`
+才是**类型校验**（`ontology_types` / `save_knowledge` 的 domain→range）、前端类型下拉、以及
+`apply_projection()` 回放的依据 —— 于是"上传成功但新类被判『本体里没有这个类』"，看起来像没生效。
+
+**现在**（默认行为，开关默认开）：
+
+```
+前端「上传本体文件」
+  ├─ write_source=true    → TTL 落真源 ontology/extensions/<key>-ext.ttl + 登记 _registry.json
+  │                          （编译器 config.build_modules() 会读注册表 → 认得上传来的模块；
+  │                            缺 bodhi:expertRole 时自动补一条默认值，否则编译会被拒）
+  └─ compile_after=true   → compile.py compile（artifacts 更新）→ 回执报 compiled.delta
+                            （totals before→after：modules/classes/object_properties/…）
+                          + project_wiki=true 时再重投影本体库 wiki
+                          （apply_after 默认 false：导入步骤已写本模块语句，全量回放交给 repair）
+```
+
+**运维修复**（崩溃/手工改动/换机器后的四层对齐；幂等）：
+
+```bash
+python3 tools/ke-core/ke_admin.py repair [kb_id]
+# 等价 HTTP：POST /bodhi/ontology/repair {compile:true, project_wiki:true}
+# 做四件事：编译 artifacts → 全量回放 Neo4j 投影 → 重投影本体库 wiki → 一致性体检（含 C5）
+```
+
+> 已知经验：**投影会按 Neo4j 实况做减法** —— Neo4j 缺对象属性/模块节点时，投影页数会少于产物规模
+> （实测 248→237）；先 `apply_projection()` 再投影即恢复。`repair` 已包含这一步。

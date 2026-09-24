@@ -35,6 +35,17 @@
           <span class="bodhi-onto-value bodhi-onto-dim">{{ ttlIri }}</span>
         </div>
         <div class="bodhi-onto-row">
+          <span class="bodhi-onto-label">编译生效</span>
+          <t-checkbox :checked="compileAfter" @change="onCompileAfterChange">
+            <b>上传后编译并生效</b>（默认开）：把 TTL 落进本体真源
+            <code>ontology/extensions/</code> 并自动编译 → 类型校验 / 类型下拉 / 本体库 wiki 都认得新类
+          </t-checkbox>
+        </div>
+        <div v-if="!compileAfter" class="bodhi-onto-warn">
+          已关闭「编译生效」：本次只更新图谱（老行为）。新类在智能体校验里会被判「本体里没有这个类」，
+          需要时再打开本开关重传，或让运维跑 <code>ke_admin.py repair</code>。
+        </div>
+        <div class="bodhi-onto-row">
           <span class="bodhi-onto-label">同步 wiki</span>
           <t-checkbox :checked="projectWiki" @change="onProjectWikiChange">
             重投影本体 wiki 页（不勾 = 只更新图谱与接口）
@@ -108,6 +119,28 @@
           </div>
         </div>
 
+        <div v-if="report?.compiled" class="bodhi-onto-block">
+          <div class="bodhi-onto-block-title">本次编译（产物已更新）</div>
+          <div class="bodhi-onto-dim">
+            真源：<code>{{ report?.source?.file || '-' }}</code>
+            <span v-if="(report?.source?.injected || []).length">
+              · 自动补了：{{ (report.source.injected || []).join('、') }}</span>
+          </div>
+          <div class="bodhi-onto-dim">
+            模块 {{ report.compiled.totals_before?.modules }} → {{ report.compiled.totals_after?.modules }}
+            · 类 {{ report.compiled.totals_before?.classes }} → {{ report.compiled.totals_after?.classes }}
+            · 对象属性 {{ report.compiled.totals_before?.object_properties }} → {{ report.compiled.totals_after?.object_properties }}
+            · 数据属性 {{ report.compiled.totals_before?.datatype_properties }} → {{ report.compiled.totals_after?.datatype_properties }}
+          </div>
+          <code class="bodhi-onto-codes">模块：{{ (report.compiled.modules || []).join('、') }}</code>
+          <div v-if="(report.compiled.modules_added || []).length" class="bodhi-onto-note">
+            新增模块：{{ (report.compiled.modules_added || []).join('、') }}
+          </div>
+          <div class="bodhi-onto-dim">
+            投影回放 {{ report?.apply?.statements ?? '-' }} 条语句 / 类 {{ report?.apply?.classes ?? '-' }}
+          </div>
+        </div>
+
         <div v-if="report?.hint" class="bodhi-onto-note">{{ report.hint }}</div>
         <div v-if="report?.warning" class="bodhi-onto-warn">{{ report.warning }}</div>
 
@@ -147,9 +180,13 @@
  *   GET  /bodhi/ontology/deps?model_id=<key>  → {model_id, dependent_modules[], purge_order[]}
  *                                                （只读：先看会连带删谁）
  *   POST /bodhi/ontology/upload               → 200 报告 / 400 {error}（依赖未就绪等校验错误）
- *        {filename, content, module_id, project_wiki}（**不用 multipart**：FileReader 读成文本）
- *   口径见 docs/handoff-ontology-upload.md §4/§5：同名模块整体替换、级联删下游、不写 artifacts/。
- *   注意：**不传 kb_id** —— 让服务端用它自己的 ONTOLOGY_KB_ID（比构建期常量权威）。
+ *        {filename, content, module_id, project_wiki, write_source, compile_after}
+ *        （**不用 multipart**：FileReader 读成文本）
+ *   口径（2026-09-24 打通）：同名模块整体替换、级联删下游；**默认 write_source + compile_after**
+ *        —— 把 TTL 落进真源 `ontology/extensions/<key>-ext.ttl` 并登记 `_registry.json`，
+ *        然后自动编译 artifacts + 回灌 Neo4j 投影（+ 可选重投影 wiki），回执里给出 compiled.delta；
+ *        两个开关都关掉 = 老行为（只更新图谱，不动产物）。
+ *   注意：**不传 kb_id** —— 让服务端用它自己的本体库解析（比构建期常量权威）。
  */
 import { computed, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
@@ -176,6 +213,8 @@ const moduleId = ref('')
 /** 从 TTL 推断出来的模块名：用户改了它要提示（改模块名不会改 TTL 的命名空间） */
 const inferredModule = ref('')
 const projectWiki = ref(true)
+/** 上传后编译并生效（2026-09-24，默认开）：落真源 ontology/extensions/ + 登记 + 编译 + 灌投影 */
+const compileAfter = ref(true)
 const ttlPrefix = ref('')
 const ttlNamespace = ref('')
 const ttlIri = ref('')
@@ -234,6 +273,10 @@ function refKind(kind: string): string {
 /** 勾选框写成方法（而不是模板里内联赋值）——避免在模板表达式里给 ref 赋值 */
 function onProjectWikiChange(v: any) {
   projectWiki.value = !!v
+}
+
+function onCompileAfterChange(v: any) {
+  compileAfter.value = !!v
 }
 
 function readText(file: File): Promise<string> {
@@ -359,10 +402,14 @@ async function doUpload() {
       content: content.value,
       module_id: (moduleId.value || '').trim(),
       project_wiki: projectWiki.value,
+      // 2026-09-24：默认"落真源 + 编译并生效"；关掉则只更新图谱（老行为）
+      write_source: compileAfter.value,
+      compile_after: compileAfter.value,
     })
     stage.value = 'done'
     MessagePlugin.success(`已导入 ${report.value.module}：`
-      + `类 ${report.value.module_classes} / 属性 ${report.value.module_properties}`)
+      + `类 ${report.value.module_classes} / 属性 ${report.value.module_properties}`
+      + (report.value.compiled ? '（已编译）' : ''))
     emit('uploaded', report.value)
   } catch (e: any) {
     // 400 = 校验类错误（如「依赖未就绪…已自动回滚」）→ 原文展示，回表单改模块名/换文件后重试

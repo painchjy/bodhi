@@ -3303,7 +3303,16 @@ class MCPHandler(BaseHTTPRequestHandler):
                 lambda b: ke_admin.upload_ttl(b.get("filename", ""), b.get("content", ""),
                                               b.get("module_id", ""),
                                               bool(b.get("project_wiki", False)),
-                                              b.get("kb_id", "")),
+                                              b.get("kb_id", ""),
+                                              # 2026-09-24：默认"落真源 + 编译并生效"（可在前端关掉）
+                                              write_source=bool(b.get("write_source", True)),
+                                              compile_after=bool(b.get("compile_after", True)),
+                                              apply_after=bool(b.get("apply_after", False))),
+            # 运维修复（幂等）：编译 → 灌 Neo4j 投影 → 重投影本体库 wiki → 一致性体检
+            "/bodhi/ontology/repair":
+                lambda b: ke_admin.repair_all(b.get("kb_id", ""),
+                                              bool(b.get("compile", True)),
+                                              bool(b.get("project_wiki", True))),
             # 按来源文档清理本体实例（用户 2026-09-20 第二问：删文档不会联动清实例层）
             #   删「独占页」+ 多源页摘引用；默认 dry-run（apply=false 只出计划）
             "/bodhi/docs/purge":

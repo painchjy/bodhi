@@ -188,6 +188,11 @@ curl -s 'http://127.0.0.1:8765/bodhi/ontology/kb?kb_id=<kb>' | python3 -m json.t
 
 > 上传**目标**库也由服务端决定（前端不传 `kb_id`），所以判定与上传用的是同一套解析 ——
 > 不会出现"按钮出现在 A 库、文件却传进 B 库"。
+>
+> **2026-09-24 起「上传本体文件」还会自动编译**：对话框里「上传后编译并生效」默认勾选 ——
+> TTL 会落进真源 `ontology/extensions/` 并登记，随即编译 artifacts（回执给出编译前后规模对比）、
+> 可选重投影本体 wiki。关闭它 = 只更新图库（新类将不被类型校验认可）。
+> 详见 `03-manual/ONTOLOGY-KB.md` §6（含运维修复 `ke_admin.py repair`）。
 > 若 `source` 是 `none`：说明四种依据都没命中，MCP 日志与 `candidates` 会列出各库的 `pages/marked` 帮你定位。
 >
 > 前置条件同其它 Bodhi 面板：nginx 要把 `/bodhi/` 反代到 MCP（本交付的 nginx 模板已含，见 §2/§4）。

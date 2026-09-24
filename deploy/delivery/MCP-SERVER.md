@@ -124,6 +124,13 @@ print('知识库：', [r['name'] for r in ke_db.psql_csv(
     "SELECT name FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY created_at")])
 PY
 # 3) MCP 协议自检（tools/list 必须 14 个工具 + skills() 返回 3 个技能）
+#
+# 本体维护（前端「上传本体文件 / 加载本体」用的就是这个端口）：
+#   POST /bodhi/ontology/upload  {filename, content, module_id, project_wiki,
+#                                 write_source(默认 true), compile_after(默认 true),
+#                                 apply_after(默认 false)}   ← 默认落真源+编译并生效
+#   POST /bodhi/ontology/repair  {kb_id, compile(默认 true), project_wiki(默认 true)}
+#   POST /bodhi/ontology/load    {model_id, kb_id, compile, purge, project_wiki}
 python3 /opt/bodhi2/02-mcp-server/selfcheck.py --url http://127.0.0.1:8765/mcp
 ```
 
