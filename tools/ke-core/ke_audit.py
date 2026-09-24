@@ -25,7 +25,8 @@ B（图谱 ↔ 模型）：B1 类型不在模型 / B2 关系不在模型 / B3 ra
   B5（本体投影 ↔ 编译产物不一致）：修复**直接给命令**（重编产物 / 重载投影），不走 plan_id
 C（来源异常）：C1 无来源实例页 / C2 来源文档已删或不存在 / C3 正文称有来源但 `source_refs` 空 /
   C4 图侧实例无溯源 / **C5 建模会话记着的页不在本库**（2026-09-24：跨库同 slug 撞主键的存量体检）
-D（重复/幂等）：D1 同语义多页 / D2 软删残留与活页并存 / D3 孤儿版本快照
+D（重复/幂等）：D1 同语义多页 / D2 软删残留与活页并存 / D3 孤儿版本快照 /
+  **D4 同库同 slug 多行（影子页）** / **D5 页 id 非规范派生**（2026-09-24 加固）
 
 用法
 ----
@@ -40,6 +41,7 @@ import os
 import pathlib
 import re
 import sys
+import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -671,6 +673,56 @@ def check_session_pages(ctx: dict, rep: Report) -> None:
 
 
 # ---------------------------------------------------------------------------
+# D4 / D5（2026-09-24）：页身份完整性
+#   D4 同库同 slug 多行（"影子页"）：同 (kb, slug) 有 2+ 活行 —— 更新只会命中其中一行，
+#      另一行在前端/巡检里表现为"内容不跟着变"。可能来源：历史跨库撞主键时代的残留、
+#      手工 SQL、suffix 兜底后又建了规范行。
+#   D5 页 id 非规范派生：既不是旧口径 uuid5('bodhi-element:'+slug)，也不是新口径
+#      uuid5('bodhi-element:<kb>|<slug>')，也不是带后缀的兜底口径 —— 说明这行不是本工具写的，
+#      或写的时候走过 `_resolve_page_id` 的 suffix 分支（该分支按设计几乎不可达，出现即为信号）。
+# 两项目前都是 0；加进来是为了**将来一旦发生能被体检发现**，而不是静默。
+# ---------------------------------------------------------------------------
+def _canonical_page_ids(kb_id: str, slug: str) -> set[str]:
+    """本页可能出现的**规范 id**集合：新口径（kb+slug）、旧口径（纯 slug）、兜底后缀 1..5。"""
+    ids = {str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s" % (kb_id, slug))),
+           str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:" + slug))}
+    for n in range(1, 6):
+        ids.add(str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s|%d" % (kb_id, slug, n))))
+    return ids
+
+
+def check_page_identity(ctx: dict, rep: Report) -> None:
+    """D4 同库同 slug 多行 + D5 页 id 非规范派生（只读；目前库里都为 0）。"""
+    kb_id = ctx["kb_id"]
+    rows = ke_db.psql_csv(
+        "SELECT slug, count(*) AS n, string_agg(version::text, ',' ORDER BY version) AS versions, "
+        "       string_agg(left(id::text, 8), ',' ORDER BY version) AS ids "
+        "FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+        "GROUP BY slug HAVING count(*) > 1 ORDER BY 2 DESC LIMIT 20" % ke_db.sql_str(kb_id))
+    for r in rows:
+        rep.add("D4", "medium", r["slug"],
+                "同库同 slug 有 %s 行（版本 %s；id 前缀 %s）—— 更新只会命中其中一行，其余是"
+                "「影子页」，前端/巡检会看到\"内容不更新\"" % (r["n"], r["versions"], r["ids"]),
+                "保留版本最高的一行、把其余行合并或硬删（先备份 content），然后重跑本巡检")
+    ctx["data"]["dup_slug_rows"] = len(rows)
+
+    bad = []
+    for page in ctx["pages"]:
+        pid = str(page.get("id") or "")
+        if not pid:
+            continue
+        if pid.lower() not in _canonical_page_ids(kb_id, page["slug"]):
+            bad.append(page)
+            if len(bad) <= 10:
+                rep.add("D5", "low", page["slug"],
+                        "页 id %s… 不是规范派生（新口径 uuid5('bodhi-element:<kb>|<slug>')/"
+                        "旧口径 uuid5('bodhi-element:<slug>')）—— 可能是 suffix 兜底或外部写入"
+                        % pid[:8],
+                        "无需处理（查询一律按 (kb, slug)）；若批量出现请核对是否有脚本直接写 wiki_pages")
+    ctx["data"]["non_canonical_ids"] = len(bad)
+
+
+# ---------------------------------------------------------------------------
 # D. 重复 / 幂等残留
 # ---------------------------------------------------------------------------
 def check_dupes(ctx: dict, rep: Report) -> None:
@@ -1136,6 +1188,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_session_pages(ctx, rep)
     if scope in ("all", "dupes"):
         check_dupes(ctx, rep)
+        check_page_identity(ctx, rep)
     if scope in ("all", "coupling"):
         check_coupling(ctx, rep)
 

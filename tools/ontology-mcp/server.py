@@ -224,6 +224,22 @@ def _resolve_page_id(kb_id: str, slug: str) -> tuple[str, str]:
     raise RuntimeError("给（kb=%s, slug=%s）找不到可用页 id（已试 50 个后缀）" % (kb_id, slug))
 
 
+def _warn_noncanonical_ids(strategies: list, subject: str = "") -> list[dict]:
+    """把 `how != existing/new` 的页挑出来告警（日志 + 返回值），并**只报一次**同样的 slug。
+
+    出现 `suffixed` 意味着：`uuid5("bodhi-element:<kb>|<slug>")` 已被**别的库**占着 ——
+    在新方案下这几乎不可能（要 uuid5 碰撞或有人直接写库），所以它是一条**信号**而不是常态；
+    巡检 D5 会独立复核这些页的 id。调用方把返回的清单带进回执即可。
+    """
+    odd = [s for s in (strategies or []) if s.get("how") not in ("existing", "new")]
+    if odd:
+        detail = "、".join("%s(→ %s, %s)" % (s.get("slug"), str(s.get("id"))[:8], s.get("how"))
+                           for s in odd[:5])
+        print("[mcp] ⚠ 页 id 走了兜底分支%s：%s —— 请核对是否有人直接写 wiki_pages（巡检 D5）"
+              % (("（%s）" % subject) if subject else "", detail))
+    return odd
+
+
 # ---------------------------------------------------------------------------
 # 片段读取 + 一次性抽取
 # ---------------------------------------------------------------------------
@@ -1188,7 +1204,8 @@ def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
                sql_str(page["slug"])))
 
 
-def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
+def sql_insert_page(page: dict, kb_id: str, tenant_id: int,
+                    strategies: list | None = None) -> str:
     """插入新页；id 由 `(kb_id, slug)` 决定（见 `_resolve_page_id`），本库已有同 slug 页时沿用其 id。
 
     历史背景
@@ -1202,8 +1219,14 @@ def sql_insert_page(page: dict, kb_id: str, tenant_id: int) -> str:
     upsert 把**别的库那一行**更新了。现在 ① id 包含 kb ② upsert 加**同库守卫**
     （`WHERE wiki_pages.knowledge_base_id = EXCLUDED.knowledge_base_id`）——
     任何情况下都不会再更新别的知识库的行。
+
+    `strategies`：可选出参列表，逐页记录 `{"slug","id","how"}`（how = existing/new/suffixed）。
+    正常只有 existing/new；一旦出现 suffixed 说明走到了兜底分支（见 `_resolve_page_id`），
+    回执里能看到、不用去翻库。巡检 D5 也盯这一项。
     """
-    pid, _how = _resolve_page_id(kb_id, page["slug"])
+    pid, how = _resolve_page_id(kb_id, page["slug"])
+    if strategies is not None:
+        strategies.append({"slug": page["slug"], "id": pid, "how": how})
     values = [
         sql_str(pid), str(tenant_id), sql_str(kb_id),
         sql_str(page["slug"]), sql_str(page["title"]), sql_str(page["page_type"]),
@@ -1330,6 +1353,9 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
             kept.append(rel)
         payload["relations"] = kept
     statements: list[str] = []
+    # id 策略留痕（2026-09-24 加固）：逐页记 existing/new/suffixed，最后进回执 `id_strategy`。
+    # 正常情况下只有 existing/new；出现 suffixed 立即在日志里告警（兜底分支按设计几乎不可达）。
+    id_strategies: list[dict] = []
     summary = {
         "model": model["key"], "kb_id": kb_id, "knowledge_id": knowledge_id,
         "resolved_note": (resolved_note or "").strip(), "doc_title": doc_meta.get("title", ""),
@@ -1425,7 +1451,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
             else:
                 action, before_v = "created", 0
             if action == "created":
-                statements.append(sql_insert_page(page, kb_id, tenant))
+                statements.append(sql_insert_page(page, kb_id, tenant, strategies=id_strategies))
                 summary["created"].append({"name": element["name"], "type": element["type"],
                                            "slug": page["slug"]})
             else:
@@ -1447,7 +1473,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         else:
             page = build_pending_page(model, element, candidate, sim, element["chunk_id"],
                                       element["chunk_index"], doc_meta, high, low)
-            statements.append(sql_insert_page(page, kb_id, tenant))
+            statements.append(sql_insert_page(page, kb_id, tenant, strategies=id_strategies))
             summary["pending"].append({"name": element["name"], "type": element["type"],
                                        "pending_slug": page["slug"],
                                        "candidate": candidate["slug"], "similarity": sim})
@@ -1516,6 +1542,19 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         except Exception as exc:  # noqa: BLE001
             summary["crud_matrix"] = "failed: %s" % exc
     summary["retagged"] = retagged or [dict(x, ok=None, note="dry_run 未执行") for x in retag_queue]
+    if id_strategies:
+        # id 策略回执（2026-09-24 加固）：existing=沿用本库既有页 id（老数据/幂等），new=按 (kb, slug)
+        # 新建；正常只有这两种，出现其它值会额外给 `id_notes`（兜底分支信号，巡检 D5 独立复核）。
+        summary["id_strategy"] = {
+            "existing": len([s for s in id_strategies if s.get("how") == "existing"]),
+            "new": len([s for s in id_strategies if s.get("how") == "new"]),
+        }
+        odd = _warn_noncanonical_ids(id_strategies, subject="kb=%s" % kb_id[:8])
+        if odd:
+            summary["id_strategy"]["odd"] = odd
+            summary["id_notes"] = ("以下页 id 未按规范派生（走了兜底后缀）：%s —— 查询/更新不受影响"
+                                   "（一律按 (kb, slug)），但请核对是否有脚本直接写 wiki_pages"
+                                   % "、".join(str(s.get("slug")) for s in odd[:10]))
     if dry_run:
         # 撤回是"减边"，dry_run 下不执行，但必须让调用方看到**将要撤回什么**（否则预览不完整）
         planned = checked.get("retract_edges") or []
@@ -2036,6 +2075,7 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str,
     doc_meta = {"id": doc.get("id", ""), "title": doc.get("title", "")}
     chunk_id, chunk_index = doc.get("chunk_id", ""), int(doc.get("chunk_index", -1))
     statements: list[str] = []
+    id_strats: list[dict] = []
     result = {"pending_slug": pending_slug, "action": action}
 
     if action == "merge":
@@ -2062,7 +2102,7 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str,
         if any(p["slug"] == page["slug"] for p in fetch_existing_pages(kb_id)):
             page["slug"] = "%s-%s" % (page["slug"], hashlib.sha1(pending_slug.encode()).hexdigest()[:6])
             page["wiki_path"] = page["slug"]
-        statements.append(sql_insert_page(page, kb_id, tenant_id))
+        statements.append(sql_insert_page(page, kb_id, tenant_id, strategies=id_strats))
         result.update({"created": page["slug"]})
     else:
         raise RuntimeError("action 只能是 merge 或 create")
@@ -2071,6 +2111,9 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str,
                       % (sql_str(kb_id), sql_str(pending_slug)))
     statements.append(sql_rebuild_in_links(kb_id))
     psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
+    if id_strats:
+        result["id_strategy"] = id_strats
+        _warn_noncanonical_ids(id_strats)
     return result
 
 
