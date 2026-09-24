@@ -1,0 +1,21 @@
+=== 1) AST 扫描（应 0 处）===
+  合计：0 处
+
+=== 2) 编译器真跑（build_prefix_map 用 re）===
+    artifacts/weknora/extract_config.ea-ownership.json             4489 B  weknora
+    artifacts/weknora/extract_config.ea-service.json               8295 B  weknora
+    artifacts/weknora/extract_config.ea.json                       8574 B  weknora
+    artifacts/weknora/ontology_index.json                        106485 B  weknora_index
+    artifacts/weknora/provenance.json                              4854 B  weknora
+  manifest：/mnt/c/Users/PHJY/source/bodhi2/artifacts/manifest.json
+
+=== 3) 投影真跑（本体库）===
+                 ontology:LightDoc = 2
+                 ontology:Module = 5
+                 ontology:Property = 102
+                 ontology:Relation = 77
+
+=== 4) py_compile 涉及文件 ===
+  OK
+
+=== 5) 提交 + 重打包 ===

@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from os import environ
 from pathlib import Path
 
+import re
+
 import rdflib
 from rdflib import BNode, Graph, Literal, URIRef
 
