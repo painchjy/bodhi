@@ -380,23 +380,26 @@ def import_ttl(ttl_path, module: str = "", project_wiki: bool = False, kb_id: st
     known_short = getattr(known, "short_label", "") if known else ""
     ttl_label = str(meta.get("label") or "")
     ttl_short = str(meta.get("short_label") or "")
-    prefix = known_prefix or meta["prefix"] or module
-    label = known_label or ttl_label or module
-    short_label = known_short or ttl_short or module.upper()
+    # 2026-09-26 用户口径修正：**TTL 是唯一真源**（"要改直接改 TTL"）。
+    # 因此 TTL 能推出来的值**优先**，已登记值只作兜底 —— 否则改 TTL 的 label 会被
+    # 注册表/源码里的旧值挡住（实测：把 rdfs:label 改成"…测试模型"后目录名不变）。
+    prefix = meta["prefix"] or known_prefix or module
+    label = ttl_label or known_label or module
+    short_label = ttl_short or known_short or module.upper()
     spec = ModuleSpec(key=module, prefix=prefix, label=label, short_label=short_label,
                       ontology_iri=meta["ontology_iri"], namespace=meta["namespace"],
                       files=(ttl,), kind="extension", affects=())
 
-    if known_prefix:
-        prefix_source = "沿用已登记模块 %s 的 prefix（%s）" % (module, known_prefix)
-    elif meta.get("prefix_derived_from_key"):
+    if meta.get("prefix_derived_from_key"):
         prefix_source = "TTL 用默认前缀 → 按约定取模块名当类前缀（%s）" % prefix
     elif meta["prefix"]:
         prefix_source = "取自 TTL 命名前缀 `@prefix %s:`" % meta["prefix"]
+    elif known_prefix:
+        prefix_source = "TTL 推不出前缀 → 沿用已登记模块 %s 的 prefix（%s）" % (module, known_prefix)
     else:
         prefix_source = "回退为模块 key（TTL 无命名前缀、也无指向本命名空间的默认前缀）"
-    label_source = ("沿用已登记模块 label" if known_label
-                    else ("取自 TTL 的 bodhi:label/rdfs:label（%s）" % label if ttl_label
+    label_source = ("取自 TTL 的 bodhi:label/rdfs:label（%s）" % label if ttl_label
+                    else ("沿用已登记模块 label（%s）" % label if known_label
                           else "TTL 未声明显示名 → 用模块名"))
 
     out: dict = {"module": module, "ttl": str(ttl),
@@ -816,12 +819,18 @@ def _sync_folders(kb: str, prune: bool = False) -> dict:
 
 
 def regen_wiki(kb_id: str = "") -> dict:
-    """重投影本体 wiki 页（build 生成页面清单 → project 幂等写进本体模型知识库 → 挂目录）。"""
+    """重投影本体 wiki 页（build 生成页面清单 → project 幂等写进本体模型知识库 → 挂目录）。
+
+    `_sync_folders(kb, prune=True)`：本体模型库的目录**完全由页面的 category_path 推导**
+    （没有人工建的目录），所以重投影时顺手清掉残留目录 —— 否则改模块 label/显示名之后，
+    旧目录会空着留下（实测：把 bmmfd 的 rdfs:label 改成"…测试模型"，目录名不变 + 多一个空目录）。
+    """
     kb = ontology_kb_id(kb_id)
     build = _run(REPO / "tools" / "ontology-extract" / "ontology_wiki.py", ["build"])
     project = _run(REPO / "tools" / "ontology-extract" / "ontology_wiki.py",
                    ["project", "--kb-id", kb])
-    return {"kb_id": kb, "build": build, "project": project, "folders": _sync_folders(kb)}
+    return {"kb_id": kb, "build": build, "project": project,
+            "folders": _sync_folders(kb, prune=True)}
 
 
 def load_model(model: str = "", kb_id: str = "", purge: bool = True,

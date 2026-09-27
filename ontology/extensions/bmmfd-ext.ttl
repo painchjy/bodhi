@@ -9,7 +9,7 @@
 @prefix bodhi:  <http://example.org/bodhi#> .
 
 <http://example.org/bodhi/ext/bmmfd> rdf:type owl:Ontology ;
-    rdfs:label "BMM 规则可执行化扩展"@zh ;
+    rdfs:label "BMM 规则可执行化测试模型"@zh ;
     rdfs:comment "把 BMM 的指导规范落到可执行、可校验的形态：结构性与操作性业务规则细分为『数据质量规则』与『访问控制规则』，并提供规则->实体/属性/契约的跨层引用关系，使 BMM 规则可以被执行层网关与校验器直接消费。"@zh ;
     owl:imports <http://example.org/bmm> , <http://example.org/ea> , <http://example.org/bodhi/ext/ea-service> ;
     owl:versionIRI <http://example.org/bodhi/ext/bmmfd/1.0> ;
