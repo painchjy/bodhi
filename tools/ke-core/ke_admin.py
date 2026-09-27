@@ -317,22 +317,20 @@ def inspect_ttl(path: pathlib.Path) -> dict:
     if not prefix and default_this_ns:
         prefix = key_guess
         derived_from_key = True
-    # 显示名：优先 `bodhi:label`/`bodhi:title`，退回 `rdfs:label`（取「（」前，去掉结尾"本体"）
+    # 显示名 = **只用 TTL 的 `rdfs:label`**（2026-09-26 用户口径：不引入新词汇/新字段）：
+    #   取「（」前的部分并去掉结尾"本体" —— 例："EA 服务契约扩展本体（业务属性 / …）" → "EA 服务契约扩展"
     label = ""
-    for pat in (r"bodhi:(?:label|title)\s+\"([^\"]+)\"", r"rdfs:label\s+\"([^\"]+)\""):
-        m2 = re.search(pat, text)
-        if m2:
-            label = m2.group(1).strip()
-            break
+    m2 = re.search(r"rdfs:label\s+\"([^\"]+)\"", text)
+    if m2:
+        label = m2.group(1).strip()
     label = re.split(r"[（(]", label)[0].strip()
     if label.endswith("本体"):
         label = label[:-2].strip()
-    m3 = re.search(r"bodhi:shortLabel\s+\"([^\"]+)\"", text)
     return {"ontology_iri": iri, "namespace": ns, "prefix": prefix,
             "default_namespace": default_this_ns, "key": key_guess,
             "prefix_derived_from_key": derived_from_key,
             "prefix_derivable": bool(prefix),
-            "label": label, "short_label": m3.group(1).strip() if m3 else ""}
+            "label": label}
 
 
 def _cypher_statements(path: pathlib.Path) -> list[str]:
@@ -379,13 +377,13 @@ def import_ttl(ttl_path, module: str = "", project_wiki: bool = False, kb_id: st
     known_label = getattr(known, "label", "") if known else ""
     known_short = getattr(known, "short_label", "") if known else ""
     ttl_label = str(meta.get("label") or "")
-    ttl_short = str(meta.get("short_label") or "")
     # 2026-09-26 用户口径修正：**TTL 是唯一真源**（"要改直接改 TTL"）。
     # 因此 TTL 能推出来的值**优先**，已登记值只作兜底 —— 否则改 TTL 的 label 会被
     # 注册表/源码里的旧值挡住（实测：把 rdfs:label 改成"…测试模型"后目录名不变）。
+    # short_label 不引入 TTL 新字段：固定"模块名大写"（已登记值兼容保留）。
     prefix = meta["prefix"] or known_prefix or module
     label = ttl_label or known_label or module
-    short_label = ttl_short or known_short or module.upper()
+    short_label = known_short or module.upper()
     spec = ModuleSpec(key=module, prefix=prefix, label=label, short_label=short_label,
                       ontology_iri=meta["ontology_iri"], namespace=meta["namespace"],
                       files=(ttl,), kind="extension", affects=())
