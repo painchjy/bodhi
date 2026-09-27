@@ -44,7 +44,7 @@ NS: dict[str, str] = {
     "ea": "http://example.org/ea#",
     "easvc": "http://example.org/bodhi/ext/ea-service#",
     "eaown": "http://example.org/bodhi/ext/ea-ownership#",
-    "bmmfd": "http://example.org/bodhi/ext/bmm-fd#",
+    "bmmfd": "http://example.org/bodhi/ext/bmmfd#",
     # 跨模块共享的注解命名空间：expertRole 等（见 docs/weknora-fork.md §8.5）
     "bodhi": "http://example.org/bodhi#",
     "owl": "http://www.w3.org/2002/07/owl#",
@@ -178,14 +178,14 @@ def build_modules() -> dict[str, ModuleSpec]:
             kind="extension",
             affects=("ea",),
         ),
-        "bmm-fd": ModuleSpec(
-            key="bmm-fd",
+        "bmmfd": ModuleSpec(
+            key="bmmfd",
             prefix="bmmfd",
             label="BMM 规则可执行化扩展",
-            short_label="BMM-FD",
-            ontology_iri="http://example.org/bodhi/ext/bmm-fd",
+            short_label="BMMFD",
+            ontology_iri="http://example.org/bodhi/ext/bmmfd",
             namespace=NS["bmmfd"],
-            files=(EXTENSIONS_DIR / "bmm-fd-ext.ttl",),
+            files=(EXTENSIONS_DIR / "bmmfd-ext.ttl",),
             kind="extension",
             affects=("bmm", "ea"),
         ),

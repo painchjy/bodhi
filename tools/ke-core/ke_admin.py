@@ -304,11 +304,35 @@ def inspect_ttl(path: pathlib.Path) -> dict:
     prefix = next((p for p, declared in prefixes.items() if p and declared == ns), "")
     # 默认前缀（`@prefix : <ns>`）没有名字，无法当 prefixed name 用。
     # 2026-09-26 事故：`ea-service`/`bmm-fd` 的 TTL 就是这种写法 → 这里解析出空 prefix
-    # → 上传登记回退成模块 key → 编译产物类名从 `easvc:*` 漂成 `ea-service:*`，
-    # 技能/巡检/存量页全线失配。现在把它显式回报，供上游决策（沿用已登记模块的 prefix）。
+    # → 上传登记回退成模块 key → 编译产物类名从 `easvc:*` 漂成 `ea-service:*`。
     default_this_ns = any((not p) and declared == ns for p, declared in prefixes.items())
+    # 模块 key：ontology IRI 末段（`…/ext/bmmfd` → `bmmfd`）
+    key_guess = iri.rstrip("#/").rsplit("/", 1)[-1]
+    # 类前缀推导（2026-09-26 用户口径）：TTL **不必**显式写 prefix
+    #   ① 有与命名空间匹配的**命名**前缀 → 用它（`@prefix easvc: <…/ea-service#>`）；
+    #   ② 否则若本 TTL 用**默认前缀**指向自己的命名空间 → **prefix := key（IRI 末段）**，
+    #      即"约定：模块名就是类前缀"；
+    #   ③ 都拿不到 → 空串（调用方回退，且必须告警）。
+    derived_from_key = False
+    if not prefix and default_this_ns:
+        prefix = key_guess
+        derived_from_key = True
+    # 显示名：优先 `bodhi:label`/`bodhi:title`，退回 `rdfs:label`（取「（」前，去掉结尾"本体"）
+    label = ""
+    for pat in (r"bodhi:(?:label|title)\s+\"([^\"]+)\"", r"rdfs:label\s+\"([^\"]+)\""):
+        m2 = re.search(pat, text)
+        if m2:
+            label = m2.group(1).strip()
+            break
+    label = re.split(r"[（(]", label)[0].strip()
+    if label.endswith("本体"):
+        label = label[:-2].strip()
+    m3 = re.search(r"bodhi:shortLabel\s+\"([^\"]+)\"", text)
     return {"ontology_iri": iri, "namespace": ns, "prefix": prefix,
-            "default_namespace": default_this_ns}
+            "default_namespace": default_this_ns, "key": key_guess,
+            "prefix_derived_from_key": derived_from_key,
+            "prefix_derivable": bool(prefix),
+            "label": label, "short_label": m3.group(1).strip() if m3 else ""}
 
 
 def _cypher_statements(path: pathlib.Path) -> list[str]:
@@ -343,37 +367,48 @@ def import_ttl(ttl_path, module: str = "", project_wiki: bool = False, kb_id: st
     from ontology_compiler.emitters.neo4j import Neo4jEmitter  # noqa: PLC0415
     from ontology_compiler.loader import load_ontology        # noqa: PLC0415
 
-    # —— 模块身份三件套（2026-09-26 教训）——
-    # key（模块标识）/ prefix（类前缀）/ label（显示名）必须与已登记模块一致。曾因 TTL 用
-    # "默认前缀"、解析不到命名前缀，这里回退成模块 key → 编译产物类名从 `easvc:*` 漂成
-    # `ea-service:*`，技能/巡检/存量页全线失配。规则：
-    #   ① 已登记同名模块 → **沿用**它的 prefix/label/short_label（唯一权威）；
-    #   ② 否则取 TTL 里与命名空间匹配的**命名**前缀；
-    #   ③ 都拿不到 → 回退模块 key，但回执里**明确告警**（prefix_source + warning）。
+    # —— 模块身份四件套（2026-09-26 用户口径：TTL 是唯一真源、前端只读）——
+    #   key（模块标识，= TTL 的 ontology IRI 末段）
+    #   prefix（类前缀）：已登记 > TTL 命名前缀 > **IRI 末段（= 模块名；TTL 用默认前缀时的约定）** > key
+    #   label（显示名） ：已登记 > TTL(`bodhi:label`/`rdfs:label`，取「（」前) > 模块名
+    #   short_label     ：已登记 > TTL(`bodhi:shortLabel`) > **模块名大写**
+    # 历史教训：曾因 TTL 用"默认前缀"解析不到 prefix → 回退成模块 key，导致类名前缀
+    # `easvc:*` 漂成 `ea-service:*`、技能/巡检/存量页全线失配（2026-09-24 事故）。
     known = _registered_modules().get(module)
     known_prefix = getattr(known, "prefix", "") if known else ""
     known_label = getattr(known, "label", "") if known else ""
     known_short = getattr(known, "short_label", "") if known else ""
+    ttl_label = str(meta.get("label") or "")
+    ttl_short = str(meta.get("short_label") or "")
     prefix = known_prefix or meta["prefix"] or module
-    spec = ModuleSpec(key=module, prefix=prefix, label=known_label or module,
-                      short_label=known_short or prefix.upper(),
+    label = known_label or ttl_label or module
+    short_label = known_short or ttl_short or module.upper()
+    spec = ModuleSpec(key=module, prefix=prefix, label=label, short_label=short_label,
                       ontology_iri=meta["ontology_iri"], namespace=meta["namespace"],
                       files=(ttl,), kind="extension", affects=())
 
     if known_prefix:
         prefix_source = "沿用已登记模块 %s 的 prefix（%s）" % (module, known_prefix)
+    elif meta.get("prefix_derived_from_key"):
+        prefix_source = "TTL 用默认前缀 → 按约定取模块名当类前缀（%s）" % prefix
     elif meta["prefix"]:
         prefix_source = "取自 TTL 命名前缀 `@prefix %s:`" % meta["prefix"]
     else:
-        prefix_source = "回退为模块 key（TTL 用的是默认前缀，未声明命名前缀）"
+        prefix_source = "回退为模块 key（TTL 无命名前缀、也无指向本命名空间的默认前缀）"
+    label_source = ("沿用已登记模块 label" if known_label
+                    else ("取自 TTL 的 bodhi:label/rdfs:label（%s）" % label if ttl_label
+                          else "TTL 未声明显示名 → 用模块名"))
 
     out: dict = {"module": module, "ttl": str(ttl),
                  "ontology_iri": meta["ontology_iri"], "namespace": meta["namespace"],
-                 "prefix": prefix, "label": known_label or module,
-                 "short_label": known_short or prefix.upper(),
-                 "prefix_source": prefix_source,
+                 "prefix": prefix, "label": label, "short_label": short_label,
+                 "prefix_source": prefix_source, "label_source": label_source,
+                 "identity": {"key": module, "prefix": prefix, "label": label,
+                              "short_label": short_label,
+                              "key_from_ttl": meta.get("key"),
+                              "label_from_ttl": ttl_label or None},
                  "default_namespace": bool(meta.get("default_namespace"))}
-    if not known_prefix and not meta["prefix"]:
+    if not known_prefix and not meta.get("prefix_derivable"):
         out["warning_prefix"] = (
             "TTL 只有默认前缀（`@prefix : <%s>`），登记时会回退 prefix=%s —— 这会让类名前缀"
             "与既有技能/巡检/存量页失配。建议在 TTL 顶部加 `@prefix %s: <%s> .`，"
@@ -571,21 +606,23 @@ def check_prefix_drift() -> dict:
                     parsed = inspect_ttl(ttl)
                 except Exception:  # noqa: BLE001
                     parsed = {}
-                if parsed.get("default_namespace") and not parsed.get("prefix"):
+                # 2026-09-26 用户口径：TTL 用默认前缀时，prefix 按约定 = 模块名（IRI 末段）
+                # → 这是**确定性推导**，不再算"回退"。只有当 TTL 里既没有命名前缀、默认前缀
+                # 也没指向本命名空间（prefix 推不出来）时才算隐患。
+                if parsed and not parsed.get("prefix_derivable"):
                     hints.append(
-                        "模块 %s 的 TTL 只有默认前缀（`@prefix : <%s>`）→ 登记时会回退 prefix；"
-                        "建议加一行 `@prefix %s: <%s> .`"
-                        % (key, parsed.get("namespace", "…"), str(item.get("prefix") or key),
-                           parsed.get("namespace", "…")))
+                        "模块 %s 的 TTL 里没有指向本模块命名空间的前缀声明（`@prefix : <%s>` "
+                        "未指向它，也没有 `@prefix %s:`）→ 类前缀推导不出来；请补前缀声明"
+                        % (key, parsed.get("namespace", "…"), str(item.get("prefix") or key)))
+                if parsed.get("key") and parsed["key"] != key:
+                    hints.append("模块 %s 的 TTL 里 ontology IRI 末段是 `%s`（与注册 key 不同）——"
+                                 "若改 key 请同时改 IRI，否则页 slug/类型名会对不上"
+                                 % (key, parsed["key"]))
         if key in built and not expected:
             expected = str(getattr(built[key], "prefix", "") or "")
         if expected and prefix and prefix != expected:
             drift.append({"module": key, "artifact_prefix": prefix, "expected": expected,
                           "source": "registry" if key in registry else "config.py"})
-    for key, item in registry.items():
-        if str(item.get("prefix") or "") == key:
-            hints.append("扩展模块 %s 的注册 prefix 与模块 key 相同（疑似回退成 key）——"
-                         "请改成该模块 TTL 里真实使用的类前缀" % key)
     return {"ok": not drift, "drift": drift, "hints": hints, "rule": rule}
 
 

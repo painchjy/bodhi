@@ -23,8 +23,9 @@
         </div>
         <div class="bodhi-onto-row">
           <span class="bodhi-onto-label">模块名</span>
-          <t-input v-model="moduleId" size="small" class="bodhi-onto-field" clearable
-            placeholder="模块 key（同名 = 整体替换）" />
+          <t-input v-model="moduleId" size="small" class="bodhi-onto-field" disabled
+            placeholder="（由 TTL 决定，不可改）" />
+          <span class="bodhi-onto-dim">只读：取 ontology IRI 末段（要改请改 TTL）</span>
         </div>
         <div v-if="ttlNamespace" class="bodhi-onto-row">
           <span class="bodhi-onto-label">命名空间</span>
@@ -51,9 +52,12 @@
             重投影本体 wiki 页（不勾 = 只更新图谱与接口）
           </t-checkbox>
         </div>
-        <div v-if="moduleId && moduleId !== inferredModule" class="bodhi-onto-warn">
-          模块名已改（TTL 推断值：{{ inferredModule }}）：TTL 的命名空间不会跟着变，
-          库里该命名空间的节点会被改成新模块名 —— 只有确实要改名时才这么填。
+        <div class="bodhi-onto-note">
+          <b>模块身份四件套</b>（前端只读，要改请改 TTL；上传回执会给出取值来源）：
+          <br />模块名 <code>{{ inferredModule || moduleId }}</code>
+          · 类前缀 <code>{{ ttlPrefix || '= 模块名（TTL 用默认前缀时的约定）' }}</code>
+          · 显示名 <code>取 TTL 的 bodhi:label / rdfs:label，缺省 = 模块名</code>
+          · 短名 <code>{{ (inferredModule || moduleId || '').toUpperCase() }}</code>
         </div>
         <div class="bodhi-onto-note">
           模块名只是预填（取 TTL 里第一个与本体 IRI 同命名空间的前缀，否则取 owl:Ontology IRI 末段），
@@ -87,6 +91,14 @@
           <span class="bodhi-onto-dim">
             前缀 {{ report?.prefix || '（默认 :）' }} · {{ report?.ontology_iri }}
           </span>
+        </div>
+        <div v-if="report?.identity" class="bodhi-onto-note">
+          <b>身份四件套</b>：模块名 <code>{{ report.identity.key }}</code>
+          · 类前缀 <code>{{ report.identity.prefix }}</code>
+          · 显示名 <code>{{ report.identity.label }}</code>
+          · 短名 <code>{{ report.identity.short_label }}</code>
+          <br />来源：模块名 {{ report.identity.key_from_ttl ? '取自 TTL 的 ontology IRI 末段' : '（未从 TTL 取到）' }}
+          · 前缀 {{ report.prefix_source || '—' }} · 显示名 {{ report.label_source || '—' }}
         </div>
         <div class="bodhi-onto-grid">
           <div>本模块类：<b>{{ report?.module_classes }}</b>（库内已定义共 {{ report?.classes }}）</div>
@@ -318,7 +330,9 @@ function inferModule(text: string, filename: string): {
     prefix = Object.keys(prefixes).find(p => p && !STD_PREFIXES.has(p)) || ''
   }
   const ns = namespace || (prefix ? prefixes[prefix] || '' : '')
-  const raw = prefix || tail || filename.replace(/\.(ttl|turtle)$/i, '')
+  // 模块名口径与后端一致（2026-09-26 用户口径）：**ontology IRI 末段优先**（key = IRI 末段），
+  // 其次才是"与命名空间一致的前缀名"，最后退回文件名。
+  const raw = tail || prefix || filename.replace(/\.(ttl|turtle)$/i, '')
   return { module: raw.trim().toLowerCase().replace(/\s+/g, '-'), namespace: ns, iri, prefix }
 }
 

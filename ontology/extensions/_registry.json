@@ -11,20 +11,23 @@
       "file": "ontology/extensions/ea-service-ext.ttl",
       "registered_at": "2026-09-24T13:16:21",
       "prefix_fixed_at": "2026-09-26",
-      "prefix_fix_note": "原登记把 prefix/label 写成模块 key（TTL 用的是默认前缀，解析不到）→ 类名前缀从 easvc 漂到 ea-service，导致技能/巡检/存量页失配。此处恢复 config.py 约定的三件套：key=ea-service / prefix=easvc / label=EA 服务契约扩展。"
+      "prefix_fix_note": "原登记把 prefix/label 写成模块 key（TTL 用的是默认前缀，解析不到）→ 类名前缀从 easvc 漂到 ea-service，导致技能/巡检/存量页失配。此处恢复 config.py 约定的三件套：key=ea-service / prefix=easvc / label=EA 服务契约扩展。",
+      "prefix_note": "TTL 里已显式声明 @prefix easvc:（不再依赖源码约定）"
     },
     {
-      "key": "bmm-fd",
+      "key": "bmmfd",
       "prefix": "bmmfd",
-      "short_label": "BMM-FD",
-      "namespace": "http://example.org/bodhi/ext/bmm-fd#",
-      "ontology_iri": "http://example.org/bodhi/ext/bmm-fd",
+      "short_label": "BMMFD",
+      "namespace": "http://example.org/bodhi/ext/bmmfd#",
+      "ontology_iri": "http://example.org/bodhi/ext/bmmfd",
       "label": "BMM 规则可执行化扩展",
       "affects": [],
-      "file": "ontology/extensions/bmm-fd-ext.ttl",
+      "file": "ontology/extensions/bmmfd-ext.ttl",
       "registered_at": "2026-09-24T13:17:09",
       "prefix_fixed_at": "2026-09-26",
-      "prefix_fix_note": "同 ea-service：prefix/label 曾漂成模块 key；恢复 prefix=bmmfd / label=BMM 规则可执行化扩展。"
+      "prefix_fix_note": "同 ea-service：prefix/label 曾漂成模块 key；恢复 prefix=bmmfd / label=BMM 规则可执行化扩展。",
+      "key_renamed_at": "2026-09-26",
+      "key_rename_note": "实验：key 改为现前缀 bmmfd（TTL 不加 @prefix，验证 prefix 可按约定取自模块名）；原 key=bmm-fd，本体库 11 页由重投影自动重建"
     }
   ]
 }

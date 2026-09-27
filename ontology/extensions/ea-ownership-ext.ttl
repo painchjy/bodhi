@@ -1,4 +1,5 @@
 @prefix :       <http://example.org/bodhi/ext/ea-ownership#> .
+@prefix eaown: <http://example.org/bodhi/ext/ea-ownership#> .
 @prefix ea:     <http://example.org/ea#> .
 @prefix bmm:    <http://example.org/bmm#> .
 @prefix owl:    <http://www.w3.org/2002/07/owl#> .
@@ -8,7 +9,7 @@
 @prefix bodhi:  <http://example.org/bodhi#> .
 
 <http://example.org/bodhi/ext/ea-ownership> rdf:type owl:Ontology ;
-    rdfs:label "EA 所有权与控制关系扩展本体（股权 / 控制 / 穿透）"@zh ;
+    rdfs:label "EA 所有权与控制关系扩展"@zh ;
     rdfs:comment "在 EA 完整版之上补充法人主体、自然人、股权关系与控制关系语义。目的：支撑『持股比例 → 控制关系 → 实际控制人/受益所有人』的规则化穿透推理（含时间点口径 asOfDate）。"@zh ;
     owl:imports <http://example.org/ea> , <http://example.org/bmm> ;
     owl:versionIRI <http://example.org/bodhi/ext/ea-ownership/1.0> ;
