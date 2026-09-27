@@ -302,7 +302,13 @@ def inspect_ttl(path: pathlib.Path) -> dict:
         iri = named[-1].rstrip("#/")
     ns = iri if iri.endswith(("#", "/")) else iri + "#"
     prefix = next((p for p, declared in prefixes.items() if p and declared == ns), "")
-    return {"ontology_iri": iri, "namespace": ns, "prefix": prefix}
+    # 默认前缀（`@prefix : <ns>`）没有名字，无法当 prefixed name 用。
+    # 2026-09-26 事故：`ea-service`/`bmm-fd` 的 TTL 就是这种写法 → 这里解析出空 prefix
+    # → 上传登记回退成模块 key → 编译产物类名从 `easvc:*` 漂成 `ea-service:*`，
+    # 技能/巡检/存量页全线失配。现在把它显式回报，供上游决策（沿用已登记模块的 prefix）。
+    default_this_ns = any((not p) and declared == ns for p, declared in prefixes.items())
+    return {"ontology_iri": iri, "namespace": ns, "prefix": prefix,
+            "default_namespace": default_this_ns}
 
 
 def _cypher_statements(path: pathlib.Path) -> list[str]:
@@ -337,12 +343,41 @@ def import_ttl(ttl_path, module: str = "", project_wiki: bool = False, kb_id: st
     from ontology_compiler.emitters.neo4j import Neo4jEmitter  # noqa: PLC0415
     from ontology_compiler.loader import load_ontology        # noqa: PLC0415
 
-    spec = ModuleSpec(key=module, prefix=meta["prefix"] or module, label=module,
-                      short_label=(meta["prefix"] or module).upper(),
+    # —— 模块身份三件套（2026-09-26 教训）——
+    # key（模块标识）/ prefix（类前缀）/ label（显示名）必须与已登记模块一致。曾因 TTL 用
+    # "默认前缀"、解析不到命名前缀，这里回退成模块 key → 编译产物类名从 `easvc:*` 漂成
+    # `ea-service:*`，技能/巡检/存量页全线失配。规则：
+    #   ① 已登记同名模块 → **沿用**它的 prefix/label/short_label（唯一权威）；
+    #   ② 否则取 TTL 里与命名空间匹配的**命名**前缀；
+    #   ③ 都拿不到 → 回退模块 key，但回执里**明确告警**（prefix_source + warning）。
+    known = _registered_modules().get(module)
+    known_prefix = getattr(known, "prefix", "") if known else ""
+    known_label = getattr(known, "label", "") if known else ""
+    known_short = getattr(known, "short_label", "") if known else ""
+    prefix = known_prefix or meta["prefix"] or module
+    spec = ModuleSpec(key=module, prefix=prefix, label=known_label or module,
+                      short_label=known_short or prefix.upper(),
                       ontology_iri=meta["ontology_iri"], namespace=meta["namespace"],
                       files=(ttl,), kind="extension", affects=())
 
-    out: dict = {"module": module, "ttl": str(ttl), **{k: meta[k] for k in ("ontology_iri", "namespace", "prefix")}}
+    if known_prefix:
+        prefix_source = "沿用已登记模块 %s 的 prefix（%s）" % (module, known_prefix)
+    elif meta["prefix"]:
+        prefix_source = "取自 TTL 命名前缀 `@prefix %s:`" % meta["prefix"]
+    else:
+        prefix_source = "回退为模块 key（TTL 用的是默认前缀，未声明命名前缀）"
+
+    out: dict = {"module": module, "ttl": str(ttl),
+                 "ontology_iri": meta["ontology_iri"], "namespace": meta["namespace"],
+                 "prefix": prefix, "label": known_label or module,
+                 "short_label": known_short or prefix.upper(),
+                 "prefix_source": prefix_source,
+                 "default_namespace": bool(meta.get("default_namespace"))}
+    if not known_prefix and not meta["prefix"]:
+        out["warning_prefix"] = (
+            "TTL 只有默认前缀（`@prefix : <%s>`），登记时会回退 prefix=%s —— 这会让类名前缀"
+            "与既有技能/巡检/存量页失配。建议在 TTL 顶部加 `@prefix %s: <%s> .`，"
+            "或上传时显式指定 prefix/label。" % (meta["namespace"], prefix, prefix, meta["namespace"]))
     if module in _registered_module_keys():
         out["warning"] = "模块 %s 也已在 config.py 注册；本次导入只更新图库，正式产物仍由编译产出" % module
     out["purge"] = cascade_purge(module, kb_id)
@@ -487,6 +522,73 @@ def _registered_modules() -> dict:
         return {}
 
 
+def check_prefix_drift() -> dict:
+    """**模块前缀漂移**检查（2026-09-26 事故后的护栏）。
+
+    为什么需要：模块身份是三件套 `key`（模块名）/ `prefix`（类前缀）/ `label`（显示名）。
+    `prefix` 一变，编译产物里的类名就变（实测 `easvc:*` → `ea-service:*`），于是
+    **技能文档、巡检代码、存量页面**三处同时失配（报"未知本体模型：easvc"、
+    详细设计的类型/关系校验全线错位、本体库还多出一个英文目录）。
+
+    检查三件事：
+      ① 产物 `models[].prefix` 与真源期望（注册表 → config.py 内置）是否一致；
+      ② 扩展模块的注册 prefix 是否**等于模块 key**（那是"回退"的典型特征）；
+      ③ TTL 是否**只声明默认前缀**（`@prefix : <ns>`）——那会让登记时回退，是本事故根因。
+
+    用法：`python3 tools/ke-core/ke_admin.py check-prefix`；`upload_ttl` 回执里也带
+    `prefix_check`（上传后立刻就能看到有没有漂移）。
+    """
+    rule = ("模块身份三件套必须稳定：key（模块名）/ prefix（类前缀）/ label（显示名）。"
+            "prefix 一变，产物类名就变（easvc:* → ea-service:*），技能/巡检/存量页会全线失配。")
+    try:
+        index = json.loads((REPO / "artifacts" / "weknora" / "ontology_index.json")
+                           .read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "drift": [], "hints": ["读不到编译产物：%s" % exc], "rule": rule}
+
+    registry: dict = {}
+    if EXT_REGISTRY.is_file():
+        try:
+            registry = {str(m.get("key")): m for m in
+                        (json.loads(EXT_REGISTRY.read_text(encoding="utf-8")).get("modules") or [])
+                        if isinstance(m, dict) and m.get("key")}
+        except Exception:  # noqa: BLE001
+            registry = {}
+
+    built = _registered_modules()
+    drift: list[dict] = []
+    hints: list[str] = []
+    for model in (index.get("models") or []):
+        key = str(model.get("key") or "")
+        prefix = str(model.get("prefix") or "")
+        expected = ""
+        if key in registry:
+            item = registry[key]
+            expected = str(item.get("prefix") or "")
+            ttl = REPO / str(item.get("file") or "")
+            if ttl.is_file():
+                try:
+                    parsed = inspect_ttl(ttl)
+                except Exception:  # noqa: BLE001
+                    parsed = {}
+                if parsed.get("default_namespace") and not parsed.get("prefix"):
+                    hints.append(
+                        "模块 %s 的 TTL 只有默认前缀（`@prefix : <%s>`）→ 登记时会回退 prefix；"
+                        "建议加一行 `@prefix %s: <%s> .`"
+                        % (key, parsed.get("namespace", "…"), str(item.get("prefix") or key),
+                           parsed.get("namespace", "…")))
+        if key in built and not expected:
+            expected = str(getattr(built[key], "prefix", "") or "")
+        if expected and prefix and prefix != expected:
+            drift.append({"module": key, "artifact_prefix": prefix, "expected": expected,
+                          "source": "registry" if key in registry else "config.py"})
+    for key, item in registry.items():
+        if str(item.get("prefix") or "") == key:
+            hints.append("扩展模块 %s 的注册 prefix 与模块 key 相同（疑似回退成 key）——"
+                         "请改成该模块 TTL 里真实使用的类前缀" % key)
+    return {"ok": not drift, "drift": drift, "hints": hints, "rule": rule}
+
+
 def _registered_module_keys() -> list[str]:
     """已登记模块的 key 列表（`_registered_modules()` 的轻量包装）。"""
     return list(_registered_modules().keys())
@@ -554,15 +656,21 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     entry = _register_extension({
         "key": out["module"],
         "prefix": out.get("prefix") or out["module"],
+        "short_label": out.get("short_label") or "",
         "namespace": out.get("namespace") or "",
         "ontology_iri": out.get("ontology_iri") or "",
-        "label": out["module"],
+        # label 不再写死成模块 key（2026-09-26：那会把中文 label 覆盖成英文，连带
+        # 本体库目录从「EA 服务契约扩展」变成「ea-service」并留下重复目录）
+        "label": out.get("label") or out["module"],
         "affects": [],
     })
     out["source"] = {"file": str(ext_path.relative_to(REPO)), "registered": entry,
                      "injected": injected,
                      "note": ("为了让编译通过，真源副本里自动补了：%s" % "、".join(injected))
                              if injected else "原样写入（TTL 已含全部必需声明）"}
+    if out.get("warning_prefix"):
+        out.setdefault("warnings", []).append(out["warning_prefix"])
+    out["prefix_check"] = check_prefix_drift()
 
     if not compile_after:
         out["note"] = ("已落真源并登记（编译器下次运行会包含它）；本次未编译（compile_after=false）"
@@ -701,6 +809,8 @@ if __name__ == "__main__":  # 运维自测：python3 ke_admin.py purge <model> |
         out = purge_model(args[1])
     elif cmd == "apply":
         out = apply_projection()
+    elif cmd == "check-prefix":
+        out = check_prefix_drift()
     elif cmd == "compile":
         out = compile_artifacts()
     elif cmd == "wiki":

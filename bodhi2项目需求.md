@@ -23,3 +23,8 @@ api-key:sk-3a477273b9624a7da50ddde0d000df03
 bodhi智能体应该不需要本体信息放入提示词
 
 待确认知识内容以及合并或新增操作出现在了本体图谱页面中，以及本体的浏览页面中增加了待确认的目录，而没有出现在“待确认”页签
+
+
+调用 Bodhi Ontology Ontology Types 失败
+{ "error": "未知本体模型：easvc" } [Analyze the error above and try a different approach.]
+本体模型目录有中文和英文2套，是怎么产生的？

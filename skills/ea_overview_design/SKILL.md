@@ -2,7 +2,7 @@
 id: ea_overview_design
 name: 企架概要设计
 description: 基于已建好的业务模型（wiki 知识）做 IT 服务层概要设计：先出报告页，再细分出服务/应用节点页。
-version: 0.1.0
+version: 0.1.1
 when: 用户要求基于**已建好的业务模型（wiki 知识）**做 IT 服务层设计（说法如：概要设计、IT 服务设计、服务清单、按流程设计服务、服务与系统定位）。
 models: [ea]
 default_model: ea
