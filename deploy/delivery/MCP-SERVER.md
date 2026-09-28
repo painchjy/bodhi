@@ -2,7 +2,7 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **19 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射（只读）** …）
+> 作用：给 WeKnora 提供 **20 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射与渲染（只读）** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
@@ -36,10 +36,15 @@ CLI 等价：`ke_admin.py retag-preview|retag-apply|retag-rollback`。
 `save_knowledge` 的 `retag` 参数**不再静默改类型**，改为回执 `retag_required`（含 ticket/风险/引用数）。
 
 **跨库上下文映射（2026-09-28 一期，只读）**：`context_scan`（全库同名/同实例候选 + 建议 + ticket）、
-`context_lookup`（检索前查同义/异义/依赖）—— 只读、只写 `state/context_map/`（不碰任何 wiki 页）。
+`context_lookup`（检索前查同义/异义/依赖）、`context_page`（**渲染视图**：领域页 ←同名 slug→ 概念页）。
+只读、只写 `state/context_map/`（不碰任何 wiki 页）。
+**口径（用户 2026-09-28）**：领域库**不写 uuid、不互相引用**；关联靠**按 slug 同名查询**「企业共享概念模型」
+（该库已建，认库 `wiki_config.bodhi_concept_kb=true`）；跨域关系**必须经企业共享概念页转换**。
 HTTP：`GET /bodhi/contexts`、`GET /bodhi/context/scan?kb_ids=&limit=&write=0`、
-`GET /bodhi/context/lookup?slug=|q=`（**参数要 URL 编码**）；CLI：`ke_admin.py ctx-contexts|ctx-scan|ctx-lookup`。
-巡检新增 **G2–G6**（映射悬空/过期/异义未映射/矛盾），并把 **F1 合并**为
+`GET /bodhi/context/lookup?slug=|q=`、`GET /bodhi/context/page?slug=|q=[&kb_id=]`、
+`GET|POST /bodhi/context/concept/preview`（dry-run，需 URL 编码参数）；
+CLI：`ke_admin.py ctx-contexts|ctx-scan|ctx-lookup`（+ `ke_context.py page|concept-preview`）。
+巡检新增 **G2–G7**（映射悬空/过期/异义未映射/矛盾/**G7 跨库直接引用=high**），并把 **F1 合并**为
 "L1 `slug` 字面同名 + L2 类+标题同实例"（detail 标 `matched_by`）。设计见 `docs/context-mapping-plan.md`。
 
 

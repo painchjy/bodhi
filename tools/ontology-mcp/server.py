@@ -3077,7 +3077,22 @@ def tool_definitions() -> list[dict]:
             "inputSchema": {"type": "object", "properties": {
                 "slug": {"type": "string", "description": "精确 slug（如 ea/businessentity/客户信息）"},
                 "q": {"type": "string", "description": "关键词（按 slug/标题模糊找，再展开跨库同名组）"},
-                "kb_ids": {"type": "array", "items": {"type": "string"}, "description": "会话绑定的库（仅回显/限定）"},
+                "kb_ids": {"type": "array", "items": {"type": "string"},
+                           "description": "会话绑定的库（仅回显/限定）"},
+            }, "required": []},
+        },
+        {
+            "name": "context_page",
+            "description": ("**跨库上下文渲染（只读）**：领域页 ←（**同名 slug**）→「企业共享概念模型」页 的关系视图。"
+                            "返回：① 概念页（企业标准名称/定义 + `## 各领域映射` 表）；② 同名领域页清单（含类/版本）；"
+                            "③ ACL 映射；④ **经企业概念转换**的中转关系；⑤ `warnings`"
+                            "（`concept_page_missing` / `cross_kb_reference_forbidden` / `same_name_no_decision`）。"
+                            "口径：**领域库不写 uuid、不互相引用**；关系统一按 slug 同名查概念库，"
+                            "跨域关系只能经概念页转换（docs/context-mapping-plan.md §13.11）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "slug": {"type": "string", "description": "领域页 slug（与概念页同名）"},
+                "q": {"type": "string", "description": "关键词（按 slug/标题找页，再渲染）"},
+                "kb_id": {"type": "string", "description": "本库 id（给了才能判定「本页是否跨库引用」）"},
             }},
         },
     ]
@@ -3097,6 +3112,15 @@ def context_lookup(kb_ids: list | None = None, q: str = "", slug: str = "") -> d
     """**只读**：检索前查跨库同名/同义/异义/依赖（`ke_context.lookup` 的入口）。"""
     kb_ids = [str(k).strip() for k in (kb_ids or []) if str(k).strip()]
     return ke_context.lookup(kb_ids or None, q=q, slug=slug)
+
+
+def context_page(kb_id: str = "", slug: str = "", q: str = "") -> dict:
+    """**只读**：领域页 ←（**同名 slug**）→ 概念页 的渲染视图（`ke_context.page_view` 的入口）。
+
+    用户口径（2026-09-28）：领域库**不写 uuid、不互相引用**；关系按 slug 同名查概念库；
+    跨域关系只能**经企业共享概念页转换**。
+    """
+    return ke_context.page_view(str(kb_id or ""), slug=str(slug or ""), q=str(q or ""))
 
 
 def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
@@ -3268,6 +3292,9 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "context_lookup":
         return context_lookup(args.get("kb_ids") or None, str(args.get("q", "")),
                               str(args.get("slug", "")))
+    if name == "context_page":
+        return context_page(str(args.get("kb_id", "")), str(args.get("slug", "")),
+                            str(args.get("q", "")))
     raise RuntimeError("未知工具：%s" % name)
 
 
@@ -3581,6 +3608,27 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json(data, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/ontology/targets 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/context/page", "/bodhi/context/page.json"):
+            # 领域页 ←同名 slug→ 概念页 的渲染视图（只读）：**领域库不写 uuid、不互相引用**
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(context_page(params.get("kb_id", ""), params.get("slug", ""),
+                                        params.get("q", "")), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/context/page 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/context/concept/preview", "/bodhi/context/concept/preview.json"):
+            # 二期概念页生成的**只读预览**（dry-run）：GET 便于 curl；POST 版见写端点表
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_context.concept_preview(
+                    params.get("slug", ""),
+                    params.get("include_unknown", "0") not in ("0", "false")), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/context/concept/preview 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/contexts", "/bodhi/contexts.json"):

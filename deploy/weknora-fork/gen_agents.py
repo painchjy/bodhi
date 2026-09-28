@@ -68,6 +68,7 @@ OPS_TOOLS = [
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
     "mcp_bodhi_ontology_retag_preview",
     "mcp_bodhi_ontology_context_scan", "mcp_bodhi_ontology_context_lookup",
+    "mcp_bodhi_ontology_context_page",
 ]
 # 「EA 概要设计」智能体：只读 wiki + 看本体类型 + **设计落库工具**（不给原生写页、不给抽取）
 DESIGN_TOOLS = [
@@ -95,8 +96,10 @@ MODELER_TOOLS = [
     # 用户明确同意后用同一 ticket 调 retag_apply（缺 ticket/风险确认会被服务端拒）。
     "mcp_bodhi_ontology_retag_preview", "mcp_bodhi_ontology_retag_apply",
     # 跨库上下文映射（2026-09-28 一期，**只读**）：同名/同实例候选（含建议与 ticket）、
-    # 跨库引用前查同义/异义/依赖；写路径（概念/映射 apply）在二期。
+    # 跨库引用前查同义/异义/依赖、以及**渲染视图**（领域页 ←同名 slug→ 概念页，
+    # 领域库不写 uuid、不互相引用，跨域关系经概念页转换）；写路径在二期。
     "mcp_bodhi_ontology_context_scan", "mcp_bodhi_ontology_context_lookup",
+    "mcp_bodhi_ontology_context_page",
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
                   "design": DESIGN_TOOLS, "modeler": MODELER_TOOLS}

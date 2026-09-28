@@ -962,6 +962,31 @@ def check_context_map(ctx: dict, rep: Report) -> None:
                     "由有写权限的人/智能体登记映射（unrelated/rename/…；二期两段式 apply）")
     ctx["data"]["context_undecided_distinct"] = undecided
 
+    # ---- G7 领域库**不得互相引用**（跨库直接引用 → high）------------------------
+    #   用户口径（2026-09-28）：领域库之间不能互相引用；相互关系必须**经企业共享概念页转换**。
+    out_slugs: set = set()
+    for page in ctx["pages"]:
+        out_slugs |= set(_json_list(page.get("out_links")))
+    out_slugs -= ctx["live"]
+    forbidden = 0
+    if out_slugs:
+        placeholders = ",".join(ke_db.sql_str(s) for s in sorted(out_slugs)[:500])
+        rows = ke_db.psql_csv(
+            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL "
+            " AND knowledge_base_id <> %s AND slug IN (%s)"
+            % (ke_db.sql_str(ctx["kb_id"]), placeholders))
+        others = {r["slug"] for r in rows}
+        for page in ctx["pages"]:
+            hits = sorted(set(_json_list(page.get("out_links"))) & others)
+            if not hits:
+                continue
+            forbidden += 1
+            rep.add("G7", "high", page["slug"],
+                    "跨库直接引用：本页出边指向**别的领域库**的 slug（%s）—— 领域库不得互相引用，"
+                    "必须经「企业共享概念模型」同名概念页转换" % "、".join(hits[:4]),
+                    "删掉跨库出边；改指向本库等价页（跨域关系由概念页映射呈现）")
+    ctx["data"]["context_forbidden_cross_kb_refs"] = forbidden
+
 
 def check_governance(ctx: dict, rep: Report) -> None:
     kb_id = ctx["kb_id"]

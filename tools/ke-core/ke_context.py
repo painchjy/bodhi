@@ -504,6 +504,256 @@ def latest_scan() -> dict:
     return _json_load(LATEST_FILE, {"scan_id": "", "note": "还没跑过 context scan"}) or {}
 
 
+def _one_page(kb_id: str, slug: str) -> dict | None:
+    """取单页完整内容（渲染用）。"""
+    cols = _page_columns()
+    summary = "COALESCE(summary,'')" if "summary" in cols else "''"
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(title,'') AS title, COALESCE(page_type,'') AS page_type, "
+        "%s AS summary, COALESCE(content,'') AS content, COALESCE(page_metadata::text,'{}') AS meta, "
+        "COALESCE(out_links::text,'[]') AS out_links, COALESCE(version,1) AS version "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+        % (summary, ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    return rows[0] if rows else None
+
+
+def _section(content: str, header: str) -> str:
+    """取 markdown 二级小节的正文（渲染概念页的「标准定义」）。"""
+    out, grab = [], False
+    for line in (content or "").splitlines():
+        if line.strip().startswith("## "):
+            grab = line.strip() == header.strip()
+            if grab:
+                continue
+        if grab:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def _table_rows(content: str, header: str) -> list:
+    """把概念页「## 各领域映射」小节解析成表格行（`[{表头: 值}]`）。"""
+    rows, header_cells = [], []
+    for line in _section(content, header).splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if all(set(c) <= set("-: ") for c in cells):
+            continue
+        if not header_cells:
+            header_cells = cells
+            continue
+        rows.append(dict(zip(header_cells, cells)))
+    return rows
+
+
+def _concept_lookup(slug: str) -> dict:
+    """按 **slug 同名**（归一化）在「企业共享概念模型」库里找概念页。"""
+    ckb_info = concept_kb()
+    ckb = ckb_info.get("id") or ""
+    if not ckb:
+        return {"exists": False, "kb": "", "kb_name": "", "slug": slug}
+    page = _one_page(ckb, slug)
+    if page is None:
+        rows = ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+            " AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 1"
+            % (ke_db.sql_str(ckb), ke_db.sql_str(norm_slug(slug))))
+        if rows:
+            page = _one_page(ckb, rows[0]["slug"])
+    if page is None:
+        return {"exists": False, "kb": ckb, "kb_name": ckb_info.get("name", ""), "slug": slug,
+                "note": "概念库里还没有这一页（二期 `concept/apply` 生成；同名 slug 才能被查询到）"}
+    return {"exists": True, "kb": ckb, "kb_name": ckb_info.get("name", ""),
+            "slug": page["slug"], "title": page["title"], "page_type": page["page_type"],
+            "version": int(page.get("version") or 1),
+            "standard_definition": _section(page["content"], "## 标准定义"),
+            "mapping_rows": _table_rows(page["content"], "## 各领域映射")}
+
+
+def page_view(kb_id: str = "", slug: str = "", q: str = "") -> dict:
+    """领域页 ←（**同名 slug**）→「企业共享概念模型」页 的**渲染视图**（只读）。
+
+    用户口径（2026-09-28 二次确认）：
+      · 领域库**不写 uuid**、也**不互相引用**；关联完全靠"按 slug 同名查询概念库"；
+      · 跨域关系必须**经企业共享概念转换**（A 领域页 → 概念页 → B 领域页），页面之间不直接连边；
+      · 本接口只**渲染**：概念页的标准名称/定义 + 各领域映射 + 同名领域页 + 经概念的中转关系。
+    """
+    slug = (slug or "").strip()
+    if not slug and q:
+        rows = ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE deleted_at IS NULL AND (slug ILIKE %s OR title ILIKE %s) "
+            " ORDER BY slug LIMIT 1" % (ke_db.sql_str("%" + q + "%"), ke_db.sql_str("%" + q + "%")))
+        slug = rows[0]["slug"] if rows else ""
+    if not slug:
+        raise ValueError("page_view 需要 slug（或 q）")
+    me = _one_page(kb_id, slug) if kb_id else None
+    if me is None and kb_id:
+        raise ValueError("本库没有这一页：%s/%s" % (kb_id[:8], slug))
+
+    concept = concept_kb()
+    concept_page = _concept_lookup(slug)
+    names = {k["id"]: k["name"] for k in kb_rows()}
+    concept_id = concept.get("id") or ""
+    ont_id = ke_ontology.resolve_ontology_kb().get("id") or ""
+    peers_rows = ke_db.psql_csv(
+        "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
+        "       COALESCE(page_type,'') AS page_type, COALESCE(version,1) AS version "
+        "  FROM wiki_pages WHERE deleted_at IS NULL "
+        "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
+        % ke_db.sql_str(norm_slug(slug)))
+    peers = [{"context": "kb:%s" % r["kb"][:8], "kb": r["kb"], "kb_name": names.get(r["kb"], ""),
+              "slug": r["slug"], "title": r["title"], "page_type": r["page_type"],
+              "version": int(r["version"] or 1),
+              "role": ("concept" if r["kb"] == concept_id else
+                       "ontology" if r["kb"] == ont_id else "domain")}
+             for r in peers_rows if r["kb"] not in (ont_id,)]
+    keys = {("kb:%s" % r["kb"][:8], r["slug"]) for r in peers_rows}
+    mappings = _mappings_touching(keys) if keys else []
+
+    # 跨库直接引用（**禁止**）：本页出边里指向"只存在于别的库"的 slug
+    forbidden: list = []
+    if me and kb_id:
+        mine = {r["slug"] for r in ke_db.psql_csv(
+            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id = %s "
+            " LIMIT 5000" % ke_db.sql_str(kb_id))}
+        others = {r["slug"] for r in ke_db.psql_csv(
+            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id <> %s "
+            " LIMIT 5000" % ke_db.sql_str(kb_id))}
+        for target in sorted(_rels(me) - mine):
+            if target in others:
+                forbidden.append({"target": target,
+                                  "why": "该 slug 只存在于**别的领域库** → 领域库不得互相引用，"
+                                         "必须经「企业共享概念模型」同名概念页转换"})
+    warnings: list = []
+    if not concept_page.get("exists"):
+        warnings.append({"kind": "concept_page_missing", "severity": "medium",
+                         "detail": "概念库里没有同名页 `%s`（按 slug 同名查不到）→ 无法渲染企业标准定义" % slug,
+                         "next": "二期 `context/concept/preview → apply`（有写权限者）生成概念页"})
+    if forbidden:
+        warnings.append({"kind": "cross_kb_reference_forbidden", "severity": "high",
+                         "detail": "本页引用了别的领域库的 slug（%s）" % "、".join(f["target"] for f in forbidden),
+                         "next": "改为经概念页转换：先在本库建立/指向本库页，再由概念页映射到其它领域"})
+    domains = [p for p in peers if p["role"] == "domain"]
+    if len(domains) >= 2 and not concept_page.get("exists") and not mappings:
+        warnings.append({"kind": "same_name_no_decision", "severity": "high",
+                         "detail": "同名页分布在 %d 个领域上下文，且既没有企业概念页、也没有 ACL 映射"
+                                   % len(domains), "next": "context_scan → 裁决 → 二期 apply"})
+    return {
+        "kb_id": kb_id, "slug": slug,
+        "page": ({"slug": me["slug"], "title": me["title"], "page_type": me["page_type"],
+                  "version": int(me.get("version") or 1)} if me else None),
+        "concept_page": concept_page, "concept_kb": concept,
+        "peers": peers, "mappings": mappings, "forbidden_cross_kb_refs": forbidden,
+        "warnings": warnings, "generated_at": ke_db.now_text(), "permission": "read_only",
+        "rule": ("领域库不写 uuid、不互相引用；关系统一按 **slug 同名** 查概念库，"
+                 "跨域关系只能**经企业共享概念页转换**（docs/context-mapping-plan.md §13.11）"),
+    }
+
+
+def _concept_page_body(primary: dict, members: list[dict]) -> str:
+    """概念页正文：**标准定义** + 各领域定义摘录 + **各领域映射**表（表里用 `code span` 而不是 wiki 链接
+    —— 概念库不引用领域库的页，避免悬空链接/跨库边；关系的渲染一律由 `page_view()` 查询完成）。"""
+    lines = ["## 标准定义", "", (primary.get("summary") or "").strip() or "（待补：企业标准定义）", "",
+             "### 各领域定义摘录", ""]
+    for m in members:
+        text = (m.get("summary") or "").strip()[:200] or "—"
+        lines.append("- **%s**（`%s`）：%s" % (m["kb_name"], m["slug"], text))
+    lines += ["", "## 各领域映射", "",
+              "| 上下文 | 页 slug | 类 | 版本 | 结论 | 说明 |", "|---|---|---|---|---|---|"]
+    for m in members:
+        lines.append("| %s | `%s` | %s | %d | %s | %s |"
+                     % (m["kb_name"], m["slug"], m["page_type"], int(m.get("version") or 1),
+                        m.get("mapping") or "equivalent", m.get("note") or "同名同义（待复核）"))
+    lines += ["", "> 本页是「企业共享概念模型」里的**企业标准概念**：领域库按 **slug 同名** 查询到它，",
+              "> 领域库之间**不直接引用**，跨域关系一律**经本页转换**（docs/context-mapping-plan.md §13.11）。"]
+    return "\n".join(lines)
+
+
+def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 50) -> dict:
+    """**只读预览**：二期 `concept/apply` 会在「企业共享概念模型」里生成/更新哪些概念页。
+
+    - 概念页 `slug` = **与领域页同名**（用户口径：不写 uuid、靠同名 slug 查询）；
+    - `page_type` = 该同名组的本体类（遵本体约束）；正文 = 标准定义 + 各领域映射表；
+    - 一组同义（`equivalent`）才默认纳入；`unknown` 需 `include_unknown=true`；`distinct` 永不生成概念页
+      （而是登记 ACL 映射）。本函数**不写任何东西**，只给 preview + ticket。
+    """
+    concept = concept_kb()
+    members_by_key: dict = {}
+    if slug:
+        key = norm_slug(slug)
+        rows = ke_db.psql_csv(
+            "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
+            "       COALESCE(page_type,'') AS page_type, COALESCE(summary,'') AS summary, "
+            "       COALESCE(version,1) AS version, COALESCE(page_metadata::text,'{}') AS meta "
+            "  FROM wiki_pages WHERE deleted_at IS NULL "
+            "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
+            % ke_db.sql_str(key)) if "summary" in _page_columns() else []
+        members_by_key[key] = rows
+        verdicts = {key: ("equivalent" if slug else "")}
+    else:
+        latest = latest_scan()
+        report = _json_load(REPO / str(latest.get("file") or ""), {}) or {}
+        verdicts = {}
+        for cand in (report.get("candidates") or []):
+            v = str(cand.get("verdict_suggestion") or "")
+            if v != "equivalent" and not (include_unknown and v == "unknown"):
+                continue
+            key = norm_slug(str((cand.get("pages") or [{}])[0].get("slug") or ""))
+            if not key:
+                continue
+            verdicts[key] = v
+            members_by_key[key] = ke_db.psql_csv(
+                "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
+                "       COALESCE(page_type,'') AS page_type, '' AS summary, COALESCE(version,1) AS version, "
+                "       COALESCE(page_metadata::text,'{}') AS meta "
+                "  FROM wiki_pages WHERE deleted_at IS NULL "
+                "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
+                % ke_db.sql_str(key))
+    names = {k["id"]: k["name"] for k in kb_rows()}
+    ont_id = ke_ontology.resolve_ontology_kb().get("id") or ""
+    skip = {concept.get("id") or "", ont_id}
+    pages: list = []
+    skipped: list = []
+    for key, rows in members_by_key.items():
+        members = [{"context": "kb:%s" % r["kb"][:8], "kb": r["kb"], "kb_name": names.get(r["kb"], ""),
+                    "slug": r["slug"], "title": r["title"], "page_type": r["page_type"],
+                    "summary": r.get("summary") or "", "version": int(r["version"] or 1),
+                    "same_as": (_meta_dict(r).get("same_as") or {})}
+                   for r in rows if r["kb"] not in skip]
+        contexts = {m["context"] for m in members}
+        if len(members) < 2 or len(contexts) < 2:
+            skipped.append({"key": key, "why": "跨库同名页不足 2 个上下文", "pages": len(members)})
+            continue
+        primary = sorted(members, key=lambda m: (-m["version"], m["slug"]))[0]
+        slug_new = primary["slug"]                       # 与领域页**同名**
+        exists = _one_page(concept.get("id") or "", slug_new) is not None
+        risks = ["concept_page_rewrite"] if exists else []
+        if any(m["same_as"] for m in members):
+            risks.append("same_as_conflict")
+        pages.append({
+            "slug": slug_new, "title": primary["title"] or slug_new,
+            "page_type": primary["page_type"], "exists": exists,
+            "verdict": verdicts.get(key, "equivalent"),
+            "members": members, "required_risks": risks,
+            "body_md": _concept_page_body(primary, members),
+        })
+    pages.sort(key=lambda p: p["slug"])
+    ticket = _sha1("concept-v1|%s|%s" % (concept.get("id") or "", json.dumps(
+        sorted((m["kb"], m["slug"], m["version"]) for p in pages for m in p["members"]),
+        ensure_ascii=False)))
+    return {
+        "mode": "dry-run（只读预览，不写任何页）", "generated_at": ke_db.now_text(),
+        "concept_kb": concept, "ticket": ticket, "permission": "read_only",
+        "stats": {"pages": len(pages), "new": sum(1 for p in pages if not p["exists"]),
+                  "update": sum(1 for p in pages if p["exists"]), "skipped": len(skipped)},
+        "pages": pages[:int(limit)], "skipped": skipped[:int(limit)],
+        "apply_hint": ("二期 `POST /bodhi/context/concept/apply`（带 ticket + acknowledge_risks；"
+                       "需对「企业共享概念模型」库有写权限）才会真正写页"),
+        "note": "概念页 slug 与领域页同名；领域库不写 uuid、不互相引用，跨域关系经概念页转换",
+    }
+
+
 def lookup(kb_ids: list[str] | None = None, q: str = "", slug: str = "", limit: int = 20) -> dict:
     """检索前查（只读）：同名组 / 同义概念（`same_as`）/ 异义映射 / 依赖页 / 警告。
 
@@ -606,8 +856,15 @@ def main() -> int:
     p_look.add_argument("kb_ids", nargs="?", default="", help="逗号分隔（仅作回显）")
     p_look.add_argument("--slug", default="")
     p_look.add_argument("--q", default="")
+    p_page = sub.add_parser("page", help="领域页 ←同名 slug→ 概念页 的渲染视图（只读）")
+    p_page.add_argument("kb_id", nargs="?", default="", help="本库（给 slug 时用于判定跨库引用）")
+    p_page.add_argument("--slug", default="")
+    p_page.add_argument("--q", default="")
+    p_prev = sub.add_parser("concept-preview", help="二期概念页生成预览（dry-run，只读）")
+    p_prev.add_argument("slug", nargs="?", default="", help="只预览某个 slug 组；省略=按最近一次扫描的 equivalent 组")
+    p_prev.add_argument("--include-unknown", action="store_true")
     p_print = ap.add_argument("--print", type=int, default=6000, help="打印字符上限")
-    for _p in (sub.choices["contexts"], p_scan, p_look):
+    for _p in (sub.choices["contexts"], p_scan, p_look, p_page, p_prev):
         _p.add_argument("--print", dest="print", type=int, default=int(p_print.default),
                         help="打印字符上限（也可写在子命令前）")
     args = ap.parse_args()
@@ -617,6 +874,10 @@ def main() -> int:
         kb_ids = [x.strip() for x in (args.kb_ids or "").split(",") if x.strip()]
         out = scan(kb_ids or None, limit=args.limit, page_limit=args.page_limit,
                    write=not args.no_write)
+    elif args.cmd == "page":
+        out = page_view(args.kb_id or "", slug=args.slug, q=args.q)
+    elif args.cmd == "concept-preview":
+        out = concept_preview(args.slug or "", include_unknown=bool(args.include_unknown))
     else:
         kb_ids = [x.strip() for x in (args.kb_ids or "").split(",") if x.strip()]
         out = lookup(kb_ids or None, q=args.q, slug=args.slug)

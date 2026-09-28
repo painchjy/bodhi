@@ -398,8 +398,33 @@ GET  /bodhi/context/lookup?kb_ids=&slug=|q=  # 只读：检索前查"同义/异�
 | 技能/提示词纪律 | 3 个 `SKILL.md` + `agent_system_prompt.yaml` | "跨库引用前先 `context_lookup`；`same_name_no_decision` → 停下请用户裁决" |
 | 状态目录 | `state/context_map/{contexts.json,mappings.json,latest_scan.json,scan/*}` | 只写这里；**不碰任何 wiki 页/元数据**（`git status` 无页改动） |
 
-**二期（写路径）待做**：建「企业共享概念模型」库 → 概念页 + `same_as` 元数据（轻量）
-→ ACL 映射表 + 映射页（版本化）→ 两段式 `context/concept|mapping` preview/apply/rollback
-→ **`ke_db.assert_can_write` 权限校验**（属主 / `kb_shares` 写权限 / fail-closed）
-→ 前端「跨库上下文」面板。
+### 13.11 口径修订（2026-09-28 第三次确认）：**领域库不写 uuid、靠同名 slug 查询；领域库不得互相引用**
+
+用户原话："领域知识库 wiki 不使用 uuid 链接企业共享概念页，通过查询企业共享概念模型的**同名 slug** 页面
+渲染与企业概念和其他领域概念的关系；领域知识库**不能互相引用**，相互关系**必须通过企业共享概念进行转换**。"
+
+落地口径（**以此为准**）：
+
+1. **建库已完成**：「企业共享概念模型」= `afcd1c2e-0ff3-41c9-8dde-01f136b8a072`
+   （`wiki_config.bodhi_concept_kb=true`；`ke_context` 认库 `source=wiki_config`；上下文表 `kind=concept`）。
+2. **关联方式 = 同名 slug 查询**：领域页**不写 uuid**（取消 `same_as.concept_kb` 的 uuid 依赖）。
+   概念页 `slug` **与领域页同名**（不再用"标准名重写 slug"；企业标准名称放概念页 `title` 与 `## 标准定义`）。
+3. **领域库不得互相引用**：领域页出边/正文**不许**指向别的领域库的 slug；跨域关系**必须经企业共享概念页转换**
+   —— A 领域页 →（同名 slug）概念页 → 概念页的「各领域映射」表 → B 领域页。
+   **渲染由查询完成**（`context_page`/`page_view`），库里零跨库痕迹（概念库也不写指向领域库的 wiki 链接，
+   映射表用 `code span` 表达）。
+4. **新增巡检 G7**：领域页出边指向"只存在于别的库"的 slug → **high**（违反上面的红线）。
+5. **只读渲染接口**：
+   - MCP `context_page`（工具数 **19 → 20**）/ `GET /bodhi/context/page?slug=|q=[&kb_id=]`（参数需 URL 编码）；
+   - 概念页生成**只读预览**：`ke_context.concept_preview()`（CLI `concept-preview`；
+     `GET|POST /bodhi/context/concept/preview`）—— dry-run，给 ticket 与 `body_md`，不写任何页。
+6. **弃用**：§5 L1 里"往领域页写 `same_as={concept_kb(uuid), concept_slug}` 指针"**不再是关联依据**；
+   若二期仍保留该字段，只能作离线校验用（可选、非必需）。
+
+**实测（2026-09-28）**：
+- `context_page(slug=ea/businessentity/手机号码)` → 概念页 `exists=false`（尚未 apply）+ 2 个领域同名页 + 两条 warnings；
+- `concept-preview`（dry-run）→ 待生成概念页 **1 页**（`ea/businessentity/登录凭据`，equivalent），
+  `body_md` 已含"标准定义 + 各领域定义摘录 + 各领域映射表"；ticket 已出；
+- 巡检 `--scope context`：**G5 = 4**（同名异义未映射，high）、`context_forbidden_cross_kb_refs = 0`（当前无跨库直接引用）；
+- MCP 自检 **20 个工具**；`/bodhi/context/page`、`/bodhi/context/concept/preview` 经 nginx 200。
 
