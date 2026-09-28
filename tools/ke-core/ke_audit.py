@@ -27,8 +27,12 @@ C（来源异常）：C1 无来源实例页 / C2 来源文档已删或不存在 
   C4 图侧实例无溯源 / **C5 建模会话记着的页不在本库**（2026-09-24：跨库同 slug 撞主键的存量体检）
 D（重复/幂等）：D1 同语义多页 / D2 软删残留与活页并存 / D3 孤儿版本快照 /
   **D4 同库同 slug 多行（影子页）** / **D5 页 id 非规范派生**（2026-09-24 加固）
-F（治理，2026-09-24 用户口径）：F1 跨库同实例候选（需指认权威）/ F2 权威·副本绑定漂移 /
+F（治理，2026-09-24 用户口径）：F1 跨库同名/同实例候选（**2026-09-28 合并**：
+  L1 归一化 `slug` 字面同名 + L2 本体类 + 归一化标题相同，detail 标 `matched_by`）/ F2 权威·副本绑定漂移 /
   F3 原文依据不达标（缺摘录或只有占位文案）；设计见 `docs/knowledge-governance.md`
+G（跨库上下文映射，2026-09-28 新增，见 `docs/context-mapping-plan.md`）：
+  G2 同义组未指认概念 / 概念冲突 / **G3** 映射悬空 / **G4** 映射过期 / **G5** 同名异义未映射（high）/
+  **G6** 映射非法或互相矛盾 —— 数据源是 `state/context_map/*.json` + `page_metadata.same_as`（一期只读）
 
 用法
 ----
@@ -65,7 +69,7 @@ except Exception:  # noqa: BLE001
     ke_docs = None  # type: ignore
 
 SEV = {"high": 0, "medium": 1, "low": 2}
-SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "coupling")
+SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
@@ -824,6 +828,141 @@ def _sha1(text: str) -> str:
     return "sha1:" + hashlib.sha1((text or "").encode("utf-8")).hexdigest()
 
 
+def _page_ver_hash(kb_id: str, slug: str):
+    """页的 `(version, sha1)` —— 映射过期（G4）用；页不存在返回 `(None, "")`。"""
+    rows = ke_db.psql_csv(
+        "SELECT COALESCE(version,1) AS version, COALESCE(content,'') AS content "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if not rows:
+        return None, ""
+    return int(rows[0]["version"] or 1), _sha1(rows[0]["content"])
+
+
+def check_context_map(ctx: dict, rep: Report) -> None:
+    """G 系列（2026-09-28 新增，**只读**）：跨库上下文映射（DDD Context Map）一致性。
+
+    G2 同义组未指认概念 / 同一同名页挂了两个概念（冲突）
+    G3 映射悬空：源/目标页不存在或已删（detached）
+    G4 映射过期：源/目标在决定之后改过（stale）
+    G5 同名异义未映射：跨库同名 slug、扫描建议 distinct、却没有任何 mapping
+    G6 映射不可达 / 互相矛盾
+
+    数据源：`state/context_map/mappings.json`（二期写、一期读）+ 页 `page_metadata.same_as`
+    + `state/context_map/latest_scan.json`（扫描报告）。设计见 docs/context-mapping-plan.md §8/§13。
+    """
+    try:
+        import ke_context  # noqa: E402  （同目录；一期只读模块）
+    except Exception:  # noqa: BLE001
+        return
+    pairs = [p for p in ((ke_context._json_load(ke_context.MAPPINGS_FILE, {}) or {}).get("pairs") or [])
+             if isinstance(p, dict)]
+
+    # ---- G2 同义组未指认概念 / 概念冲突 ---------------------------------------
+    mounted: list = []
+    for page in ctx["pages"]:
+        same = _meta_full(page.get("meta")).get("same_as")
+        if not isinstance(same, dict) or not same:
+            continue
+        cslug = str(same.get("concept_slug") or "")
+        ckb = str(same.get("concept_kb") or "")
+        if not cslug:
+            rep.add("G2", "medium", page["slug"], "`page_metadata.same_as` 缺 `concept_slug`（挂了空概念）",
+                    "补全指针或移除（docs/context-mapping-plan.md §5 L1）")
+            continue
+        mounted.append((page["slug"], ckb, cslug))
+        if ckb and not _page_ver_hash(ckb, cslug)[0]:
+            rep.add("G2", "medium", page["slug"],
+                    "概念页不存在：`%s/%s`（same_as 指向空的落点）" % (ckb[:8], cslug),
+                    "在「企业共享概念模型」里建该概念页后重签")
+    if mounted:
+        slugs = sorted({s for s, _ckb, _cs in mounted})
+        placeholders = ",".join(ke_db.sql_str(s) for s in slugs[:200])
+        rows = ke_db.psql_csv(
+            "SELECT left(t.kb::text, 8) AS kb, t.slug, t.concept FROM ("
+            "  SELECT knowledge_base_id AS kb, slug, "
+            "         COALESCE(page_metadata -> 'same_as' ->> 'concept_slug', '') AS concept "
+            "    FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id <> %s"
+            "     AND slug IN (%s)) t WHERE t.concept <> ''"
+            % (ke_db.sql_str(ctx["kb_id"]), placeholders))
+        mine = {s: cs for s, _ckb, cs in mounted}
+        for row in rows:
+            other = str(row.get("concept") or "")
+            if row["slug"] in mine and other and mine[row["slug"]] != other:
+                rep.add("G2", "medium", row["slug"],
+                        "同一同名页在不同上下文挂了**不同概念**（本库 `%s` vs %s/%s）—— 概念冲突"
+                        % (mine[row["slug"]], row["kb"], other),
+                        "先裁决同义/异义，再统一概念指针")
+    ctx["data"]["context_same_as_mounted"] = len(mounted)
+
+    # ---- G3/G4/G6 映射表自身 --------------------------------------------------
+    detached = stale = bad = 0
+    seen: dict = {}
+    for row in pairs:
+        src, dst = row.get("source") or {}, row.get("target") or {}
+        mtype = str(row.get("mapping") or "")
+        s_kb = str(src.get("kb") or ""); d_kb = str(dst.get("kb") or "")
+        s_slug = str(src.get("slug") or ""); d_slug = str(dst.get("slug") or "")
+        label = "%s → %s" % (s_slug or "?", d_slug or "?")
+        if mtype not in ("equivalent", "rename", "narrower", "broader", "split", "merge", "unrelated"):
+            bad += 1
+            rep.add("G6", "medium", label, "非法映射类型 `%s`" % mtype,
+                    "取值域 equivalent/rename/narrower/broader/split/merge/unrelated")
+        if not (s_kb and d_kb and s_slug and d_slug):
+            bad += 1
+            rep.add("G6", "medium", label, "映射缺 `source{kb,slug}` 或 `target{kb,slug}`",
+                    "补全映射四要素（docs/context-mapping-plan.md §5 L2）")
+            continue
+        for side, kb, slug in (("source", s_kb, s_slug), ("target", d_kb, d_slug)):
+            ver, sha = _page_ver_hash(kb, slug)
+            if ver is None:
+                detached += 1
+                rep.add("G3", "high", label, "映射%s页不存在或已删：%s/%s" % (side, kb[:8], slug),
+                        "重建映射或归档为 detached（二期两段式 apply）")
+                continue
+            recorded = str(row.get("%s_hash" % side) or "")
+            if recorded and recorded != sha:
+                stale += 1
+                rep.add("G4", "medium", label, "映射%s页自决定后改动过（%s 指纹不一致）→ 复核同义/异义"
+                        % (side, side), "重跑 context_scan → preview → 重签该映射")
+            elif row.get("%s_version" % side) and ver > int(row.get("%s_version" % side) or 0):
+                stale += 1
+                rep.add("G4", "medium", label, "映射%s页版本 %s → %s（决定后改过）→ 复核"
+                        % (side, row.get("%s_version" % side), ver),
+                        "重跑 context_scan → preview → 重签该映射")
+        back = seen.get((d_kb, d_slug, s_kb, s_slug))
+        if back and str(back.get("mapping") or "") != mtype:
+            rep.add("G6", "medium", label, "映射互相矛盾：反向记录类型是 `%s`（本记录 `%s`）"
+                    % (back.get("mapping"), mtype), "统一两侧映射口径")
+        seen[(s_kb, s_slug, d_kb, d_slug)] = row
+    covered = {(s_kb[:8], s_slug, d_kb[:8], d_slug) for (s_kb, s_slug, d_kb, d_slug) in seen}
+    ctx["data"]["context_mappings"] = {"pairs": len(pairs), "detached": detached, "stale": stale,
+                                       "invalid": bad, "same_as_mounted": len(mounted)}
+
+    # ---- G5 同名异义未映射（读一期扫描报告）------------------------------------
+    latest = ke_context.latest_scan()
+    report_file = str(latest.get("file") or "")
+    if not report_file:
+        return
+    data = ke_context._json_load(ke_context.REPO / report_file, {}) or {}
+    undecided = 0
+    me = "kb:%s" % ctx["kb_id"][:8]
+    for cand in (data.get("candidates") or []):
+        pages = cand.get("pages") or []
+        if me not in [p.get("context") for p in pages] or cand.get("verdict_suggestion") != "distinct":
+            continue
+        keys = [(str(p.get("kb") or "")[:8], str(p.get("slug") or ""), p.get("context")) for p in pages]
+        pair_covered = any((keys[i][0], keys[i][1], keys[j][0], keys[j][1]) in covered
+                           for i in range(len(keys)) for j in range(len(keys)) if i != j)
+        if not pair_covered:
+            undecided += 1
+            rep.add("G5", "high", str(cand.get("id") or ""),
+                    "同名**异义**但**没有 ACL 映射**：%s —— 跨库引用会误读"
+                    % " | ".join("%s:%s" % (p.get("context"), p.get("slug")) for p in pages),
+                    "由有写权限的人/智能体登记映射（unrelated/rename/…；二期两段式 apply）")
+    ctx["data"]["context_undecided_distinct"] = undecided
+
+
 def check_governance(ctx: dict, rep: Report) -> None:
     kb_id = ctx["kb_id"]
     mine = [p for p in ctx["pages"] if _is_instance(p["page_type"])]
@@ -853,6 +992,47 @@ def check_governance(ctx: dict, rep: Report) -> None:
                    "、".join("%s/%s（%s）" % (r["kb"], r["slug"], r["kb_name"]) for r in rowset[:3])),
                 "裁决与绑定方案见 docs/knowledge-governance.md §B（元数据写 `page_metadata.authority`）")
     ctx["data"]["cross_kb_instance_candidates"] = len(others)
+
+    # ---- F1 补充判据：**L1 `slug` 字面同名**（2026-09-28 用户拍板：与原 F1 合并成同一检查）------
+    #   口径（docs/context-mapping-plan.md §2 / §13.3）：
+    #     L1 同名   = 跨库 slug **归一化后字面相同**（用户口径，名字冲突 → 可能同名异义）；
+    #     L2 同实例 = 跨库 本体类 + 归一化标题 相同（原 F1 口径，语义更强的"同一实例"线索）。
+    #   两者**同属 F1**，detail 里标 `matched_by`，便于一眼看出是"名字撞了"还是"确实是同一实例"。
+    same_slug_groups: dict = {}
+    try:
+        import ke_context  # noqa: E402  （同目录；一期只读模块）
+    except Exception:  # noqa: BLE001
+        ke_context = None  # type: ignore
+    if ke_context is not None:
+        l1_rows = ke_db.psql_csv(
+            "SELECT left(w.knowledge_base_id::text, 8) AS kb, COALESCE(k.name, '') AS kb_name, "
+            "       w.slug, COALESCE(w.title, '') AS title, COALESCE(w.page_type, '') AS page_type "
+            "  FROM wiki_pages w LEFT JOIN knowledge_bases k ON k.id = w.knowledge_base_id "
+            " WHERE w.deleted_at IS NULL AND w.knowledge_base_id <> %s "
+            "   AND position(':' in COALESCE(w.page_type, '')) > 0 "
+            " LIMIT 5000" % ke_db.sql_str(kb_id))
+        by_slug: dict = {}
+        for row in l1_rows:
+            if _is_instance(row["page_type"]):
+                by_slug.setdefault(ke_context.norm_slug(row["slug"]), []).append(row)
+        for page in mine:
+            rowset = by_slug.get(ke_context.norm_slug(page["slug"]))
+            if not rowset:
+                continue
+            same_slug_groups[page["slug"]] = rowset
+            l2_hit = [r for r in rowset
+                      if r["page_type"] == page["page_type"]
+                      and _norm_title(r["title"]) == _norm_title(page["title"])]
+            matched = "L1+L2" if l2_hit else "L1"
+            rep.add("F1", "low", page["slug"],
+                    "跨库**同名**（归一化 slug 相同，matched_by=%s）：本库 `%s`（%s）；别库 %s —— "
+                    "同名不等于同义：同义 → 挂同一个「企业共享概念模型」里的概念页；"
+                    "异义 → 必须登记 ACL 映射（`unrelated`/`rename`/`split`…）"
+                    % (matched, page["slug"], page["page_type"],
+                       "、".join("%s/%s（%s）" % (r["kb"], r["slug"], r["kb_name"]) for r in rowset[:3])),
+                    "跑 `context_scan` 拿 ticket → 裁决（一期只读；写路径见 "
+                    "docs/context-mapping-plan.md §7/§13）")
+    ctx["data"]["cross_kb_same_slug"] = len(same_slug_groups)
     check_governance_rest(ctx, rep, mine)
 
 
@@ -1352,6 +1532,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_page_identity(ctx, rep)
     if scope in ("all", "governance"):
         check_governance(ctx, rep)
+    if scope in ("all", "governance", "context"):
+        check_context_map(ctx, rep)
     if scope in ("all", "coupling"):
         check_coupling(ctx, rep)
 

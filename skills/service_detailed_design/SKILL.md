@@ -73,6 +73,11 @@ guard: 键角色不建 Key 类（用 easvc:keyRole）；CRUD 只在边上给（p
 > **相似度与关系解析都只在本库内**：目标节点若只存在于别的知识库，回执会出现
 > `cross_kb_same_name` 并把它计入 `violations`（**绝不跨库合并**——同名不代表同义）。
 > 要连到那个节点，先在本库建立它，或改用本库内的等价节点。
+> **跨库引用前必须先查（2026-09-28 新增只读工具）**：`context_lookup(slug|q)` ——
+> 它会返回该页在**各库的同名页**、已挂的企业标准概念（`page_metadata.same_as`）、ACL 映射、
+> 以及引用它的页；若回执里有 `same_name_no_decision`（跨库同名但**没有任何裁决**），
+> **停下来先请用户裁决**（同义→挂「企业共享概念模型」里的概念页；异义→登记 ACL 映射），
+> 不要凭 slug 相同就假定同义。全库体检用 `context_scan`（只读，出建议 + ticket）。
 
 - **主外键不建类**：`keyRole` 是数据属性（PK/FK/UNIQUE/NONE），外键用 `referencesAttribute` 指过去。
 - **CRUD 只在边上给**（`edges[].properties.easvc:crudKind`），不要在正文里手写表格 ——

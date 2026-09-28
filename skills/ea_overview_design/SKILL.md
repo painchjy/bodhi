@@ -74,6 +74,11 @@ guard: 两段都要人工确认；落库必须 mode="apply"；新建应用/系�
 > **相似度与关系解析都只在本库内**：目标节点若只存在于别的知识库，回执会出现
 > `cross_kb_same_name` 并把它计入 `violations`（**绝不跨库合并**——同名不代表同义）。
 > 要连到那个节点，先在本库建立它，或改用本库内的等价节点。
+> **跨库引用前必须先查（2026-09-28 新增只读工具）**：`context_lookup(slug|q)` ——
+> 它会返回该页在**各库的同名页**、已挂的企业标准概念（`page_metadata.same_as`）、ACL 映射、
+> 以及引用它的页；若回执里有 `same_name_no_decision`（跨库同名但**没有任何裁决**），
+> **停下来先请用户裁决**（同义→挂「企业共享概念模型」里的概念页；异义→登记 ACL 映射），
+> 不要凭 slug 相同就假定同义。全库体检用 `context_scan`（只读，出建议 + ticket）。
 
 - **`mode` 必须显式写**：`dry_run` 只是预览（回执 `applied=false` + `write_note`）；要落库必须 `apply`。
   **只以回执 `applied=true` 与 `page_versions` 为准**；`applied=false` 时绝不说"已写入/已更新"。

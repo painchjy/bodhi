@@ -34,6 +34,11 @@ import ke_neo4j  # noqa: E402
 import ke_ontology  # noqa: E402
 import ke_pages  # noqa: E402
 
+try:                       # 跨库上下文映射（一期只读；见 docs/context-mapping-plan.md）
+    import ke_context  # noqa: E402
+except Exception:  # noqa: BLE001
+    ke_context = None  # type: ignore
+
 REPO = HERE.parents[1]
 # 本体模型知识库：**不再写死 uuid**（客户环境不是我们的 uuid）。
 # 解析顺序见 ke_ontology.resolve_ontology_kb：env → wiki_config 标记 → 库名 → 内容探测。
@@ -882,6 +887,17 @@ if __name__ == "__main__":  # 运维自测：python3 ke_admin.py purge <model> |
         out = load_model(args[1] if len(args) > 1 else "", purge=True)
     elif cmd == "repair":                          # 运维修复：编译 → 灌投影 → 重投影 wiki → 体检
         out = repair_all(args[1] if len(args) > 1 else "")
+    elif cmd in ("ctx-contexts", "ctx-scan", "ctx-lookup"):   # 跨库上下文映射（一期只读）
+        if ke_context is None:
+            out = {"error": "ke_context 不可用（tools/ke-core/ke_context.py 缺失）"}
+        elif cmd == "ctx-contexts":
+            out = ke_context.contexts()
+        elif cmd == "ctx-scan":
+            kbs = [x.strip() for x in (args[1] if len(args) > 1 else "").split(",") if x.strip()]
+            out = ke_context.scan(kbs or None, write="--no-write" not in args)
+        else:
+            out = (ke_context.lookup(slug=args[1]) if len(args) > 1 and "/" in args[1]
+                   else ke_context.lookup(q=args[1] if len(args) > 1 else ""))
     else:
         print(__doc__)
         sys.exit(1)

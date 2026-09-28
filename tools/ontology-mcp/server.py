@@ -99,6 +99,7 @@ import ke_admin  # noqa: E402
 import ke_pages  # noqa: E402
 import ke_docs  # noqa: E402  （按来源文档统计/清理本体实例，2026-09-20）
 import ke_audit  # noqa: E402  （wiki↔图谱↔模型 一致性巡检，只读，2026-09-20 P1）
+import ke_context  # noqa: E402  （跨库上下文映射：同名/同义/异义 + 依赖，只读，2026-09-28 一期）
 import ke_yamlmini  # noqa: E402  （零依赖 YAML 子集：干净容器里没有 PyYAML 时的兜底）
 import ke_neo4j  # noqa: E402  （Neo4j 本体投影；ontology_types 补录、B5 一致性都用它）
 from ke_pages import (  # noqa: E402,F401  （历史脚本 relink_pages.py 已归档，此别名保留兼容）
@@ -3050,7 +3051,52 @@ def tool_definitions() -> list[dict]:
                 "ticket": {"type": "string", "description": "要回滚的那次迁移 ticket"},
             }, "required": ["kb_id", "ticket"]},
         },
+        {
+            "name": "context_scan",
+            "description": ("**跨库上下文扫描（只读）**：把「跨库同名 / 同实例」的知识页聚成**一张**候选表 —— "
+                            "判据 L1 归一化 `slug` 字面同名（用户口径）+ L2 本体类 + 归一化标题相同（原 F1）；"
+                            "每组给出 `signals`（标题/类/定义相似度/关系签名）与**建议结论**"
+                            "（`equivalent` 同义 / `distinct` 异义 / `unknown` 需人判）、`required_risks`、`ticket`。"
+                            "**同名不等于同义**：本工具只出建议，绝不自动改任何页；"
+                            "同义 → 让用户指认「企业共享概念模型」里的概念页；异义 → 登记 ACL 映射（二期两段式 apply）。"
+                            "写入路径见 docs/context-mapping-plan.md §7/§13。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_ids": {"type": "array", "items": {"type": "string"},
+                           "description": "要一起比较的知识库（省略=全部活着的库；本体库与共享概念库不参与分组）"},
+                "limit": {"type": "integer", "description": "最多返回多少条候选（默认 200）"},
+                "write": {"type": "boolean", "description": "是否落扫描报告到 state/context_map/（默认 true；只写我们自己的状态目录）"},
+            }},
+        },
+        {
+            "name": "context_lookup",
+            "description": ("**跨库上下文查询（只读，检索前用）**：给定 `slug`（或 `q` 关键词）→ 返回该页在**各库**的"
+                            "同名页、已挂的企业标准概念（`page_metadata.same_as`）、ACL 映射、"
+                            "引用它的页（`depended_by`），以及 `warnings`（如 `same_name_no_decision` = "
+                            "跨库同名但**没有任何裁决** ← 跨库引用最危险的场景）。"
+                            "**跨库引用前必须先查这个**：不得因为 slug 相同就假定同义。"),
+            "inputSchema": {"type": "object", "properties": {
+                "slug": {"type": "string", "description": "精确 slug（如 ea/businessentity/客户信息）"},
+                "q": {"type": "string", "description": "关键词（按 slug/标题模糊找，再展开跨库同名组）"},
+                "kb_ids": {"type": "array", "items": {"type": "string"}, "description": "会话绑定的库（仅回显/限定）"},
+            }},
+        },
     ]
+
+
+def context_scan(kb_ids: list | None = None, limit: int = 200, write: bool = True) -> dict:
+    """**只读**：跨库同名/同实例候选（`ke_context.scan` 的入口）。
+
+    用户口径（2026-09-28）：**同名** = 归一化 `slug` 相同；**同实例** = 本体类 + 归一化标题相同
+    —— 两者合并成**一张**候选表（`matched_by` 标出命中哪条判据）。只写 `state/context_map/`，不碰任何页。
+    """
+    kb_ids = [str(k).strip() for k in (kb_ids or []) if str(k).strip()]
+    return ke_context.scan(kb_ids or None, limit=int(limit), write=bool(write))
+
+
+def context_lookup(kb_ids: list | None = None, q: str = "", slug: str = "") -> dict:
+    """**只读**：检索前查跨库同名/同义/异义/依赖（`ke_context.lookup` 的入口）。"""
+    kb_ids = [str(k).strip() for k in (kb_ids or []) if str(k).strip()]
+    return ke_context.lookup(kb_ids or None, q=q, slug=slug)
 
 
 def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
@@ -3216,6 +3262,12 @@ def call_tool(name: str, args: dict) -> dict:
         if block:
             return block
         return ke_pages.retag_rollback(kb_id, str(args.get("ticket", "")))
+    if name == "context_scan":
+        return context_scan(args.get("kb_ids") or None, int(args.get("limit", 200) or 200),
+                            bool(args.get("write", True)))
+    if name == "context_lookup":
+        return context_lookup(args.get("kb_ids") or None, str(args.get("q", "")),
+                              str(args.get("slug", "")))
     raise RuntimeError("未知工具：%s" % name)
 
 
@@ -3529,6 +3581,33 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json(data, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/ontology/targets 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/contexts", "/bodhi/contexts.json"):
+            # 跨库上下文映射（一期只读）：上下文注册表（**KB = 限界上下文**，见 docs/context-mapping-plan.md）
+            try:
+                self._json(ke_context.contexts(), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/contexts 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/context/scan", "/bodhi/context/scan.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                kbs = [x.strip() for x in (params.get("kb_ids") or "").split(",") if x.strip()]
+                self._json(context_scan(kbs or None, int(params.get("limit", 200) or 200),
+                                        params.get("write", "1") not in ("0", "false")), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/context/scan 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/context/lookup", "/bodhi/context/lookup.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(context_lookup(None, params.get("q", ""), params.get("slug", "")),
+                           200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/context/lookup 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/crud", "/bodhi/crud.json"):
