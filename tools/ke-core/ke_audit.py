@@ -904,10 +904,11 @@ def check_context_map(ctx: dict, rep: Report) -> None:
         s_kb = str(src.get("kb") or ""); d_kb = str(dst.get("kb") or "")
         s_slug = str(src.get("slug") or ""); d_slug = str(dst.get("slug") or "")
         label = "%s → %s" % (s_slug or "?", d_slug or "?")
-        if mtype not in ("equivalent", "rename", "narrower", "broader", "split", "merge", "unrelated"):
+        if mtype not in ("equivalent", "rename", "narrower", "broader", "split", "merge",
+                         "unrelated", "unknown"):     # unknown = 尚未裁决（概念页里可先留空/待定）
             bad += 1
             rep.add("G6", "medium", label, "非法映射类型 `%s`" % mtype,
-                    "取值域 equivalent/rename/narrower/broader/split/merge/unrelated")
+                    "取值域 equivalent/rename/narrower/broader/split/merge/unrelated/unknown")
         if not (s_kb and d_kb and s_slug and d_slug):
             bad += 1
             rep.add("G6", "medium", label, "映射缺 `source{kb,slug}` 或 `target{kb,slug}`",
@@ -961,6 +962,23 @@ def check_context_map(ctx: dict, rep: Report) -> None:
                     % " | ".join("%s:%s" % (p.get("context"), p.get("slug")) for p in pages),
                     "由有写权限的人/智能体登记映射（unrelated/rename/…；二期两段式 apply）")
     ctx["data"]["context_undecided_distinct"] = undecided
+
+    # ---- G8 映射缓存过期/缺失（缓存=技术产物；事实源是概念页）-------------------
+    cache = ke_context.read_cache()
+    if cache.get("generated_from"):
+        if cache.get("stale_count"):
+            rep.add("G8", "low", "state/context_map/mappings.json",
+                    "映射缓存过期 %d 项（%s）—— 概念页在缓存生成后改过/删过；缓存只用于渲染加速，"
+                    "事实源始终是概念页正文" % (cache["stale_count"],
+                                             "、".join(str(x.get("slug") or "") for x in
+                                                       (cache.get("stale") or [])[:3])),
+                    "刷新缓存：`ke_context.py cache-rebuild` 或 `POST /bodhi/context/cache/rebuild`")
+    elif pairs or mounted:
+        rep.add("G8", "low", "state/context_map/mappings.json",
+                "有概念页但**没有映射缓存**（渲染/查询会少一层加速数据）", "跑 `cache-rebuild`")
+    ctx["data"]["context_cache"] = {"built_at": cache.get("built_at", ""),
+                                    "pairs": len(cache.get("pairs") or []),
+                                    "stale": cache.get("stale_count", 0)}
 
     # ---- G7 领域库**不得互相引用**（跨库直接引用 → high）------------------------
     #   用户口径（2026-09-28）：领域库之间不能互相引用；相互关系必须**经企业共享概念页转换**。

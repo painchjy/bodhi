@@ -203,6 +203,31 @@ def _defn(page: dict) -> str:
     return re.sub(r"[#>*`\[\]()|{}\-]+", " ", text)[:600]
 
 
+def _definition_from_content(content: str, limit: int = 220) -> str:
+    """从领域页正文里**摘出定义**（概念页的「标准定义」默认值）：优先 `## 定义/用途/说明` 小节，
+    否则取正文第一段实质内容（跳过标题、引用块、表格、列表与元数据行）。"""
+    text = content or ""
+    for header in ("## 定义", "## 用途", "## 说明", "## 概念定义"):
+        body = _section(text, header)
+        para = _first_para(body)
+        if para:
+            return para[:limit]
+    return _first_para(text)[:limit]
+
+
+def _first_para(text: str) -> str:
+    """取第一段"实质段落"（跳过标题/引用/表格/列表行）；没有就返回空串。"""
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line[0] in "#>|" or line.startswith(("-", "*", "```")):
+            continue
+        clean = re.sub(r"[*`\[\]]+", "", line)
+        clean = re.sub(r"\s+", " ", clean).strip()
+        if len(clean) >= 8:
+            return clean
+    return ""
+
+
 def _rels(page: dict) -> set:
     return {str(x) for x in (_json_load_str(page.get("out_links"), []) or []) if x}
 
@@ -520,11 +545,15 @@ def _one_page(kb_id: str, slug: str) -> dict | None:
 
 
 def _section(content: str, header: str) -> str:
-    """取 markdown 二级小节的正文（渲染概念页的「标准定义」）。"""
+    """取 markdown 某小节的正文：命中 `header` 后开始收集，**遇到下一个任意级别的标题就停**
+    （否则 `## 标准定义` 会把 `### 子小节` 也算进去）。"""
     out, grab = [], False
     for line in (content or "").splitlines():
-        if line.strip().startswith("## "):
-            grab = line.strip() == header.strip()
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            if grab and stripped != header.strip():
+                break
+            grab = stripped == header.strip()
             if grab:
                 continue
         if grab:
@@ -664,10 +693,10 @@ def _concept_page_body(primary: dict, members: list[dict], verdict: str = "equiv
     if verdict == "distinct":
         head += ["> ⚠️ **同名异义**：本 slug 在不同领域上下文里**含义不同**（下表逐域列出）；",
                  "> 跨域引用**必须**经本页转换，不得假定同义。", ""]
-    head += [(definition or primary.get("summary") or "").strip() or "（待补：企业标准定义）", "",
-             "### 各领域定义摘录", ""]
+    head += [(definition or primary.get("definition") or primary.get("summary") or "").strip()
+             or "（待补：企业标准定义）", "", "### 各领域定义摘录", ""]
     for m in members:
-        text = (m.get("summary") or "").strip()[:200] or "—"
+        text = (m.get("definition") or m.get("summary") or "").strip()[:200] or "—"
         head.append("- **%s**（`%s`）：%s" % (m["kb_name"], m["slug"], text))
     head += ["", "## 各领域映射", "",
              "| 上下文 | 页 slug | 类 | 版本 | 结论 | 说明 |", "|---|---|---|---|---|---|"]
@@ -700,6 +729,7 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
             "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
             "       COALESCE(page_type,'') AS page_type, COALESCE(summary,'') AS summary, "
             "       COALESCE(out_links::text,'[]') AS out_links, left(COALESCE(content,''),1500) AS head, "
+            "       COALESCE(content,'') AS content, "
             "       COALESCE(version,1) AS version, COALESCE(page_metadata::text,'{}') AS meta "
             "  FROM wiki_pages WHERE deleted_at IS NULL "
             "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
@@ -722,7 +752,8 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
             members_by_key[key] = ke_db.psql_csv(
                 "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
                 "       COALESCE(page_type,'') AS page_type, '' AS summary, "
-                "       COALESCE(out_links::text,'[]') AS out_links, '' AS head, "
+                "       COALESCE(out_links::text,'[]') AS out_links, "
+                "       left(COALESCE(content,''),1500) AS head, COALESCE(content,'') AS content, "
                 "       COALESCE(version,1) AS version, COALESCE(page_metadata::text,'{}') AS meta "
                 "  FROM wiki_pages WHERE deleted_at IS NULL "
                 "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
@@ -737,6 +768,7 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
                     "slug": r["slug"], "title": r["title"], "page_type": r["page_type"],
                     "summary": r.get("summary") or "", "version": int(r["version"] or 1),
                     "head": r.get("head") or "", "out_links": r.get("out_links") or "[]",
+                    "definition": _definition_from_content(r.get("content") or r.get("head") or ""),
                     "same_as": (_meta_dict(r).get("same_as") or {})}
                    for r in rows if r["kb"] not in skip]
         contexts = {m["context"] for m in members}
@@ -808,7 +840,7 @@ def concept_apply(slug: str, ticket: str = "", acknowledge_risks: list | None = 
     if sorted(acknowledge_risks or []) != want:
         return {"error": "风险确认不一致：需 acknowledge_risks=%s" % want,
                 "required_risks": want, "slug": slug}
-    body = _concept_page_body({"summary": definition, "title": page["title"]},
+    body = _concept_page_body(sorted(page["members"], key=lambda m: (-m["version"], m["slug"]))[0],
                               page["members"], page["verdict"], definition)
     before = _one_page(ckb, page["slug"])
     written = ke_pages.upsert_page(ckb, page["slug"], standard_name or page["title"],
