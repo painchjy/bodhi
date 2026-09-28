@@ -60,10 +60,12 @@ ALLOWED_TOOLS = [
     "wiki_search", "wiki_read_page", "wiki_write_page",
 ]
 # 「知识运维」智能体：**只给只读工具 + 巡检工具**（不给写页、不给抽取）
+#   + `retag_preview`（只读影响面，2026-09-27）—— 回执给运维/用户看，执行仍在人手里
 OPS_TOOLS = [
     "grep_chunks", "list_knowledge_chunks", "get_document_info",
     "wiki_search", "wiki_read_page",
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
+    "mcp_bodhi_ontology_retag_preview",
 ]
 # 「EA 概要设计」智能体：只读 wiki + 看本体类型 + **设计落库工具**（不给原生写页、不给抽取）
 DESIGN_TOOLS = [
@@ -87,6 +89,9 @@ MODELER_TOOLS = [
     "mcp_bodhi_ontology_save_knowledge",
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
     "mcp_bodhi_ontology_service_overview",
+    # 改本体类型（2026-09-27）：**两段式** —— 先 retag_preview（只读）把影响面+风险念给用户，
+    # 用户明确同意后用同一 ticket 调 retag_apply（缺 ticket/风险确认会被服务端拒）。
+    "mcp_bodhi_ontology_retag_preview", "mcp_bodhi_ontology_retag_apply",
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
                   "design": DESIGN_TOOLS, "modeler": MODELER_TOOLS}

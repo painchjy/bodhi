@@ -5,7 +5,7 @@
 > - `frontend/default.conf.template` —— nginx 模板（含 `/bodhi/` 反代 + **上游运行期解析**修复）
 > - `frontend/docker-compose.weknora.yml` —— compose overlay 片段（image + 模板挂载 + extra_hosts）
 > - `frontend/deploy_frontend.sh` —— 一键切换 + 端到端验收脚本
-> - `frontend/patches/` —— 若你们 UI 版本不同，可自行打补丁：`patch_frontend.py`、`gen_frontend_types.py`、`ontologyTypes.ts`
+> - `frontend/patches/` —— 若你们 UI 版本不同，可自行打补丁：`patch_frontend.py`、`gen_frontend_types.py`、`ontologyTypes.ts`、`bodhi_type_migration.ts`
 
 ## 1. 我们的前端补丁都改了什么（便于评估是否要整体替换）
 
@@ -15,7 +15,7 @@
 | **类型可视化** | `utils/ontologyTypes.ts`（**57 个类型**） | 类型彩色圆点 + 悬停中文类名；列表视图同样显示徽标；新增 `easvc:*`（服务详设）类型 |
 | **本体关系维护面板** | `components/bodhi/BodhiRelationsPanel.vue` | 阅读页右侧：出边可改/可删、入边只读；调 MCP 的 `/bodhi/relations*` |
 | **版本徽标位置** | `views/knowledge/wiki/WikiBrowser.vue`（补丁 v10） | 列表行 `v3` 徽标放在**标题之后**（放前面会让各行标题起始位置不齐，用户 2026-09-21 反馈）；`tools/delivery/patch_version_badge.py` 可对已有源码单独归一化（幂等）|
-| **类型下拉（编辑页）** | `AgentEditorModal`/知识页编辑 | 页面 `page_type` 用下拉选取（来自本体模型库编译产物），避免手打前缀出错 |
+| **类型下拉（编辑页）** | `src/bodhi/typeMigration.ts`（补丁 `patch_wikibrowser_v10_retag`） | 改**本体类型 = 迁移页面**：保存时先 `POST /bodhi/page/retag/preview` 算影响面（新 slug / 引用处数 / 预计违规 / 风险 / ticket）→ **弹确认框** → `POST /bodhi/page/retag/apply`（带 ticket + 风险确认）。取消则不改；不适用迁移的页自动退回旧通道（`/bodhi/page/type`，只改类型） |
 | **上传自动生成 wiki 开关** | 知识库头部 | 打开后上传文档自动进 wiki 抽取流程 |
 | **树/列表多选批量删除** | wiki 列表页 | |
 | **`/bodhi/` 反向代理** | `default.conf.template` | 前端把 `/bodhi/*` 反代到 MCP 服务（图谱/待确认/巡检等只读数据） |

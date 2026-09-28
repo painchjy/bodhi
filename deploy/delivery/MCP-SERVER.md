@@ -2,7 +2,7 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **14 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 …）
+> 作用：给 WeKnora 提供 **17 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
@@ -30,6 +30,8 @@ curl -s -X POST http://127.0.0.1:8765/bodhi/page/retag/rollback -H 'Content-Type
      -d '{"kb_id":"<kb>","ticket":"<ticket>"}'
 ```
 CLI 等价：`ke_admin.py retag-preview|retag-apply|retag-rollback`。
+**智能体也能用**（2026-09-27 新增 3 个工具，总数 14 → **17**）：`retag_preview`（只读）→ 把影响面念给用户 →
+用户同意后 `retag_apply`（带 `ticket` + `acknowledge_risks`，缺一即拒）→ 运维可用 `retag_rollback`。
 巡检 **A7** 报"slug 段与 `page_type` 错位"（存量体检；迁移后应清零）。
 `save_knowledge` 的 `retag` 参数**不再静默改类型**，改为回执 `retag_required`（含 ticket/风险/引用数）。
 

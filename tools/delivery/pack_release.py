@@ -64,7 +64,8 @@ MANUALS = MANUAL_ROOT + ("FRONTEND.md", "MCP-SERVER.md") + MANUAL_PKG_03
 MCP_ARTIFACT_SKIP = ("shacl",)          # 与 03 的 ontology/shapes 逐字节相同 → 只留真源
 TOOLS_MANUAL_PKG = ("delivery",)        # tools 下归 03（维护工具）
 # 01 包里这三份补丁脚本只放 `frontend/patches/`（源目录里同时存在同名文件 → 必须排除一侧，否则包内重复）
-FRONTEND_PATCH_FILES = ("patch_frontend.py", "gen_frontend_types.py", "ontologyTypes.ts")
+FRONTEND_PATCH_FILES = ("patch_frontend.py", "gen_frontend_types.py", "ontologyTypes.ts",
+                        "bodhi_type_migration.ts")
 PACKAGES = (("01-frontend", "bodhi2-01-frontend.tar.gz"),
             ("02-mcp-server", "bodhi2-02-mcp-server.tar.gz"),
             ("03-manual", "bodhi2-03-manual.tar.gz"))

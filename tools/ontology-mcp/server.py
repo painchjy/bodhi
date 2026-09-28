@@ -3003,6 +3003,53 @@ def tool_definitions() -> list[dict]:
                 "knowledge_id": {"type": "string"},
             }, "required": ["kb_id", "candidate_id", "action"]},
         },
+        {
+            "name": "retag_preview",
+            "description": ("**改本体类型 · 第一步（只读预览）**：算改类型后的影响面 —— "
+                            "① 新 slug（`模块/类/名称`）；② 引用了该页的地方（关系行 / out_links / 正文 / "
+                            "`## 溯源` / `page_metadata` / **建模会话状态**）；③ 预计 domain-range 违规；"
+                            "④ 需要用户确认的风险项 `required_risks`；⑤ **ticket**（影响面指纹）。"
+                            "流程：本工具 → **把影响面与风险念给用户**、等用户明确同意 → "
+                            "用**同一 ticket** 调 `retag_apply`。**不要跳过预览直接改类型**。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "目标知识库（会话绑定多库时必须明确，否则被拒）"},
+                "kb_ids": {"type": "array", "items": {"type": "string"},
+                           "description": "会话绑定的库清单（见 runtime_context 的 bound_knowledge_bases）"},
+                "confirm_kb_match": {"type": "boolean", "description": "kb_id 模糊匹配命中唯一库时的二次确认"},
+                "slug": {"type": "string", "description": "要改类型的页 slug（如 ea/step/某步骤）"},
+                "new_type": {"type": "string", "description": "目标本体类型（prefixed，如 ea:Activity）"},
+            }, "required": ["kb_id", "slug", "new_type"]},
+        },
+        {
+            "name": "retag_apply",
+            "description": ("**改本体类型 · 第二步（执行）**：迁移 slug + 改写所有引用（关系行 / out_links / "
+                            "正文 / 溯源 / 元数据）+ 重算 in_links + 改写建模会话状态；页 id 不变，可回滚。"
+                            "**必须**带 `ticket`（来自同一影响面的 `retag_preview`）与 `acknowledge_risks`"
+                            "（与 preview 返回的 `required_risks` 完全一致）—— 缺一即拒；ticket 不匹配"
+                            "（例如引用变了）也会被拒，需要重新 preview。调用前必须已获得用户明确同意。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "kb_ids": {"type": "array", "items": {"type": "string"}},
+                "confirm_kb_match": {"type": "boolean"},
+                "slug": {"type": "string"},
+                "new_type": {"type": "string"},
+                "ticket": {"type": "string", "description": "retag_preview 返回的 ticket（必须原样带回）"},
+                "acknowledge_risks": {"type": "array", "items": {"type": "string"},
+                                      "description": "用户确认过的风险项（= preview 的 required_risks，如 "
+                                                     "['url_break','refs_rewrite','agent_session']）"},
+            }, "required": ["kb_id", "slug", "new_type", "ticket", "acknowledge_risks"]},
+        },
+        {
+            "name": "retag_rollback",
+            "description": ("**回滚一次类型迁移**（运维用）：按 apply 留下的迁移记录 "
+                            "`state/retag/<ticket>.json` 恢复 slug / 类型 / 正文 / 引用 / 会话状态；幂等。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "kb_ids": {"type": "array", "items": {"type": "string"}},
+                "confirm_kb_match": {"type": "boolean"},
+                "ticket": {"type": "string", "description": "要回滚的那次迁移 ticket"},
+            }, "required": ["kb_id", "ticket"]},
+        },
     ]
 
 
@@ -3150,6 +3197,25 @@ def call_tool(name: str, args: dict) -> dict:
                                       str(args.get("knowledge_id", "")),
                                       kb_ids=args.get("kb_ids") or None,
                                       confirm_kb_match=bool(args.get("confirm_kb_match")))
+    if name == "retag_preview":
+        kb_id, _n, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
+                                            bool(args.get("confirm_kb_match")))
+        if block:
+            return block
+        return ke_pages.retag_preview(kb_id, str(args["slug"]), str(args["new_type"]))
+    if name == "retag_apply":
+        kb_id, _n, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
+                                            bool(args.get("confirm_kb_match")))
+        if block:
+            return block
+        return ke_pages.retag_apply(kb_id, str(args["slug"]), str(args["new_type"]),
+                                    str(args.get("ticket", "")), args.get("acknowledge_risks") or [])
+    if name == "retag_rollback":
+        kb_id, _n, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
+                                            bool(args.get("confirm_kb_match")))
+        if block:
+            return block
+        return ke_pages.retag_rollback(kb_id, str(args.get("ticket", "")))
     raise RuntimeError("未知工具：%s" % name)
 
 

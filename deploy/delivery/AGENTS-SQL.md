@@ -64,7 +64,7 @@ done
 
 | 智能体 | 提示词 | 工具面（`allowed_tools`） | 备注 |
 |---|---|---|---|
-| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + 13 个 `mcp_bodhi_ontology_*`（含 `skills`/`ontology_types`/`service_overview`；**无**抽取类） | **不给** `wiki_write_page`：写库只走 MCP |
+| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + 15 个 `mcp_bodhi_ontology_*`（含 `skills`/`ontology_types`/`service_overview`/**`retag_preview`+`retag_apply`**；**无**抽取类） | **不给** `wiki_write_page`：写库只走 MCP；改类型必须两段式（preview → 用户确认 → apply） |
 | `bodhi-kb-ops` | 「知识运维」——只做体检与清理计划，绝不改数据 | 5 个 wiki 工具 + `audit_scan`/`audit_plan` | 执行清理始终由人确认（`plan → apply --confirm`）|
 
 技能（3 个）由 MCP 下发、**不写进提示词**：`domain_modeling` / `ea_overview_design` / `service_detailed_design`

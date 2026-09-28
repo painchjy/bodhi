@@ -18,6 +18,9 @@
 5. 新增 src/views/knowledge/wiki/BodhiOntologyUpload.vue（「上传本体文件」按钮，2026-09-20）：
    本体模型知识库页的面包屑右侧，只在该 KB 渲染；同名模块整体替换、级联删下游、出报告
    （见 docs/handoff-ontology-upload.md §6.1）
+6. 新增 src/bodhi/typeMigration.ts（**本体类型改动 = 迁移**，2026-09-27）：
+   WikiBrowser 编辑页的类型下拉不再「保存即静默改 `page_type`」，改为**两段式**
+   `preview（只读影响面/风险/ticket）→ 确认弹窗 → apply`（`patch_wikibrowser_v10_retag`）。
 """
 
 from __future__ import annotations
@@ -656,6 +659,100 @@ def patch_wikibrowser_v6_save(fe: pathlib.Path) -> None:
     path.write_text(text, encoding="utf-8")
     print("  WikiBrowser.vue v6 保存链路完成（%d 字节）" % len(text.encode("utf-8")))
     patch_wikibrowser_v7(fe)
+    patch_wikibrowser_v10_retag(fe)
+
+
+def patch_wikibrowser_v10_retag(fe: pathlib.Path) -> None:
+    """v10（2026-09-27）：本体类型改动 = **迁移页面**（两段式：预览 → 用户确认 → 执行）。
+
+    背景：v6 的类型通道直接 `POST /bodhi/page/type`（**只改 `page_type`，不动 slug**）。
+    但本体类型的落点是 **slug**（实例页三段式 `模块/类/名称`）与页面里的**引用**，
+    所以真正的「改类型」= 迁移 slug + 改写引用（关系行 / `## 本体关系` / 反向链接 /
+    正文 / `## 溯源` / `page_metadata` / 建模会话状态）。这类操作有真实影响面
+    （旧链接失效、别的页被改写），**不允许静默做**：
+
+        `POST /bodhi/page/retag/preview`（只读：新 slug / 引用处数 / 预计违规 / 风险 / ticket）
+        → 弹确认框（把影响面与风险念给用户）
+        → `POST /bodhi/page/retag/apply`（带 `ticket` + `acknowledge_risks=required_risks`）
+
+    服务端守门：缺 ticket / 缺风险确认 / ticket 与当前影响面不匹配 → 一律拒绝
+    （`need_repreview=true`）；回滚 `POST /bodhi/page/retag/rollback`（运维/CLI 亦可）。
+
+    逻辑放在**独立自包含模块** `src/bodhi/typeMigration.ts`（`bodhiMigratePageType()`），
+    本函数只做两件事：拷模块 + 把 v6 的类型通道换成对它的调用。**不适用迁移**的场景
+    （slug 非三段式、新类推不出 slug、preview 不可用）由模块内部退回旧通道
+    （`POST /bodhi/page/type`：只改类型），行为不倒退。
+    """
+    ts_src = HERE / "bodhi_type_migration.ts"
+    ts_dst = fe / "src" / "bodhi" / "typeMigration.ts"
+    ts_dst.parent.mkdir(parents=True, exist_ok=True)
+    if not ts_dst.exists() or ts_dst.read_bytes() != ts_src.read_bytes():
+        shutil.copyfile(ts_src, ts_dst)
+        print("  + 拷贝：src/bodhi/typeMigration.ts（类型迁移两段式模块）")
+    else:
+        print("  - 已应用：src/bodhi/typeMigration.ts")
+
+    path = fe / "src" / "views" / "knowledge" / "wiki" / "WikiBrowser.vue"
+    text = path.read_text(encoding="utf-8")
+
+    if "bodhiMigratePageType" not in text:
+        text = replace_once(
+            text,
+            "import { MessagePlugin } from 'tdesign-vue-next'\n",
+            "import { MessagePlugin } from 'tdesign-vue-next'\n"
+            "// bodhi2 v10：本体类型改动 = 迁移（两段式预览/确认/执行），见 @/bodhi/typeMigration\n"
+            "import { bodhiMigratePageType } from '@/bodhi/typeMigration'\n",
+            "WikiBrowser.vue import（类型迁移）")
+    else:
+        print("  - 已应用：WikiBrowser.vue import（类型迁移）")
+
+    old_mark = "    // bodhi2 v6：类型改动走上游不支持的通道（PUT /wiki/pages 只认内建类型）。\n"
+    old_end = ("        MessagePlugin.error(((e as any) && (e as any).message) "
+               "|| '本体类型修改失败')\n      }\n    }\n")
+    new_block = (
+        "    // bodhi2 v10（2026-09-27）：类型改动 = **迁移页面**（slug + 引用联动），两段式：\n"
+        "    // 「预览影响面/风险 → 用户确认 → 执行」。不适用迁移的场景由 bodhiMigratePageType\n"
+        "    // 内部退回旧通道（POST /bodhi/page/type：只改类型、不动 slug）。\n"
+        "    if (editForm.value.page_type && editForm.value.page_type !== editBaseType.value) {\n"
+        "      const mb = await bodhiMigratePageType(props.knowledgeBaseId, slug, editForm.value.page_type)\n"
+        "      if (mb.changed_type) {\n"
+        "        editBaseType.value = editForm.value.page_type\n"
+        "        if (mb.applied) {\n"
+        "          MessagePlugin.success('本体类型已迁移为 ' + (mb.type_label || editForm.value.page_type)\n"
+        "                                + (mb.new_slug ? '（新 slug：' + mb.new_slug + '）' : ''))\n"
+        "        } else {\n"
+        "          MessagePlugin.success('本体类型已改为 ' + (mb.type_label || editForm.value.page_type))\n"
+        "        }\n"
+        "        if (mb.applied && mb.new_slug && mb.new_slug !== slug) {\n"
+        "          // slug 变了：重新选中新页 + 同步地址栏（否则刷新会指向旧 slug）\n"
+        "          await navigateToSlug(mb.new_slug)\n"
+        "          updated = (selectedPage.value as WikiPage) || updated\n"
+        "          void router.replace({ query: { ...route.query, slug: mb.new_slug } })\n"
+        "        } else {\n"
+        "          try {\n"
+        "            const fresh = await getWikiPage(props.knowledgeBaseId, mb.new_slug || slug)\n"
+        "            updated = (((fresh as any).data) || fresh) as WikiPage\n"
+        "          } catch (e) { /* 忽略：类型已改成功，本地版本稍旧 */ }\n"
+        "        }\n"
+        "        await loadPages()\n"
+        "      } else {\n"
+        "        // 用户取消 / 影响面已变化 → 类型保持不变（还原下拉）\n"
+        "        editForm.value.page_type = editBaseType.value\n"
+        "        if (mb.message) MessagePlugin.warning(mb.message)\n"
+        "      }\n"
+        "    }\n")
+    if "bodhiMigratePageType(props.knowledgeBaseId" in text:
+        print("  - 已应用：WikiBrowser.vue 类型迁移通道（两段式）")
+    else:
+        i = text.find(old_mark)
+        j = text.find(old_end, i) if i >= 0 else -1
+        if i < 0 or j < 0:
+            raise SystemExit("！！类型迁移补丁锚点缺失（先确认 v6 保存链路已应用）")
+        text = text[:i] + new_block + text[j + len(old_end):]
+        print("  + 应用：WikiBrowser.vue 类型迁移通道（两段式：preview → 确认 → apply）")
+
+    path.write_text(text, encoding="utf-8")
+    print("  WikiBrowser.vue v10 完成（%d 字节）" % len(text.encode("utf-8")))
 
 
 def patch_wikibrowser_v7(fe: pathlib.Path) -> None:
