@@ -855,6 +855,19 @@ if __name__ == "__main__":  # 运维自测：python3 ke_admin.py purge <model> |
         out = apply_projection()
     elif cmd == "check-prefix":
         out = check_prefix_drift()
+    elif cmd == "retag-preview" and len(args) > 3:
+        out = ke_pages.retag_preview(args[1], args[2], args[3])
+    elif cmd == "retag-apply" and len(args) > 3:
+        # 用法：retag-apply <kb> <slug> <new_type> --ticket <t> --ack url_break,refs_rewrite
+        ticket, ack, rest = "", [], args[4:]
+        for i, item in enumerate(rest):
+            if item == "--ticket" and i + 1 < len(rest):
+                ticket = rest[i + 1]
+            elif item == "--ack" and i + 1 < len(rest):
+                ack = [x.strip() for x in rest[i + 1].split(",") if x.strip()]
+        out = ke_pages.retag_apply(args[1], args[2], args[3], ticket, ack)
+    elif cmd == "retag-rollback" and len(args) > 2:
+        out = ke_pages.retag_rollback(args[1], args[2])
     elif cmd == "compile":
         out = compile_artifacts()
     elif cmd == "wiki":

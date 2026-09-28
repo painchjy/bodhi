@@ -1418,8 +1418,9 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                                              "before": candidate.get("version"),
                                              "action": "merged（正文已按载荷更新）",
                                              "applied": not dry_run})
-            # 类型变更（retag）：用户口径「把 API 服务改为 MCP 服务」= 改既有页的类型，
-            # 不是再建一份（2026-09-21 实测：不加这个能力就会出 2 套服务）。
+            # 类型变更（retag，2026-09-27 用户口径）：**不再静默改类型** —— 改类型 = 迁移 slug +
+            # 联动引用，必须走两段式（preview → 用户确认 → apply）。这里只登记"需要迁移"的清单，
+            # 回执里给出 preview 调用方式，由人确认后执行（避免智能体绕过风险确认）。
             want_type = element["type"]
             if element.get("retag") and candidate.get("page_type") \
                     and candidate["page_type"] != want_type \
@@ -1505,11 +1506,18 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                 summary["write_check"]["note"] = (
                     "这些 slug 未在本库落库 —— **不要向用户汇报成功**；请重跑本批或按清单排查"
                     "（历史原因：跨知识库同 slug 撞主键，旧实现会更新到别的库）")
-        # 类型变更（retag）：批量写完后逐条改类型（快照 + 重建 category_path），再统一同步一次目录
+        # 类型变更（retag）：**不在这里执行**（2026-09-27 用户口径：必须走两段式）。
+        # 跳过执行，只把"需要迁移的类型"整理成 retag_required，回执里带 preview 调用方式。
         for item in retag_queue:
             try:
-                res = ke_pages.set_page_type(kb_id, item["slug"], item["to"], sync_folders=False)
-                retagged.append({**item, "ok": True, "version": res.get("version")})
+                prev = ke_pages.retag_preview(kb_id, item["slug"], item["to"])
+                retagged.append({**item, "ok": None, "status": "需要两段式确认",
+                                 "new_slug": (prev.get("slug_change") or {}).get("to", ""),
+                                 "refs": (prev.get("refs") or {}).get("total", 0),
+                                 "risks": prev.get("required_risks") or [],
+                                 "ticket": prev.get("ticket", ""),
+                                 "preview_http": "POST /bodhi/page/retag/preview",
+                                 "apply_http": "POST /bodhi/page/retag/apply"})
             except Exception as exc:  # noqa: BLE001
                 retagged.append({**item, "ok": False, "error": str(exc)[:160]})
         # 落库后**自动重建该知识库的目录树**（用户 2026-09-19 口径）：
@@ -1541,7 +1549,15 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                 summary["crud_matrix"] = refresh_crud_matrix(kb_id, targets)
         except Exception as exc:  # noqa: BLE001
             summary["crud_matrix"] = "failed: %s" % exc
-    summary["retagged"] = retagged or [dict(x, ok=None, note="dry_run 未执行") for x in retag_queue]
+    # 类型变更：不再是"已改好"，而是"需要两段式确认"（2026-09-27 用户口径）
+    summary["retag_required"] = retagged or [dict(x, ok=None, note="dry_run 未执行")
+                                             for x in retag_queue]
+    if retagged:
+        summary["retag_note"] = (
+            "改本体类型 = **迁移 slug + 联动引用**，必须两段式：先 `POST /bodhi/page/retag/preview` "
+            "（只读：新 slug / 引用清单 / 会话命中 / 预计违规 + ticket）→ 用户确认后 "
+            "`POST /bodhi/page/retag/apply`（带 ticket + acknowledge_risks）。"
+            "**本次未改任何类型**（避免绕过风险确认）。")
     if id_strategies:
         # id 策略回执（2026-09-24 加固）：existing=沿用本库既有页 id（老数据/幂等），new=按 (kb, slug)
         # 新建；正常只有这两种，出现其它值会额外给 `id_notes`（兜底分支信号，巡检 D5 独立复核）。
@@ -3356,6 +3372,17 @@ class MCPHandler(BaseHTTPRequestHandler):
                 lambda b: ke_admin.repair_all(b.get("kb_id", ""),
                                               bool(b.get("compile", True)),
                                               bool(b.get("project_wiki", True))),
+            # 类型迁移（retag，2026-09-27 用户口径）：改本体类型 = **迁移 slug + 联动引用**，
+            #   两段式：preview（只读影响面 + ticket）→ 用户确认 → apply（ticket + 风险确认，缺一即拒）
+            "/bodhi/page/retag/preview":
+                lambda b: ke_pages.retag_preview(b.get("kb_id", ""), b.get("slug", ""),
+                                                 b.get("new_type", "")),
+            "/bodhi/page/retag/apply":
+                lambda b: ke_pages.retag_apply(b.get("kb_id", ""), b.get("slug", ""),
+                                               b.get("new_type", ""), b.get("ticket", ""),
+                                               b.get("acknowledge_risks") or []),
+            "/bodhi/page/retag/rollback":
+                lambda b: ke_pages.retag_rollback(b.get("kb_id", ""), b.get("ticket", "")),
             # 按来源文档清理本体实例（用户 2026-09-20 第二问：删文档不会联动清实例层）
             #   删「独占页」+ 多源页摘引用；默认 dry-run（apply=false 只出计划）
             "/bodhi/docs/purge":

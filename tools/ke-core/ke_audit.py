@@ -256,6 +256,26 @@ def check_wiki_graph(ctx: dict, rep: Report) -> None:
         elif page["src"] not in KNOWN_SOURCES:
             rep.add("A6", "low", page["slug"], "未知生成器 last_edit_source=%s" % page["src"],
                     "确认来源，必要时补记生成器")
+    # A7 slug 与类型错位（2026-09-27 用户口径）：改本体类型必须**迁移 slug**（`模块/类/名称`），
+    #    旧实现只改 page_type 不改 slug → 出现"类型是 X、slug 还写着 Y"。存量体检 +
+    #    两段式迁移后的校验（迁移完 A7 应清零）。
+    meta_all = ctx["model"]["meta"] if ctx.get("model") else ke_ontology.class_meta()
+    for page in pages:
+        if not _is_instance(page["page_type"]):
+            continue
+        parts = (page["slug"] or "").split("/")
+        if len(parts) != 3 or not all(parts):
+            continue
+        cls_meta = meta_all.get(page["page_type"]) or {}
+        want_module = str(cls_meta.get("module") or "")
+        want_local = page["page_type"].split(":")[-1].lower()
+        if (want_module and parts[0] != want_module) or parts[1] != want_local:
+            rep.add("A7", "medium", page["slug"],
+                    "slug 与类型错位：slug 段=`%s/%s`，但 page_type=`%s` 要求 `%s/%s`"
+                    % (parts[0], parts[1], page["page_type"], want_module or "?", want_local),
+                    "两段式迁移修：先 `POST /bodhi/page/retag/preview`（或 "
+                    "`ke_admin.py retag-preview <kb> <slug> <new_type>`）看影响面，"
+                    "用户确认后 retag-apply（带 ticket + acknowledge_risks）")
 
 
 # ---------------------------------------------------------------------------

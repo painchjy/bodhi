@@ -13,6 +13,27 @@
 
 ## 0. 它到底怎么工作（先理解，再部署）
 
+**本体类型迁移是两段式（2026-09-27 新增）**：改本体类型 = **迁移 slug（`模块/类/名称`）+ 联动引用**
+（关系行 / `out_links` / 正文引用 / `## 溯源` / `page_metadata` / **建模会话状态**），
+必须"先 preview、用户确认后 apply"，缺确认一律拒绝：
+
+```bash
+# ① 预览（只读）：新 slug、引用清单、会话命中、预计 violations、ticket
+curl -s -X POST http://127.0.0.1:8765/bodhi/page/retag/preview -H 'Content-Type: application/json' \
+     -d '{"kb_id":"<kb>","slug":"ea/step/某步骤","new_type":"ea:Activity"}'
+# ② 确认后执行（带 ticket + acknowledge_risks）
+curl -s -X POST http://127.0.0.1:8765/bodhi/page/retag/apply -H 'Content-Type: application/json' \
+     -d '{"kb_id":"<kb>","slug":"ea/step/某步骤","new_type":"ea:Activity",
+          "ticket":"<preview 的 ticket>","acknowledge_risks":["url_break","refs_rewrite","agent_session"]}'
+# ③ 回滚（按 apply 留下的迁移记录，幂等）
+curl -s -X POST http://127.0.0.1:8765/bodhi/page/retag/rollback -H 'Content-Type: application/json' \
+     -d '{"kb_id":"<kb>","ticket":"<ticket>"}'
+```
+CLI 等价：`ke_admin.py retag-preview|retag-apply|retag-rollback`。
+巡检 **A7** 报"slug 段与 `page_type` 错位"（存量体检；迁移后应清零）。
+`save_knowledge` 的 `retag` 参数**不再静默改类型**，改为回执 `retag_required`（含 ticket/风险/引用数）。
+
+
 ```
 WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
      │                                            │

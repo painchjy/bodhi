@@ -38,8 +38,13 @@
 **待决**：默认迁移 slug，还是允许 `page_metadata.ontology.slug_locked=true` 保留旧 slug（URL 不变、唯一性口径放宽）？
 写入入口用**新增 MCP 工具**（14→15，需同步交付文档/自检/手册）还是挂在 `save_knowledge` 的 `retag` 参数 + 新 HTTP 端点？
 
-**落地改动**：`ke_pages.retag_preview()/retag_apply()`（新）、`server` 两个 HTTP 端点 + 可选工具、
-`ke_admin.py retag-preview|retag-apply --confirm`、前端类型下拉改「先预览后确认」、巡检新增 A7（迁移后旧 slug 残留引用）。
+**落地改动**：✅ **已实施（2026-09-27，用户口径"就用迁移 slug 方案、两段式、先 preview 确认后提交"）**：
+- `ke_pages.retag_preview()` / `retag_apply()` / `retag_rollback()`（新，含 ticket、风险确认、会话状态改写、迁移记录 `state/retag/<ticket>.json`）；
+- HTTP：`POST /bodhi/page/retag/preview`、`POST /bodhi/page/retag/apply`（缺 ticket / 缺风险确认 → 拒绝，等价 409）、`POST /bodhi/page/retag/rollback`；
+- CLI：`ke_admin.py retag-preview <kb> <slug> <new_type>`、`retag-apply <kb> <slug> <new_type> --ticket T --ack a,b`、`retag-rollback <kb> <ticket>`；
+- 巡检 **A7**：slug 段与 `page_type` 错位（存量体检 + 迁移后应清零）；
+- `save_knowledge` 的 `retag` 参数**不再静默改类型**：改为回执 `retag_required`（含 preview 的 ticket/风险/引用数），由人确认后走 apply。
+- 前端"先预览后确认"弹窗**待做**（要重建前端镜像；当前可直接用 HTTP/CLI）。
 
 ## B. 跨库同实例：权威（master）/ 副本（replica）+ 单向版本绑定
 
