@@ -753,6 +753,47 @@ def patch_wikibrowser_v10_retag(fe: pathlib.Path) -> None:
 
     path.write_text(text, encoding="utf-8")
     print("  WikiBrowser.vue v10 完成（%d 字节）" % len(text.encode("utf-8")))
+    patch_wikibrowser_v12_context_panel(fe)
+
+
+def patch_wikibrowser_v12_context_panel(fe: pathlib.Path) -> None:
+    """v12（2026-09-28）：wiki 阅读页加「跨库上下文」面板（**只读渲染**）。
+
+    口径（用户拍板，docs/context-mapping-plan.md §13.11/§13.12）：
+    领域库**不写 uuid**、**不互相引用**；关联靠"按 slug 同名查询"「企业共享概念模型」的概念页；
+    跨域关系只能**经企业概念页转换** —— 面板只**展示**（企业标准概念 + 各领域映射表 + 同名领域页 + 告警），
+    **不提供跨库直跳**（那等于跨库引用），也不写任何领域库数据。
+
+    数据源：`GET /bodhi/context/page?kb_id=&slug=`（MCP 只读端点，同源反代）。
+    组件 `BodhiContextPanel.vue` 自包含；本补丁只做三件事：拷组件 + import + 挂一行标签。
+    """
+    shutil.copy2(HERE / "BodhiContextPanel.vue",
+                 fe / "src" / "views" / "knowledge" / "wiki" / "BodhiContextPanel.vue")
+    print("  + src/views/knowledge/wiki/BodhiContextPanel.vue（跨库上下文面板）")
+
+    path = fe / "src" / "views" / "knowledge" / "wiki" / "WikiBrowser.vue"
+    text = path.read_text(encoding="utf-8")
+    if "BodhiContextPanel" not in text:
+        text = replace_once(
+            text,
+            "import BodhiRelationsPanel from './BodhiRelationsPanel.vue'",
+            "import BodhiRelationsPanel from './BodhiRelationsPanel.vue'\n"
+            "import BodhiContextPanel from './BodhiContextPanel.vue'",
+            "WikiBrowser.vue import（跨库上下文面板）")
+        text = replace_once(
+            text,
+            "              <!-- bodhi2 v6（需求 2）：本体关系维护（出边可改、入边只读） -->\n",
+            "              <!-- bodhi2 v12：跨库上下文（企业共享概念模型）—— 只读渲染；\n"
+            "                   领域库不写 uuid、不互相引用，跨域关系经企业概念页转换 -->\n"
+            "              <BodhiContextPanel v-if=\"selectedPage && !editingPage\"\n"
+            "                :knowledge-base-id=\"props.knowledgeBaseId\" :slug=\"selectedPage.slug\" />\n"
+            "              <!-- bodhi2 v6（需求 2）：本体关系维护（出边可改、入边只读） -->\n",
+            "WikiBrowser.vue 挂载（跨库上下文面板）")
+    else:
+        print("  - 已应用：WikiBrowser.vue 跨库上下文面板")
+
+    path.write_text(text, encoding="utf-8")
+    print("  WikiBrowser.vue v12 完成（跨库上下文面板）")
 
 
 def patch_wikibrowser_v7(fe: pathlib.Path) -> None:
