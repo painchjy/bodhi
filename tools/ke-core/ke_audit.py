@@ -992,7 +992,10 @@ def check_context_map(ctx: dict, rep: Report) -> None:
         stale_slugs = {str(x.get("slug") or "") for x in (cache.get("stale") or [])}
         counts = {"draft": 0, "reviewed": 0, "approved": 0, "none": 0}
         for row in rows:
-            cmeta = (ke_context._json_load(row["meta"], {}) or {}).get("concept") or {}
+            try:
+                cmeta = (json.loads(row["meta"] or "{}").get("concept") or {})
+            except Exception:  # noqa: BLE001
+                cmeta = {}
             state = str(cmeta.get("state") or "")
             counts[state if state in counts else "none"] += 1
             age = int(float(row.get("age_days") or 0))
