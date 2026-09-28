@@ -31,6 +31,8 @@ KB_KEYS = ("knowledge_bases", "knowledge_base_ids")
 MODEL_KEYS = ("model_id", "rerank_model_id", "vlm_model_id", "asr_model_id")
 MCP_KEYS = ("mcp_services",)
 MCP_SERVICE_PLACEHOLDER = "__MCP_SERVICE_ID__"
+# 环境相关、必须删掉的键（不占位：客户库里没有对应行，留着会指向不存在的记录）
+DROP_KEYS = ("sandbox_config_id",)
 _UUID_RE = __import__("re").compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -54,6 +56,11 @@ def scrub_agent_config(cfg: dict) -> list[str]:
         if key in cfg:
             cfg[key] = [MCP_SERVICE_PLACEHOLDER]
             notes.append("%s → 占位符" % key)
+    # 沙箱配置 id（`sandbox_configs` 行）：客户库不会有，且它指向**本机**的沙箱定义
+    #   → 直接删除，装完在智能体编辑页重新选（2026-09-28：脱敏断言因此失败而暴露）。
+    for key in DROP_KEYS:
+        if cfg.pop(key, None):
+            notes.append("%s → 删除（沙箱配置不随包交付）" % key)
     bad = sorted(set(_UUID_RE.findall(json.dumps(cfg, ensure_ascii=False))))
     if bad:   # 断言：脱敏后不允许再出现任何 UUID 字面量
         raise SystemExit("!! agent 配置里仍有写死的 UUID，客户库不会有：%s" % "、".join(bad))
