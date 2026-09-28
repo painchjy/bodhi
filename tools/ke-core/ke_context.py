@@ -843,14 +843,19 @@ def concept_apply(slug: str, ticket: str = "", acknowledge_risks: list | None = 
     body = _concept_page_body(sorted(page["members"], key=lambda m: (-m["version"], m["slug"]))[0],
                               page["members"], page["verdict"], definition)
     before = _one_page(ckb, page["slug"])
+    # 治理状态（附录 A）：默认 draft；**人给了 definition 就算 reviewed**；已有 reviewed/approved 则保持
+    prev_meta = (_meta_dict(before).get("concept") or {}) if before else {}
+    state = prev_meta.get("state") or ("reviewed" if definition else "draft")
+    concept_meta = {"generated_by": "context-map", "verdict": page["verdict"], "state": state,
+                    "actor": actor or "unknown",
+                    "reviewed_by": (actor if state != "draft" else prev_meta.get("reviewed_by", "")),
+                    "reviewed_at": (ke_db.now_text() if state != "draft" else prev_meta.get("reviewed_at", "")),
+                    "members": [{"context": m["context"], "slug": m["slug"], "version": m["version"]}
+                                for m in page["members"]]}
     written = ke_pages.upsert_page(ckb, page["slug"], standard_name or page["title"],
                                    page["page_type"], body, summary=definition or "",
                                    tag="bodhi-cxt-edit",
-                                   metadata={"concept": {
-                                       "generated_by": "context-map", "verdict": page["verdict"],
-                                       "actor": actor or "unknown",
-                                       "members": [{"context": m["context"], "slug": m["slug"],
-                                                    "version": m["version"]} for m in page["members"]]}})
+                                   metadata={"concept": concept_meta})
     cache = rebuild_cache()
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     record = {"ticket": prev["ticket"], "slug": page["slug"], "at": ke_db.now_text(),
@@ -979,6 +984,58 @@ def rebuild_cache() -> dict:
             "note": "领域库零写入；缓存可随时重建"}
 
 
+def set_concept_state(slug: str, state: str, by: str = "", note: str = "",
+                      tenant: int | None = None) -> dict:
+    """把概念页推进治理状态（附录 A）：`draft → reviewed → approved`（可退回）。
+
+    **只写元数据**（`page_metadata.concept.state/reviewed_by/reviewed_at/note`）：不动正文、不产生新版本
+    （治理状态不是知识正文；正文改动走 app 编辑或 `concept_apply`，那两条路都会 `version+1`）。
+    守门：写权限（目标库=概念库）+ state 取值域。
+    """
+    concept = concept_kb()
+    ckb = concept.get("id") or ""
+    state = (state or "").strip()
+    if state not in ("draft", "reviewed", "approved"):
+        return {"error": "state 只能是 draft / reviewed / approved"}
+    acl = ke_db.assert_can_write(ckb, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl["allowed"]:
+        return {"error": "need_write_permission", "permission": acl}
+    page = _one_page(ckb, slug)
+    if page is None:
+        return {"error": "概念页不存在：%s（先用 concept_apply 生成）" % slug}
+    meta = dict((_meta_dict(page).get("concept") or {}))
+    meta.update({"state": state, "reviewed_by": by or meta.get("reviewed_by", ""),
+                 "reviewed_at": ke_db.now_text(), "note": note or meta.get("note", "")})
+    ke_db.psql("UPDATE wiki_pages SET page_metadata = COALESCE(page_metadata,'{}'::jsonb) || %s::jsonb, "
+               "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+               % (ke_db.sql_json({"concept": meta}), ke_db.sql_str(ckb), ke_db.sql_str(slug)))
+    return {"ok": True, "slug": slug, "state": state, "reviewed_by": meta["reviewed_by"],
+            "reviewed_at": meta["reviewed_at"], "permission": acl, "concept_kb": concept}
+
+
+def ensure_marks(tenant: int | None = None) -> dict:
+    """**派生配置自愈**：给本体库/概念库自动补 `wiki_config` 标记（人不用维护）。
+
+    口径（用户 2026-09-29）：两个库由 **env 全局指定**（唯一权威）；`wiki_config` 标记只是
+    "**没配 env 的客户环境**"的兜底 —— 因此由代码在认库成功后**自动补写**，不需要人工维护。
+    """
+    out: dict = {}
+    pairs = (("ontology", ke_ontology.resolve_ontology_kb(), "bodhi_ontology_kb"),
+             ("concept", concept_kb(), "bodhi_concept_kb"))
+    for label, info, key in pairs:
+        kb_id = info.get("id") or ""
+        if not kb_id:
+            out[label] = {"marked": False, "why": "认不出库（跳过）", "source": info.get("source")}
+            continue
+        ke_db.psql("UPDATE knowledge_bases SET wiki_config = COALESCE(wiki_config,'{}'::jsonb) || %s::jsonb "
+                   "WHERE id = %s AND COALESCE(wiki_config,'{}'::jsonb) ->> '%s' IS DISTINCT FROM 'true'"
+                   % (ke_db.sql_json({key: True}), ke_db.sql_str(kb_id), key))
+        out[label] = {"marked": True, "id": kb_id, "name": info.get("name"), "mark": key,
+                      "source": info.get("source")}
+    return {"ok": True, "marks": out,
+            "note": "env 是唯一权威；标记只是未配 env 时的兜底，由本函数自动维护（幂等）"}
+
+
 def lookup(kb_ids: list[str] | None = None, q: str = "", slug: str = "", limit: int = 20) -> dict:
     """检索前查（只读）：同名组 / 同义概念（`same_as`）/ 异义映射 / 依赖页 / 警告。
 
@@ -1101,6 +1158,13 @@ def main() -> int:
     p_rb.add_argument("ticket")
     sub.add_parser("cache-rebuild", help="**写**：刷新映射缓存（mappings.json + 各库局部缓存）")
     sub.add_parser("cache-show", help="只读：看缓存内容与失效情况")
+    p_state = sub.add_parser("concept-state", help="**写**：推进概念页治理状态（draft/reviewed/approved）")
+    p_state.add_argument("slug")
+    p_state.add_argument("state", choices=["draft", "reviewed", "approved"])
+    p_state.add_argument("--by", default="", help="评审人（记进元数据 reviewed_by）")
+    p_state.add_argument("--note", default="")
+    p_state.add_argument("--tenant", type=int, default=None)
+    sub.add_parser("ensure-marks", help="给本体库/概念库自动补 wiki_config 标记（派生、幂等）")
     p_print = ap.add_argument("--print", type=int, default=6000, help="打印字符上限")
     for _p in list(sub.choices.values()):        # 所有子命令都接受 --print（写法随意）
         _p.add_argument("--print", dest="print", type=int, default=int(p_print.default),
@@ -1128,6 +1192,10 @@ def main() -> int:
         out = rebuild_cache()
     elif args.cmd == "cache-show":
         out = read_cache()
+    elif args.cmd == "concept-state":
+        out = set_concept_state(args.slug, args.state, by=args.by, note=args.note, tenant=args.tenant)
+    elif args.cmd == "ensure-marks":
+        out = ensure_marks()
     else:
         kb_ids = [x.strip() for x in (args.kb_ids or "").split(",") if x.strip()]
         out = lookup(kb_ids or None, q=args.q, slug=args.slug)

@@ -69,6 +69,8 @@ except Exception:  # noqa: BLE001
     ke_docs = None  # type: ignore
 
 SEV = {"high": 0, "medium": 1, "low": 2}
+# 企业标准定义「待评审」天数阈值（附录 A：draft 超过它 → G9 low）
+STANDARD_REVIEW_DAYS = 14
 SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
@@ -979,6 +981,31 @@ def check_context_map(ctx: dict, rep: Report) -> None:
     ctx["data"]["context_cache"] = {"built_at": cache.get("built_at", ""),
                                     "pairs": len(cache.get("pairs") or []),
                                     "stale": cache.get("stale_count", 0)}
+
+    # ---- G9 企业标准定义治理状态（附录 A）：draft 超期未评审 / approved 后被改 ----------
+    ckb = ke_context.concept_kb().get("id") or ""
+    if ckb:
+        rows = ke_db.psql_csv(
+            "SELECT slug, COALESCE(page_metadata::text,'{}') AS meta, "
+            "       COALESCE(extract(day from (now() - updated_at)),0) AS age_days "
+            "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id = %s" % ke_db.sql_str(ckb))
+        stale_slugs = {str(x.get("slug") or "") for x in (cache.get("stale") or [])}
+        counts = {"draft": 0, "reviewed": 0, "approved": 0, "none": 0}
+        for row in rows:
+            cmeta = (ke_context._json_load(row["meta"], {}) or {}).get("concept") or {}
+            state = str(cmeta.get("state") or "")
+            counts[state if state in counts else "none"] += 1
+            age = int(float(row.get("age_days") or 0))
+            if state in ("", "draft") and age >= STANDARD_REVIEW_DAYS:
+                rep.add("G9", "low", row["slug"],
+                        "企业标准定义**待评审**：状态=%s，已 %d 天未动（阈值 %d 天）"
+                        % (state or "（未标）", age, STANDARD_REVIEW_DAYS),
+                        "评审后推进状态：`ke_context.py concept-state <slug> reviewed --by 谁`")
+            if state == "approved" and row["slug"] in stale_slugs:
+                rep.add("G9", "medium", row["slug"],
+                        "已 `approved` 的企业标准被改动（缓存指纹不一致）→ 需**重新评审**",
+                        "复核后重新置 approved（或先退回 reviewed）")
+        ctx["data"]["context_concept_states"] = counts
 
     # ---- G7 领域库**不得互相引用**（跨库直接引用 → high）------------------------
     #   用户口径（2026-09-28）：领域库之间不能互相引用；相互关系必须**经企业共享概念页转换**。

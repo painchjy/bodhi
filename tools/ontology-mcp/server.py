@@ -3600,6 +3600,11 @@ class MCPHandler(BaseHTTPRequestHandler):
                 lambda b: context_concept_rollback(str(b.get("ticket", ""))),
             "/bodhi/context/cache/rebuild":
                 lambda b: ke_context.rebuild_cache(),
+            "/bodhi/context/concept/state":
+                lambda b: ke_context.set_concept_state(str(b.get("slug", "")), str(b.get("state", "")),
+                                                       by=str(b.get("by", "")), note=str(b.get("note", ""))),
+            "/bodhi/context/ensure-marks":
+                lambda b: ke_context.ensure_marks(),
             "/bodhi/docs/purge":
                 lambda b: ke_docs.purge_document(b.get("kb_id", ""), b.get("knowledge_id", ""),
                                                  b.get("title", ""), bool(b.get("apply", False)),
@@ -3914,6 +3919,12 @@ class MCPHandler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    # 启动自愈：把「本体库 / 企业共享概念模型库」的 wiki_config 标记补齐（**派生配置**，幂等，见 §14/A1）
+    try:
+        marks = ke_context.ensure_marks()
+        print("[mcp] ensure-marks：%s" % json.dumps(marks.get("marks"), ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001
+        print("[mcp] ensure-marks 跳过：%s" % exc)
     parser = argparse.ArgumentParser(description="本体知识保存工具（MCP over Streamable HTTP）")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)

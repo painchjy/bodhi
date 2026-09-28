@@ -310,22 +310,32 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     if existing:
         before = int(existing[0]["version"] or 1)
         _apply_content_update(kb_id, slug, content, tag, extra_set=extra)
+        _sync_folders(kb_id)
         return {"slug": slug, "created": False, "before_version": before, "after_version": before + 1}
     kb = ke_db.psql_csv("SELECT COALESCE(tenant_id,0) AS tenant_id FROM knowledge_bases WHERE id = %s"
                         % ke_db.sql_str(kb_id))
     if not kb:
         raise ValueError("知识库不存在：%s" % kb_id)
+    # 本体分类目录（2026-09-29 用户口径：概念库也要「和领域模型一样有本体分类目录」）：
+    #   `category_path` 由本体类推导（大类链），`wiki_path` 供前端目录树显示 —— 全部**派生**，不靠人维护。
+    try:
+        import json as _json
+        cat = ke_ontology.category_path(page_type) or []
+    except Exception:  # noqa: BLE001
+        cat = []
     cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
-            "out_links, page_metadata, version, last_edit_source")
-    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 1, %s"
+            "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path")
+    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 1, %s, %s::jsonb, %d, %s"
             % (int(kb[0]["tenant_id"] or 0), ke_db.sql_str(kb_id), ke_db.sql_str(slug),
                ke_db.sql_str(title), ke_db.sql_str(page_type), ke_db.sql_str(content),
                ke_db.sql_str(summary), ke_db.sql_json(out_links_of(content)), ke_db.sql_json(metadata or {}),
-               ke_db.sql_str(tag)))
+               ke_db.sql_str(tag), ke_db.sql_json(cat), len(cat),
+               ke_db.sql_str("/".join([str(x) for x in cat] + [title]))))
     ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\n%s\nCOMMIT;\n"
                % (cols, vals, rebuild_in_links_sql(kb_id)), stdin=True)
     _sync_folders(kb_id)
-    return {"slug": slug, "created": True, "before_version": 0, "after_version": 1}
+    return {"slug": slug, "created": True, "before_version": 0, "after_version": 1,
+            "category_path": cat}
 
 
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:
