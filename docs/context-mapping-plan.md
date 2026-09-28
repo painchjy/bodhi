@@ -421,10 +421,52 @@ GET  /bodhi/context/lookup?kb_ids=&slug=|q=  # 只读：检索前查"同义/异�
 6. **弃用**：§5 L1 里"往领域页写 `same_as={concept_kb(uuid), concept_slug}` 指针"**不再是关联依据**；
    若二期仍保留该字段，只能作离线校验用（可选、非必需）。
 
-**实测（2026-09-28）**：
-- `context_page(slug=ea/businessentity/手机号码)` → 概念页 `exists=false`（尚未 apply）+ 2 个领域同名页 + 两条 warnings；
-- `concept-preview`（dry-run）→ 待生成概念页 **1 页**（`ea/businessentity/登录凭据`，equivalent），
-  `body_md` 已含"标准定义 + 各领域定义摘录 + 各领域映射表"；ticket 已出；
-- 巡检 `--scope context`：**G5 = 4**（同名异义未映射，high）、`context_forbidden_cross_kb_refs = 0`（当前无跨库直接引用）；
-- MCP 自检 **20 个工具**；`/bodhi/context/page`、`/bodhi/context/concept/preview` 经 nginx 200。
+### 13.12 二期实施结果（2026-09-28）：B 案迁移 + 概念页写路径 + 缓存
+
+**1. 存量修复（用户口径：`ea/offering` 是旧类名 → 走 B 案，统一 slug）**
+
+| 迁移 | 结果 |
+|---|---|
+| 企业知识 `ea/offering/手机银行服务` → `bmm/offering/手机银行服务` | ✅ v1→v2，`page_type` 保持 `bmm:Offering`；无冲突、无引用；记录 `state/retag/b45daa01e43f6324.json`（可回滚） |
+| 企业知识 `ea/offering/转账类服务` → `bmm/offering/转账类服务` | ✅ v1→v2；记录 `d98ae5ffacd4f64d.json` |
+
+迁移后该组在 **2 个库同名**（企业知识 + 领域知识库-测试1）→ 一期扫描的候选从"仅 class+title"升级为"slug+class+title"，
+**新口径下的歧义消失**（这正是 B 案的目的）。
+
+**2. 映射关系的事实源 = 概念页；JSON 只是缓存（用户口径）**
+
+- 概念页正文（企业共享概念模型库）承载 **`## 标准定义` + `### 各领域定义摘录` + `## 各领域映射`表**（事实源）；
+  表内用 `code span` 而非 wiki 链接 → 概念库不产生指向领域库的链接/边。
+- `state/context_map/mappings.json`（企业级）与 `state/context_map/cache/kb-<短id>.json`（**各领域库局部缓存**）
+  都是**程序产物**：由 `ke_context.rebuild_cache()` 从概念页解析生成，带 `generated_from{slug,version,hash}` 指纹；
+  `read_cache()` 会报 `stale`（概念页改过/删了）。**缓存不写任何领域页、不动领域版本**。
+- 命令：`cache-rebuild`（写缓存）/ `cache-show`（看缓存+失效）；HTTP `GET /bodhi/context/cache`、
+  `POST /bodhi/context/cache/rebuild`。
+
+**3. 写路径（两段式 + 权限守门）**
+
+- `concept_preview`（dry-run）→ `concept_apply`（带 `ticket` + `acknowledge_risks` 完全一致）→ `concept_rollback`
+  （按 `state/context_map/history/<ticket>.json` 恢复旧正文或删除新建页）。
+- **权限**：`ke_db.assert_can_write(kb_id, tenant)` —— 属主 / `kb_shares`（经 `organization_tenant_members`）写权限白名单
+  / **身份缺失 fail-closed**。调用者租户来自 **MCP 请求头 `X-Bodhi-Tenant`**（`mcp_services.headers` 已配 `10000`），
+  回落 env `BODHI_TENANT_ID`。**只有对企业共享概念模型库有写权限的租户**才能 apply ✓（决策 6 落地）。
+- 新增页面写助手 `ke_pages.upsert_page()`（概念页/映射页专用：新建 → INSERT + 重算 in_links + 建目录树；
+  已存在 → 快照 + `version+1` + 元数据合并，可回退）。
+
+**4. 实测（2026-09-28 22:xx）**
+
+| 项 | 结果 |
+|---|---|
+| 概念页 | 生成 3 个：`ea/businessentity/登录凭据`、`bmm/offering/手机银行服务`、`ea/businessentity/手机号码`（均 v1，`last_edit_source=bodhi-cxt-edit`） |
+| 领域库 | **版本零变化**（`522d5f81`=3/4、`c7426a6e`=6、`dbc2528f`=2 与 apply 前一致）→ "不影响领域知识的版本" ✓ |
+| 渲染 | `page_view`/`context_page`：概念页 `exists=true`、标准定义、映射表逐行、peers（concept/domain 分类）、warnings |
+| 缓存 | `pairs=3`、概念页=3、`stale=0`；3 份领域库局部缓存 + 2 条 history |
+| 权限 | 无线程头 → `need_write_permission`（fail-closed）；带 `X-Bodhi-Tenant: 10000` → `owner` 通过并写成功 |
+| 工具面 | MCP **22 个**（新增 `context_page` + `context_concept_apply` + `context_concept_rollback`）；modeler 系 25 个（含写路径），知识运维保持只读 |
+
+**5. 待办（下一轮）**
+- 概念页的**标准定义**目前多为占位（领域页无 `summary`）→ 由人/智能体在概念页里补写（或 `apply --definition`）；
+- **异义组的映射语义**（`unrelated`/`rename`/`split`）目前在概念页表格里人工填写 → 缓存解析即生效（G5 会随之清零）；
+- 前端"跨库上下文"面板（渲染 `context_page` 结果；可在领域页显示"经企业概念 X 关联到 B 领域页"）；
+- `mappings.json` 的巡检口径（G3/G4 现已读缓存并可报 `stale`；下一步把"缓存过期"并入巡检提示）。
 

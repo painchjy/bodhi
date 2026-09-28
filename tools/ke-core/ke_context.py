@@ -53,8 +53,10 @@ REPO = HERE.parents[1]
 STATE_DIR = REPO / "state" / "context_map"
 SCAN_DIR = STATE_DIR / "scan"
 CONTEXTS_FILE = STATE_DIR / "contexts.json"
-MAPPINGS_FILE = STATE_DIR / "mappings.json"
+MAPPINGS_FILE = STATE_DIR / "mappings.json"          # **缓存**（事实源是概念页正文）
 LATEST_FILE = STATE_DIR / "latest_scan.json"
+HISTORY_DIR = STATE_DIR / "history"                  # apply 记录（可回滚）
+CACHE_DIR = STATE_DIR / "cache"                      # 各领域库的**局部映射缓存**
 
 CONCEPT_MARK_KEY = "bodhi_concept_kb"          # wiki_config 里的标记（与本体库标记同款套路）
 CONCEPT_DEFAULT_NAME = "企业共享概念模型"
@@ -651,26 +653,38 @@ def page_view(kb_id: str = "", slug: str = "", q: str = "") -> dict:
     }
 
 
-def _concept_page_body(primary: dict, members: list[dict]) -> str:
+def _concept_page_body(primary: dict, members: list[dict], verdict: str = "equivalent",
+                       definition: str = "") -> str:
     """概念页正文：**标准定义** + 各领域定义摘录 + **各领域映射**表（表里用 `code span` 而不是 wiki 链接
-    —— 概念库不引用领域库的页，避免悬空链接/跨库边；关系的渲染一律由 `page_view()` 查询完成）。"""
-    lines = ["## 标准定义", "", (primary.get("summary") or "").strip() or "（待补：企业标准定义）", "",
+    —— 概念库不引用领域库的页，避免悬空链接/跨库边；关系的渲染一律由 `page_view()` 查询完成）。
+
+    `verdict`：`equivalent`（同义 → 一张企业标准定义）/ `distinct`（同名异义 → 页首写明"同名但各领域含义不同"）。
+    """
+    head = ["## 标准定义", ""]
+    if verdict == "distinct":
+        head += ["> ⚠️ **同名异义**：本 slug 在不同领域上下文里**含义不同**（下表逐域列出）；",
+                 "> 跨域引用**必须**经本页转换，不得假定同义。", ""]
+    head += [(definition or primary.get("summary") or "").strip() or "（待补：企业标准定义）", "",
              "### 各领域定义摘录", ""]
     for m in members:
         text = (m.get("summary") or "").strip()[:200] or "—"
-        lines.append("- **%s**（`%s`）：%s" % (m["kb_name"], m["slug"], text))
-    lines += ["", "## 各领域映射", "",
-              "| 上下文 | 页 slug | 类 | 版本 | 结论 | 说明 |", "|---|---|---|---|---|---|"]
+        head.append("- **%s**（`%s`）：%s" % (m["kb_name"], m["slug"], text))
+    head += ["", "## 各领域映射", "",
+             "| 上下文 | 页 slug | 类 | 版本 | 结论 | 说明 |", "|---|---|---|---|---|---|"]
     for m in members:
-        lines.append("| %s | `%s` | %s | %d | %s | %s |"
-                     % (m["kb_name"], m["slug"], m["page_type"], int(m.get("version") or 1),
-                        m.get("mapping") or "equivalent", m.get("note") or "同名同义（待复核）"))
-    lines += ["", "> 本页是「企业共享概念模型」里的**企业标准概念**：领域库按 **slug 同名** 查询到它，",
-              "> 领域库之间**不直接引用**，跨域关系一律**经本页转换**（docs/context-mapping-plan.md §13.11）。"]
-    return "\n".join(lines)
+        default_note = ("同名同义（待复核）" if verdict == "equivalent"
+                        else "**同名异义**：本域含义与其他域不同（请在此列写明差异）")
+        head.append("| %s | `%s` | %s | %d | %s | %s |"
+                    % (m["kb_name"], m["slug"], m["page_type"], int(m.get("version") or 1),
+                       m.get("mapping") or verdict, m.get("note") or default_note))
+    head += ["", "> 本页是「企业共享概念模型」里的**企业标准概念**：领域库按 **slug 同名** 查询到它，",
+             "> 领域库之间**不直接引用**，跨域关系一律**经本页转换**（docs/context-mapping-plan.md §13.11）。",
+             "> 本页的「各领域映射」表是**映射关系的事实源**；`state/context_map/*.json` 只是它的缓存。"]
+    return "\n".join(head)
 
 
-def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 50) -> dict:
+def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 50,
+                    allow_distinct: bool = False) -> dict:
     """**只读预览**：二期 `concept/apply` 会在「企业共享概念模型」里生成/更新哪些概念页。
 
     - 概念页 `slug` = **与领域页同名**（用户口径：不写 uuid、靠同名 slug 查询）；
@@ -685,19 +699,21 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
         rows = ke_db.psql_csv(
             "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
             "       COALESCE(page_type,'') AS page_type, COALESCE(summary,'') AS summary, "
+            "       COALESCE(out_links::text,'[]') AS out_links, left(COALESCE(content,''),1500) AS head, "
             "       COALESCE(version,1) AS version, COALESCE(page_metadata::text,'{}') AS meta "
             "  FROM wiki_pages WHERE deleted_at IS NULL "
             "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
             % ke_db.sql_str(key)) if "summary" in _page_columns() else []
         members_by_key[key] = rows
-        verdicts = {key: ("equivalent" if slug else "")}
+        verdicts = {key: ""}                      # "" = 现场算（见下）
     else:
         latest = latest_scan()
         report = _json_load(REPO / str(latest.get("file") or ""), {}) or {}
         verdicts = {}
         for cand in (report.get("candidates") or []):
             v = str(cand.get("verdict_suggestion") or "")
-            if v != "equivalent" and not (include_unknown and v == "unknown"):
+            if v != "equivalent" and not (include_unknown and v == "unknown") \
+                    and not (allow_distinct and v == "distinct"):
                 continue
             key = norm_slug(str((cand.get("pages") or [{}])[0].get("slug") or ""))
             if not key:
@@ -705,8 +721,9 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
             verdicts[key] = v
             members_by_key[key] = ke_db.psql_csv(
                 "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
-                "       COALESCE(page_type,'') AS page_type, '' AS summary, COALESCE(version,1) AS version, "
-                "       COALESCE(page_metadata::text,'{}') AS meta "
+                "       COALESCE(page_type,'') AS page_type, '' AS summary, "
+                "       COALESCE(out_links::text,'[]') AS out_links, '' AS head, "
+                "       COALESCE(version,1) AS version, COALESCE(page_metadata::text,'{}') AS meta "
                 "  FROM wiki_pages WHERE deleted_at IS NULL "
                 "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
                 % ke_db.sql_str(key))
@@ -719,6 +736,7 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
         members = [{"context": "kb:%s" % r["kb"][:8], "kb": r["kb"], "kb_name": names.get(r["kb"], ""),
                     "slug": r["slug"], "title": r["title"], "page_type": r["page_type"],
                     "summary": r.get("summary") or "", "version": int(r["version"] or 1),
+                    "head": r.get("head") or "", "out_links": r.get("out_links") or "[]",
                     "same_as": (_meta_dict(r).get("same_as") or {})}
                    for r in rows if r["kb"] not in skip]
         contexts = {m["context"] for m in members}
@@ -728,15 +746,18 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
         primary = sorted(members, key=lambda m: (-m["version"], m["slug"]))[0]
         slug_new = primary["slug"]                       # 与领域页**同名**
         exists = _one_page(concept.get("id") or "", slug_new) is not None
+        verdict = verdicts.get(key) or _verdict(_signals(
+            [{"title": m["title"], "page_type": m["page_type"], "summary": m.get("summary", ""),
+              "head": m.get("head", ""), "out_links": m.get("out_links", "[]")} for m in members]))[0]
         risks = ["concept_page_rewrite"] if exists else []
         if any(m["same_as"] for m in members):
             risks.append("same_as_conflict")
         pages.append({
             "slug": slug_new, "title": primary["title"] or slug_new,
             "page_type": primary["page_type"], "exists": exists,
-            "verdict": verdicts.get(key, "equivalent"),
+            "verdict": verdict,
             "members": members, "required_risks": risks,
-            "body_md": _concept_page_body(primary, members),
+            "body_md": _concept_page_body(primary, members, verdict),
         })
     pages.sort(key=lambda p: p["slug"])
     ticket = _sha1("concept-v1|%s|%s" % (concept.get("id") or "", json.dumps(
@@ -752,6 +773,178 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
                        "需对「企业共享概念模型」库有写权限）才会真正写页"),
         "note": "概念页 slug 与领域页同名；领域库不写 uuid、不互相引用，跨域关系经概念页转换",
     }
+
+
+def concept_apply(slug: str, ticket: str = "", acknowledge_risks: list | None = None,
+                  definition: str = "", standard_name: str = "", actor: str = "",
+                  tenant: int | None = None) -> dict:
+    """**二期写路径**：把某个同名组的「企业共享概念模型」概念页**建/改**出来（版本化、可回滚）。
+
+    口径（用户 2026-09-28）：
+      · **映射关系的事实源 = 概念页正文的「各领域映射」表**（不是 JSON；JSON 只是缓存）；
+      · 概念页 `slug` 与领域页**同名**；`page_type` = 该组的本体类（遵本体约束）；
+      · **领域库零写入**（不改领域页、不动其版本）；概念页版本化（`version+1` + 快照，可回退）；
+      · 守门：写权限（`ke_db.assert_can_write`，目标是概念库）+ ticket（影响面指纹）+ 风险确认。
+    """
+    concept = concept_kb()
+    ckb = concept.get("id") or ""
+    if not ckb:
+        return {"error": "还没有「企业共享概念模型」库（先建库，见 docs/context-mapping-plan.md §13.11）",
+                "need_kb": True, "concept": concept}
+    acl = ke_db.assert_can_write(ckb, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl["allowed"]:
+        return {"error": "need_write_permission", "permission": acl,
+                "hint": "只有对企业共享概念模型库有写权限的租户才能 apply（他人只读 + 提建议）"}
+    prev = concept_preview(slug, allow_distinct=True, limit=1)
+    pages = prev.get("pages") or []
+    if not pages:
+        return {"error": "该 slug 不构成跨库同名组（<2 个上下文），无需生成概念页", "slug": slug,
+                "skipped": prev.get("skipped")}
+    page = pages[0]
+    if str(prev.get("ticket") or "") != str(ticket or ""):
+        return {"error": "ticket 不匹配（影响面已变化或未先 preview）→ need_repreview=true",
+                "need_repreview": True, "ticket": prev.get("ticket"), "slug": slug}
+    want = sorted(page.get("required_risks") or [])
+    if sorted(acknowledge_risks or []) != want:
+        return {"error": "风险确认不一致：需 acknowledge_risks=%s" % want,
+                "required_risks": want, "slug": slug}
+    body = _concept_page_body({"summary": definition, "title": page["title"]},
+                              page["members"], page["verdict"], definition)
+    before = _one_page(ckb, page["slug"])
+    written = ke_pages.upsert_page(ckb, page["slug"], standard_name or page["title"],
+                                   page["page_type"], body, summary=definition or "",
+                                   tag="bodhi-cxt-edit",
+                                   metadata={"concept": {
+                                       "generated_by": "context-map", "verdict": page["verdict"],
+                                       "actor": actor or "unknown",
+                                       "members": [{"context": m["context"], "slug": m["slug"],
+                                                    "version": m["version"]} for m in page["members"]]}})
+    cache = rebuild_cache()
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    record = {"ticket": prev["ticket"], "slug": page["slug"], "at": ke_db.now_text(),
+              "actor": actor or "unknown", "verdict": page["verdict"], "concept_kb": concept,
+              "created": written["created"], "page_version": written["after_version"],
+              "before_content": (before or {}).get("content", ""), "after_content": body,
+              "members": page["members"], "permission": acl}
+    path = HISTORY_DIR / ("%s.json" % prev["ticket"])
+    _json_dump(path, record)
+    return {"ok": True, "applied": True, "concept_kb": concept, "slug": page["slug"],
+            "verdict": page["verdict"],
+            "page": {"created": written["created"], "version": written["after_version"],
+                     "page_type": page["page_type"]},
+            "permission": acl, "cache": cache.get("stats"),
+            "record": str(path.relative_to(REPO)),
+            "note": "领域库零写入（不动领域页/版本）；映射表就是事实源；缓存已刷新"}
+
+
+def concept_rollback(ticket: str) -> dict:
+    """按 apply 留下的记录回滚概念页（恢复旧正文或删除新建页），并刷新缓存。"""
+    path = HISTORY_DIR / ("%s.json" % (ticket or ""))
+    if not path.is_file():
+        return {"error": "没有这条 apply 记录：%s" % ticket}
+    rec = _json_load(path, {}) or {}
+    ckb = rec.get("concept_kb", {}).get("id") if isinstance(rec.get("concept_kb"), dict) else ""
+    ckb = ckb or (concept_kb().get("id") or "")
+    slug = rec.get("slug") or ""
+    member = (rec.get("members") or [{}])[0]
+    if not (ckb and slug):
+        return {"error": "记录不完整（缺 concept_kb/slug）"}
+    if rec.get("created"):
+        ke_pages.delete_pages(ckb, [slug], dry_run=False)
+        action = "deleted"
+    else:
+        ke_pages.upsert_page(ckb, slug, member.get("title") or slug,
+                             member.get("page_type") or "ontology:Class",
+                             rec.get("before_content") or "", tag="bodhi-cxt-edit")
+        action = "restored"
+    cache = rebuild_cache()
+    return {"ok": True, "rolled_back": True, "action": action, "slug": slug, "ticket": ticket,
+            "cache": cache.get("stats")}
+
+
+def read_cache() -> dict:
+    """读映射缓存（`state/context_map/mappings.json`）+ 失效检测（概念页版本/指纹变了 → `stale`）。"""
+    data = _json_load(MAPPINGS_FILE, {}) or {}
+    if not data:
+        return {"kind": "cache", "pairs": [], "generated_from": [], "stale": [], "built_at": "",
+                "note": "还没有缓存（跑 `rebuild_cache` 或 concept_apply 生成）"}
+    stale = []
+    ckb = (data.get("concept_kb") or {}).get("id") or (concept_kb().get("id") or "")
+    for item in (data.get("generated_from") or []):
+        page = _one_page(item.get("kb") or ckb, item.get("slug") or "")
+        if page is None:
+            stale.append({"slug": item.get("slug"), "why": "概念页已删"})
+        elif int(page.get("version") or 1) != int(item.get("version") or 0) \
+                or text_hash(page.get("content") or "") != (item.get("hash") or ""):
+            stale.append({"slug": item.get("slug"), "why": "概念页已改（缓存过期）"})
+    data["stale"] = stale
+    data["stale_count"] = len(stale)
+    return data
+
+
+def rebuild_cache() -> dict:
+    """**刷新缓存**：把概念页上的「各领域映射」表解析成 `mappings.json`（企业级）+ 每个领域库一份局部缓存。
+
+    缓存是**技术产物**：给渲染/查询加速；**事实源始终是概念页正文**；**不写任何领域页、不动其版本**。
+    """
+    concept = concept_kb()
+    ckb = concept.get("id") or ""
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(title,'') AS title, COALESCE(version,1) AS version, "
+        "       COALESCE(content,'') AS content "
+        "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id = %s ORDER BY slug"
+        % ke_db.sql_str(ckb)) if ckb else []
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    pairs: list = []
+    generated_from: list = []
+    per_kb: dict = {}
+    names = {k["id"]: k["name"] for k in kb_rows()}
+    for row in rows:
+        table = _table_rows(row["content"], "## 各领域映射")
+        if not table:
+            continue
+        generated_from.append({"kb": ckb, "slug": row["slug"], "version": int(row["version"] or 1),
+                               "hash": text_hash(row["content"])})
+        nodes = []
+        for line in table:
+            slug = str(line.get("页 slug") or "").strip("` ")
+            kb_name = str(line.get("上下文") or "")
+            kb_id = next((k for k, v in names.items() if v == kb_name), "")
+            raw_v = str(line.get("版本") or "")
+            if kb_id and slug:
+                nodes.append({"context": "kb:%s" % kb_id[:8], "kb": kb_id, "kb_name": kb_name,
+                              "slug": slug, "page_type": str(line.get("类") or ""),
+                              "mapping": str(line.get("结论") or "equivalent"),
+                              "version": int(raw_v) if raw_v.isdigit() else 0})
+        for i, a in enumerate(nodes):
+            for b in nodes[i + 1:]:
+                pairs.append({
+                    "id": "m:%s:%s→%s:%s" % (a["context"], a["slug"], b["context"], b["slug"]),
+                    "concept_slug": row["slug"], "concept_kb": ckb,
+                    "source": {"context": a["context"], "kb": a["kb"], "slug": a["slug"],
+                               "type": a["page_type"]},
+                    "target": {"context": b["context"], "kb": b["kb"], "slug": b["slug"],
+                               "type": b["page_type"]},
+                    "mapping": a["mapping"] or "equivalent", "decided_by": "concept-page",
+                    "state": "active"})
+        for node in nodes:
+            per_kb.setdefault(node["context"], []).append(
+                {"kb_id": node["kb"], "slug": node["slug"], "concept_slug": row["slug"],
+                 "concept_kb": ckb, "mapping": node["mapping"],
+                 "peers": [p["slug"] for p in nodes if p["slug"] != node["slug"]]})
+    payload = {"version": 1, "kind": "cache", "built_at": ke_db.now_text(), "concept_kb": concept,
+               "generated_from": generated_from, "pairs": pairs,
+               "note": "缓存（程序产物）：事实源是概念页正文的「各领域映射」表"}
+    _json_dump(MAPPINGS_FILE, payload)
+    for ctx_key, items in per_kb.items():
+        _json_dump(CACHE_DIR / ("%s.json" % ctx_key.replace(":", "-")),
+                   {"kind": "cache", "context": ctx_key,
+                    "kb_id": items[0].get("kb_id", ""), "built_at": payload["built_at"],
+                    "concept_kb": concept, "pages": items})
+    return {"ok": True, "cache": str(MAPPINGS_FILE.relative_to(REPO)),
+            "stats": {"concept_pages": len(generated_from), "pairs": len(pairs),
+                      "kb_caches": len(per_kb)},
+            "note": "领域库零写入；缓存可随时重建"}
 
 
 def lookup(kb_ids: list[str] | None = None, q: str = "", slug: str = "", limit: int = 20) -> dict:
@@ -860,11 +1053,24 @@ def main() -> int:
     p_page.add_argument("kb_id", nargs="?", default="", help="本库（给 slug 时用于判定跨库引用）")
     p_page.add_argument("--slug", default="")
     p_page.add_argument("--q", default="")
-    p_prev = sub.add_parser("concept-preview", help="二期概念页生成预览（dry-run，只读）")
+    p_prev = sub.add_parser("concept-preview", help="概念页生成预览（dry-run，只读）")
     p_prev.add_argument("slug", nargs="?", default="", help="只预览某个 slug 组；省略=按最近一次扫描的 equivalent 组")
     p_prev.add_argument("--include-unknown", action="store_true")
+    p_prev.add_argument("--allow-distinct", action="store_true", help="把同名异义（distinct）组也纳入")
+    p_app = sub.add_parser("concept-apply", help="**写**：把某同名组落成概念页（需 ticket + 风险 + 写权限）")
+    p_app.add_argument("slug")
+    p_app.add_argument("--ticket", default="")
+    p_app.add_argument("--ack", default="", help="逗号分隔的风险确认，须与 preview 的 required_risks 一致")
+    p_app.add_argument("--definition", default="", help="企业标准定义（不填则用该组首选页的摘要）")
+    p_app.add_argument("--name", default="", help="企业标准名称（不填则用标题）")
+    p_app.add_argument("--actor", default="", help="操作者标识（记进概念页元数据与记录）")
+    p_app.add_argument("--tenant", type=int, default=None, help="调用租户（省略则读 env BODHI_TENANT_ID）")
+    p_rb = sub.add_parser("concept-rollback", help="**写**：按 apply 记录回滚概念页")
+    p_rb.add_argument("ticket")
+    sub.add_parser("cache-rebuild", help="**写**：刷新映射缓存（mappings.json + 各库局部缓存）")
+    sub.add_parser("cache-show", help="只读：看缓存内容与失效情况")
     p_print = ap.add_argument("--print", type=int, default=6000, help="打印字符上限")
-    for _p in (sub.choices["contexts"], p_scan, p_look, p_page, p_prev):
+    for _p in list(sub.choices.values()):        # 所有子命令都接受 --print（写法随意）
         _p.add_argument("--print", dest="print", type=int, default=int(p_print.default),
                         help="打印字符上限（也可写在子命令前）")
     args = ap.parse_args()
@@ -877,7 +1083,19 @@ def main() -> int:
     elif args.cmd == "page":
         out = page_view(args.kb_id or "", slug=args.slug, q=args.q)
     elif args.cmd == "concept-preview":
-        out = concept_preview(args.slug or "", include_unknown=bool(args.include_unknown))
+        out = concept_preview(args.slug or "", include_unknown=bool(args.include_unknown),
+                              allow_distinct=bool(args.allow_distinct))
+    elif args.cmd == "concept-apply":
+        out = concept_apply(args.slug, ticket=args.ticket,
+                            acknowledge_risks=[x.strip() for x in (args.ack or "").split(",") if x.strip()],
+                            definition=args.definition, standard_name=args.name, actor=args.actor,
+                            tenant=args.tenant)
+    elif args.cmd == "concept-rollback":
+        out = concept_rollback(args.ticket)
+    elif args.cmd == "cache-rebuild":
+        out = rebuild_cache()
+    elif args.cmd == "cache-show":
+        out = read_cache()
     else:
         kb_ids = [x.strip() for x in (args.kb_ids or "").split(",") if x.strip()]
         out = lookup(kb_ids or None, q=args.q, slug=args.slug)

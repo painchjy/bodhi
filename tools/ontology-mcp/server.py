@@ -3095,6 +3095,31 @@ def tool_definitions() -> list[dict]:
                 "kb_id": {"type": "string", "description": "本库 id（给了才能判定「本页是否跨库引用」）"},
             }},
         },
+        {
+            "name": "context_concept_apply",
+            "description": ("**把某同名组落成「企业共享概念模型」里的概念页（写路径）**：概念页 slug 与领域页**同名**、"
+                            "`page_type` = 该组本体类；正文含「标准定义 + 各领域映射表」（**映射关系的事实源**）。"
+                            "**必须**：先 `context_scan`/人读预览拿 `ticket`、带 `acknowledge_risks`（= preview 的 "
+                            "`required_risks`）、且**对企业共享概念模型库有写权限**（服务端按 `X-Bodhi-Tenant` 判）。"
+                            "领域库**零写入**（不动领域页/版本）；概念页版本化可回滚（`context_concept_rollback`）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "slug": {"type": "string", "description": "组内 slug（与概念页同名）"},
+                "ticket": {"type": "string", "description": "预览返回的 ticket（原样带回）"},
+                "acknowledge_risks": {"type": "array", "items": {"type": "string"},
+                                      "description": "用户确认过的风险（= preview 的 required_risks）"},
+                "definition": {"type": "string", "description": "企业标准定义（可空 → 用组内首选页摘要）"},
+                "standard_name": {"type": "string", "description": "企业标准名称（可空 → 用标题）"},
+                "actor": {"type": "string", "description": "操作者标识（记进概念页元数据与记录）"},
+            }, "required": ["slug", "ticket", "acknowledge_risks"]},
+        },
+        {
+            "name": "context_concept_rollback",
+            "description": ("**回滚一次概念页 apply**（按 `state/context_map/history/<ticket>.json` 恢复旧正文或"
+                            "删除新建页；幂等），并刷新映射缓存。"),
+            "inputSchema": {"type": "object", "properties": {
+                "ticket": {"type": "string", "description": "apply 时的 ticket"},
+            }, "required": ["ticket"]},
+        },
     ]
 
 
@@ -3121,6 +3146,25 @@ def context_page(kb_id: str = "", slug: str = "", q: str = "") -> dict:
     跨域关系只能**经企业共享概念页转换**。
     """
     return ke_context.page_view(str(kb_id or ""), slug=str(slug or ""), q=str(q or ""))
+
+
+def context_concept_apply(slug: str, ticket: str = "", acknowledge_risks: list | None = None,
+                          definition: str = "", standard_name: str = "", actor: str = "") -> dict:
+    """**写**：把同名组落成「企业共享概念模型」里的概念页（`ke_context.concept_apply` 的入口）。
+
+    守门在 ke_context 里：写权限（`ke_db.assert_can_write`，调用者租户来自 `X-Bodhi-Tenant` 头）
+    + ticket（影响面指纹）+ `acknowledge_risks` 完全一致；领域库**零写入**。
+    """
+    return ke_context.concept_apply(str(slug or ""), str(ticket or ""),
+                                    [str(x) for x in (acknowledge_risks or [])],
+                                    definition=str(definition or ""),
+                                    standard_name=str(standard_name or ""),
+                                    actor=str(actor or ""))
+
+
+def context_concept_rollback(ticket: str) -> dict:
+    """**写**：回滚概念页 apply（幂等）+ 刷新缓存。"""
+    return ke_context.concept_rollback(str(ticket or ""))
 
 
 def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
@@ -3295,6 +3339,14 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "context_page":
         return context_page(str(args.get("kb_id", "")), str(args.get("slug", "")),
                             str(args.get("q", "")))
+    if name == "context_concept_apply":
+        return context_concept_apply(str(args.get("slug", "")), str(args.get("ticket", "")),
+                                     args.get("acknowledge_risks") or [],
+                                     str(args.get("definition", "")),
+                                     str(args.get("standard_name", "")),
+                                     str(args.get("actor", "")))
+    if name == "context_concept_rollback":
+        return context_concept_rollback(str(args.get("ticket", "")))
     raise RuntimeError("未知工具：%s" % name)
 
 
@@ -3382,6 +3434,10 @@ class MCPHandler(BaseHTTPRequestHandler):
         # bodhi2 前端用的 JSON 接口（/bodhi/*）与 MCP 传输（/mcp）共用同一端口。
         parsed = urlparse.urlsplit(self.path)
         path = parsed.path.rstrip("/") or "/"
+        # 调用者租户：`X-Bodhi-Tenant` 头（WeKnora 的 mcp_services.headers 可配）→ 写权限校验用；
+        # 没带就问 env `BODHI_TENANT_ID`；都没有 → 写路径 fail-closed 拒（只读照常）。
+        raw_tenant = str(self.headers.get("X-Bodhi-Tenant") or "").strip()
+        ke_db.set_request_tenant(int(raw_tenant) if raw_tenant.isdigit() else None)
         if path.startswith("/bodhi/"):
             self._bodhi_post(path)
             return
@@ -3530,6 +3586,20 @@ class MCPHandler(BaseHTTPRequestHandler):
                 lambda b: ke_pages.retag_rollback(b.get("kb_id", ""), b.get("ticket", "")),
             # 按来源文档清理本体实例（用户 2026-09-20 第二问：删文档不会联动清实例层）
             #   删「独占页」+ 多源页摘引用；默认 dry-run（apply=false 只出计划）
+            "/bodhi/context/concept/preview":
+                lambda b: ke_context.concept_preview(str(b.get("slug", "")),
+                                                     bool(b.get("include_unknown", False)),
+                                                     allow_distinct=bool(b.get("allow_distinct", False))),
+            "/bodhi/context/concept/apply":
+                lambda b: context_concept_apply(str(b.get("slug", "")), str(b.get("ticket", "")),
+                                               b.get("acknowledge_risks") or [],
+                                               str(b.get("definition", "")),
+                                               str(b.get("standard_name", "")),
+                                               str(b.get("actor", ""))),
+            "/bodhi/context/concept/rollback":
+                lambda b: context_concept_rollback(str(b.get("ticket", ""))),
+            "/bodhi/context/cache/rebuild":
+                lambda b: ke_context.rebuild_cache(),
             "/bodhi/docs/purge":
                 lambda b: ke_docs.purge_document(b.get("kb_id", ""), b.get("knowledge_id", ""),
                                                  b.get("title", ""), bool(b.get("apply", False)),
@@ -3629,6 +3699,14 @@ class MCPHandler(BaseHTTPRequestHandler):
                     params.get("include_unknown", "0") not in ("0", "false")), 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/context/concept/preview 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/context/cache", "/bodhi/context/cache.json"):
+            # 映射**缓存**（技术产物；事实源是概念页正文）：给前端/运维看缓存与失效情况
+            try:
+                self._json(ke_context.read_cache(), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/context/cache 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/contexts", "/bodhi/contexts.json"):

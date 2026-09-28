@@ -95,11 +95,10 @@ MODELER_TOOLS = [
     # 改本体类型（2026-09-27）：**两段式** —— 先 retag_preview（只读）把影响面+风险念给用户，
     # 用户明确同意后用同一 ticket 调 retag_apply（缺 ticket/风险确认会被服务端拒）。
     "mcp_bodhi_ontology_retag_preview", "mcp_bodhi_ontology_retag_apply",
-    # 跨库上下文映射（2026-09-28 一期，**只读**）：同名/同实例候选（含建议与 ticket）、
-    # 跨库引用前查同义/异义/依赖、以及**渲染视图**（领域页 ←同名 slug→ 概念页，
-    # 领域库不写 uuid、不互相引用，跨域关系经概念页转换）；写路径在二期。
+    # 跨库上下文映射：只读（候选/查询/渲染）+ **写路径**（概念页 apply/rollback，带写权限校验）
     "mcp_bodhi_ontology_context_scan", "mcp_bodhi_ontology_context_lookup",
     "mcp_bodhi_ontology_context_page",
+    "mcp_bodhi_ontology_context_concept_apply", "mcp_bodhi_ontology_context_concept_rollback",
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
                   "design": DESIGN_TOOLS, "modeler": MODELER_TOOLS}

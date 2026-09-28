@@ -236,3 +236,82 @@ def sql_str(value) -> str:
 
 def sql_json(value) -> str:
     return sql_str(json.dumps(value, ensure_ascii=False)) + "::jsonb"
+
+
+# ---------------------------------------------------------------------------
+# 知识库写权限（2026-09-28；用户口径：每轮只写一个库，且必须对该库有写权限）
+# ---------------------------------------------------------------------------
+# 可写的 `kb_shares.permission`（实测本机只出现 viewer；editor/writer/admin 为上游语义）
+WRITE_PERMISSIONS = ("editor", "writer", "admin", "owner")
+
+# 当前请求的调用者租户（由 MCP 传输层从 `X-Bodhi-Tenant` 头设置；见 server.py）
+_REQUEST_TENANT: int | None = None
+
+
+def set_request_tenant(tenant: int | None) -> None:
+    """MCP 传输层在每个请求开始时调用（头 ``X-Bodhi-Tenant``）；请求结束后传 None 复位。"""
+    global _REQUEST_TENANT
+    _REQUEST_TENANT = tenant
+
+
+def caller_tenant(default: int | None = None) -> int | None:
+    """调用者租户：优先**本请求头**（`X-Bodhi-Tenant`），其次 env `BODHI_TENANT_ID`/`BODHI_DEFAULT_TENANT`。"""
+    if _REQUEST_TENANT is not None:
+        return _REQUEST_TENANT
+    for key in ("BODHI_TENANT_ID", "BODHI_DEFAULT_TENANT"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw.isdigit():
+            return int(raw)
+    return default
+
+
+def assert_can_write(kb_id: str, tenant: int | None = None) -> dict:
+    """判断调用者能否**写**这个知识库；返回 `{allowed, mode, kb, caller_tenant, why}`（不抛异常）。
+
+    规则（依据 `knowledge_bases.tenant_id` + `kb_shares` + `organization_tenant_members`）：
+      1. 该库属调用者租户 → `owner`，允许；
+      2. 该库通过组织共享给调用者租户且权限在 `WRITE_PERMISSIONS` 内 → `share:<perm>`，允许；
+      3. 其它（含 viewer 共享、身份缺失）→ **拒**（fail-closed；只读接口另行放行）。
+    """
+    kb_id = (kb_id or "").strip()
+    out = {"allowed": False, "mode": "none", "kb": {"id": kb_id}, "caller_tenant": tenant, "why": ""}
+    if not kb_id:
+        out["why"] = "kb_id 为空"
+        return out
+    rows = psql_csv("SELECT id, COALESCE(name,'') AS name, tenant_id, "
+                    "COALESCE(creator_id::text,'') AS creator_id FROM knowledge_bases "
+                    " WHERE id = %s AND deleted_at IS NULL LIMIT 1" % sql_str(kb_id))
+    if not rows:
+        out["why"] = "知识库不存在或已删"
+        return out
+    kb = rows[0]
+    out["kb"] = {"id": kb["id"], "name": kb["name"], "tenant_id": int(kb["tenant_id"] or 0),
+                 "creator_id": kb["creator_id"]}
+    if tenant is None:
+        out["why"] = ("无法确定调用者租户（身份缺失 → 拒写，只读放行）：请给 MCP 服务配 "
+                      "`X-Bodhi-Tenant` 头或设 env `BODHI_TENANT_ID`")
+        return out
+    if int(kb["tenant_id"] or 0) == int(tenant):
+        out.update({"allowed": True, "mode": "owner",
+                    "why": "该库属于调用者租户 %d" % tenant})
+        return out
+    shares = psql_csv(
+        "SELECT s.permission AS permission, COALESCE(o.name,'') AS org_name "
+        "  FROM kb_shares s "
+        "  JOIN organization_tenant_members m ON m.organization_id = s.organization_id "
+        "  LEFT JOIN organizations o ON o.id = s.organization_id "
+        " WHERE s.knowledge_base_id = %s AND s.deleted_at IS NULL AND m.tenant_id = %d"
+        % (sql_str(kb_id), int(tenant)))
+    allowed = [s for s in shares if str(s["permission"] or "").lower() in WRITE_PERMISSIONS]
+    if allowed:
+        out.update({"allowed": True, "mode": "share:%s" % allowed[0]["permission"],
+                    "why": "通过组织「%s」共享获得 %s 权限" % (allowed[0]["org_name"],
+                                                              allowed[0]["permission"])})
+        return out
+    if shares:
+        out["mode"] = "share:%s" % shares[0]["permission"]
+        out["why"] = ("该库属租户 %d，你（租户 %d）只有 %s 共享（只读）"
+                      % (int(kb["tenant_id"] or 0), int(tenant), shares[0]["permission"]))
+    else:
+        out["why"] = "该库属租户 %d，且没有共享给租户 %d（无写权限）" % (int(kb["tenant_id"] or 0), int(tenant))
+    return out

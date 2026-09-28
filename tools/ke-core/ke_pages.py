@@ -287,6 +287,47 @@ def sync_folders(kb_id: str) -> dict:
     return _sync_folders(kb_id)
 
 
+def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
+                summary: str = "", tag: str = "bodhi-cxt-edit",
+                metadata: dict | None = None) -> dict:
+    """**建或改**一页（概念页/映射页专用；2026-09-28）。
+
+    - 已存在 → 走 `_apply_content_update`（快照旧版 → content/out_links/version+1 → 重算 in_links），
+      并把 `title/summary/page_type/page_metadata` 一起更新（可回退到旧版本）；
+    - 不存在 → INSERT（`id` 用 `gen_random_uuid()`；`tenant_id` 取该 KB 的），随后重算 in_links + 建目录树；
+    - 只用于**我们自己的治理页**（「企业共享概念模型」里的概念页/映射页）；领域业务页禁止走这里。
+    """
+    if len(tag) > 16:
+        raise ValueError("tag 超过 last_edit_source 的 varchar(16)：%s" % tag)
+    existing = ke_db.psql_csv(
+        "SELECT COALESCE(version,1) AS version FROM wiki_pages "
+        " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    extra = (", title = %s, summary = %s, page_type = %s, "
+             "page_metadata = COALESCE(page_metadata, '{}'::jsonb) || %s::jsonb"
+             % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
+                ke_db.sql_json(metadata or {})))
+    if existing:
+        before = int(existing[0]["version"] or 1)
+        _apply_content_update(kb_id, slug, content, tag, extra_set=extra)
+        return {"slug": slug, "created": False, "before_version": before, "after_version": before + 1}
+    kb = ke_db.psql_csv("SELECT COALESCE(tenant_id,0) AS tenant_id FROM knowledge_bases WHERE id = %s"
+                        % ke_db.sql_str(kb_id))
+    if not kb:
+        raise ValueError("知识库不存在：%s" % kb_id)
+    cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
+            "out_links, page_metadata, version, last_edit_source")
+    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 1, %s"
+            % (int(kb[0]["tenant_id"] or 0), ke_db.sql_str(kb_id), ke_db.sql_str(slug),
+               ke_db.sql_str(title), ke_db.sql_str(page_type), ke_db.sql_str(content),
+               ke_db.sql_str(summary), ke_db.sql_json(out_links_of(content)), ke_db.sql_json(metadata or {}),
+               ke_db.sql_str(tag)))
+    ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\n%s\nCOMMIT;\n"
+               % (cols, vals, rebuild_in_links_sql(kb_id)), stdin=True)
+    _sync_folders(kb_id)
+    return {"slug": slug, "created": True, "before_version": 0, "after_version": 1}
+
+
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:
     """按给定正文**重写一页**：快照旧版 → 更新 content/out_links/version+1 → 重算 in_links。
 
