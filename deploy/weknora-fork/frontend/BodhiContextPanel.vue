@@ -27,11 +27,19 @@
         </div>
 
         <div class="bodhi-ctx-block">
-          <div class="bodhi-ctx-label">企业标准概念</div>
+          <div class="bodhi-ctx-label">
+            企业标准概念
+            <span v-if="conceptState" class="bodhi-ctx-state" :class="'st-' + conceptState">{{ stateLabel }}</span>
+          </div>
           <template v-if="data.concept_page && data.concept_page.exists">
             <div class="bodhi-ctx-row">
               <code>{{ data.concept_page.slug }}</code>
               <span class="bodhi-ctx-dim">（{{ data.concept_page.page_type }}，v{{ data.concept_page.version }}）</span>
+              <button class="bodhi-ctx-btn" @click="openConceptPage">在概念库里打开</button>
+              <button class="bodhi-ctx-btn" @click="copyConceptSlug">复制 slug</button>
+            </div>
+            <div v-if="data.concept_page.reviewed_by" class="bodhi-ctx-dim">
+              评审：{{ data.concept_page.reviewed_by }} · {{ data.concept_page.reviewed_at }}
             </div>
             <div class="bodhi-ctx-def">{{ data.concept_page.standard_definition || '（标准定义待补）' }}</div>
           </template>
@@ -70,12 +78,37 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 const props = defineProps<{ knowledgeBaseId?: string; slug?: string }>()
+const router = useRouter()
 const open = ref(true)
 const loading = ref(false)
 const error = ref('')
 const data = ref<any>(null)
+
+/** 治理状态（draft / reviewed / approved；空=未标）—— 事实源在概念页 page_metadata.concept.state */
+const conceptState = computed(() => String((data.value && data.value.concept_page &&
+  data.value.concept_page.exists && data.value.concept_page.state) || ''))
+const stateLabel = computed(() => ({ draft: '草稿·待评审', reviewed: '已评审', approved: '企业标准·已批准' }[conceptState.value] || ''))
+
+/** 打开概念库里的那一页（**只是 UI 导航到治理库**；领域库之间仍不互相引用）。 */
+function openConceptPage(): void {
+  const c = (data.value && data.value.concept_page) || {}
+  if (!c.kb || !c.slug) return
+  void router.push(`/platform/knowledge-bases/${c.kb}?slug=${encodeURIComponent(c.slug)}`)
+}
+
+/** 复制概念页 slug（给"到概念库里粘贴打开"或贴到工单里用）。 */
+async function copyConceptSlug(): Promise<void> {
+  const c = (data.value && data.value.concept_page) || {}
+  if (!c.slug) return
+  try {
+    await navigator.clipboard.writeText(String(c.slug))
+  } catch (e) {
+    /* 剪贴板不可用（非 https / 无权限）→ 静默：用户可手选文本 */
+  }
+}
 
 const domainPeers = computed<any[]>(() =>
   ((data.value && data.value.peers) || []).filter((p: any) => p.role === 'domain'))
@@ -172,4 +205,27 @@ defineExpose({ reload: load })
   vertical-align: top;
 }
 .bodhi-ctx-table th { background: var(--td-bg-color-secondarycontainer, #f3f3f3); font-weight: 600; }
+.bodhi-ctx-state {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-weight: 400;
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  color: var(--td-text-color-secondary, #666);
+}
+.bodhi-ctx-state.st-draft { background: #fff7e6; color: #b26a00; }
+.bodhi-ctx-state.st-reviewed { background: #e8f0fe; color: #1a56db; }
+.bodhi-ctx-state.st-approved { background: #e8f5e9; color: #2e7d32; }
+.bodhi-ctx-btn {
+  border: 1px solid var(--td-component-stroke, #e7e7e7);
+  background: var(--td-bg-color-container, #fff);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bodhi-ctx-btn:hover {
+  border-color: var(--td-brand-color, #0052d9);
+  color: var(--td-brand-color, #0052d9);
+}
 </style>

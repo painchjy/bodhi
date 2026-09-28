@@ -598,6 +598,9 @@ def _concept_lookup(slug: str) -> dict:
     return {"exists": True, "kb": ckb, "kb_name": ckb_info.get("name", ""),
             "slug": page["slug"], "title": page["title"], "page_type": page["page_type"],
             "version": int(page.get("version") or 1),
+            "state": str((_meta_dict(page).get("concept") or {}).get("state") or ""),
+            "reviewed_by": str((_meta_dict(page).get("concept") or {}).get("reviewed_by") or ""),
+            "reviewed_at": str((_meta_dict(page).get("concept") or {}).get("reviewed_at") or ""),
             "standard_definition": _section(page["content"], "## 标准定义"),
             "mapping_rows": _table_rows(page["content"], "## 各领域映射")}
 
