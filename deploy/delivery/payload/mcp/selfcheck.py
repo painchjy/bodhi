@@ -2,7 +2,7 @@
 """bodhi2 MCP 服务自检（只读）：握手 → tools/list → skills()。
 
 用法：
-    python3 selfcheck.py [--url http://127.0.0.1:8765/mcp] [--expect-tools 10]
+    python3 selfcheck.py [--url http://127.0.0.1:8765/mcp] [--expect-tools 19]
 
 只依赖标准库；不写任何数据。退出码：0 全通，1 有失败项。
 """
