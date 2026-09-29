@@ -13,6 +13,8 @@
 | `domain_modeling` | 领域知识建模 | 把**某篇文档**按本体抽成 wiki 知识（**分批交互**：一轮一批、可续跑） | ea / bmm | `doc_outline`、`extract_state`、`save_knowledge`、`link_candidates`/`resolve_link_candidate` |
 | `ea_overview_design` | 企架概要设计 | 基于**业务模型**做 IT 服务层设计（报告页 + 服务页） | ea | `wiki_search`/`wiki_read_page`、`save_knowledge` |
 | `service_detailed_design` | 服务详细设计 | 对**已入库服务**做接口/操作/主外键/CRUD 详细设计 | ea + ea-service | `ontology_types`、`save_knowledge`、`audit_scan`、`service_overview` |
+| `structured_modeling` | 结构化数据批量建模 | 读用户对 **Excel/CSV 表结构**的描述 → 把列映射到本体的**类/数据属性/关系/枚举**，再一次一个类或一条关系地批量建页（**技能理解 → 工具执行**） | bmm / ea | `import_probe`、`import_plan`、`import_apply`、`import_state`、`ontology_types`、`audit_scan` |
+| `document_review` | 文档评审 | 选**文档** + 选**业务策略** → 按策略下的**业务规则逐条**评（LLM软规则交给大模型；图检索生成只读 Cypher；有参考规范先取规范），**每条只在它的适用范围（一般=章节）内判断** | bmm | `rules_of_policy`、`graph_query`、`review_apply`、`doc_outline`、`grep_chunks`、`wiki_search`、`audit_scan` |
 
 > **领域建模已改为分批交互**（v0.2.0，2026-09-21）：`doc_outline` 按切片父子关系组织"合适的上下文"，
 > `budget_tokens` 是**会话参数**（超时就调小，父块会自动按子块细分）；每轮 `save_knowledge(..., session=…)`
