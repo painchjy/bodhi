@@ -90,7 +90,7 @@ connect() failed (111: Connection refused) while connecting to upstream:
 **根因**：容器里要装 `postgresql-client`（提供 `psql`），而**公网 Debian 源在内网/受限网络下常常不通**。
 **修法**：① `docker build --build-arg APT_MIRROR=<内网 debian 源> ...`；② 或改用**裸机 systemd** 方式（§MCP-SERVER 方式 B）。
 
-## 14. 改了配置/代码但"没生效"（我们踩过，2026-09-29）
+## 13. 改了配置/代码但"没生效"（我们踩过，2026-09-29）
 
 **现象**：接口少字段（例如 `/bodhi/context/page` 回执里没有 `state`）→ 前端「跨库上下文」面板的**治理状态徽标不显示**；或改了 `.env` 但认库/租户行为没变。
 
@@ -112,7 +112,7 @@ print('tenant=',ke_db.caller_tenant(),'ontology=',ke_ontology.resolve_ontology_k
 'concept=',ke_context.concept_kb()['source'],'db_pwd_len=',len(ke_db.DB_PASSWORD or ''))"
 ```
 
-## 15. CLI 报 `need_write_permission`、`caller_tenant: null`（2026-09-29 已修）
+## 14. CLI 报 `need_write_permission`、`caller_tenant: null`（2026-09-29 已修）
 
 **现象**：手敲 `ke_context.py concept-state …` / `concept-apply …` 落库失败，回执里 `caller_tenant` 是 `null`：
 ```json
@@ -126,7 +126,7 @@ print('tenant=',ke_db.caller_tenant(),'ontology=',ke_ontology.resolve_ontology_k
 **排查顺序**：① `.env` 里有没有 `BODHI_TENANT_ID`；② 该租户是不是目标库属主，或该租户所在组织在 `kb_shares` 上的权限是 `editor/admin`（`viewer` 只读）；
 ③ 目标库是否是**另一个租户**的库（那就得先共享/给写权限）。
 
-## 16. `docker build` 报 `NotFound: parent snapshot … does not exist`（2026-09-29）
+## 15. `docker build` 报 `NotFound: parent snapshot … does not exist`（2026-09-29）
 
 **现象**：打前端/MCP 镜像时失败：
 ```
@@ -142,7 +142,7 @@ DOCKER_BUILDKIT=0 docker build --no-cache -f Dockerfile -t weknora-ui:bodhi2 .
 ```
 前端重建的完整流程见 `FRONTEND.md` §4（本仓 `deploy/weknora-fork/build_frontend.sh` 会自动构建并自检）。
 
-## 17. 整栈"莫名其妙全重启"/ `localhost` 时通时断（2026-09-28 排查结论）
+## 16. 整栈"莫名其妙全重启"/ `localhost` 时通时断（2026-09-28 排查结论）
 
 **现象**：容器 `Up` 只有几十秒；`http://localhost/` 有时连不上，稍后 `/platform/creatChat` 又能开。
 
@@ -158,7 +158,7 @@ DOCKER_BUILDKIT=0 docker build --no-cache -f Dockerfile -t weknora-ui:bodhi2 .
      容器 `restart: unless-stopped` 会在下次进入 WSL 时自动拉起。
 
 > 排查入口：本仓 `deploy/weknora-fork/stack_ctl.sh status|watch|up|stop`（一条命令打出容器/健康/端口/端点/dockerd 重启次数/ MCP 自检）。
-## 13. 沙箱相关（本交付**不需要**，仅备查）
+## 附录：沙箱相关（本交付**不需要**，仅备查）
 
 WeKnora 原生技能是"沙箱安装型"（装进快照镜像）。要用需同时满足：`WEKNORA_SANDBOX_DOCKER_ENABLED=true`、
 app 挂载 `docker.sock`（≈宿主机 root）、沙箱基础镜像可用、以及上面的 §1 SSRF 白名单。
