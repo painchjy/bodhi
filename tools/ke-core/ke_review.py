@@ -41,17 +41,29 @@ def _slug(text: str) -> str:
     return SLUG_SAFE.sub("-", str(text or "").strip()).strip("-")
 
 
-def _attr(meta: str, key: str) -> str:
-    """从 page_metadata.ontology.attributes 里取某数据属性的值（找不到返回空串）。"""
+def _attr(meta: str, key: str, hint: str = "") -> str:
+    """从页面元数据里取某数据属性的值。**兼容两代口径**：
+
+    - 新：`attributes` 键 = 本体属性名（`bmm:ruleScope`）或本地名（`ruleScope`）；
+    - 老：`attributes` 键 = 中文列名（`适用范围`）→ 用工信 `hint` 在 `attributes_by_column` 里兜底。
+    """
     import json
     try:
         data = json.loads(meta or "{}")
     except Exception:  # noqa: BLE001
         return ""
-    attrs = ((data.get("ontology") or {}).get("attributes") or {})
+    onto = (data.get("ontology") or {})
+    attrs = onto.get("attributes") or {}
+    low = key.lower()
     for name, value in attrs.items():
-        if name.endswith(":" + key):
+        if str(name).split(":")[-1].lower() == low:
             return str(value or "")
+    by_col = onto.get("attributes_by_column") or {}
+    if hint:
+        for source in (by_col, attrs):          # 新页看 by_column；老页的 attributes 键本身就是中文列名
+            for column, value in source.items():
+                if hint in str(column) or str(column) in hint:
+                    return str(value or "")
     return ""
 
 
@@ -84,9 +96,9 @@ def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict
             level = m.group(1) if m else ""
         ev = re.search(r"%s\n\n> ?(.+)" % re.escape(EVIDENCE_SECTION), r["content"])
         out.append({"slug": r["slug"], "name": r["title"], "page_type": r["page_type"],
-                    "level": level, "scope": _attr(r["meta"], "ruleScope"),
-                    "how": _attr(r["meta"], "ruleImplementation"),
-                    "reference": _attr(r["meta"], "ruleReference"),
+                    "level": level, "scope": _attr(r["meta"], "ruleScope", "适用范围"),
+                    "how": _attr(r["meta"], "ruleImplementation", "实现方式"),
+                    "reference": _attr(r["meta"], "ruleReference", "参考规范"),
                     "evidence": (ev.group(1).strip()[:400] if ev else "")})
     return {"ok": True, "kb": {"id": kb, "name": kb_name},
             "policy": {"slug": pol["slug"], "name": pol["title"]},
@@ -170,7 +182,11 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
         if f.get("suggestion"):
             lines.append("- 建议：%s" % f["suggestion"])
         quote = str(f.get("evidence") or "").strip() or "（该条未给逐字证据）"
-        lines += ["", "#### 原文依据", "", "> %s" % quote.replace("\n", "\n> "), ""]
+        lines += ["", "#### 证据（逐字）", "", "> %s" % quote.replace("\n", "\n> "), ""]
+    # 页级「## 原文依据」：汇总各条证据（巡检 F3 按此小节判定"是否有逐字摘录"）
+    quotes = [str(f.get("evidence") or "").strip() for f in items if str(f.get("evidence") or "").strip()]
+    lines += [EVIDENCE_SECTION, ""] + (["> %s" % q.replace("\n", "\n> ") for q in quotes]
+                                       or ["> （本次评审未附逐字证据）"]) + [""]
     if policy_slug:
         lines += [REL_SECTION, "",
                   "- 促进指导规范（`bmm:promotesDirective`）→ [[%s|%s]]" % (policy_slug, policy), ""]
@@ -180,7 +196,9 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
                                                                   "、".join("%s%d条" % (k, v)
                                                                           for k, v in verdicts.items())),
                                    tag=REVIEW_TAG,
-                                   metadata={"review": {"doc": doc, "policy": policy,
+                                   metadata={"ontology": {"model": "bmm", "class": page_type, "label": "评估",
+                                                          "name": title, "generator": REVIEW_TAG},
+                                             "review": {"doc": doc, "policy": policy,
                                                         "policy_slug": policy_slug,
                                                         "rules": len(items), "verdicts": verdicts,
                                                         "generator": REVIEW_TAG}})

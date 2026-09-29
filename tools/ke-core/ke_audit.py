@@ -86,7 +86,9 @@ NON_INSTANCE = ("index", "summary")
 NON_INSTANCE_PREFIX = ("ontology:",)
 # 已知页面生成器（`last_edit_source`）；其它值 = 元数据漂移（A6，低）
 KNOWN_SOURCES = ("bodhi-onto-mcp", "ontology-wiki", "bodhi-type-edit", "bodhi-rel-edit",
-                 "bodhi-page-del", "bodhi-ops-edit", "pipeline", "agent", "")
+                 "bodhi-page-del", "bodhi-ops-edit", "pipeline", "agent", "",
+                 # 结构化批量建模（2026-09-29）：last_edit_source 是短 tag `bi-xxxxxxxx`（varchar(16) 限制）
+                 "bodhi-import", "bodhi-review")
 
 
 def _is_instance(page_type: str) -> bool:
@@ -259,9 +261,9 @@ def check_wiki_graph(ctx: dict, rep: Report) -> None:
         if not _page_meta(page["meta"]):
             rep.add("A6", "low", page["slug"], "缺 page_metadata.ontology（老数据/手写页）",
                     "按需补元数据（非必须）")
-        elif page["src"] not in KNOWN_SOURCES:
+        elif page["src"] not in KNOWN_SOURCES and not str(page["src"]).startswith("bi-"):
             rep.add("A6", "low", page["slug"], "未知生成器 last_edit_source=%s" % page["src"],
-                    "确认来源，必要时补记生成器")
+                    "确认来源，必要时补记生成器（结构化导入用 `bi-xxxxxxxx`）")
     # A7 slug 与类型错位（2026-09-27 用户口径）：改本体类型必须**迁移 slug**（`模块/类/名称`），
     #    旧实现只改 page_type 不改 slug → 出现"类型是 X、slug 还写着 Y"。存量体检 +
     #    两段式迁移后的校验（迁移完 A7 应清零）。
@@ -603,12 +605,33 @@ def check_ontology_artifacts(ctx: dict, rep: Report) -> None:
 # ---------------------------------------------------------------------------
 # C. 来源异常（用户口径：无来源 / 来源已删 = 异常数据）
 # ---------------------------------------------------------------------------
+def _import_source(page: dict) -> str:
+    """结构化批量建模导入的页：`page_metadata.import.file_sha256` 就是它的来源（Excel 行即原文）。
+
+    用户口径（2026-09-29）：结构化数据**不加"原文依据"列**——Excel 行本身即原文，
+    正文已带「## 原文依据」逐字；来源用**文件 sha256 + sheet + 行号**记在元数据里。
+    因此这类页**不算"无来源"**（C1 豁免），但会在 `data.structured_imports` 里报数。
+    """
+    try:
+        meta = json.loads(page.get("meta") or "{}")
+    except Exception:  # noqa: BLE001
+        return ""
+    imp = meta.get("import") or {}
+    if meta.get("review"):                       # 文档评审页：依据=被评审文档，逐条带「原文依据」
+        return "review"
+    return str(imp.get("file_sha256") or "")
+
+
 def check_sources(ctx: dict, rep: Report) -> None:
     pages = ctx["pages"]
+    structured = 0
     for page in pages:
         refs = _json_list(page["refs"])
         claims = bool(re.search(r"（来源[:：]", page["content"] or "")) or "<sources>" in (page["content"] or "")
         if _is_instance(page["page_type"]) and not refs:
+            if _import_source(page):
+                structured += 1                     # 结构化导入页：来源=文件 sha256，C1 豁免
+                continue
             rep.add("C1", "high", page["slug"],
                     "实例页无来源文档（source_refs 为空）%s" % ("；正文却有来源标记" if claims else ""),
                     "确认后清理（P2）：删该页并重算 in_links；误判可先 --strip-only")
@@ -616,6 +639,8 @@ def check_sources(ctx: dict, rep: Report) -> None:
             rep.add("C3", "low", page["slug"],
                     "正文有来源标记但 source_refs 为空（非实例页，上游维护）",
                     "上游页不在本工具清理范围；如需纳入请先确认口径")
+    ctx["data"]["structured_imports"] = structured
+
     docs = ctx.get("docs") or {}
     orphan_docs = [d for d in (docs.get("docs") or [])
                    if d.get("status") in ("deleted", "missing")]

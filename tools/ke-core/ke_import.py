@@ -364,10 +364,14 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
     import uuid
     module = page_type.split(":")[0]
     attrs = source.get("attrs") or {}
-    attributes = {column: (row.get(column) or "").strip()
-                  for column in attrs if (row.get(column) or "").strip()}
+    # `attributes` 用**本体数据属性名**为键（`bmm:ruleScope`）——机器口径（评审/巡检/智能体按本体名读）；
+    # `attributes_by_column` 保留**中文列名**——人类口径（页详情页好看）。老数据只有中文键，读取方需兼容。
+    by_column = {column: (row.get(column) or "").strip()
+                 for column in attrs if (row.get(column) or "").strip()}
+    attributes = {attrs.get(column, column): value for column, value in by_column.items()}
     metadata = {"ontology": {"model": module, "class": page_type, "label": label, "name": title,
-                             "attributes": attributes, "generator": TAG, "created_at": ke_db.now_text()},
+                             "attributes": attributes, "attributes_by_column": by_column,
+                             "generator": TAG, "created_at": ke_db.now_text()},
                 "import": {"batch": source.get("batch"), "file": source.get("file"),
                            "file_sha256": source.get("sha256"), "sheet": source.get("sheet"),
                            "row": int(row.get("__row__") or 0), "key": source.get("key_value"),
