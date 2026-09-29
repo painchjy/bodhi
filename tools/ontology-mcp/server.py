@@ -3005,11 +3005,12 @@ def tool_definitions() -> list[dict]:
         },
         {
             "name": "import_refresh",
-            "description": ("**结构化批量建模·元数据刷新（写）**：把结构化导入页的 `page_metadata.ontology` 刷成当前口径"
-                            "（`attributes` 键=**本体属性名**如 `bmm:ruleScope`、`attributes_by_column`=中文列名）。"
-                            "列名→本体属性名按本体 label 反查；**只改元数据**（正文/标题/slug/version 不动）；"
-                            "幂等（已合规零写入）。用途：存量页（老口径用中文列名做键）一次性对齐，"
-                            "之后评审/巡检/智能体都能按本体名读。`dry_run=true` 只看会改哪些页。"),
+            "description": ("**结构化批量建模·元数据与目录刷新（写）**：① 把结构化导入页的 `page_metadata.ontology` 刷成当前口径"
+                            "（`attributes` 键=**本体属性名**如 `bmm:ruleScope`、`attributes_by_column`=中文列名；"
+                            "**只升级不降级**，中文列名按「账本 mapping → 本体 label」升级）；"
+                            "② 把 `wiki_path` 对齐成「**目录路径/标题**」（前端目录树靠它显示；写 slug 会导致**目录缺失**）"
+                            "并重建 `wiki_folders` + 页 `folder_id`。只改元数据/路径（正文/version 不动）；幂等。"
+                            "`dry_run=true` 只看会改哪些页（含 `wiki_path_before/after`）。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
                 "dry_run": {"type": "boolean"},

@@ -86,6 +86,7 @@ import_state(batch="<batch>")                # remaining 为空 = 这张表建�
 | 单实体宽表 | `key_column` = 唯一键列；`mapping` = 属性列 → 数据属性 |
 | 一张表**多个实体**（前缀分组） | 每个实体**单独一遍**：前缀列映射到该类的属性，`key_column` 用该实体的编号列 |
 | 只有名称的实体（部门/组织机构） | `mapping={"…业务部门":"name"}` + `unknown_to_description=false` |
+| 实体**名称列**（中文名/简称，如新增的「主系统」「子系统」） | 映射到 **`name`**（本体已有）；并用作**页标题** `title="{主系统}（{主系统系统编号}）"`；英文名/简称进 `aliases`。**同一个名称列不要在两遍里重复映射**（另一实体的名称列在该批次按未映射处理） |
 | 关系（主子、归属） | `source_key_column`/`target_key_column` + `source_class`/`target_class`；**两侧键列都必须是该类建页时用的 slug 键列**（规则页键列是 `规则编号`——拿 `业务规则名称` 当 `source_key_column` 会报 `dangling`，回执会回显拼出的 slug） |
 | 枚举型列（强制/推荐） | **用 `enums` 建成关系**（不是数据属性）：`enums={"级别":{"relation":"bmm:hasEnforcementLevel","values":{"强制":"bmm:Strict","推荐":"bmm:Advisory","可覆盖":"bmm:Override"}}}` → 页面写 `- 具有执行级别（`bmm:hasEnforcementLevel`）→ bmm:Advisory（推荐）`（**无链接**：目标是枚举值不是页），元数据落 `ontology.enum_relations` |
 | 列里是 URL/规范名 | 映射到 `bmm:ruleReference` 之类；**它的内容不进正文**（正文原文依据用**该行原始值**） |

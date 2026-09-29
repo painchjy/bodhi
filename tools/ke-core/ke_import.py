@@ -485,11 +485,15 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
                            "file_sha256": source.get("sha256"), "sheet": source.get("sheet"),
                            "row": int(row.get("__row__") or 0), "key": source.get("key_value"),
                            "tag": source.get("tag_full")}}
+    category_path = [kb_name or "批量建模", label]
     return {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s" % (kb, slug))),
             "slug": slug, "title": title, "page_type": page_type, "content": content,
             "summary": (attributes.get("bmm:description") or title)[:200],
             "aliases": aliases, "metadata": metadata,
-            "category_path": [kb_name or "批量建模", label],
+            "category_path": category_path,
+            # `wiki_path` 供**前端目录树显示**：口径与 `ke_pages.upsert_page` 一致（目录路径/标题），
+            # 派生自 category_path；**不能**写 slug（否则目录里显示不出来 —— 2026-09-30 用户实测"目录缺失"）。
+            "wiki_path": "/".join([str(x) for x in category_path] + [title]),
             "last_edit_source": tag, "out_links": ke_pages.out_links_of(content)}
 
 
@@ -547,11 +551,22 @@ def _upsert_relation_lines(content: str, lines: list) -> tuple[str, int]:
     return "\n".join(merged), len(added)
 
 
-def _extra_set(title: str, aliases: list, metadata: dict, page_type: str, summary: str) -> str:
-    """更新已存在页时要一并覆盖的列（正文由 `_apply_content_update` 写）。"""
-    return (", title = %s, summary = %s, page_type = %s, aliases = %s::jsonb, page_metadata = %s::jsonb"
-            % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
-               ke_db.sql_json(aliases), ke_db.sql_json(metadata)))
+def _extra_set(title: str, aliases: list, metadata: dict, page_type: str, summary: str,
+               wiki_path: str = "", category_path: list | None = None) -> str:
+    """更新已存在页时要一并覆盖的列（正文由 `_apply_content_update` 写）。
+
+    `wiki_path`/`category_path` 也要覆盖：标题变了（如新增中文名称列）若不同步，
+    目录树里会一直显示旧标题 —— 2026-09-30 用户实测"目录缺失/不一致"。
+    """
+    extra = (", title = %s, summary = %s, page_type = %s, aliases = %s::jsonb, page_metadata = %s::jsonb"
+             % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
+                ke_db.sql_json(aliases), ke_db.sql_json(metadata)))
+    if wiki_path:
+        extra += ", wiki_path = %s" % ke_db.sql_str(wiki_path)
+    if category_path is not None:
+        extra += (", category_path = %s::jsonb, depth = %d"
+                  % (ke_db.sql_json(category_path), len(category_path)))
+    return extra
 
 
 # ---------------------------------------------------------------------------
@@ -620,8 +635,12 @@ def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
                         continue
                     meta = _page_row(kb, data.get("kb_name"), page_type, label, slug, title, content,
                                      aliases, row, source, tag)["metadata"]
-                    ke_pages._apply_content_update(kb, slug, content, tag,
-                                                   _extra_set(title, aliases, meta, page_type, title))
+                    cat = [data.get("kb_name") or "批量建模", label]
+                    ke_pages._apply_content_update(
+                        kb, slug, content, tag,
+                        _extra_set(title, aliases, meta, page_type, title,
+                                   wiki_path="/".join([str(x) for x in cat] + [title]),
+                                   category_path=cat))
                     updated += 1
                     continue
                 page = _page_row(kb, data.get("kb_name"), page_type, label, slug, title, content,
@@ -646,8 +665,13 @@ def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
                 pruned = len(victims)
         if created or updated or pruned:
             ke_db.psql(ke_pages.rebuild_in_links_sql(kb))
+            # 目录树：`wiki_folders` + 页 `folder_id`（与 `ke_pages.upsert_page` 同口径；
+            # 否则前端目录里看不到这批页 —— 2026-09-30 用户实测"目录缺失"）
+            folders = ke_pages.sync_folders(kb)
+        else:
+            folders = {"ok": True, "skipped": "无写入，跳过目录同步"}
         result.update({"created": created, "updated": updated, "skipped": skipped, "pruned": pruned,
-                       "entities": len(entities), "chunk_rows": CHUNK,
+                       "entities": len(entities), "chunk_rows": CHUNK, "folders": folders,
                        "next": "继续下一个目标（另一个类或一条关系）；全跑完再 audit_scan 验收"})
     else:
         rel = entry["target"]
@@ -796,11 +820,13 @@ def refresh_metadata(kb_id: str = "", dry_run: bool = False, limit: int = 5000,
     if not acl.get("allowed"):
         return {"ok": False, "error": "need_write_permission", "permission": acl}
     rows = ke_db.psql_csv(
-        "SELECT slug, COALESCE(page_type,'') AS page_type, COALESCE(page_metadata::text,'{}') AS meta "
+        "SELECT slug, COALESCE(page_type,'') AS page_type, COALESCE(title,'') AS title, "
+        "       COALESCE(page_metadata::text,'{}') AS meta, COALESCE(wiki_path,'') AS wiki_path, "
+        "       COALESCE(category_path::text,'[]') AS cat, COALESCE(depth,0) AS depth "
         "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
         "   AND page_metadata->'import'->>'file_sha256' IS NOT NULL "
         " ORDER BY slug LIMIT %d" % (ke_db.sql_str(kb), int(limit or 5000)))
-    changed, samples, skipped, failed = [], [], 0, []
+    changed, samples, skipped, failed, paths_fixed = [], [], 0, [], 0
     cache: dict = {}
     for row in rows:
         try:
@@ -820,29 +846,44 @@ def refresh_metadata(kb_id: str = "", dry_run: bool = False, limit: int = 5000,
             text = str(key)
             want[text if ":" in text else colmap.get(text, text)] = value
         by_col = onto.get("attributes_by_column") or {k: v for k, v in attrs.items() if ":" not in str(k)}
-        if attrs == want and (onto.get("attributes_by_column") or {}) == by_col and by_col:
+        # 目录路径（`wiki_path` 供前端目录树显示）：期望值 = 目录路径/标题；顺带补 category_path/depth
+        try:
+            cat = json.loads(row["cat"] or "[]")
+        except json.JSONDecodeError:
+            cat = []
+        if not cat:
+            cat = [kb_name or "批量建模", onto.get("label") or row["page_type"]]
+        want_wp = "/".join([str(x) for x in cat] + [row["title"]])
+        path_ok = (str(row["wiki_path"]) == want_wp) and bool(cat)
+        if attrs == want and (onto.get("attributes_by_column") or {}) == by_col and by_col and path_ok:
             skipped += 1
             continue
         if dry_run:
             samples.append({"slug": row["slug"], "page_type": row["page_type"],
-                            "before_keys": sorted(attrs)[:8], "after_keys": sorted(want)[:8]})
+                            "before_keys": sorted(attrs)[:8], "after_keys": sorted(want)[:8],
+                            "wiki_path_before": row["wiki_path"], "wiki_path_after": want_wp})
             continue
         onto2 = dict(onto)
         onto2["attributes"] = want
         onto2["attributes_by_column"] = by_col
         meta2 = dict(meta)
         meta2["ontology"] = onto2
-        ke_db.psql("UPDATE wiki_pages SET page_metadata = %s::jsonb, updated_at = now(), "
-                   " last_edit_source = %s "
+        if not path_ok:
+            paths_fixed += 1
+        ke_db.psql("UPDATE wiki_pages SET page_metadata = %s::jsonb, wiki_path = %s, "
+                   " category_path = %s::jsonb, depth = %d, updated_at = now(), last_edit_source = %s "
                    " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
-                   % (ke_db.sql_json(meta2), ke_db.sql_str("bodhi-import"),
-                      ke_db.sql_str(kb), ke_db.sql_str(row["slug"])))
+                   % (ke_db.sql_json(meta2), ke_db.sql_str(want_wp), ke_db.sql_json(cat), len(cat),
+                      ke_db.sql_str("bodhi-import"), ke_db.sql_str(kb), ke_db.sql_str(row["slug"])))
         changed.append(row["slug"])
+    folders = ke_pages.sync_folders(kb) if changed else {"ok": True, "skipped": "无写入，跳过目录同步"}
     return {"ok": True, "kb": {"id": kb, "name": kb_name}, "permission": acl.get("mode"),
             "scanned": len(rows), "changed": len(changed), "skipped": skipped, "failed": failed,
+            "paths_fixed": paths_fixed, "folders": folders,
             "samples": samples[:5], "slugs": changed[:50], "dry_run": bool(dry_run),
-            "note": ("只升级不降级：本体键原样保留；中文列名按「账本 mapping → 本体 label」升级；"
-                     "都查不到保留原键。只改 page_metadata（正文/version 不动）")}
+            "note": ("元数据：只升级不降级（本体键原样保留；中文列名按「账本 mapping → 本体 label」升级）；"
+                     "目录：`wiki_path` 对齐成「目录路径/标题」并重建 `wiki_folders`（前端目录树显示用）；"
+                     "只改这些列（正文/version 不动）")}
 
 
 def main() -> int:
