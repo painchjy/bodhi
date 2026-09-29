@@ -149,6 +149,81 @@ def graph_query(cypher: str = "", limit: int = 200, timeout: float = 25.0) -> di
             "result": rows[:cap], "truncated": len(rows) >= cap}
 
 
+def reference_lookup(kb_id: str = "", reference: str = "", allow_fetch: bool = False,
+                     max_chars: int = 6000, timeout: float = 8.0) -> dict:
+    """按规则里的「参考规范」（`bmm:ruleReference`）线索找**规范内容**（只读）。三级查找：
+
+    ① 知识库**文档/附件**同名（`knowledges`）→ 回文档 id（正文用 `doc_outline` 取）；
+    ② 知识库**wiki 页**标题/slug 命中 → 直接回正文片段；
+    ③ `allow_fetch=True` 且是 http(s) URL → 抓取并剥 HTML（内网可能不可达，默认关）。
+    都找不到 → `found=False` + `note`（技能口径：标「参考规范不可得」，**不要编造**）。
+    """
+    kb, kb_name, _note = ke_db.resolve_kb_id(kb_id) if kb_id else ("", "", "")
+    ref = str(reference or "").strip()
+    if not ref:
+        return {"ok": False, "error": "需要 reference（规则里的参考规范线索）"}
+    is_url = ref.lower().startswith(("http://", "https://"))
+    tail = ref.rstrip("/").split("/")[-1].split("?")[0].split("#")[0]
+    stem = tail.rsplit(".", 1)[0] if "." in tail else tail
+    like = "%" + (stem or ref) + "%"
+    out = {"ok": True, "kb": {"id": kb, "name": kb_name}, "reference": ref, "is_url": is_url,
+           "found": False, "source": "", "hits": [], "text": "", "note": ""}
+    if kb:
+        # ② wiki 页（规范文档常被建成页）
+        rows = ke_db.psql_csv(
+            "SELECT slug, title, LEFT(COALESCE(content,''), %d) AS snippet FROM wiki_pages "
+            " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND page_type NOT LIKE 'bmm:%%' "
+            "   AND (title ILIKE %s OR slug ILIKE %s) ORDER BY length(title) LIMIT 3"
+            % (int(max_chars), ke_db.sql_str(kb), ke_db.sql_str(like), ke_db.sql_str(like)))
+        if rows:
+            out["found"], out["source"] = True, "wiki"
+            out["hits"] = [{"slug": r["slug"], "title": r["title"]} for r in rows]
+            out["text"] = rows[0]["snippet"]
+            out["note"] = "命中的是知识库页；正文片段已附（要看全文用 wiki_read_page）"
+            return out
+        # ① 知识库文档/附件
+        cols = {str(r["column_name"]).lower() for r in ke_db.psql_csv(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'knowledges'")}
+        name_cols = [c for c in ("title", "name", "file_name", "filename") if c in cols]
+        if name_cols:
+            where = " OR ".join("%s::text ILIKE %s" % (c, ke_db.sql_str(like)) for c in name_cols)
+            try:
+                docs = ke_db.psql_csv(
+                    "SELECT id, %s FROM knowledges WHERE knowledge_base_id = %s AND (%s) LIMIT 3"
+                    % (", ".join(name_cols), ke_db.sql_str(kb), where))
+            except Exception as exc:  # noqa: BLE001
+                docs = []
+                out["note"] = "查文档表失败：%s" % str(exc)[:120]
+            if docs:
+                out["found"], out["source"] = True, "doc"
+                out["hits"] = [{"knowledge_id": d.get("id"),
+                                "title": next((d.get(c) for c in name_cols if d.get(c)), "")}
+                               for d in docs]
+                out["note"] = "命中的是知识库文档/附件；正文用 doc_outline（或 list_knowledge_chunks）取"
+                return out
+    if is_url and allow_fetch:
+        import html
+        import urllib.request
+        try:
+            req = urllib.request.Request(ref, headers={"User-Agent": "bodhi-review/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                raw = resp.read(200_000)
+            text = raw.decode("utf-8", "replace")
+            text = re.sub(r"(?is)<(script|style).*?</\1>", " ", text)
+            text = re.sub(r"(?s)<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", html.unescape(text)).strip()
+            out.update({"found": True, "source": "url", "text": text[:int(max_chars)],
+                        "note": "从 URL 抓取并剥 HTML；判分时引用要标明来自外部规范"})
+            return out
+        except Exception as exc:  # noqa: BLE001
+            out["note"] = ("URL 取不到（%s）→ 按技能口径标「参考规范不可得」，**不要编造规范内容**"
+                           % str(exc)[:120])
+            return out
+    out["note"] = ("知识库里找不到同名规范%s → 标「参考规范不可得」，只按规则原文判定，**不要编造**"
+                   % ("；URL 抓取未开启（allow_fetch=false）" if is_url else ""))
+    return out
+
+
 def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: list | None = None,
                  page_type: str = REPORT_TYPE, actor: str = "agent:document_review",
                  policy_slug: str = "", tenant: int | None = None) -> dict:
@@ -163,6 +238,14 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
     items = [f for f in (findings or []) if isinstance(f, dict)]
     if not items:
         return {"ok": False, "error": "需要 findings（每条：rule/verdict/evidence…）"}
+    if not policy_slug and policy:                 # 默认自动挂到策略页（bmm:promotesDirective）
+        hits = ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+            " AND page_type = 'bmm:BusinessPolicy' AND (title ILIKE %s OR slug ILIKE %s) "
+            " ORDER BY length(title) LIMIT 1"
+            % (ke_db.sql_str(kb), ke_db.sql_str("%" + str(policy) + "%"),
+               ke_db.sql_str("%" + str(policy) + "%")))
+        policy_slug = hits[0]["slug"] if hits else ""
     verdicts = {}
     for f in items:
         verdicts[str(f.get("verdict") or "无法判定")] = verdicts.get(str(f.get("verdict") or "无法判定"), 0) + 1
@@ -219,5 +302,6 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
                                                         "generator": REVIEW_TAG}})
     return {"ok": True, "kb": {"id": kb, "name": kb_name}, "slug": slug, "title": title,
             "rules": len(items), "verdicts": verdicts, "version": written.get("after_version"),
-            "permission": acl.get("mode"), "next": "跑 audit_scan 让结论页也满足 F3（本页已带原文依据）"}
+            "policy_slug": policy_slug, "permission": acl.get("mode"),
+            "next": "跑 audit_scan 让结论页也满足 F3（本页已带原文依据）"}
 

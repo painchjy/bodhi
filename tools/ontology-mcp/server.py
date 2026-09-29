@@ -3004,6 +3004,19 @@ def tool_definitions() -> list[dict]:
                 "batch": {"type": "string"}}},
         },
         {
+            "name": "import_refresh",
+            "description": ("**结构化批量建模·元数据刷新（写）**：把结构化导入页的 `page_metadata.ontology` 刷成当前口径"
+                            "（`attributes` 键=**本体属性名**如 `bmm:ruleScope`、`attributes_by_column`=中文列名）。"
+                            "列名→本体属性名按本体 label 反查；**只改元数据**（正文/标题/slug/version 不动）；"
+                            "幂等（已合规零写入）。用途：存量页（老口径用中文列名做键）一次性对齐，"
+                            "之后评审/巡检/智能体都能按本体名读。`dry_run=true` 只看会改哪些页。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "dry_run": {"type": "boolean"},
+                "limit": {"type": "integer"}},
+                "required": ["kb_id"]},
+        },
+        {
             "name": "audit_purge",
             "description": ("**巡检清理·一步硬删（写）**：只要调用者对该知识库**有写权限**就执行，不需要后台 plan/confirm。"
                             "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理 + 重算 in_links）；"
@@ -3040,6 +3053,20 @@ def tool_definitions() -> list[dict]:
                 "cypher": {"type": "string"},
                 "limit": {"type": "integer"}},
                 "required": ["cypher"]},
+        },
+        {
+            "name": "reference_lookup",
+            "description": ("**文档评审·取参考规范（只读）**：按规则里的「参考规范」（`bmm:ruleReference`，URL 或规范名）"
+                            "找**规范内容**：① 知识库文档/附件同名 → 回 `knowledge_id`（正文用 `doc_outline` 取）；"
+                            "② 知识库 wiki 页标题/slug 命中 → 直接回正文片段；③ `allow_fetch=true` 且是 URL → 抓取并剥 HTML"
+                            "（内网可能不可达，**默认关**）。都找不到 → `found=false` + `note`：按技能口径标"
+                            "「参考规范不可得」，**只按规则原文判定，不要编造规范内容**。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "reference": {"type": "string", "description": "规则里的参考规范（URL / 规范名 / 文件名）"},
+                "allow_fetch": {"type": "boolean"},
+                "max_chars": {"type": "integer"}},
+                "required": ["reference"]},
         },
         {
             "name": "review_apply",
@@ -3485,6 +3512,13 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "import_apply":
         return ke_import.apply(str(args.get("ticket", "")), actor=str(args.get("actor", "agent:import")),
                                prune=bool(args["prune"]) if "prune" in args else None)
+    if name == "import_refresh":
+        return ke_import.refresh_metadata(str(args.get("kb_id", "")), bool(args.get("dry_run", False)),
+                                          int(args.get("limit", 5000) or 5000))
+    if name == "reference_lookup":
+        return ke_review.reference_lookup(str(args.get("kb_id", "")), str(args.get("reference", "")),
+                                          bool(args.get("allow_fetch", False)),
+                                          int(args.get("max_chars", 6000) or 6000))
     if name == "import_state":
         return ke_import.state(str(args.get("batch", "")))
     if name == "audit_purge":
@@ -3855,6 +3889,10 @@ class MCPHandler(BaseHTTPRequestHandler):
             "/bodhi/import/apply":
                 lambda b: ke_import.apply(str(b.get("ticket", "")), actor=str(b.get("actor", "http:import")),
                                           prune=bool(b["prune"]) if "prune" in b else None),
+            # 结构化批量建模：元数据刷新（存量页一次性对齐）
+            "/bodhi/import/refresh":
+                lambda b: ke_import.refresh_metadata(str(b.get("kb_id", "")), bool(b.get("dry_run", False)),
+                                                     int(b.get("limit", 5000) or 5000)),
             # 巡检清理：有库写权限即可一步硬删
             "/bodhi/audit/purge":
                 lambda b: ke_audit.purge(str(b.get("kb_id", "")), str(b.get("kinds", "all")), "all", 5000,
@@ -3994,6 +4032,17 @@ class MCPHandler(BaseHTTPRequestHandler):
                                                      int(params.get("limit", 300) or 300)), 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/review/rules 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/review/reference", "/bodhi/review/reference.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_review.reference_lookup(params.get("kb_id", ""), params.get("reference", ""),
+                                                      params.get("allow_fetch", "").lower() in ("1", "true", "yes"),
+                                                      int(params.get("max_chars", 6000) or 6000)),
+                           200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/review/reference 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/review/graph", "/bodhi/review/graph.json"):

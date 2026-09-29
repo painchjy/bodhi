@@ -73,6 +73,11 @@ import_state(batch="<batch>")                # remaining 为空 = 这张表建�
 ```
 - 建完所有目标后跑 `audit_scan(kb_id=…, scope="all")`：**C1（无来源）/F3（无原文依据）/B1（类型不在本体）必须全绿**，
   有 findings 就照它的 fix 处理。
+- 若库里**已有**历史导入页（老口径：`page_metadata.ontology.attributes` 用中文列名做键），跑一次
+  `import_refresh(kb_id=…)` 对齐成"本体键为主"（`dry_run=true` 先看 diff；**只升级不降级**、幂等）。
+- **清理纪律（硬删）**：要清理异常页时**先** `audit_purge(kb_id, dry_run=true)` 把 `per_kind` 清单念给用户，
+  再 `audit_purge(kb_id, kinds=…)` 执行（**有库写权限即可一步硬删，不可逆**）；
+  结构化导入页与评审页在清理计划里是**豁免**的（来源记在元数据），所以这类页不会被误删。
 
 ## 3. 每个类/关系的参数怎么给（速查）
 

@@ -1484,9 +1484,20 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
         actions["init_graph"] = {"nodes": _instance_nodes(kb_id),
                                  "note": "Neo4j BodhiInstance（当前部署通常为 0）"}
     if "no_source_pages" in kinds:
-        slugs = sorted(p["slug"] for p in pages
-                       if _is_instance(p["page_type"]) and not _json_list(p["refs"]))
-        actions["no_source_pages"] = {"count": len(slugs), "slugs": slugs}
+        # 与 check_sources（C1）**同口径**：结构化导入页（page_metadata.import.file_sha256）与
+        # 文档评审页（page_metadata.review）的"来源"记在元数据里 → **豁免**，不列入清理计划。
+        # （2026-09-30 修：此前 plan 侧没走豁免 → purge --kinds all 会把 33 页合法导入页硬删！）
+        slugs, exempt = [], 0
+        for page in pages:
+            if not (_is_instance(page["page_type"]) and not _json_list(page["refs"])):
+                continue
+            if _import_source(page):
+                exempt += 1
+                continue
+            slugs.append(page["slug"])
+        actions["no_source_pages"] = {"count": len(slugs), "slugs": sorted(slugs), "exempt": exempt,
+                                      "note": ("结构化导入页/评审页按口径豁免（来源=page_metadata.import.file_sha256 "
+                                               "/ page_metadata.review）；exempt=%d" % exempt)}
     if "deleted_source_pages" in kinds or "mixed_source_refs" in kinds:
         res = (ke_docs.residue(kb_id) if ke_docs is not None
                else {"will_delete": [], "will_strip": {}, "doc_ids": []})
@@ -1786,9 +1797,13 @@ def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 
                 "permission": acl.get("mode"), "not_found": [s for s in targets if s not in existing],
                 **(out if isinstance(out, dict) else {"result": out})}
     plan = build_plan(kb, kinds, scope, page_limit, save=True)
+    actions = plan.get("actions") or {}
+    per_kind = {}
+    for kind, info in actions.items():
+        if isinstance(info, dict):
+            per_kind[kind] = info.get("count", info.get("pages", info.get("lines")))
     brief = {"plan_id": plan.get("plan_id"), "kinds": plan.get("kinds"),
-             "actions": len(plan.get("actions") or []),
-             "counts": plan.get("counts") or plan.get("summary")}
+             "actions": len(actions), "per_kind": per_kind, "current": plan.get("current")}
     if dry_run:
         return {"ok": True, "dry_run": True, "kb": {"id": kb, "name": kname}, "mode": "kinds",
                 "plan": brief, "permission": acl.get("mode")}

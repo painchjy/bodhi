@@ -749,6 +749,102 @@ def _dump(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
+def _label_lookup(page_type: str) -> dict:
+    """本体 label（中文）→ 本体属性名（`适用范围` → `bmm:ruleScope`）。"""
+    props = ke_ontology.data_properties_for(page_type) or {}
+    lookup = {}
+    for prefixed, info in props.items():
+        for key in ((info or {}).get("label"), prefixed, str(prefixed).split(":")[-1]):
+            if key:
+                lookup[str(key).strip()] = prefixed
+    return lookup
+
+
+def _ledger_colmap(row: dict, cache: dict) -> dict:
+    """该页**所属批次账本**里记的「列名 → 本体属性名」（最权威；账本没有才用本体 label 兜底）。"""
+    try:
+        meta = json.loads(row.get("meta") or "{}")
+    except json.JSONDecodeError:
+        return {}
+    batch = ((meta.get("import") or {}).get("batch") or "").strip()
+    if not batch:
+        return {}
+    if batch not in cache:
+        try:
+            cache[batch] = _ledger_load(batch)
+        except Exception:  # noqa: BLE001
+            cache[batch] = {}
+    out = {}
+    for entry in ((cache[batch] or {}).get("targets") or {}).values():
+        if entry.get("kind") == "class" and entry.get("page_type") == row.get("page_type"):
+            out.update({str(k): str(v) for k, v in (entry.get("attrs") or {}).items()})
+    return out
+
+
+def refresh_metadata(kb_id: str = "", dry_run: bool = False, limit: int = 5000,
+                     tenant: int | None = None) -> dict:
+    """把**结构化导入页**的元数据刷成当前口径（`attributes` 键=本体属性名 + `attributes_by_column`=中文列名）。
+
+    **只升级、不降级**：
+    - 已是本体键（含 `:`）的条目**原样保留**；
+    - 中文列名的条目按「账本该批次 mapping（最权威）→ 本体 label 反查」升级；
+    - 两条都查不到就保留原键（不猜）。
+    只改 `page_metadata`（正文/标题/slug/version 都不动）；**幂等**：已合规的页零写入。
+    """
+    kb, kb_name, _note = ke_db.resolve_kb_id(kb_id)
+    acl = ke_db.assert_can_write(kb, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl.get("allowed"):
+        return {"ok": False, "error": "need_write_permission", "permission": acl}
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(page_type,'') AS page_type, COALESCE(page_metadata::text,'{}') AS meta "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+        "   AND page_metadata->'import'->>'file_sha256' IS NOT NULL "
+        " ORDER BY slug LIMIT %d" % (ke_db.sql_str(kb), int(limit or 5000)))
+    changed, samples, skipped, failed = [], [], 0, []
+    cache: dict = {}
+    for row in rows:
+        try:
+            meta = json.loads(row["meta"] or "{}")
+        except json.JSONDecodeError:
+            failed.append({"slug": row["slug"], "why": "page_metadata 不是合法 JSON"})
+            continue
+        onto = meta.get("ontology") or {}
+        attrs = onto.get("attributes") or {}
+        if not attrs:
+            skipped += 1
+            continue
+        colmap = dict(_label_lookup(row["page_type"]))
+        colmap.update(_ledger_colmap(row, cache))            # 账本优先
+        want = {}
+        for key, value in attrs.items():
+            text = str(key)
+            want[text if ":" in text else colmap.get(text, text)] = value
+        by_col = onto.get("attributes_by_column") or {k: v for k, v in attrs.items() if ":" not in str(k)}
+        if attrs == want and (onto.get("attributes_by_column") or {}) == by_col and by_col:
+            skipped += 1
+            continue
+        if dry_run:
+            samples.append({"slug": row["slug"], "page_type": row["page_type"],
+                            "before_keys": sorted(attrs)[:8], "after_keys": sorted(want)[:8]})
+            continue
+        onto2 = dict(onto)
+        onto2["attributes"] = want
+        onto2["attributes_by_column"] = by_col
+        meta2 = dict(meta)
+        meta2["ontology"] = onto2
+        ke_db.psql("UPDATE wiki_pages SET page_metadata = %s::jsonb, updated_at = now(), "
+                   " last_edit_source = %s "
+                   " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
+                   % (ke_db.sql_json(meta2), ke_db.sql_str("bodhi-import"),
+                      ke_db.sql_str(kb), ke_db.sql_str(row["slug"])))
+        changed.append(row["slug"])
+    return {"ok": True, "kb": {"id": kb, "name": kb_name}, "permission": acl.get("mode"),
+            "scanned": len(rows), "changed": len(changed), "skipped": skipped, "failed": failed,
+            "samples": samples[:5], "slugs": changed[:50], "dry_run": bool(dry_run),
+            "note": ("只升级不降级：本体键原样保留；中文列名按「账本 mapping → 本体 label」升级；"
+                     "都查不到保留原键。只改 page_metadata（正文/version 不动）")}
+
+
 def main() -> int:
     import argparse
     for stream in (sys.stdout, sys.stderr):
@@ -791,6 +887,10 @@ def main() -> int:
     q.add_argument("--prune", action="store_true")
     q = sub.add_parser("state", help="账本：目标状态 + remaining")
     q.add_argument("--batch", default="")
+    q = sub.add_parser("refresh-metadata", help="写：把导入页元数据刷成当前口径（只改 page_metadata）")
+    q.add_argument("--kb", required=True)
+    q.add_argument("--dry-run", action="store_true")
+    q.add_argument("--limit", type=int, default=5000)
     args = ap.parse_args()
 
     if args.cmd == "probe":
@@ -814,6 +914,10 @@ def main() -> int:
         return 0 if out.get("ok") or out.get("error") is None else 1
     if args.cmd == "apply":
         out = apply(args.ticket, actor=args.actor, prune=True if args.prune else None)
+        _dump(out)
+        return 0 if out.get("ok") else 1
+    if args.cmd == "refresh-metadata":
+        out = refresh_metadata(args.kb, args.dry_run, args.limit)
         _dump(out)
         return 0 if out.get("ok") else 1
     _dump(state(args.batch))

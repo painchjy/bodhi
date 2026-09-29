@@ -8,8 +8,8 @@ stages: [pick, rules, scope, judge, report]
 scope:
   classes: [bmm:BusinessPolicy, bmm:OperativeBusinessRule, bmm:StructuralBusinessRule, bmm:BusinessRule]
   relations: [bmm:isDerivedFrom, bmm:isBasisFor, bmm:guides, bmm:hasEnforcementLevel]
-tools: [rules_of_policy, graph_query, review_apply, doc_outline, get_document_info, list_knowledge_chunks,
-        grep_chunks, wiki_search, wiki_read_page, audit_scan]
+tools: [rules_of_policy, graph_query, reference_lookup, review_apply, doc_outline, get_document_info,
+        list_knowledge_chunks, grep_chunks, wiki_search, wiki_read_page, audit_scan]
 version: 1
 ---
 
@@ -58,9 +58,13 @@ doc_outline(kb_id, knowledge_id, budget_tokens=…)      # 按章节/切片取�
 - 图检索**取不到**证据时：结论写「无法判定（图中无相关数据）」，并给"需要在图谱里补什么"的建议。
 
 ### 第 4 步：有参考规范就先取规范
-`ruleReference` 是规范线索（URL 或规范文档名）：
-- **优先在知识库里找同名规范文档/附件**（`wiki_search` / `doc_outline`）→ 取到就用它做判据；
-- 只给 URL 且取不到 → 结论里标「参考规范不可得（仅按规则原文判定）」，**不要编造规范内容**。
+`ruleReference` 是规范线索（URL 或规范文档名），**用 `reference_lookup` 取**（只读，三级查找）：
+```
+reference_lookup(kb_id, reference="<ruleReference 的值>")
+#  found=true + source=wiki/doc → 直接用它的正文/文档做判据
+#  found=true + source=url  → 需 allow_fetch=true（内网可能不可达）
+#  found=false              → 结论里标「参考规范不可得（仅按规则原文判定）」，**不要编造规范内容**
+```
 
 ### 第 5 步：写评审结论（一页报告）
 ```
