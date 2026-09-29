@@ -76,6 +76,12 @@
 3. `参考规范细则`（URL）只作**参照**：技能里有一条可选步骤 —— 发现 URL 时**去取该明细规范**（上传/检索到的 md）辅助处理规则；
 4. `级别` 取值约定 `强制 / 推荐 / 可覆盖` → `bmm:Strict / bmm:Advisory / bmm:Override`（现成枚举）。
    `适用范围`（`bmm:ruleScope`）、`实现方式`（`bmm:ruleImplementation`）、`参考规范细则`（`bmm:ruleReference`）已进本体（2026-09-29）。
+5. **`级别` 是"枚举列"**：用 `import_plan(..., enums={"级别":{"relation":"bmm:hasEnforcementLevel",
+   "values":{"强制":"bmm:Strict","推荐":"bmm:Advisory","可覆盖":"bmm:Override"}}})` 建成**无链接的关系行**
+   （`- 具有执行级别（`bmm:hasEnforcementLevel`）→ bmm:Advisory（推荐）`）+ 元数据 `ontology.enum_relations`；
+   工具只校验「该关系对该类是否合法」，取值映射由技能按本口径给出。
+6. **`## 本体关系` 归关系批次维护**：类批次重跑会**保留**已有关系小节（只并入本批新增的枚举行），
+   所以「先类批次、后关系批次」的顺序可以放心重跑，不必担心关系线被擦掉。
 
 ---
 

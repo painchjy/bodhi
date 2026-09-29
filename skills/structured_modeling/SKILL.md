@@ -81,8 +81,8 @@ import_state(batch="<batch>")                # remaining 为空 = 这张表建�
 | 单实体宽表 | `key_column` = 唯一键列；`mapping` = 属性列 → 数据属性 |
 | 一张表**多个实体**（前缀分组） | 每个实体**单独一遍**：前缀列映射到该类的属性，`key_column` 用该实体的编号列 |
 | 只有名称的实体（部门/组织机构） | `mapping={"…业务部门":"name"}` + `unknown_to_description=false` |
-| 关系（主子、归属） | `source_key_column`/`target_key_column` + `source_class`/`target_class` |
-| 枚举型列（强制/推荐） | 不要建成数据属性：**建成关系**（`bmm:hasEnforcementLevel` → `bmm:Strict`/`bmm:Advisory`/`bmm:Override`） |
+| 关系（主子、归属） | `source_key_column`/`target_key_column` + `source_class`/`target_class`；**两侧键列都必须是该类建页时用的 slug 键列**（规则页键列是 `规则编号`——拿 `业务规则名称` 当 `source_key_column` 会报 `dangling`，回执会回显拼出的 slug） |
+| 枚举型列（强制/推荐） | **用 `enums` 建成关系**（不是数据属性）：`enums={"级别":{"relation":"bmm:hasEnforcementLevel","values":{"强制":"bmm:Strict","推荐":"bmm:Advisory","可覆盖":"bmm:Override"}}}` → 页面写 `- 具有执行级别（`bmm:hasEnforcementLevel`）→ bmm:Advisory（推荐）`（**无链接**：目标是枚举值不是页），元数据落 `ontology.enum_relations` |
 | 列里是 URL/规范名 | 映射到 `bmm:ruleReference` 之类；**它的内容不进正文**（正文原文依据用**该行原始值**） |
 | 列名对不上任何已声明属性 | 别硬塞 → 让工具报 `attribute_not_declared`（它会给出可用清单），或先跟用户确认是否改本体 |
 
@@ -91,6 +91,10 @@ import_state(batch="<batch>")                # remaining 为空 = 这张表建�
 - **重复键**（同一实体多行，如一个主系统带多个子系统）：工具**自动去重成一条**（`duplicate_keys` 会报数）；
   这是正常现象，不用报错。
 - **空键行**：进 `empty_keys` 计数并跳过（例如"主系统无子系统"的空行）。
-- **`dangling`（关系批次）**：说明两侧有页还没建 → 先把对应**类**批次跑完，再回来跑关系。
+- **`dangling`（关系批次）**：说明两侧有页还没建 → 先把对应**类**批次跑完，再回来跑关系；
+  也可能是**键列选错**（关系批次把 `source_key_column` 的值直接拼源页 slug）——回执里 `source_slug`/`target_slug`
+  会给出拼出来的 slug，对照页 slug 一眼能看出。
+- **`## 本体关系` 归谁维护**：**关系批次**（和手工编辑）。类批次只维护「定义/属性/原文依据」，
+  重跑时会**原样保留**已有关系小节（只把本批新增的枚举关系行并进去）→ 不用担心类批次擦掉关系线。
 - **`attribute_not_declared` / 类不存在**：改 `mapping`/`target`，或跟用户确认是否要给本体加类/属性（那是 TTL 变更）。
 - **`need_write_permission`**：目标库的写权限（属主 / `kb_shares` 里 editor|writer|admin）；让用户换库或授权。

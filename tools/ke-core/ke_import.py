@@ -182,12 +182,18 @@ def plan(kind: str, target: str, file: str, kb_id: str = "", sheet: str = "", ma
          key_column: str = "", title: str = "", aliases: list | None = None,
          source_key_column: str = "", target_key_column: str = "",
          source_class: str = "", target_class: str = "", prune: bool = False,
-         batch_id: str = "", limit: int = 0, unknown_to_description: bool = True) -> dict:
+         batch_id: str = "", limit: int = 0, unknown_to_description: bool = True,
+         enums: dict | None = None) -> dict:
     """**只读**。`kind="class"`：一个类 + 它的数据属性（`key_column` 是行→slug 的键列）；
     `kind="relation"`：一条关系（`source_key_column`/`target_key_column` 是两侧键列）。
 
     `unknown_to_description=False` 时**不把未映射列聚合进 description**（适合"部门/组织机构"这类
     只有名称、整行其余列与本实体无关的表）。
+
+    `enums`：把**枚举列**建成「关系 → 枚举值」（不是数据属性），例：
+    `{"级别": {"relation": "bmm:hasEnforcementLevel",
+               "values": {"强制": "bmm:Strict", "推荐": "bmm:Advisory", "可覆盖": "bmm:Override"}}}`
+    —— 工具只校验「该关系是不是这个类的合法关系」，取值映射由你（智能体）从用户口径给出。
     """
     if kind not in ("class", "relation"):
         return {"error": "kind 只能是 class（一个类）或 relation（一条关系）", "kind": kind}
@@ -216,6 +222,14 @@ def plan(kind: str, target: str, file: str, kb_id: str = "", sheet: str = "", ma
                     "issues": [{"code": "attribute_not_declared", "detail": bad,
                                 "allowed": sorted(ke_ontology.data_properties_for(conv) or {})}],
                     "header": header}
+        enum_spec, enum_bad, enum_miss = build_enum_spec(conv, enums or {}, rows)
+        if enum_bad:
+            return {"ok": False, "error": "enum_relation_not_allowed（枚举列映射到了不合法的关系）",
+                    "issues": [{"code": "enum_relation_not_allowed", "detail": enum_bad}],
+                    "header": header}
+        for item in enum_miss:
+            questions.append("列「%s」有 %d 个取值没在映射表里（不写关系行）：%s"
+                             % (item["column"], len(item["values"]), "、".join(item["values"])))
         keys, dup, empty = [], [], 0
         for row in rows:
             value = (row.get(key_column) or "").strip()
@@ -226,7 +240,7 @@ def plan(kind: str, target: str, file: str, kb_id: str = "", sheet: str = "", ma
                 dup.append(value)
                 continue
             keys.append(value)
-        unknown = [c for c in header if c not in attrs and c != key_column]
+        unknown = [c for c in header if c not in attrs and c not in enum_spec and c != key_column]
         if unknown:
             questions.append("有 %d 列未映射：%s → 默认聚合进 description（要单独建模请改 mapping）"
                              % (len(unknown), "、".join(unknown[:8])))
@@ -245,7 +259,7 @@ def plan(kind: str, target: str, file: str, kb_id: str = "", sheet: str = "", ma
                             "row": row["__row__"]})
         extra = {"page_type": conv, "class_label": info.get("label") or conv, "attrs": attrs,
                  "unknown_columns": unknown, "aliases": aliases or [], "title": title,
-                 "unknown_to_description": bool(unknown_to_description)}
+                 "unknown_to_description": bool(unknown_to_description), "enums": enum_spec}
         plan_key = "class|%s|%s" % (conv, key_column)
     else:
         rel = relation_meta(str(target or "").strip())
@@ -273,7 +287,8 @@ def plan(kind: str, target: str, file: str, kb_id: str = "", sheet: str = "", ma
             if s_slug in known and t_slug in known:
                 resolvable += 1
             else:
-                missing.append({"source": a, "target": b, "why": ("源页缺 " if s_slug not in known else "")
+                missing.append({"source": a, "target": b, "source_slug": s_slug, "target_slug": t_slug,
+                                "why": ("源页缺 " if s_slug not in known else "")
                                 + ("目标页缺" if t_slug not in known else "")})
         counts = {"rows": len(rows), "pairs": len(pairs), "resolvable": resolvable,
                   "dangling": len(missing)}
@@ -285,10 +300,11 @@ def plan(kind: str, target: str, file: str, kb_id: str = "", sheet: str = "", ma
                  "page_type": source_class}
         plan_key = "relation|%s|%s|%s" % (target, source_key_column, target_key_column)
 
-    ticket = _sha1("import-v1|%s|%s|%s|%s|%s|%s|%s"
+    ticket = _sha1("import-v1|%s|%s|%s|%s|%s|%s|%s|%s"
                    % (sha, kind, target, kb, json.dumps(mapping or {}, sort_keys=True),
                       json.dumps(counts, sort_keys=True),
-                      key_column + source_key_column + target_key_column))
+                      key_column + source_key_column + target_key_column,
+                      json.dumps(enums or {}, sort_keys=True)))
     batch = batch_id or ("imp-%s" % _sha1("%s|%s" % (sha, kb))[:10])
     ledger = _ledger_load(batch)
     ledger.update({"batch": batch, "kb_id": kb, "kb_name": kb_name, "file": str(file), "sha256": sha,
@@ -336,9 +352,50 @@ def _description_of(row: dict, attrs: dict, unknown: list) -> str:
     return "\n\n".join(parts) or "（源表未提供）"
 
 
+def enum_relations_of(meta: str) -> dict:
+    """从页元数据取「枚举关系」（`bmm:hasEnforcementLevel` → `bmm:Advisory`）。"""
+    try:
+        data = json.loads(meta or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+    return ((data.get("ontology") or {}).get("enum_relations") or {})
+
+
+def build_enum_spec(klass: str, enums: dict, rows: list) -> tuple[dict, list, list]:
+    """校验「枚举列 → 关系」的映射（**确定性**：只查本体，不做语义推断）。
+
+    `enums` 形态：`{"级别": {"relation": "bmm:hasEnforcementLevel",
+                            "values": {"强制": "bmm:Strict", "推荐": "bmm:Advisory"}}}`
+    返回 `(spec, bad, unmapped)`：spec 可直接进 plan/apply；bad = 关系不合法；unmapped = 数据里出现的、映射表没覆盖的取值。
+    """
+    allowed = ke_ontology.relation_type_map(klass) if hasattr(ke_ontology, "relation_type_map") else {}
+    spec, bad, unmapped = {}, [], []
+    for column, raw in (enums or {}).items():
+        conf = raw if isinstance(raw, dict) else {"relation": str(raw), "values": {}}
+        rel = str(conf.get("relation") or "").strip()
+        if not rel:
+            bad.append({"column": column, "why": "缺 relation"})
+            continue
+        if allowed and rel not in allowed:
+            bad.append({"column": column, "relation": rel,
+                        "why": "%s 不是 %s 的合法关系（domain 不含该类，含继承）" % (rel, klass),
+                        "allowed": sorted(allowed)})
+            continue
+        info = allowed.get(rel) or {}
+        values = {str(k).strip(): str(v).strip() for k, v in (conf.get("values") or {}).items()}
+        seen = {str(r.get(column) or "").strip() for r in rows}
+        miss = sorted(v for v in seen if v and v not in values)
+        if miss:
+            unmapped.append({"column": column, "relation": rel, "values": miss[:10]})
+        spec[column] = {"relation": rel, "label": info.get("label") or rel, "values": values,
+                        "range": info.get("targets") or info.get("range") or []}
+    return spec, bad, unmapped
+
+
 def render_class_content(page_type: str, row: dict, attrs: dict, title: str, unknown: list,
-                         source: dict, tag: str) -> str:
-    """类批次正文：`# 标题` + 类型/生成方式/来源 + `## 定义` + `## 属性` + `## 原文依据`。"""
+                         source: dict, tag: str, enums: dict | None = None) -> str:
+    """类批次正文：`# 标题` + 类型/生成方式/来源 + `## 定义` + `## 属性` + `## 原文依据`
+    （`enums` 给了就再写「## 本体关系」的**枚举关系行**，如 `- 具有执行级别（`bmm:hasEnforcementLevel`）→ bmm:Advisory（推荐）`）。"""
     label = source.get("class_label") or page_type
     lines = ["# %s" % title, "",
              "> **本体类型**：%s（`%s`）  " % (label, page_type),
@@ -355,7 +412,50 @@ def render_class_content(page_type: str, row: dict, attrs: dict, title: str, unk
         lines.append("")
     evidence = " | ".join(str(c or "") for c in (row.get("__raw__") or [])).strip(" |")
     lines += [EVIDENCE_SECTION, "", "> %s" % (evidence or "（空行）"), ""]
+    rel_lines = []
+    for column, spec in (enums or {}).items():
+        raw = (row.get(column) or "").strip()
+        value = (spec.get("values") or {}).get(raw)
+        if not value:
+            continue
+        # 目标不是 wiki 页（枚举值/外部个体）→ `ke_pages.rel_line` 的**无链接**形态：
+        # 巡检 A1 只解析 `[[slug|…]]`，所以这种行既表达关系，又不会产生悬空出边。
+        rel_lines.append(ke_pages.rel_line(spec.get("label") or spec["relation"], spec["relation"],
+                                           "%s（%s）" % (value, raw), ""))
+    if rel_lines:
+        lines += [REL_SECTION, ""] + rel_lines + [""]
     return "\n".join(lines)
+
+
+def _merge_relation_section(prev: str, content: str) -> str:
+    """类批次只维护「定义/属性/原文依据」；**已有**「## 本体关系」小节原样保留。
+
+    为什么：`## 本体关系` 由**关系批次**（或人在页面上）维护——类批次重跑时若整页覆盖，
+    会把 `bmm:isDerivedFrom → [[策略页]]` 这类行擦掉（实测踩到：规则页的关系线被清空 → 评审取不到规则）。
+    本函数把旧小节的行与本批新生成的行**并集去重**后写回。
+    """
+    p_lines = (prev or "").splitlines()
+    ps, pe = ke_pages._section_span(p_lines)
+    if ps < 0:
+        return content
+    keep = [ln.rstrip() for ln in p_lines[ps + 1:pe] if ln.strip()]
+    cur = (content or "").splitlines()
+    cs, ce = ke_pages._section_span(cur)
+    if cs >= 0:
+        new = [ln.rstrip() for ln in cur[cs + 1:ce] if ln.strip()]
+        body, rest = cur[:cs], cur[ce:]
+    else:
+        new, body, rest = [], cur, []
+    merged = list(keep)
+    for line in new:
+        if line not in merged:
+            merged.append(line)
+    if not merged:
+        return content
+    while body and not body[-1].strip():
+        body.pop()
+    text = "\n".join(body + ["", REL_SECTION, ""] + merged + rest).rstrip("\n")
+    return text + "\n"
 
 
 def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, title: str, content: str,
@@ -369,9 +469,18 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
     by_column = {column: (row.get(column) or "").strip()
                  for column in attrs if (row.get(column) or "").strip()}
     attributes = {attrs.get(column, column): value for column, value in by_column.items()}
-    metadata = {"ontology": {"model": module, "class": page_type, "label": label, "name": title,
-                             "attributes": attributes, "attributes_by_column": by_column,
-                             "generator": TAG, "created_at": ke_db.now_text()},
+    # 枚举列 → 关系（`bmm:hasEnforcementLevel` → `bmm:Advisory`）：机器口径放元数据，正文另有一行（无链接）
+    enum_rel = {}
+    for column, spec in (source.get("enums") or {}).items():
+        value = (spec.get("values") or {}).get((row.get(column) or "").strip())
+        if value:
+            enum_rel[spec.get("relation") or column] = value
+    onto = {"model": module, "class": page_type, "label": label, "name": title,
+            "attributes": attributes, "attributes_by_column": by_column,
+            "generator": TAG, "created_at": ke_db.now_text()}
+    if enum_rel:
+        onto["enum_relations"] = enum_rel
+    metadata = {"ontology": onto,
                 "import": {"batch": source.get("batch"), "file": source.get("file"),
                            "file_sha256": source.get("sha256"), "sheet": source.get("sheet"),
                            "row": int(row.get("__row__") or 0), "key": source.get("key_value"),
@@ -500,7 +609,9 @@ def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
                 source = {**entry, "batch": batch, "key_value": value, "page_type": page_type,
                           "class_label": label, "attrs": attrs, "sha256": data.get("sha256"),
                           "file": data.get("file"), "sheet": sheet, "tag_full": tag_full}
-                content = render_class_content(page_type, row, attrs, title, unknown, source, tag)
+                content = render_class_content(page_type, row, attrs, title, unknown, source, tag,
+                                               enums=entry.get("enums"))
+                content = _merge_relation_section(existing.get(slug) or "", content)
                 aliases = [str(row.get(c) or "").strip() for c in (entry.get("aliases") or [])]
                 aliases = [a for a in aliases if a]
                 if slug in existing:
@@ -671,6 +782,9 @@ def main() -> int:
     q.add_argument("--limit", type=int, default=0)
     q.add_argument("--no-unknown-to-description", action="store_true",
                    help="未映射列不聚合进 description（适合部门/组织机构这类只有名称的类）")
+    q.add_argument("--enums", default="",
+                   help='JSON：把枚举列建成关系，如 {"级别":{"relation":"bmm:hasEnforcementLevel",'
+                        '"values":{"强制":"bmm:Strict","推荐":"bmm:Advisory"}}}')
     q = sub.add_parser("apply", help="写：按 ticket 落库（只写这一个目标）")
     q.add_argument("--ticket", required=True)
     q.add_argument("--actor", default="cli:import")
@@ -694,7 +808,8 @@ def main() -> int:
                    source_key_column=args.source_key_column, target_key_column=args.target_key_column,
                    source_class=args.source_class, target_class=args.target_class,
                    prune=args.prune, batch_id=args.batch, limit=args.limit,
-                   unknown_to_description=not args.no_unknown_to_description)
+                   unknown_to_description=not args.no_unknown_to_description,
+                   enums=(json.loads(args.enums) if args.enums.strip() else None))
         _dump(out)
         return 0 if out.get("ok") or out.get("error") is None else 1
     if args.cmd == "apply":

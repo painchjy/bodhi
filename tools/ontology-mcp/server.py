@@ -2978,6 +2978,7 @@ def tool_definitions() -> list[dict]:
                 "source_class": {"type": "string"},
                 "target_class": {"type": "string"},
                 "unknown_to_description": {"type": "boolean", "description": "未映射列是否聚合进 description（默认 true；部门这类实体建议 false）"},
+                "enums": {"type": "object", "description": "枚举列 → 关系（不是数据属性）：{\"级别\":{\"relation\":\"bmm:hasEnforcementLevel\",\"values\":{\"强制\":\"bmm:Strict\",\"推荐\":\"bmm:Advisory\"}}}；工具只校验关系对该类是否合法，取值映射由技能从用户口径给"},
                 "prune": {"type": "boolean", "description": "重跑时软删本批多出来的页"},
                 "batch_id": {"type": "string", "description": "同一份文件多次目标共用一个 batch（便于 import_state 收敛）"},
                 "limit": {"type": "integer"}},
@@ -3479,6 +3480,7 @@ def call_tool(name: str, args: dict) -> dict:
                               target_class=str(args.get("target_class", "")),
                               unknown_to_description=bool(args.get("unknown_to_description", True)),
                               prune=bool(args.get("prune", False)),
+                              enums=args.get("enums") or None,
                               batch_id=str(args.get("batch_id", "")), limit=int(args.get("limit", 0) or 0))
     if name == "import_apply":
         return ke_import.apply(str(args.get("ticket", "")), actor=str(args.get("actor", "agent:import")),
@@ -3847,6 +3849,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                                          target_class=str(b.get("target_class", "")),
                                          unknown_to_description=bool(b.get("unknown_to_description", True)),
                                          prune=bool(b.get("prune", False)),
+                                         enums=b.get("enums") or None,
                                          batch_id=str(b.get("batch_id", "")),
                                          limit=int(b.get("limit", 0) or 0)),
             "/bodhi/import/apply":

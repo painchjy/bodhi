@@ -41,6 +41,16 @@ def _slug(text: str) -> str:
     return SLUG_SAFE.sub("-", str(text or "").strip()).strip("-")
 
 
+def _enum_rels(meta: str) -> dict:
+    """取页元数据里的「枚举关系」（`bmm:hasEnforcementLevel` → `bmm:Advisory`）。"""
+    import json
+    try:
+        data = json.loads(meta or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+    return ((data.get("ontology") or {}).get("enum_relations") or {})
+
+
 def _attr(meta: str, key: str, hint: str = "") -> str:
     """从页面元数据里取某数据属性的值。**兼容两代口径**：
 
@@ -90,10 +100,15 @@ def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict
     out = []
     for r in rows:
         level = ""
-        hit = re.search(r"hasEnforcementLevel[^)]*\)[^\n]*", r["content"])
-        if hit:
-            m = re.search(r"(Strict|Advisory|Override)", hit.group(0), re.I)
-            level = m.group(1) if m else ""
+        enum_rel = _enum_rels(r["meta"])
+        for name, value in enum_rel.items():
+            if str(name).split(":")[-1].lower() == "hasenforcementlevel":
+                level = str(value)
+                break
+        if not level:                                  # 老页：从正文关系行兜底（无链接形态）
+            hit = re.search(r"hasEnforcementLevel`\)\s*→\s*(?P<v>[A-Za-z_]+:[A-Za-z]+)", r["content"])
+            if hit:
+                level = hit.group("v")
         ev = re.search(r"%s\n\n> ?(.+)" % re.escape(EVIDENCE_SECTION), r["content"])
         out.append({"slug": r["slug"], "name": r["title"], "page_type": r["page_type"],
                     "level": level, "scope": _attr(r["meta"], "ruleScope", "适用范围"),
