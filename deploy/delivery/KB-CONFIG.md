@@ -3,7 +3,7 @@
 > 适用：你们已在内部网跑起 WeKnora（app + 前端 + Postgres）。本指引讲**建哪些库、每个字段怎么填、怎么验收**。
 > 前置：`02-mcp-server` 已部署并在 WeKnora 里注册为 MCP 服务（见 `MCP-SERVER.md`）。
 
-## 1. 一共需要两个知识库
+## 1. 一共需要两个知识库（另加 1 个治理库「企业共享概念模型」，见 §5.1）
 
 | 知识库名称（建议） | 内容 | 谁写 | 怎么来 |
 |---|---|---|---|
@@ -91,6 +91,74 @@ UPDATE knowledge_bases SET extract_config = '{"enabled": false}'::jsonb, updated
 | `source_refs` 溯源 | 实例页必须有来源文档；设计生成的页从"服务页/报告页"继承。**空来源**会被巡检判 C1（high）|
 | 类型/关系只能取本体面 | `ontology_types(model, focus?)`；`nodes[].attributes` / `edges[].properties` 的键必须是该类声明过的数据属性 |
 
+## 5.1 治理库「企业共享概念模型」（跨库上下文映射的落点，2026-09-29 起）
+
+跨库**同名同义 / 同名异义**的事实源是一个专门的知识库：**每个概念一页**（`slug` 与领域页**同名**、
+`page_type` = 该概念的本体类）。领域库**不写 uuid、不互相引用**，跨域关系**经这页转换**。
+设计详见 03 包内的 `docs/context-mapping-plan.md`（§13.11 / §13.12 / 附录 A）。
+
+### 5.1.1 建库（UI 一步，或抄一条 SQL）
+
+UI：知识库页「新建」→ 名字填 **`企业共享概念模型`** → 建好后**不需要上传任何文档**。
+
+SQL（幂等；形状抄一个已跑通的业务库，避免漏 `NOT NULL` 字段）：
+
+```sql
+INSERT INTO knowledge_bases (
+  id, name, description, tenant_id, chunking_config, image_processing_config,
+  embedding_model_id, summary_model_id, cos_config, vlm_config, extract_config, type,
+  faq_config, question_generation_config, storage_provider_config, asr_config,
+  wiki_config, indexing_strategy, creator_id, auto_tag_config)
+SELECT gen_random_uuid()::text,
+       '企业共享概念模型',
+       '企业级共享概念：跨领域同名同义/同名异义的映射与转换、企业标准名称与定义都在本库维护。',
+       tenant_id, chunking_config, image_processing_config,
+       embedding_model_id, summary_model_id, cos_config, vlm_config, extract_config, 'document',
+       faq_config, question_generation_config, storage_provider_config, asr_config,
+       COALESCE(wiki_config,'{}'::jsonb) || '{"bodhi_concept_kb": true}'::jsonb,
+       COALESCE(indexing_strategy,'{}'::jsonb) || '{"wiki_enabled": true}'::jsonb,  -- 要能像领域库一样看 wiki 列表/目录
+       creator_id, auto_tag_config
+  FROM knowledge_bases WHERE name = '<你的业务库名>' AND deleted_at IS NULL
+   AND NOT EXISTS (SELECT 1 FROM knowledge_bases
+                    WHERE name = '企业共享概念模型' AND deleted_at IS NULL)
+RETURNING id, name;
+```
+
+### 5.1.2 配置（env 是唯一权威）
+
+```ini
+BODHI_CONCEPT_KB_ID=<上一步的 id>
+BODHI_CONCEPT_KB_NAME=企业共享概念模型
+```
+与 `BODHI_ONTOLOGY_KB_ID/NAME`、`BODHI_TENANT_ID` 一起放**同一份** `.env`（见 `MCP-SERVER.md` §2.1；
+systemd 用 `EnvironmentFile=` 读它，CLI/脚本也读它）。`wiki_config.bodhi_concept_kb=true` 只是
+"未配 env 时的兜底"，MCP 启动时 `ensure_marks()` 会自动补齐，**不需要人维护**。
+
+### 5.1.3 权限（读放开、写受控）
+
+- **读**：全部放开（所有租户可读，与其它库一致）；
+- **写**：只有**对该库有写权限**的租户能落概念页 —— 属主租户，或该租户所在组织在 `kb_shares` 上的权限为
+  **editor / admin**（默认共享是 `viewer`，只能读）。调用者租户取 `X-Bodhi-Tenant` 头或 `BODHI_TENANT_ID`；
+  取不到 → 拒写（fail-closed），回执里给 `need_write_permission` 与原因。
+
+### 5.1.4 验收
+
+```bash
+python3 -c "import sys;sys.path.insert(0,'tools/ke-core');import ke_context,json;\
+print(json.dumps(ke_context.concept_kb(), ensure_ascii=False))"
+# 期望：{"id":"<概念库 id>","name":"企业共享概念模型","source":"env",...}
+curl -s http://<mcp>:8765/bodhi/contexts | head -c 300     # concept.source 应为 env
+python3 tools/ke-core/ke_context.py scan --limit 5         # 只读：出跨库同名/同实例候选 + Ticket
+```
+概念页写入后会**自动带本体分类目录**（`category_path` 派生自本体类 + `sync_folders` 建目录树），
+因此它和领域库一样有「本体」分类视图。
+
+### 5.1.5 不需要交付的东西
+
+- **不需要 TTL**：它不是本体（本体真源仍是 03 包的 `ontology/`）；
+- **不需要单独的表 / 服务**：概念页与映射表就是普通 wiki 页 + `page_metadata`（JSON 索引只是缓存）；
+- **不需要 LLM 配置**：概念页的生成与维护由智能体或人工驱动，MCP 不调用模型。
+
 ## 6. 智能体与工具面（配置在哪）
 
 在 `custom_agents` 里（UI：智能体 → 编辑），一次配好四件事：
@@ -108,7 +176,7 @@ UPDATE knowledge_bases SET extract_config = '{"enabled": false}'::jsonb, updated
 
 | # | 检查 | 期望 |
 |---|---|---|
-| 1 | 智能体跑一轮"只读"任务（`skills()` → 读一页）| `tool_count=15`；`logs/mcp_calls_*.log` 里能看到 `skills` |
+| 1 | 智能体跑一轮"只读"任务（`skills()` → 读一页）| `tool_count=22`；`logs/mcp_calls_*.log` 里能看到 `skills` |
 | 2 | 智能体说"某工具不存在" | **十有八九是 MCP 没注册上**（SSRF/URL/网络），见 `TROUBLESHOOTING.md` §1 |
 | 3 | 上传一篇文档并抽取 | 页面类型都在本体里；无 B1/B2 报错；来源(`source_refs`)非空 |
 | 4 | `curl "http://<mcp>:8765/bodhi/audit?kb_id=<kb>"` | findings 里**没有** C1/C3（无来源）；A1/A2 若出现属于历史页，按提示修 |
