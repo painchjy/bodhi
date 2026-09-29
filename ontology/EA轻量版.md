@@ -14,22 +14,21 @@
 ### 角色与业务实体
 - BusinessRole（业务角色）：业务角色或岗位
 - BusinessEntity（业务实体）：如客户、合同、账户、申请单等
-  - Customer（客户）：客户实体，个人客户
+> 2026-09-29：本模块**不再有** `Customer` 子类（测试残留已删）——业务实体统统抽 `BusinessEntity`。
 
-### IT 资产层（ITAsset 是 BMM 资源 Resource 的子类）
-- ITAsset（IT资产）：IT 资产，如硬件、软件系统等
-  - Application（应用系统）：应用（或称为子系统），软件资产
-  - HardwareAsset（硬件资产）：硬件资产
+### IT 资产层（2026-09-29 **已迁至 BMM**）
+> `ITAsset` / `MainSystem`（主系统）/ `SubSystem`（子系统，原本模块的 `Application`）/
+> `HardwareAsset`（硬件资产）现定义在 **BMM**：`bmm:ITAsset` 及其子类。
+> 本模块只保留「步骤由 IT 资产支撑」这条连接关系（range 指向 `bmm:ITAsset`）。
+> 见 `BMM轻量版.md`（含 系统编号/英文简称/重要性等级/状态/核心功能/硬件资产分类 等数据属性）。
 
-### 派生筛选类（跨层查询用，不作为抽取目标）
-- CustomerWithExpiringProduct（有到期产品的客户）：等价于「持有至少一个 bmm:ExpiringProduct 的客户」
-- CustomerWithoutExpiringProduct（无到期产品的客户）：等价于「不持有任何 bmm:ExpiringProduct 的客户」
-> 这两类是查询侧定义的等价类，抽取时**不要把客户判成这两个类型**，只抽 `Customer`。
+### 派生筛选类
+> 原 `CustomerWithExpiringProduct` / `CustomerWithoutExpiringProduct` **已随客户类一并删除**（2026-09-29）。
 
 ### 从 BMM 借用的跨层术语（本模块关系会用到，定义见 BMM 轻量版）
 - bmm:BusinessProcess（业务流程）、bmm:CourseOfAction（行动方案）、bmm:DesiredResult（预期成果）
 - bmm:Offering（对外交付物）→ bmm:Product（产品）、bmm:ExpiringProduct（即将到期的产品）
-- bmm:BusinessRule（业务规则）、bmm:Resource（资源）
+- bmm:BusinessRule（业务规则）、bmm:Resource（资源）、bmm:ITAsset（IT 资产：主系统/子系统/硬件资产）
 
 ## 二、枚举类（固定取值）
 
@@ -46,7 +45,7 @@
 ### 执行与操作
 - taskPerformedByRole（任务 → 业务角色）：任务由业务角色执行
 - stepOperatesOnEntity（步骤 → 业务实体）：步骤操作业务实体
-- stepSupportedByAsset（步骤 → IT资产）：步骤由 IT 资产支撑
+- stepSupportedByAsset（步骤 → bmm:IT资产）：步骤由 IT 资产支撑（IT 资产类在 BMM）
 
 ### 实现与达成（跨层到 BMM）
 - activityAchievesDesiredResult（活动 → bmm:预期成果）：活动实现某个预期成果
@@ -61,7 +60,8 @@
 - taskGovernedByRule（任务 → bmm:业务规则）：任务受业务规则约束
 
 ### 客户与产品
-- holdsProduct（客户 → bmm:产品）：客户持有产品
+> 2026-09-29：客户类与 `holdsProduct` 已删除（客户不再作为 EA 抽取目标）。若文档表达"客户持有产品"，
+> 请在 BMM 侧用 `bmm:Product` 建模。
 
 ## 四、数据属性（常用）
 
@@ -78,10 +78,13 @@
 | 任务、作业、日常操作、岗位职责 | Task |
 | 步骤、操作步骤、动作 | Step |
 | 岗位、角色、经办人、责任人 | BusinessRole |
-| 客户、合同、账户、申请单、工单 | BusinessEntity（客户→Customer） |
-| 系统、平台、应用、子系统、软件 | Application |
-| 服务器、网络设备、终端、硬件 | HardwareAsset |
-| IT 资产、信息化资产（不区分软硬件） | ITAsset |
+| 客户、合同、账户、申请单、工单 | BusinessEntity |
+| 系统、平台、应用、子系统、软件 | **bmm:SubSystem**（子系统；EA 已迁出该类） |
+| 主系统、核心系统 | **bmm:MainSystem** |
+| 服务器、网络设备、终端、硬件 | **bmm:HardwareAsset** |
+| IT 资产、信息化资产（不区分软硬件） | **bmm:ITAsset** |
+| 包含子系统、下属子系统 | **bmm:mainSystemContainsSubSystem**（主系统 → 子系统） |
+| 归属于子系统、部署在子系统 | **bmm:hardwareAssetBelongsToSubSystem**（硬件资产 → 子系统） |
 | 支撑、依托于…系统、在…系统里操作 | stepSupportedByAsset |
 | 由…执行、由…负责、岗位是… | taskPerformedByRole |
 | 处理、录入、修改、查询（对业务对象的动作） | stepOperatesOnEntity |
@@ -91,7 +94,7 @@
 
 ### 抽取粒度提示
 - 一份流程文档通常应抽出：1 个 `bmm:BusinessProcess` + N 个 `Activity` + 每个活动下的 `Task`/`Step`。
-- 只在文档明确写出时抽 `ITAsset`/`Application`，不要凭常识补系统名。
+- 只在文档明确写出时抽 `bmm:ITAsset`/`bmm:MainSystem`/`bmm:SubSystem`/`bmm:HardwareAsset`，不要凭常识补系统名。
 
 ## 六、基数约束简记（本模块 TBox 公理）
 
@@ -108,7 +111,7 @@
 | Task | `taskDelivers` some `bmm:Offering` | 任务必须交付至少一个产品或业务服务 |
 | Task | `taskGovernedByRule` some `bmm:BusinessRule` | 任务必须至少受一条业务规则约束 |
 | Step | `stepOperatesOnEntity` some `BusinessEntity` | 步骤必须至少操作一个业务实体 |
-| Step | `stepSupportedByAsset` some `ITAsset` | 步骤必须至少由一个 IT 资产支撑 |
+| Step | `stepSupportedByAsset` some `bmm:ITAsset` | 步骤必须至少由一个 IT 资产支撑（IT 资产类在 BMM） |
 
 ## 七、跨层协作提示（与 BMM 一起用时）
 

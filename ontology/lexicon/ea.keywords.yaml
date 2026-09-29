@@ -25,7 +25,7 @@ type_keywords:
     note: "任务的执行角色"
   - keywords: ["客户", "对公客户", "个人客户", "账户", "合同", "申请单"]
     type: BusinessEntity
-    note: "个人客户抽 Customer（BusinessEntity 子类）"
+    note: "业务实体统统抽 BusinessEntity（2026-09-29 起本模块不再有 Customer 子类）"
   - keywords: ["法人", "公司", "集团", "机构"]
     type: LegalEntity
     note: "eaown:LegalEntity，BusinessEntity 子类（所有权扩展）"
@@ -38,9 +38,8 @@ type_keywords:
   - keywords: ["协议控制", "表决权委托", "人事任免权", "一致行动"]
     type: ControlRelation
     note: "非股权控制关系"
-  - keywords: ["系统", "平台", "应用", "子系统", "主机", "设备"]
-    type: Application
-    note: "应用系统抽 Application；硬件抽 HardwareAsset；二者都是 ITAsset"
+  # IT 资产（主系统 / 子系统 / 硬件资产 / IT 资产）已迁至 BMM：
+  #   判定线索与数据属性见 ontology/lexicon/bmm.keywords.yaml（2026-09-29 迁出）
   # （原 Service / APIService / MCPService / SkillService 词表项随 IT 服务层暂缓下线，2026-09-17）
   - keywords: ["契约", "幂等", "重试", "幂等键", "超时"]
     type: ServiceContract
@@ -71,9 +70,9 @@ relation_keywords:
   - keywords: ["操作对象", "对...操作"]
     predicate: stepOperatesOnEntity
     note: "步骤 -> 业务实体"
-  - keywords: ["由...系统支撑", "系统承载"]
+  - keywords: ["由...系统支撑", "系统承载", "部署在"]
     predicate: stepSupportedByAsset
-    note: "步骤 -> IT 资产"
+    note: "步骤 -> IT 资产（bmm:ITAsset / 主系统 / 子系统 / 硬件资产）"
   # （原 stepUsesService / applicationProvidesService 词表项随 IT 服务层暂缓下线，2026-09-17）
   - keywords: ["受规则约束", "遵循...规则"]
     predicate: taskGovernedByRule
@@ -84,9 +83,7 @@ relation_keywords:
   - keywords: ["实现目标成果"]
     predicate: activityAchievesDesiredResult
     note: "活动 -> 预期成果（BMM）"
-  - keywords: ["持有产品"]
-    predicate: holdsProduct
-    note: "客户 -> 产品（BMM Product）"
+  # （2026-09-29 移除）holdsProduct：客户类已删，该关系随之删除
   - keywords: ["持有股权", "股东为"]
     predicate: holdsShare
     note: "法人主体 -> 股权关系"

@@ -37,62 +37,19 @@
 :BusinessEntity     rdf:type owl:Class ;
     rdfs:label "业务实体"@zh ;
     rdfs:comment "业务实体，如客户、合同、账户、申请单等" .
-:Customer    rdf:type owl:Class ;
-    rdfs:subClassOf :BusinessEntity ;
-    rdfs:label "客户"@zh ;
-    rdfs:comment "客户实体，个人客户" .
 
-# 对外交付物/产品/业务服务/即将到期的产品 已迁移至 BMM 完整版（bmm:Offering / bmm:Product / bmm:BusinessService / bmm:ExpiringProduct）
-
-# 有到期产品的客户（等价于持有至少一个 ExpiringProduct 的客户）
-:CustomerWithExpiringProduct rdf:type owl:Class ;
-                             owl:equivalentClass [ owl:intersectionOf ( :Customer
-                                                                        [ rdf:type owl:Restriction ;
-                                                                          owl:onProperty :holdsProduct ;
-                                                                          owl:someValuesFrom bmm:ExpiringProduct
-                                                                        ]
-                                                                      ) ;
-                                                   rdf:type owl:Class
-                                                 ] ;
-                             rdfs:label "有到期产品的客户"@zh .
-
-# 无到期产品的客户（等价于不持有任何 ExpiringProduct 的客户）
-:CustomerWithoutExpiringProduct rdf:type owl:Class ;
-    rdfs:label "无到期产品的客户"@zh ;
-    owl:equivalentClass [
-        a owl:Class ;
-        owl:intersectionOf (
-            :Customer
-            [ a owl:Class ;
-              owl:complementOf [
-                  a owl:Restriction ;
-                  owl:onProperty :holdsProduct ;
-                  owl:someValuesFrom bmm:ExpiringProduct
-              ] ]
-        )
-    ] .
+# 2026-09-29：测试用的客户类（Customer / CustomerWithExpiringProduct /
+#   CustomerWithoutExpiringProduct）及 holdsProduct 已按用户口径删除
+#   —— EA 只做流程建模；对外交付物/产品/业务服务/即将到期的产品 早已在 BMM 完整版
+#   （bmm:Offering / bmm:Product / bmm:BusinessService / bmm:ExpiringProduct）。
 
 # ============================================================
-# 3. IT 资产与 IT 服务
+# 3. IT 服务（IT 资产类已迁至 BMM：bmm:ITAsset / bmm:MainSystem / bmm:SubSystem / bmm:HardwareAsset）
 # ============================================================
-:ITAsset            rdf:type owl:Class ;
-    rdfs:subClassOf bmm:Resource ;          # IT 资产是 BMM 资源的子类
-    rdfs:label "IT资产"@zh ;
-    rdfs:comment "IT 资产，如硬件、软件系统等" .
-
-:Application        rdf:type owl:Class ;
-    rdfs:subClassOf :ITAsset ;
-    rdfs:label "应用系统"@zh ;
-    rdfs:comment "应用（或称为子系统），软件资产" .
-
-:HardwareAsset      rdf:type owl:Class ;
-    rdfs:subClassOf :ITAsset ;
-    rdfs:label "硬件资产"@zh ;
-    rdfs:comment "硬件资产" .
 
 :Service            rdf:type owl:Class ;
     rdfs:label "IT服务"@zh ;
-    rdfs:comment "IT 服务（或称为功能），由应用提供，用于实现步骤" .
+    rdfs:comment "IT 服务（或称为功能），由（子）系统提供，用于实现步骤" .
 
 # --- IT 服务子类：三种可执行服务形态 ---
 :APIService         rdf:type owl:Class ;
@@ -156,15 +113,15 @@
 # --- IT 资源支撑 ---
 :stepSupportedByAsset         rdf:type owl:ObjectProperty ;
     rdfs:domain :Step ;
-    rdfs:range :ITAsset ;
+    rdfs:range bmm:ITAsset ;                # IT 资产类在 BMM（2026-09-29 自 EA 迁出）
     rdfs:label "由IT资产支撑"@zh ;
-    rdfs:comment "步骤由 IT 资产支撑" .
+    rdfs:comment "步骤由 IT 资产（主系统/子系统/硬件资产）支撑" .
 
 :applicationProvidesService   rdf:type owl:ObjectProperty ;
-    rdfs:domain :Application ;
+    rdfs:domain bmm:SubSystem ;             # 原 :Application → BMM 的「子系统」
     rdfs:range :Service ;
     rdfs:label "提供服务"@zh ;
-    rdfs:comment "应用提供服务/功能" .
+    rdfs:comment "系统（子系统）提供服务/功能" .
 
 :stepUsesService              rdf:type owl:ObjectProperty ;
     rdfs:domain :Step ;
@@ -203,12 +160,8 @@
     rdfs:label "实现行动方案"@zh ;
     rdfs:comment "业务流程实现某个行动方案" .
 
-# --- 客户与产品 ---    
-:holdsProduct        rdf:type owl:ObjectProperty ;  # 客户持有产品（Product 已迁移至 BMM）
-    rdfs:domain :Customer ;
-    rdfs:range bmm:Product ;
-    rdfs:label "持有"@zh ;
-    rdfs:comment "客户持有产品" .
+# --- 客户与产品（2026-09-29：客户类已删，holdsProduct 随之移除；
+#     若将来要表达"客户持有产品"，请在 BMM 侧建模（bmm:Product 已在 BMM））---
 # ============================================================
 # 4.5 数据属性（Datatype Properties）
 # ============================================================
@@ -270,11 +223,11 @@ bmm:BusinessProcess rdfs:subClassOf [
     owl:someValuesFrom :BusinessEntity
 ] .
 
-# 步骤必须至少由一个 IT 资产支撑
+# 步骤必须至少由一个 IT 资产支撑（IT 资产类在 BMM）
 :Step rdfs:subClassOf [
     a owl:Restriction ;
     owl:onProperty :stepSupportedByAsset ;
-    owl:someValuesFrom :ITAsset
+    owl:someValuesFrom bmm:ITAsset
 ] .
 
 # 步骤必须使用至少一个 IT 服务
@@ -291,12 +244,9 @@ bmm:BusinessProcess rdfs:subClassOf [
     owl:someValuesFrom bmm:BusinessRule
 ] .
 
-# 每个应用至少提供一个服务
-:Application rdfs:subClassOf [
-    a owl:Restriction ;
-    owl:onProperty :applicationProvidesService ;
-    owl:someValuesFrom :Service
-] .
+# （2026-09-29 删除）原公理「每个应用至少提供一个服务」：
+#   应用/子系统类已迁 BMM（bmm:SubSystem）；"至少一个"约束对批量台账不友好（会刷 violation）。
+#   如需该约束，请在 BMM 里对 bmm:SubSystem 声明。
 
 # 活动必须交付至少一个产品或业务服务
 :Activity rdfs:subClassOf [
@@ -339,8 +289,10 @@ bmm:BusinessProcess rdfs:subClassOf [
 # 本扩展模型在 BMM 四大支柱基础上：
 #   - 将业务流程（BusinessProcess）视为 BMM 行动方案（CourseOfAction）的一种，
 #     活动、任务、步骤作为其组成部分；
-#   - IT 资产（ITAsset）是 BMM 资源（Resource）的子类，
-#     应用（Application）提供 IT 服务，步骤通过 IT 服务实现；
+#   - **IT 资产类已迁至 BMM**（2026-09-29）：bmm:ITAsset 及其子类 主系统（bmm:MainSystem）/
+#     子系统（bmm:SubSystem，原 EA 的 Application）/ 硬件资产（bmm:HardwareAsset）；
+#     本模型只保留「IT 服务」层与两条连接关系：步骤由 IT 资产支撑（stepSupportedByAsset）、
+#     系统提供服务（applicationProvidesService，domain 指向 bmm:SubSystem）；
 #   - 活动/任务必须交付具体产品或业务服务；
 #   - 活动必须实现预期成果（DesiredResult）和行动方案（CourseOfAction）；
 #   - 业务流程必须实现行动方案（CourseOfAction）。

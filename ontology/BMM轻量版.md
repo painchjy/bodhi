@@ -31,6 +31,10 @@
         - Product（产品）：具体产品
           - ExpiringProduct（即将到期的产品）：即将到期的产品
         - BusinessService（业务服务）：对外提供的业务服务（非 IT 服务）
+    - **ITAsset（IT资产，2026-09-29 自 EA 迁入）**：软件系统与硬件资产的总称
+      - **MainSystem（主系统）**：承载核心业务能力，可包含若干子系统
+      - **SubSystem（子系统）**：主系统下的子系统（原 EA 的「应用系统 Application」）
+      - **HardwareAsset（硬件资产）**：服务器/网络设备/终端等，归属于某个子系统
 - Liability（责任）：企业所承担的义务或债务（如未偿债务、保修承诺、合同义务）；由组织机构负责、可由行动方案免除（清偿）、占用（索取）资源
 
 ### 信息来源追踪类
@@ -99,6 +103,10 @@
 - managesLiability（组织机构 → 责任）：组织机构对责任负责（承担管理职责）
 - claimsResource（责任 → 资源）：责任占用（索取）企业资源，如债务需要资金清偿
 
+### IT 资产 / 系统（2026-09-29 新增）
+- mainSystemContainsSubSystem（主系统 → 子系统）：主系统包含子系统
+- hardwareAssetBelongsToSubSystem（硬件资产 → 子系统）：硬件资产归属于某个子系统
+
 ### 信息来源追踪
 - hasSource（DesiredResult/Means/Influencer/Assessment → 来源文档）
 - fromSource（原文摘录 → 来源文档）
@@ -113,6 +121,12 @@
 - name（名称）、englishName（英文名称）、definition（定义）、description（描述）
 - CourseOfActionlevel（行动方案级别：战略/战术）
 - influencerCategory（影响因素具体分类：假设/竞争者等）
+- **IT 资产 / 系统（2026-09-29）**：
+  - systemNo（系统编号）、systemAbbr（英文简称）、systemCriticality（重要性等级）、systemStatus（状态）
+    —— domain = `ITAsset`，主系统与子系统通用；
+  - coreFunction（核心功能）—— 仅子系统（`SubSystem`）；
+  - hardwareAssetCategory（硬件资产分类）—— 仅硬件资产（`HardwareAsset`）；
+  - 系统的「英文名称/功能简介」**复用** `englishName` / `description`。
 - documentTitle、documentId、publicationDate（来源文档）
 - text、sourcePosition（原文摘录）
 
@@ -133,6 +147,12 @@
 | 监管、法规、竞争、市场 | ExternalInfluencer |
 | 存量系统、资源、团队 | InternalInfluencer |
 | 导致、带来、引发、不利于 | Assessment（需标注 SWOT 类型）|
+| 主系统、核心系统、平台 | MainSystem |
+| 子系统、应用系统、应用、模块 | SubSystem |
+| 服务器、网络设备、终端、存储、硬件 | HardwareAsset |
+| IT 资产、信息化资产（不分软硬件） | ITAsset |
+| 包含子系统、下属子系统 | mainSystemContainsSubSystem |
+| 归属于子系统、部署在子系统 | hardwareAssetBelongsToSubSystem |
 
 ## 六、基数约束简记
 - 每个预期成果、评估必须关联至少一个组织机构

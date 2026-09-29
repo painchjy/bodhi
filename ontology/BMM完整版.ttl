@@ -112,6 +112,36 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "使用期限超过一个会计期间的资产"@zh ;
     rdfs:subClassOf :Asset .
 
+# ------------------------------------------------------------
+# 14.2.x IT 资产家族（2026-09-29 自 EA 迁入；EA 从此只做流程建模）
+#   ITAsset 是 Asset（→ Resource）的子类；主系统 / 子系统 / 硬件资产 都是 IT 资产。
+#   原 EA 的「应用系统（ea:Application）」即本模块的 SubSystem（子系统）。
+# ------------------------------------------------------------
+
+### 14.2.1 IT 资产 ITAsset
+:ITAsset rdf:type owl:Class ;
+    rdfs:subClassOf :Asset ;
+    rdfs:label "IT资产"@zh ;
+    rdfs:comment "IT 资产，如软件系统（主系统/子系统）、硬件资产等"@zh .
+
+### 14.2.2 主系统 MainSystem
+:MainSystem rdf:type owl:Class ;
+    rdfs:subClassOf :ITAsset ;
+    rdfs:label "主系统"@zh ;
+    rdfs:comment "承载核心业务能力的应用系统（主系统），可包含若干子系统"@zh .
+
+### 14.2.3 子系统 SubSystem
+:SubSystem rdf:type owl:Class ;
+    rdfs:subClassOf :ITAsset ;
+    rdfs:label "子系统"@zh ;
+    rdfs:comment "主系统下的子系统（原 EA 的「应用系统 Application」）"@zh .
+
+### 14.2.4 硬件资产 HardwareAsset
+:HardwareAsset rdf:type owl:Class ;
+    rdfs:subClassOf :ITAsset ;
+    rdfs:label "硬件资产"@zh ;
+    rdfs:comment "硬件资产（服务器、网络设备、终端等），归属于某个子系统"@zh .
+
 ### 14.3 对外交付物 Offering
 :Offering rdf:type owl:Class ;
     rdfs:label "对外交付物"@zh ;
@@ -436,6 +466,20 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:range :AssessmentType ;
     rdfs:comment "评估属于哪一种SWOT维度（优势、劣势、机会、威胁）"@zh .
 
+
+### IT 资产 / 系统关系（2026-09-29 新增）
+:mainSystemContainsSubSystem rdf:type owl:ObjectProperty ;
+    rdfs:label "包含子系统"@zh ;
+    rdfs:domain :MainSystem ;
+    rdfs:range :SubSystem ;
+    rdfs:comment "主系统包含子系统（一个主系统可包含多个子系统）"@zh .
+
+:hardwareAssetBelongsToSubSystem rdf:type owl:ObjectProperty ;
+    rdfs:label "归属于子系统"@zh ;
+    rdfs:domain :HardwareAsset ;
+    rdfs:range :SubSystem ;
+    rdfs:comment "硬件资产归属于某个子系统"@zh .
+
 # ============================================================
 # 四、数据属性（Datatype Properties）
 # ============================================================
@@ -471,6 +515,44 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:domain :Influencer ;
     rdfs:range xsd:string ;
     rdfs:comment "内部或外部影响因素的具体分类，如'假设'、'竞争者'等" .
+
+
+### IT 资产 / 系统属性（2026-09-29 新增；「英文名称」「描述/功能简介」复用本文件的 englishName / description）
+:systemNo rdf:type owl:DatatypeProperty ;
+    rdfs:label "系统编号"@zh ;
+    rdfs:domain :ITAsset ;
+    rdfs:range xsd:string ;
+    rdfs:comment "系统的内部编号（主系统/子系统通用，台账主键）" .
+
+:systemAbbr rdf:type owl:DatatypeProperty ;
+    rdfs:label "英文简称"@zh ;
+    rdfs:domain :ITAsset ;
+    rdfs:range xsd:string ;
+    rdfs:comment "系统的英文简称（主系统/子系统通用）" .
+
+:systemCriticality rdf:type owl:DatatypeProperty ;
+    rdfs:label "重要性等级"@zh ;
+    rdfs:domain :ITAsset ;
+    rdfs:range xsd:string ;
+    rdfs:comment "系统重要性等级（主系统/子系统通用），如'高'/'中'/'低'" .
+
+:systemStatus rdf:type owl:DatatypeProperty ;
+    rdfs:label "状态"@zh ;
+    rdfs:domain :ITAsset ;
+    rdfs:range xsd:string ;
+    rdfs:comment "系统状态（主系统/子系统通用），如'在用'/'在建'/'下线'" .
+
+:coreFunction rdf:type owl:DatatypeProperty ;
+    rdfs:label "核心功能"@zh ;
+    rdfs:domain :SubSystem ;
+    rdfs:range xsd:string ;
+    rdfs:comment "子系统的核心功能说明" .
+
+:hardwareAssetCategory rdf:type owl:DatatypeProperty ;
+    rdfs:label "硬件资产分类"@zh ;
+    rdfs:domain :HardwareAsset ;
+    rdfs:range xsd:string ;
+    rdfs:comment "硬件资产分类，如'服务器'/'网络设备'/'终端'/'存储'" .
 
 
 # ============================================================

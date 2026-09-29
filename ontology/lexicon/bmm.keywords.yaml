@@ -66,6 +66,19 @@ type_keywords:
   - keywords: ["债务", "义务", "承诺", "赔偿责任", "担保"]
     type: Liability
     note: "企业承担的义务或债务"
+  # --- IT 资产家族（2026-09-29 自 EA 迁入；对应数据属性见 ontology/BMM完整版.ttl §四）---
+  - keywords: ["IT资产", "信息化资产", "技术资产"]
+    type: ITAsset
+    note: "不区分软硬件时的兜底类；主系统/子系统/硬件资产都是它的子类"
+  - keywords: ["主系统", "核心系统", "主机系统", "平台"]
+    type: MainSystem
+    note: "承载核心业务能力的应用系统；带 系统编号/英文简称/重要性等级/状态，包含若干子系统"
+  - keywords: ["子系统", "应用系统", "应用", "模块", "功能模块"]
+    type: SubSystem
+    note: "主系统下的子系统（原 EA 的应用系统）；带 系统编号/英文简称/重要性等级/状态 + 核心功能"
+  - keywords: ["服务器", "网络设备", "终端", "存储", "硬件", "机房设备"]
+    type: HardwareAsset
+    note: "硬件资产，归属于某个子系统；带 硬件资产分类"
 
 relation_keywords:
   - keywords: ["为了实现", "支撑...目标", "服务于"]
@@ -95,6 +108,13 @@ relation_keywords:
   - keywords: ["原文依据", "出自", "摘录自"]
     predicate: fromSource
     note: "原文摘录 -> 来源文档（溯源必填）"
+  # --- IT 资产 / 系统关系（2026-09-29 新增）---
+  - keywords: ["包含子系统", "下属子系统", "下设子系统"]
+    predicate: mainSystemContainsSubSystem
+    note: "主系统 -> 子系统"
+  - keywords: ["归属于子系统", "挂载在子系统", "部署在子系统"]
+    predicate: hardwareAssetBelongsToSubSystem
+    note: "硬件资产 -> 子系统"
 
 enum_keywords:
   EnforcementLevel:
