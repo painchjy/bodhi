@@ -38,12 +38,12 @@
 
 | 步 | 动作 | 验收（不通过就别往下走）|
 |---|---|---|
-| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（24 个）` |
-| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 24 个 |
+| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（34 个）` |
+| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 34 个 |
 | **3** | 导入本体模型知识库（`bodhi2-03`：**种子导入**最省事；或用 02 包的编译器按 TTL 重新生成）| 页数 **254**（类 50 / 关系 81 / 属性 114 / 模块 6 / 轻量版 2 / 索引 1）|
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
 | **5** | 替换前端（`bodhi2-01`）+ 挂载 nginx 模板 | `deploy_frontend.sh check` 全绿；类型下拉能看到 `easvc:*` |
-| **6** | 注册智能体（`AGENTS-SQL.md`：提示词 + 两个库 + MCP + 工具清单）| 让智能体跑一轮"先 `skills()` 看目录"的任务，能正常列出 3 个技能 |
+| **6** | 注册智能体（`AGENTS-SQL.md`：提示词 + 两个库 + MCP + 工具清单）| 让智能体跑一轮"先 `skills()` 看目录"的任务，能正常列出 **5 个技能** |
 | **7** | 端到端验证 | 见 §4「验收清单」|
 
 > **只想要本体建模/设计能力、暂时不动前端**也可以：1→2→3→4→6 就能跑（前端替换只影响"类型下拉/本体图谱 tab/关系面板"这些可视化）。
@@ -107,20 +107,23 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 
 | # | 检查 | 期望 |
 |---|---|---|
-| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（24 个）` + `skills() OK（3 个）` |
-| 2 | 智能体一轮只读任务 | `tool_count=18`；`logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录 |
+| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（34 个）` + `skills() OK（5 个）` |
+| 2 | 智能体一轮只读任务 | `logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录（模型侧工具数见 `AGENTS-SQL.md`） |
 | 3 | 本体模型库 | 254 页（类 50 / 关系 81 / 属性 114 / 模块 6 / 轻量版 2 / 索引 1）；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
 | 4 | 业务库上传+抽取 | 页面类型都在本体里，`source_refs` 非空（无 C1）|
 | 5 | `curl <mcp>/bodhi/audit?kb_id=<业务库>` | 无 **C1/C3** 类"无来源"发现；A1/A2 若有，按提示修 |
 | 6 | 前端 | 登录正常；本体图谱 tab 出图；关系面板出边可改；类型下拉含 `easvc:*` |
 | 7 | 设计流程 | 让智能体按 `service_detailed_design` 技能做一个服务，末尾调 `service_overview(apply=true)` → 生成/刷新「IT 服务详细设计总览」页 |
+| 8 | **结构化批量建模**（`structured_modeling` 技能）| 给一张 Excel + 中文说明：`import_probe` → 逐目标 `import_plan`/`import_apply` → `import_state` 的 `remaining` 为空；页有「定义/属性/原文依据」；**前端目录里能看到这批页**（`wiki_path`=目录路径/标题、`folder_id` 非空）|
+| 9 | **文档评审**（`document_review` 技能）| 选文档 + 选策略：`rules_of_policy` 出规则清单（级别/范围/实现方式）→ 逐条判（LLM软规则 / `graph_query`）→ `review_apply` 写出 `review/<文档>-<策略>` 页（逐条结论 + 逐字证据 + `promotesDirective → 策略页`）|
+| 10 | 巡检清理 | `audit_purge(kb_id, dry_run=true)` 先看 `per_kind` 清单（导入页/评审页应被**豁免**）→ 确认后再执行（**一步硬删**，不可逆）|
 
 ## 5. 日常运维
 
 | 场景 | 命令 |
 |---|---|
 | 看智能体到底调了什么 | `tail -f logs/mcp_calls_YYYYMMDD.log`（时间/工具/耗时/入参/结果摘要）|
-| 一致性巡检 | `curl "<mcp>/bodhi/audit?kb_id=<kb>"`；清理走 `plan → apply --confirm`（**不自动修**）|
+| 一致性巡检 | `curl "<mcp>/bodhi/audit?kb_id=<kb>"`；清理用 `audit_purge`（**有库写权限即可一步硬删**，先 `dry_run=true` 看 `per_kind` 清单再执行）|
 | 本体演进 | 改 TTL（**03 包** `ontology/`）→ `refresh_ontology_kb.sh`（编译+投影；借用 **02 包** `tools/`，解到同一父目录即可）；类清单变了记得重建前端 |
 | 技能演进 | 直接改 `skills/<id>/SKILL.md`（MCP 按 mtime 热读，**不用重启**）|
 | 重建过 app 容器 | `docker restart WeKnora-frontend`（交付模板已含运行期解析，仍建议一把）|

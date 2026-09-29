@@ -84,7 +84,47 @@ connect() failed (111: Connection refused) while connecting to upstream:
 **若 `skills()` 回执是 `{"error": "No module named 'yaml'"}`**：这是 MCP 在**没有 PyYAML** 的环境里跑
 （干净容器/精简宿主机）。代码已带零依赖兜底（`tools/ke-core/ke_yamlmini.py`），只要源码是最新版即可；
 升级方式：把 02 包里的 `tools/ke-core/ke_yamlmini.py` 与 `tools/ontology-mcp/server.py` 一起替换后重启 MCP。
-我们实测：在只有 Python + psql 的镜像里 `skills()` 正常返回 3 个技能。
+我们实测：在只有 Python + psql 的镜像里 `skills()` 正常返回 5 个技能。
+
+## 11b. 【2026-09-30】批量导入成功，但**前端目录里看不到这批页**
+
+**现象**：`import_apply` 回执 `created=8/16/5…` 都对、页也能搜到，但前端的**目录树是空的/缺这几层**。
+
+**根因**（两个叠加）：
+1. 写页时 `wiki_path` 被写成了 **slug**（`bmm/mainsystem/SYS-0001`）—— 本仓约定是
+   「**`wiki_path` 供前端目录树显示**」= **目录路径/标题**（`ke_pages.upsert_page` 注释里写死的口径）；
+2. 批量导入**没有调用** `sync_folders` → `wiki_folders` 建不起来、页 `folder_id` 为空。
+
+**修法**（工具已修，存量页一次对齐）：
+```bash
+curl -s -X POST http://<mcp>:8765/bodhi/import/refresh -H 'Content-Type: application/json' \
+     -d '{"kb_id":"<kb>","dry_run":true}'      # 先看 wiki_path_before/after
+curl -s -X POST http://<mcp>:8765/bodhi/import/refresh -H 'Content-Type: application/json' \
+     -d '{"kb_id":"<kb>"}'                     # 执行（幂等：再跑 changed=0）
+```
+自检（三条都要满足）：
+```sql
+SELECT count(*) FROM wiki_folders WHERE knowledge_base_id='<kb>' AND deleted_at IS NULL;         -- >0
+SELECT count(*) FROM wiki_pages WHERE knowledge_base_id='<kb>' AND deleted_at IS NULL
+   AND COALESCE(folder_id,'')='';                                                                -- 0
+SELECT count(*) FROM wiki_pages WHERE knowledge_base_id='<kb>' AND deleted_at IS NULL
+   AND wiki_path = slug;                                                                         -- 0
+```
+> 新导入的批次不用管：`import_apply` 现在写完会自动 `sync_folders`（回执里带 `folders`）。
+
+## 11c. 【2026-09-30】巡检显示"34 页无来源"，会不会被 `audit_purge` 删掉？
+
+**不会**：结构化导入页（`page_metadata.import.file_sha256`）与文档评审页（`page_metadata.review`）在
+**`check_sources`（C1）与清理计划（`no_source_pages`）里同口径豁免**（用户口径：Excel 行即原文，
+不加"原文依据"列；正文已有「## 原文依据」逐字）。回执里 `actions.no_source_pages.exempt` 会给豁免条数。
+**但仍然要先看清单**：`audit_purge(kb_id, dry_run=true)` → 看 `per_kind` 全为 0 再考虑执行。
+
+## 11d. 【2026-09-30】页属性读不到（评审/巡检按本体名取值为空）
+
+**根因**：页元数据 `ontology.attributes` 的**键口径**——新页是**本体属性名**（`bmm:ruleScope`），
+老页是**中文列名**（`适用范围`）。读取端已做三级兜底（本体名 → `attributes_by_column` → 老页中文键），
+所以**功能不受影响**；要把老页统一成"本体键为主"，跑一次
+`POST /bodhi/import/refresh`（**只升级不降级**：本体键原样保留、中文列名按「账本 mapping → 本体 label」升级）。
 
 ## 12. 打 MCP 镜像时卡在 `apt-get update`
 **根因**：容器里要装 `postgresql-client`（提供 `psql`），而**公网 Debian 源在内网/受限网络下常常不通**。

@@ -2,12 +2,33 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **24 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** …）
+> 作用：给 WeKnora 提供 **34 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
-> 的零依赖子集解析（我们逐键比对过，3 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list **24 个** / skills() 3 个）。
+> 的零依赖子集解析（我们逐键比对过，5 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
+> `selfcheck.py` 全绿（initialize / tools/list **34 个** / skills() **5 个**）。
+
+**结构化数据批量建模（2026-09-29/30 新增，5 个工具）**：技能负责「理解」（从用户对表结构的中文描述得出
+有哪些类/关系/键列/列→属性映射），工具负责「确定性执行」，**一次只处理一个类（含数据属性）或一条关系**：
+`import_probe`（只读探表：表头/抽样/列前缀/疑似主键）→ `import_plan`（只读：校验 + 影响面 + `ticket`；
+`mapping` 列→属性、`enums` 枚举列→关系、`unknown_to_description` 未知列口径）→ `import_apply`（按 `ticket` 写，
+500 行/事务，**幂等**：内容未变零写入）→ `import_state`（账本 + `remaining`，循环到收敛）→
+`import_refresh`（存量页元数据/目录对齐）。页模板：`定义 + 属性 + 原文依据`（**逐字**该行原始值，满足巡检 F3），
+`id = uuid5(bodhi-element:<kb>|<slug>)`，`wiki_path = 目录路径/标题` + `folder_id`（**前端目录树靠它**）。
+HTTP：`GET /bodhi/import/{probe,state}`、`POST /bodhi/import/{plan,apply,refresh}`。
+
+**巡检一步硬删（2026-09-30）**：`audit_purge` —— 只要对该库**有写权限**即可执行（不再要求后台
+`plan → apply --confirm`），支持 `slugs`（精确）或 `kinds`（按种类）；**先 `dry_run` 看清单**。
+结构化导入页与评审页在清理计划里**豁免**（来源记在元数据），不会被误删。
+HTTP：`POST /bodhi/audit/purge`。
+
+**文档评审（2026-09-30 新增，4 个工具）**：对选定文档按一条业务策略**逐条**评业务规则 ——
+`rules_of_policy`（策略下规则：级别/适用范围/实现方式/参考规范）→ 规则「实现方式」为 **LLM软规则**则交给大模型判定、
+为**图检索**则用 `graph_query`（**只读** Cypher 白名单）出结论；有参考规范先 `reference_lookup`
+（知识库文档/页 → 可选抓 URL；取不到就标「不可得」不编造）；结论用 `review_apply` 写成**一页**评审报告
+（逐条结论 + 逐字证据 + `bmm:promotesDirective → 策略页`）。
+HTTP：`GET /bodhi/review/{rules,graph,reference}`、`POST /bodhi/review/apply`。
 
 **权威 / 副本（2026-09-29 新增，2 个工具）**：同义知识**认定一个领域为权威**，其它领域**只读**、
 **只能从权威复制** —— 工具面 `context_authority`（只读：谁是权威、副本漂移、ticket）+

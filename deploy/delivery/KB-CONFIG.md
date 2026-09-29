@@ -183,7 +183,7 @@ python3 tools/ke-core/ke_context.py scan --limit 5         # 只读：出跨库�
 
 | # | 检查 | 期望 |
 |---|---|---|
-| 1 | 智能体跑一轮"只读"任务（`skills()` → 读一页）| `tool_count=22`；`logs/mcp_calls_*.log` 里能看到 `skills` |
+| 1 | 智能体跑一轮"只读"任务（`skills()` → 读一页）| `logs/mcp_calls_*.log` 里能看到 `skills`（模型侧工具数见 `AGENTS-SQL.md`）|
 | 2 | 智能体说"某工具不存在" | **十有八九是 MCP 没注册上**（SSRF/URL/网络），见 `TROUBLESHOOTING.md` §1 |
 | 3 | 上传一篇文档并抽取 | 页面类型都在本体里；无 B1/B2 报错；来源(`source_refs`)非空 |
 | 4 | `curl "http://<mcp>:8765/bodhi/audit?kb_id=<kb>"` | findings 里**没有** C1/C3（无来源）；A1/A2 若出现属于历史页，按提示修 |
