@@ -103,3 +103,618 @@ def _rows_as_dicts(sheet_rows: list[list[str]], header: list[str]) -> list[dict]
             item[col] = value.strip()
         out.append(item)
     return out
+
+
+# ---------------------------------------------------------------------------
+# 数据 / 本体 读取辅助
+# ---------------------------------------------------------------------------
+def _load_sheet(file: str, sheet: str = "", limit: int = 0) -> tuple[list[str], list[dict], str]:
+    """→ (表头, 行字典列表, 文件 sha256)。空表头/空 sheet 直接报错。"""
+    data = ke_sheet.read_any(file, sheet=sheet, max_rows=limit)
+    if not data["sheets"]:
+        raise ValueError("文件里没有可读 sheet：%s" % file)
+    item = data["sheets"][0]
+    rows = item["rows"]
+    if not rows:
+        raise ValueError("sheet 是空的：%s" % (sheet or item["name"]))
+    header = [(c or "").strip() for c in rows[0]]
+    return header, _rows_as_dicts(rows[1:], header), _sha256_file(file)
+
+
+def class_meta(page_type: str) -> dict:
+    """本体类元信息（不存在 → 报错）。`classes()` = {"source","classes"}，classes 是**列表**。"""
+    data = ke_ontology.classes() or {}
+    table = data.get("classes") if data.get("classes") is not None else data
+    name = str(page_type or "").strip()
+    if isinstance(table, dict):
+        info = table.get(name)
+    else:
+        info = next((c for c in (table or []) if c.get("prefixed") == name), None)
+    if not info:
+        raise ValueError("不是本体的类：%s（用 `ontology_types` 或 skills(skill=\"structured_modeling\") "
+                         "拿可用类清单）" % page_type)
+    return info
+
+
+def class_attrs(page_type: str, mapping: dict) -> tuple[dict, list]:
+    """列 → 数据属性（`systemNo` / `bmm:systemNo` 都认）→ (归一化映射, 未声明项)。"""
+    allowed = ke_ontology.data_properties_for(page_type) or {}
+    out, bad = {}, []
+    module = str(page_type).split(":")[0]
+    for column, attr in (mapping or {}).items():
+        want = str(attr or "").strip()
+        if not want:
+            continue
+        prefixed = want if ":" in want else "%s:%s" % (module, want)
+        if prefixed not in allowed:
+            bad.append({"column": column, "attribute": want})
+            continue
+        out[column] = prefixed
+    return out, bad
+
+
+def relation_meta(target: str) -> dict:
+    """按 prefixed 名找本体对象属性 → {'label','targets'(range),'domain','module'}。"""
+    name = str(target or "").strip()
+    for module in (ke_ontology.index_data().get("models") or []):
+        for rel in (module.get("relations") or []):
+            if rel.get("name") == name:
+                return {"label": rel.get("label") or name, "targets": rel.get("range") or [],
+                        "domain": rel.get("domain") or [], "module": module.get("key") or ""}
+    raise ValueError("不是本体的关系：%s（关系只能取本体里声明的对象属性）" % target)
+
+
+def _ledger_path(batch: str) -> pathlib.Path:
+    return STATE_DIR / ("%s.json" % batch)
+
+
+def _ledger_load(batch: str) -> dict:
+    path = _ledger_path(batch)
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return {"batch": batch, "targets": {}}
+
+
+# ---------------------------------------------------------------------------
+# plan：只读校验 + 影响面 + ticket（写进账本，不改任何页）
+# ---------------------------------------------------------------------------
+def plan(kind: str, target: str, file: str, kb_id: str = "", sheet: str = "", mapping: dict | None = None,
+         key_column: str = "", title: str = "", aliases: list | None = None,
+         source_key_column: str = "", target_key_column: str = "",
+         source_class: str = "", target_class: str = "", prune: bool = False,
+         batch_id: str = "", limit: int = 0, unknown_to_description: bool = True) -> dict:
+    """**只读**。`kind="class"`：一个类 + 它的数据属性（`key_column` 是行→slug 的键列）；
+    `kind="relation"`：一条关系（`source_key_column`/`target_key_column` 是两侧键列）。
+
+    `unknown_to_description=False` 时**不把未映射列聚合进 description**（适合"部门/组织机构"这类
+    只有名称、整行其余列与本实体无关的表）。
+    """
+    if kind not in ("class", "relation"):
+        return {"error": "kind 只能是 class（一个类）或 relation（一条关系）", "kind": kind}
+    header, rows, sha = _load_sheet(file, sheet, limit)
+    if not rows:
+        return {"error": "没有数据行（只有表头？）", "file": file, "header": header}
+    if not key_column or key_column not in header:
+        return {"error": "key_column 必须给出且存在于表头", "key_column": key_column, "header": header}
+    kb_res = ke_db.resolve_kb_id(kb_id) if kb_id else ("", "")
+    kb = kb_res[0] if isinstance(kb_res, (tuple, list)) else str(kb_res)
+    kb_name = kb_res[1] if isinstance(kb_res, (tuple, list)) and len(kb_res) > 1 else kb_id
+    if not kb:
+        return {"error": "需要 kb_id（目标知识库的 uuid 或精确库名）"}
+    if not ke_db.psql_csv("SELECT 1 AS ok FROM knowledge_bases WHERE id = %s AND deleted_at IS NULL"
+                          % ke_db.sql_str(kb)):
+        return {"error": "知识库不存在或已删：%s" % kb_id}
+
+    issues, questions, samples, counts, extra = [], [], [], {}, {}
+    if kind == "class":
+        conv = str(target or "").strip()
+        conv = conv if ":" in conv else "bmm:%s" % conv
+        info = class_meta(conv)
+        attrs, bad = class_attrs(conv, mapping or {})
+        if bad:
+            return {"ok": False, "error": "attribute_not_declared（有列映射到未声明的数据属性）",
+                    "issues": [{"code": "attribute_not_declared", "detail": bad,
+                                "allowed": sorted(ke_ontology.data_properties_for(conv) or {})}],
+                    "header": header}
+        keys, dup, empty = [], [], 0
+        for row in rows:
+            value = (row.get(key_column) or "").strip()
+            if not value:
+                empty += 1
+                continue
+            if value in keys:
+                dup.append(value)
+                continue
+            keys.append(value)
+        unknown = [c for c in header if c not in attrs and c != key_column]
+        if unknown:
+            questions.append("有 %d 列未映射：%s → 默认聚合进 description（要单独建模请改 mapping）"
+                             % (len(unknown), "、".join(unknown[:8])))
+        slugs = [page_slug(conv, k) for k in keys]
+        existing = {r["slug"] for r in ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+            " AND slug LIKE %s" % (ke_db.sql_str(kb), ke_db.sql_str(class_slug_prefix(conv) + "/%")))}
+        counts = {"rows": len(rows), "entities": len(keys), "duplicate_keys": len(dup),
+                  "empty_keys": empty, "create": len([s for s in slugs if s not in existing]),
+                  "update": len([s for s in slugs if s in existing])}
+        for value, slug in list(zip(keys, slugs))[:3]:
+            row = next(r for r in rows if (r.get(key_column) or "").strip() == value)
+            samples.append({"slug": slug, "title": render_title(title, row, value, info),
+                            "attributes": {column: row.get(column, "") for column in attrs},
+                            "evidence": " | ".join((c or "") for c in row["__raw__"]).strip()[:180],
+                            "row": row["__row__"]})
+        extra = {"page_type": conv, "class_label": info.get("label") or conv, "attrs": attrs,
+                 "unknown_columns": unknown, "aliases": aliases or [], "title": title,
+                 "unknown_to_description": bool(unknown_to_description)}
+        plan_key = "class|%s|%s" % (conv, key_column)
+    else:
+        rel = relation_meta(str(target or "").strip())
+        if not source_key_column or not target_key_column:
+            return {"error": "关系批次需要 source_key_column 与 target_key_column", "relation": rel}
+        for col in (source_key_column, target_key_column):
+            if col not in header:
+                return {"error": "键列不在表头里：%s" % col, "header": header}
+        pairs = []
+        for row in rows:
+            a = (row.get(source_key_column) or "").strip()
+            b = (row.get(target_key_column) or "").strip()
+            if a and b and (a, b) not in pairs:
+                pairs.append((a, b))
+        if not (source_class and target_class):
+            return {"error": "关系批次需要 source_class 与 target_class（拼 slug 用）",
+                    "hint": "例如 source_class=bmm:MainSystem, target_class=bmm:SubSystem"}
+        s_prefix, t_prefix = class_slug_prefix(source_class) + "/", class_slug_prefix(target_class) + "/"
+        known = {r["slug"] for r in ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL"
+            % ke_db.sql_str(kb))}
+        missing, resolvable = [], 0
+        for a, b in pairs:
+            s_slug, t_slug = s_prefix + _slugify(a), t_prefix + _slugify(b)
+            if s_slug in known and t_slug in known:
+                resolvable += 1
+            else:
+                missing.append({"source": a, "target": b, "why": ("源页缺 " if s_slug not in known else "")
+                                + ("目标页缺" if t_slug not in known else "")})
+        counts = {"rows": len(rows), "pairs": len(pairs), "resolvable": resolvable,
+                  "dangling": len(missing)}
+        if missing:
+            questions.append("有 %d 对键在库里找不到页（先跑类批次、再跑关系批次）" % len(missing))
+        samples = [{"source_key": a, "target_key": b} for a, b in pairs[:3]]
+        extra = {"relation_label": rel["label"], "relation_targets": rel["targets"],
+                 "dangling": missing[:10], "source_class": source_class, "target_class": target_class,
+                 "page_type": source_class}
+        plan_key = "relation|%s|%s|%s" % (target, source_key_column, target_key_column)
+
+    ticket = _sha1("import-v1|%s|%s|%s|%s|%s|%s|%s"
+                   % (sha, kind, target, kb, json.dumps(mapping or {}, sort_keys=True),
+                      json.dumps(counts, sort_keys=True),
+                      key_column + source_key_column + target_key_column))
+    batch = batch_id or ("imp-%s" % _sha1("%s|%s" % (sha, kb))[:10])
+    ledger = _ledger_load(batch)
+    ledger.update({"batch": batch, "kb_id": kb, "kb_name": kb_name, "file": str(file), "sha256": sha,
+                   "sheet": sheet or "(first)", "header": header, "updated_at": ke_db.now_text()})
+    entry = ledger["targets"].get(plan_key, {})
+    entry.update({"kind": kind, "target": target, "ticket": ticket, "status": "planned",
+                  "counts": counts, "mapping": mapping or {}, "key_column": key_column,
+                  "source_key_column": source_key_column, "target_key_column": target_key_column,
+                  "title": title, "aliases": aliases or [], "prune": bool(prune),
+                  "planned_at": ke_db.now_text(), **extra})
+    ledger["targets"][plan_key] = entry
+    _ledger_save(ledger)
+    return {"ok": True, "batch": batch, "kind": kind, "target": target, "ticket": ticket,
+            "kb_id": kb, "kb_name": kb_name, "counts": counts, "samples": samples,
+            "issues": issues, "questions": questions, "ledger": str(_ledger_path(batch)),
+            "plan_key": plan_key, "next": "确认后用同一 ticket 调 import_apply（一次只写这一个目标）"}
+
+
+# ---------------------------------------------------------------------------
+# 渲染：标题 / 正文（定义 + 属性表 + 原文依据）
+# ---------------------------------------------------------------------------
+def render_title(template: str, row: dict, key: str, info: dict) -> str:
+    """标题模板：`{列名}` 占位 + `{key}`（键列值）+ `{name}`（兜底用键值）。"""
+    text = str(template or "{key}")
+    for col, value in row.items():
+        if col.startswith("__"):
+            continue
+        text = text.replace("{%s}" % col, str(value or "").strip())
+    text = text.replace("{key}", key).replace("{name}", key)
+    return text.strip() or key
+
+
+def _description_of(row: dict, attrs: dict, unknown: list) -> str:
+    """「## 定义」：优先取映射到 `:description`/`:definition` 的列；未映射列按 `【列名】值` 聚合。"""
+    parts = []
+    for column, attr in attrs.items():
+        if attr.endswith(":description") or attr.endswith(":definition"):
+            value = (row.get(column) or "").strip()
+            if value:
+                parts.append(value)
+    for column in unknown:
+        value = (row.get(column) or "").strip()
+        if value:
+            parts.append("【%s】%s" % (column, value))
+    return "\n\n".join(parts) or "（源表未提供）"
+
+
+def render_class_content(page_type: str, row: dict, attrs: dict, title: str, unknown: list,
+                         source: dict, tag: str) -> str:
+    """类批次正文：`# 标题` + 类型/生成方式/来源 + `## 定义` + `## 属性` + `## 原文依据`。"""
+    label = source.get("class_label") or page_type
+    lines = ["# %s" % title, "",
+             "> **本体类型**：%s（`%s`）  " % (label, page_type),
+             "> **生成方式**：结构化批量建模（`%s`）—— **以来源文件为唯一事实源**"
+             % (source.get("tag_full") or tag),
+             "> **来源**：`%s`（sha256:%s）sheet=`%s` 第 %d 行"
+             % (source.get("file"), str(source.get("sha256") or "")[:12], source.get("sheet"),
+                int(row.get("__row__") or 0)),
+             "", DEF_SECTION, "", _description_of(row, attrs, unknown), ""]
+    if attrs:
+        lines += [AUTH_SECTION, "", "| 属性 | 取值 |", "|---|---|"]
+        for column, attr in attrs.items():
+            lines.append("| %s | %s |" % (column, (row.get(column) or "").strip()))
+        lines.append("")
+    evidence = " | ".join(str(c or "") for c in (row.get("__raw__") or [])).strip(" |")
+    lines += [EVIDENCE_SECTION, "", "> %s" % (evidence or "（空行）"), ""]
+    return "\n".join(lines)
+
+
+def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, title: str, content: str,
+              aliases: list, row: dict, source: dict, tag: str) -> dict:
+    """一行 → 可插入的页字段（id 用规范派生 `bodhi-element:<kb>|<slug>`，巡检 D5 认它）。"""
+    import uuid
+    module = page_type.split(":")[0]
+    attrs = source.get("attrs") or {}
+    attributes = {column: (row.get(column) or "").strip()
+                  for column in attrs if (row.get(column) or "").strip()}
+    metadata = {"ontology": {"model": module, "class": page_type, "label": label, "name": title,
+                             "attributes": attributes, "generator": TAG, "created_at": ke_db.now_text()},
+                "import": {"batch": source.get("batch"), "file": source.get("file"),
+                           "file_sha256": source.get("sha256"), "sheet": source.get("sheet"),
+                           "row": int(row.get("__row__") or 0), "key": source.get("key_value"),
+                           "tag": source.get("tag_full")}}
+    return {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s" % (kb, slug))),
+            "slug": slug, "title": title, "page_type": page_type, "content": content,
+            "summary": (attributes.get("bmm:description") or title)[:200],
+            "aliases": aliases, "metadata": metadata,
+            "category_path": [kb_name or "批量建模", label],
+            "last_edit_source": tag, "out_links": ke_pages.out_links_of(content)}
+
+
+PAGE_COLUMNS = ("id, tenant_id, knowledge_base_id, slug, title, page_type, status, content, summary, "
+                "parent_slug, folder_id, category_path, wiki_path, depth, sort_order, source_refs, "
+                "chunk_refs, in_links, out_links, page_metadata, aliases, version, last_edit_source, "
+                "last_editor_id")
+
+
+def _insert_stmt(kb: str, tenant_id: str, page: dict, actor: str) -> str:
+    values = [ke_db.sql_str(page["id"]), str(int(tenant_id)), ke_db.sql_str(kb),
+              ke_db.sql_str(page["slug"]), ke_db.sql_str(page["title"]), ke_db.sql_str(page["page_type"]),
+              ke_db.sql_str("published"), ke_db.sql_str(page["content"]), ke_db.sql_str(page["summary"]),
+              ke_db.sql_str(""), ke_db.sql_str(""), ke_db.sql_json(page["category_path"]),
+              ke_db.sql_str(page["slug"]), str(len(page["category_path"])), "0",
+              ke_db.sql_json([]), ke_db.sql_json([]), ke_db.sql_json([]),
+              ke_db.sql_json(page["out_links"]), ke_db.sql_json(page["metadata"]),
+              ke_db.sql_json(page["aliases"]), "1", ke_db.sql_str(page["last_edit_source"]),
+              ke_db.sql_str(actor)]
+    return ("INSERT INTO wiki_pages (%s) VALUES (%s) ON CONFLICT DO NOTHING;"
+            % (PAGE_COLUMNS, ", ".join(values)))
+
+
+def _find_entry(ticket: str) -> tuple[dict, str, dict]:
+    """按 ticket 找账本条目（账本在 state/import/*.json）。"""
+    if not STATE_DIR.is_dir():
+        return {}, "", {}
+    for path in sorted(STATE_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        for key, entry in (data.get("targets") or {}).items():
+            if entry.get("ticket") == ticket:
+                return data, key, entry
+    return {}, "", {}
+
+
+def _upsert_relation_lines(content: str, lines: list) -> tuple[str, int]:
+    """把关系行并入「## 本体关系」小节（已存在的不重复加）；小节不存在就追加到文尾。"""
+    text = content or ""
+    existing = text.splitlines()
+    start = next((i for i, ln in enumerate(existing) if ln.strip() == REL_SECTION), -1)
+    added = [ln for ln in lines if ln not in existing]
+    if not added:
+        return text, 0
+    if start < 0:
+        block = "\n" + REL_SECTION + "\n\n" + "\n".join(lines) + "\n"
+        return (text.rstrip() + block), len(added)
+    end = next((i for i in range(start + 1, len(existing)) if existing[i].startswith("## ")), len(existing))
+    insert_at = end
+    while insert_at > start + 1 and not existing[insert_at - 1].strip():
+        insert_at -= 1
+    merged = existing[:insert_at] + added + [""] + existing[insert_at:]
+    return "\n".join(merged), len(added)
+
+
+def _extra_set(title: str, aliases: list, metadata: dict, page_type: str, summary: str) -> str:
+    """更新已存在页时要一并覆盖的列（正文由 `_apply_content_update` 写）。"""
+    return (", title = %s, summary = %s, page_type = %s, aliases = %s::jsonb, page_metadata = %s::jsonb"
+            % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
+               ke_db.sql_json(aliases), ke_db.sql_json(metadata)))
+
+
+# ---------------------------------------------------------------------------
+# apply：**只写这一个 target**（一个类 或 一条关系）
+# ---------------------------------------------------------------------------
+def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
+          prune: bool | None = None, limit: int = 0) -> dict:
+    """按 ticket 落库（**一次只处理一个类或一条关系**；内部按 CHUNK 行分批提交）。"""
+    import time
+    data, key, entry = _find_entry(ticket)
+    if not entry:
+        return {"error": "ticket 未登记（先 import_plan）", "need_plan": True}
+    kb, batch = data["kb_id"], data["batch"]
+    acl = ke_db.assert_can_write(kb, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl.get("allowed"):
+        return {"error": "need_write_permission", "permission": acl,
+                "hint": "import_apply 写目标知识库；需要对该库有写权限"}
+    file = entry.get("file") or data["file"]
+    sheet = data.get("sheet") or ""
+    header, rows, sha = _load_sheet(file, "" if sheet == "(first)" else sheet, limit)
+    if sha != data.get("sha256"):
+        return {"error": "文件内容已变（sha256 不一致）→ need_replan", "need_replan": True}
+    tenant_id = ke_db.psql_csv("SELECT tenant_id FROM knowledge_bases WHERE id = %s"
+                               % ke_db.sql_str(kb))[0]["tenant_id"]
+    tag = "bi-%s" % _sha1("%s|%s" % (batch, key))[:8]        # last_edit_source 是 varchar(16)
+    tag_full = "%s:%s:%s" % (TAG, batch, key)                # 完整标识进 page_metadata.import.tag
+    started = time.time()
+    result: dict = {"ok": True, "batch": batch, "plan_key": key, "kind": entry["kind"],
+                    "target": entry["target"], "kb_id": kb, "tag": tag, "tag_full": tag_full}
+
+    if entry["kind"] == "class":
+        page_type = entry["page_type"]
+        label = entry.get("class_label") or page_type
+        attrs = entry.get("attrs") or {}
+        unknown = entry.get("unknown_columns") or []
+        if not entry.get("unknown_to_description", True):
+            unknown = []                       # 部门这类实体：不把整行其余列塞进 description
+        key_column = entry["key_column"]
+        entities: dict = {}
+        for row in rows:
+            value = (row.get(key_column) or "").strip()
+            if value and value not in entities:
+                entities[value] = row
+        existing = {r["slug"]: r["content"] for r in ke_db.psql_csv(
+            "SELECT slug, COALESCE(content,'') AS content FROM wiki_pages "
+            " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug LIKE %s"
+            % (ke_db.sql_str(kb), ke_db.sql_str(class_slug_prefix(page_type) + "/%")))}
+        created = updated = skipped = 0
+        items = list(entities.items())
+        for offset in range(0, len(items), CHUNK):
+            stmts = []
+            for value, row in items[offset:offset + CHUNK]:
+                slug = page_slug(page_type, value)
+                title = render_title(entry.get("title"), row, value, {"label": label})
+                source = {**entry, "batch": batch, "key_value": value, "page_type": page_type,
+                          "class_label": label, "attrs": attrs, "sha256": data.get("sha256"),
+                          "file": data.get("file"), "sheet": sheet, "tag_full": tag_full}
+                content = render_class_content(page_type, row, attrs, title, unknown, source, tag)
+                aliases = [str(row.get(c) or "").strip() for c in (entry.get("aliases") or [])]
+                aliases = [a for a in aliases if a]
+                if slug in existing:
+                    if existing[slug].strip() == content.strip():
+                        skipped += 1
+                        continue
+                    meta = _page_row(kb, data.get("kb_name"), page_type, label, slug, title, content,
+                                     aliases, row, source, tag)["metadata"]
+                    ke_pages._apply_content_update(kb, slug, content, tag,
+                                                   _extra_set(title, aliases, meta, page_type, title))
+                    updated += 1
+                    continue
+                page = _page_row(kb, data.get("kb_name"), page_type, label, slug, title, content,
+                                 aliases, row, source, tag)
+                stmts.append(_insert_stmt(kb, tenant_id, page, actor))
+            if stmts:
+                ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;")
+                created += len(stmts)
+        pruned = 0
+        if prune if prune is not None else entry.get("prune"):
+            keep = [page_slug(page_type, v) for v in entities]
+            victims = [r["slug"] for r in ke_db.psql_csv(
+                "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                " AND last_edit_source LIKE %s AND slug LIKE %s"
+                % (ke_db.sql_str(kb), ke_db.sql_str(tag + "%"),
+                   ke_db.sql_str(class_slug_prefix(page_type) + "/%")))]
+            victims = [s for s in victims if s not in keep]
+            if victims:
+                ke_db.psql("UPDATE wiki_pages SET deleted_at = now(), updated_at = now() "
+                           " WHERE knowledge_base_id = %s AND slug = ANY(ARRAY['%s']);"
+                           % (ke_db.sql_str(kb), "','".join(victims)))
+                pruned = len(victims)
+        if created or updated or pruned:
+            ke_db.psql(ke_pages.rebuild_in_links_sql(kb))
+        result.update({"created": created, "updated": updated, "skipped": skipped, "pruned": pruned,
+                       "entities": len(entities), "chunk_rows": CHUNK,
+                       "next": "继续下一个目标（另一个类或一条关系）；全跑完再 audit_scan 验收"})
+    else:
+        rel = entry["target"]
+        rel_label = entry.get("relation_label") or rel
+        sc, tc = entry["source_class"], entry["target_class"]
+        s_col, t_col = entry["source_key_column"], entry["target_key_column"]
+        per_source: dict = {}
+        for row in rows:
+            a = (row.get(s_col) or "").strip()
+            b = (row.get(t_col) or "").strip()
+            if a and b:
+                per_source.setdefault(a, set()).add(b)
+        titles = {r["slug"]: (r["title"] or "") for r in ke_db.psql_csv(
+            "SELECT slug, COALESCE(title,'') AS title FROM wiki_pages "
+            " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug LIKE %s"
+            % (ke_db.sql_str(kb), ke_db.sql_str(class_slug_prefix(tc) + "/%")))}
+        pages_written = edges = dangling = 0
+        updates = []
+        for a, group in per_source.items():
+            slug = page_slug(sc, a)
+            cur = ke_db.psql_csv("SELECT COALESCE(content,'') AS content FROM wiki_pages "
+                                 " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+                                 % (ke_db.sql_str(kb), ke_db.sql_str(slug)))
+            if not cur:
+                dangling += 1
+                continue
+            lines = []
+            for b in sorted(group):
+                t_slug = page_slug(tc, b)
+                if t_slug not in titles:
+                    dangling += 1
+                    continue
+                lines.append("- %s（`%s`）→ [[%s|%s]]" % (rel_label, rel, t_slug, titles[t_slug] or b))
+            new_text, added = _upsert_relation_lines(cur[0]["content"], lines)
+            if not added:
+                continue
+            updates.append((slug, new_text))
+            edges += added
+        # 批量写：每 CHUNK 个源页一个事务（快照 + version+1；比逐页 helper 快一个量级）
+        for offset in range(0, len(updates), CHUNK):
+            stmts = []
+            for slug, new_text in updates[offset:offset + CHUNK]:
+                stmts.append(ke_pages._snapshot_stmt(kb, slug, tag))
+                stmts.append("UPDATE wiki_pages SET content = %s, out_links = %s::jsonb, "
+                             "version = version + 1, updated_at = now(), last_edit_source = '%s' "
+                             " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
+                             % (ke_db.sql_str(new_text), ke_db.sql_json(ke_pages.out_links_of(new_text)),
+                                tag, ke_db.sql_str(kb), ke_db.sql_str(slug)))
+            if stmts:
+                ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;")
+                pages_written += len(updates[offset:offset + CHUNK])
+        if pages_written:
+            ke_db.psql(ke_pages.rebuild_in_links_sql(kb))
+        result.update({"pages_written": pages_written, "edges": edges, "dangling": dangling,
+                       "pairs": sum(len(v) for v in per_source.values()),
+                       "next": "import_state 看 remaining；为空即整个文件建完"})
+
+    import time as _t
+    result["duration_ms"] = int((_t.time() - started) * 1000)
+    entry["status"] = "applied"
+    entry["applied_at"] = ke_db.now_text()
+    entry["result"] = {k: v for k, v in result.items()}
+    data["targets"][key] = entry
+    data["updated_at"] = ke_db.now_text()
+    _ledger_save(data)
+    result["ledger"] = str(_ledger_path(batch))
+    return result
+
+
+def state(batch: str = "") -> dict:
+    """账本：不传 → 最近几批；传 batch → 每个目标的状态 + `remaining`（为空=全部建完）。"""
+    if not STATE_DIR.is_dir():
+        return {"batches": [], "note": "还没有任何批次"}
+    if not batch:
+        out = []
+        for path in sorted(STATE_DIR.glob("*.json")):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            targets = data.get("targets") or {}
+            out.append({"batch": data.get("batch"), "kb_name": data.get("kb_name"),
+                        "file": data.get("file"), "targets": len(targets),
+                        "done": len([1 for e in targets.values() if e.get("status") == "applied"]),
+                        "updated_at": data.get("updated_at")})
+        return {"batches": out[-10:]}
+    data = _ledger_load(batch)
+    targets = data.get("targets") or {}
+    remaining = [k for k, e in targets.items() if e.get("status") != "applied"]
+    return {"batch": batch, "kb_id": data.get("kb_id"), "kb_name": data.get("kb_name"),
+            "file": data.get("file"), "sha256": data.get("sha256"),
+            "targets": {k: {"kind": v.get("kind"), "target": v.get("target"), "status": v.get("status"),
+                            "counts": v.get("counts"), "result": v.get("result")}
+                        for k, v in targets.items()},
+            "remaining": remaining, "done": not remaining}
+
+
+# ---------------------------------------------------------------------------
+# CLI：probe / plan / apply / state（智能体走 MCP 工具，运维/脚本走这里）
+# ---------------------------------------------------------------------------
+def _dump(payload: dict) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def main() -> int:
+    import argparse
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:  # noqa: BLE001
+                pass
+    ap = argparse.ArgumentParser(description="结构化数据批量建模（一次一个类或一条关系）")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    q = sub.add_parser("probe", help="只读：结构 / 表头 / 抽样 / 重复表头 / 列前缀")
+    q.add_argument("file")
+    q.add_argument("--sheet", default="")
+    q.add_argument("--sample", type=int, default=3)
+    q = sub.add_parser("plan", help="只读：校验 + 影响面 + ticket")
+    q.add_argument("--kind", required=True, choices=("class", "relation"))
+    q.add_argument("--target", required=True, help="类（bmm:MainSystem）或关系（bmm:mainSystemContainsSubSystem）")
+    q.add_argument("--file", required=True)
+    q.add_argument("--kb", required=True)
+    q.add_argument("--sheet", default="")
+    q.add_argument("--key-column", default="")
+    q.add_argument("--map", default="", help='列=属性,列=属性（属性可写 systemNo 或 bmm:systemNo）')
+    q.add_argument("--title", default="{key}")
+    q.add_argument("--aliases", default="", help="逗号分隔的列名（进 aliases，便于检索）")
+    q.add_argument("--source-key-column", default="")
+    q.add_argument("--target-key-column", default="")
+    q.add_argument("--source-class", default="")
+    q.add_argument("--target-class", default="")
+    q.add_argument("--batch", default="")
+    q.add_argument("--prune", action="store_true")
+    q.add_argument("--limit", type=int, default=0)
+    q.add_argument("--no-unknown-to-description", action="store_true",
+                   help="未映射列不聚合进 description（适合部门/组织机构这类只有名称的类）")
+    q = sub.add_parser("apply", help="写：按 ticket 落库（只写这一个目标）")
+    q.add_argument("--ticket", required=True)
+    q.add_argument("--actor", default="cli:import")
+    q.add_argument("--prune", action="store_true")
+    q = sub.add_parser("state", help="账本：目标状态 + remaining")
+    q.add_argument("--batch", default="")
+    args = ap.parse_args()
+
+    if args.cmd == "probe":
+        _dump(ke_sheet.probe(args.file, args.sheet, args.sample))
+        return 0
+    if args.cmd == "plan":
+        mapping = {}
+        for pair in args.map.split(","):
+            if "=" in pair:
+                column, _, attr = pair.partition("=")
+                mapping[column.strip()] = attr.strip()
+        out = plan(kind=args.kind, target=args.target, file=args.file, kb_id=args.kb, sheet=args.sheet,
+                   mapping=mapping, key_column=args.key_column, title=args.title,
+                   aliases=[a.strip() for a in args.aliases.split(",") if a.strip()],
+                   source_key_column=args.source_key_column, target_key_column=args.target_key_column,
+                   source_class=args.source_class, target_class=args.target_class,
+                   prune=args.prune, batch_id=args.batch, limit=args.limit,
+                   unknown_to_description=not args.no_unknown_to_description)
+        _dump(out)
+        return 0 if out.get("ok") or out.get("error") is None else 1
+    if args.cmd == "apply":
+        out = apply(args.ticket, actor=args.actor, prune=True if args.prune else None)
+        _dump(out)
+        return 0 if out.get("ok") else 1
+    _dump(state(args.batch))
+    return 0
+
+
+def _ledger_save(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _ledger_path(data["batch"]).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+
+
+
+
+def _ledger_save(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _ledger_path(data["batch"]).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+

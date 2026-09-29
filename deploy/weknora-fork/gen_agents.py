@@ -69,6 +69,9 @@ OPS_TOOLS = [
     "mcp_bodhi_ontology_retag_preview",
     "mcp_bodhi_ontology_context_scan", "mcp_bodhi_ontology_context_lookup",
     "mcp_bodhi_ontology_context_page",
+    # 巡检清理（用户口径）：有库写权限即可一步硬删；文档评审取规则/图检索（只读）
+    "mcp_bodhi_ontology_audit_purge",
+    "mcp_bodhi_ontology_rules_of_policy", "mcp_bodhi_ontology_graph_query",
 ]
 # 「EA 概要设计」智能体：只读 wiki + 看本体类型 + **设计落库工具**（不给原生写页、不给抽取）
 DESIGN_TOOLS = [
@@ -101,6 +104,14 @@ MODELER_TOOLS = [
     "mcp_bodhi_ontology_context_concept_apply", "mcp_bodhi_ontology_context_concept_rollback",
     # 权威/副本（2026-09-29）：同义知识认定一个领域为权威，其它领域只读 + 只能从权威复制
     "mcp_bodhi_ontology_context_authority", "mcp_bodhi_ontology_context_authority_apply",
+    # 结构化批量建模（2026-09-29）：一次一个类/一条关系；工具只执行，语义由技能理解
+    "mcp_bodhi_ontology_import_probe", "mcp_bodhi_ontology_import_plan",
+    "mcp_bodhi_ontology_import_apply", "mcp_bodhi_ontology_import_state",
+    # 巡检清理（2026-09-29 用户口径）：有库写权限即可**一步硬删**（不再走后台 plan/confirm）
+    "mcp_bodhi_ontology_audit_purge",
+    # 文档评审（2026-09-29）：按策略下规则逐条评（LLM软规则 / 图检索 / 参考规范）
+    "mcp_bodhi_ontology_rules_of_policy", "mcp_bodhi_ontology_graph_query",
+    "mcp_bodhi_ontology_review_apply",
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
                   "design": DESIGN_TOOLS, "modeler": MODELER_TOOLS}

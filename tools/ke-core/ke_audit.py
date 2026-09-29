@@ -1731,6 +1731,47 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     }
 
 
+def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 5000,
+          slugs: list | None = None, tenant: int | None = None, dry_run: bool = False) -> dict:
+    """**一步硬删**（用户口径 2026-09-29）：只要调用者对该库**有写权限**就执行，不再走后台 plan/confirm。
+
+    - `slugs` 给了 → 只硬删这些页（含快照/关系行清理 + 重算 in_links）；
+    - 否则按 `kinds`（见 `KIND_HELP`）生成清理计划**并立即执行**；
+    - `dry_run=True` 只回影响面，不写库。
+    写权限口径与其它写路径一致：属主 / `kb_shares` 的 editor|writer|admin；身份缺失 fail-closed。
+    """
+    import ke_pages as _ke_pages
+    kb, kname, _note = ke_db.resolve_kb_id(kb_id)
+    acl = ke_db.assert_can_write(kb, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl.get("allowed"):
+        return {"ok": False, "error": "need_write_permission", "permission": acl,
+                "hint": ("巡检清理需要对该知识库的写权限（属主 / kb_shares 的 editor|writer|admin）；"
+                         "调用者租户来自 MCP 头 X-Bodhi-Tenant 或 env BODHI_TENANT_ID")}
+    if slugs:
+        targets = [s for s in dict.fromkeys(slugs) if s]
+        existing = [r["slug"] for r in ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+            " AND slug = ANY(ARRAY['%s'])" % (ke_db.sql_str(kb), "','".join(targets)))]
+        if dry_run:
+            return {"ok": True, "dry_run": True, "kb": {"id": kb, "name": kname}, "mode": "slugs",
+                    "will_delete": len(existing), "not_found": [s for s in targets if s not in existing],
+                    "permission": acl.get("mode")}
+        out = _ke_pages.delete_pages(kb, existing) if existing else {"deleted": 0}
+        return {"ok": True, "mode": "slugs", "kb": {"id": kb, "name": kname},
+                "permission": acl.get("mode"), "not_found": [s for s in targets if s not in existing],
+                **(out if isinstance(out, dict) else {"result": out})}
+    plan = build_plan(kb, kinds, scope, page_limit, save=True)
+    brief = {"plan_id": plan.get("plan_id"), "kinds": plan.get("kinds"),
+             "actions": len(plan.get("actions") or []),
+             "counts": plan.get("counts") or plan.get("summary")}
+    if dry_run:
+        return {"ok": True, "dry_run": True, "kb": {"id": kb, "name": kname}, "mode": "kinds",
+                "plan": brief, "permission": acl.get("mode")}
+    applied = apply_plan(kb, plan["plan_id"], True, page_limit)
+    return {"ok": True, "mode": "kinds", "kb": {"id": kb, "name": kname},
+            "permission": acl.get("mode"), "plan": brief, "applied": applied}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="wiki ↔ 本体图谱 ↔ 本体模型 一致性巡检 / 清理（P1 只读 + P2 计划→确认→硬删）")
@@ -1755,6 +1796,12 @@ def main() -> int:
     apply_cmd.add_argument("--confirm", action="store_true",
                            help="必须显式给出（用户口径：执行前必须确认），否则拒绝执行")
     apply_cmd.add_argument("--page-limit", type=int, default=5000)
+    purge_cmd = sub.add_parser("purge", help="**一步硬删**（有该库写权限即可）：--kinds 或 --slugs")
+    purge_cmd.add_argument("kb_id")
+    purge_cmd.add_argument("--kinds", default="all")
+    purge_cmd.add_argument("--slugs", default="", help="逗号分隔：只硬删这些页")
+    purge_cmd.add_argument("--tenant", type=int, default=0)
+    purge_cmd.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
     if args.cmd == "scan":
@@ -1771,6 +1818,11 @@ def main() -> int:
         return 0
     if args.cmd == "init":
         print(json.dumps(build_plan(args.kb_id, "init", "all", ), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "purge":
+        slugs = [s.strip() for s in args.slugs.split(",") if s.strip()]
+        print(json.dumps(purge(args.kb_id, args.kinds, "all", 5000, slugs or None,
+                               args.tenant or None, args.dry_run), ensure_ascii=False, indent=2))
         return 0
     print(json.dumps(apply_plan(args.kb_id, args.plan_id, args.confirm, args.page_limit),
                      ensure_ascii=False, indent=2))

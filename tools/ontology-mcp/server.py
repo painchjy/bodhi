@@ -99,7 +99,10 @@ import ke_admin  # noqa: E402
 import ke_pages  # noqa: E402
 import ke_docs  # noqa: E402  （按来源文档统计/清理本体实例，2026-09-20）
 import ke_audit  # noqa: E402  （wiki↔图谱↔模型 一致性巡检，只读，2026-09-20 P1）
-import ke_context  # noqa: E402  （跨库上下文映射：同名/同义/异义 + 依赖，只读，2026-09-28 一期）
+import ke_context
+import ke_import
+import ke_review
+import ke_sheet  # noqa: E402  （跨库上下文映射：同名/同义/异义 + 依赖，只读，2026-09-28 一期）
 import ke_yamlmini  # noqa: E402  （零依赖 YAML 子集：干净容器里没有 PyYAML 时的兜底）
 import ke_neo4j  # noqa: E402  （Neo4j 本体投影；ontology_types 补录、B5 一致性都用它）
 from ke_pages import (  # noqa: E402,F401  （历史脚本 relink_pages.py 已归档，此别名保留兼容）
@@ -2941,6 +2944,119 @@ def tool_definitions() -> list[dict]:
             },
         },
         {
+            "name": "import_probe",
+            "description": ("**结构化批量建模·探表（只读）**：读 Excel/CSV 的**结构**——sheet 名、表头、行数、抽样 3 行、"
+                            "**重复表头**、**列前缀**（判断一张表里有几个实体）、疑似主键列。"
+                            "用法：先 `import_probe(file=…, sheet=…)`，和用户对齐「哪些列是哪个类/属性/外键」后，"
+                            "再逐个目标 `import_plan` → `import_apply`。零依赖（xlsx 走标准库 zip+xml）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "file": {"type": "string", "description": "文件路径（宿主机可读路径）"},
+                "sheet": {"type": "string", "description": "可选：只探某个 sheet"},
+                "sample": {"type": "integer", "description": "抽样行数（默认 3）"}},
+                "required": ["file"]},
+        },
+        {
+            "name": "import_plan",
+            "description": ("**结构化批量建模·计划（只读）**：**一次只处理一个类（含其数据属性）或一条关系**。"
+                            "`kind=class` 给 `target`（本体类）+ `key_column`（行→slug 的键列）+ `mapping`（列→数据属性）；"
+                            "`kind=relation` 给 `target`（本体关系）+ `source_key_column`/`target_key_column` + "
+                            "`source_class`/`target_class`。回执给影响面（create/update/duplicate_keys/empty_keys/dangling）、"
+                            "页样例、待确认问题与 `ticket`。工具**只做确定性校验**（类/属性是否已声明、键唯一、外键命中），"
+                            "语义由你（智能体）从用户描述得出。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kind": {"type": "string", "enum": ["class", "relation"]},
+                "target": {"type": "string", "description": "类（bmm:MainSystem）或关系（bmm:mainSystemContainsSubSystem）"},
+                "file": {"type": "string"},
+                "kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"},
+                "sheet": {"type": "string"},
+                "key_column": {"type": "string"},
+                "mapping": {"type": "object", "description": "列名 → 数据属性（systemNo 或 bmm:systemNo）"},
+                "title": {"type": "string", "description": "标题模板，如 {主系统英文名称}（{主系统系统编号}）"},
+                "aliases": {"type": "array", "items": {"type": "string"}},
+                "source_key_column": {"type": "string"},
+                "target_key_column": {"type": "string"},
+                "source_class": {"type": "string"},
+                "target_class": {"type": "string"},
+                "unknown_to_description": {"type": "boolean", "description": "未映射列是否聚合进 description（默认 true；部门这类实体建议 false）"},
+                "prune": {"type": "boolean", "description": "重跑时软删本批多出来的页"},
+                "batch_id": {"type": "string", "description": "同一份文件多次目标共用一个 batch（便于 import_state 收敛）"},
+                "limit": {"type": "integer"}},
+                "required": ["kind", "target", "file", "kb_id", "key_column"]},
+        },
+        {
+            "name": "import_apply",
+            "description": ("**结构化批量建模·执行（写）**：按 `import_plan` 给的 `ticket` 落库，**只写那一个目标**；"
+                            "内部按 500 行/事务分批；幂等（内容没变的页**零写入**，变化走快照 + version+1）；"
+                            "关系批次把关系行写进 **domain 侧页**的「## 本体关系」并重算 in_links。"
+                            "写权限：对该库有写权限（属主 / kb_shares 的 editor|writer|admin）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "ticket": {"type": "string"},
+                "actor": {"type": "string"},
+                "prune": {"type": "boolean"}},
+                "required": ["ticket"]},
+        },
+        {
+            "name": "import_state",
+            "description": ("**结构化批量建模·账本（只读）**：不传 `batch` → 列最近批次；传 `batch` → 每个目标的"
+                            "状态与 **`remaining`**（为空 = 这张表所有类/关系都建完了）。智能体靠它循环到收敛。"),
+            "inputSchema": {"type": "object", "properties": {
+                "batch": {"type": "string"}}},
+        },
+        {
+            "name": "audit_purge",
+            "description": ("**巡检清理·一步硬删（写）**：只要调用者对该知识库**有写权限**就执行，不需要后台 plan/confirm。"
+                            "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理 + 重算 in_links）；"
+                            "② 不给 → 按 `kinds`（all=清理异常+修问题；也可 no_source_pages/deleted_source_pages/"
+                            "mixed_source_refs/soft_deleted_rows/orphan_revisions 等）生成计划并立即执行。"
+                            "`dry_run=true` 只看影响面。**删除不可逆**，删前先 `audit_scan` 把 target 念给用户确认。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "kinds": {"type": "string", "description": "all（默认）或逗号分隔的具体 kind"},
+                "slugs": {"type": "array", "items": {"type": "string"}},
+                "dry_run": {"type": "boolean"}},
+                "required": ["kb_id"]},
+        },
+        {
+            "name": "rules_of_policy",
+            "description": ("**文档评审·取规则清单（只读）**：给一条业务策略（`bmm:BusinessPolicy` 的 slug/标题片段），"
+                            "返回它下面的**业务规则**清单：每条的名称、**级别**（Strict/Advisory/Override）、"
+                            "**适用范围**（`ruleScope`，一般=文档章节）、**实现方式**（`ruleImplementation`："
+                            "LLM软规则 / 图检索）、**参考规范**（`ruleReference`）与规则原文依据。"
+                            "评审时**逐条**按实现方式分流（LLM软规则→大模型判定；图检索→`graph_query`）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "policy": {"type": "string", "description": "策略的 slug 片段或标题片段"},
+                "limit": {"type": "integer"}},
+                "required": ["kb_id", "policy"]},
+        },
+        {
+            "name": "graph_query",
+            "description": ("**文档评审·图检索（只读）**：执行**只读** Cypher（MATCH/OPTIONAL MATCH/WITH/UNWIND/RETURN 开头），"
+                            "写操作与存储过程调用一律拒；自动补 LIMIT（默认 200，上限 1000）。"
+                            "给「实现方式=图检索」的规则出结论：把规则语义翻成 Cypher → 拿命中行 → 结论里附**语句+命中数**。"
+                            "拿不准图谱标签时先跑探针 `MATCH (n) RETURN labels(n)[0] AS kind, count(*) AS n`。"),
+            "inputSchema": {"type": "object", "properties": {
+                "cypher": {"type": "string"},
+                "limit": {"type": "integer"}},
+                "required": ["cypher"]},
+        },
+        {
+            "name": "review_apply",
+            "description": ("**文档评审·写结论（写）**：把**逐条**评审结论写成**一页报告**（`slug=review/<文档>-<策略>`，"
+                            "版本化可回退）：正文=结论汇总 + 逐条结论表 + 每条明细（含**原文依据**逐字证据 / 图检索语句 / 建议）。"
+                            "`findings[]` 每条：{rule, verdict(符合|不符合|不适用|无法判定), severity, scope, evidence, how, cypher, suggestion}。"
+                            "写权限同其它写路径；`policy_slug` 给了会加一条 `bmm:promotesDirective` 关系指向策略页。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "doc": {"type": "string", "description": "被评审的文档名/知识 id"},
+                "policy": {"type": "string"},
+                "policy_slug": {"type": "string"},
+                "findings": {"type": "array", "items": {"type": "object"}},
+                "page_type": {"type": "string", "description": "结论页的页类型（默认 bmm:Assessment）"},
+                "actor": {"type": "string"}},
+                "required": ["kb_id", "doc", "policy", "findings"]},
+        },
+        {
             "name": "doc_outline",
             "description": ("**领域建模 v2 的入口**：按切片**父子关系**把一个文档组织成"
                             "\"大小合适\"的上下文批次（父块正文 + 子块用于定位），把"
@@ -3349,6 +3465,41 @@ def call_tool(name: str, args: dict) -> dict:
             session=args.get("session") or None, kb_ids=args.get("kb_ids") or None,
             confirm_kb_match=bool(args.get("confirm_kb_match")),
             context=str(args.get("context", "")))
+    if name == "import_probe":
+        return ke_sheet.probe(str(args["file"]), str(args.get("sheet", "")), int(args.get("sample", 3) or 3))
+    if name == "import_plan":
+        return ke_import.plan(kind=str(args.get("kind", "")), target=str(args.get("target", "")),
+                              file=str(args.get("file", "")), kb_id=str(args.get("kb_id", "")),
+                              sheet=str(args.get("sheet", "")), mapping=args.get("mapping") or {},
+                              key_column=str(args.get("key_column", "")), title=str(args.get("title", "")),
+                              aliases=args.get("aliases") or [],
+                              source_key_column=str(args.get("source_key_column", "")),
+                              target_key_column=str(args.get("target_key_column", "")),
+                              source_class=str(args.get("source_class", "")),
+                              target_class=str(args.get("target_class", "")),
+                              unknown_to_description=bool(args.get("unknown_to_description", True)),
+                              prune=bool(args.get("prune", False)),
+                              batch_id=str(args.get("batch_id", "")), limit=int(args.get("limit", 0) or 0))
+    if name == "import_apply":
+        return ke_import.apply(str(args.get("ticket", "")), actor=str(args.get("actor", "agent:import")),
+                               prune=bool(args["prune"]) if "prune" in args else None)
+    if name == "import_state":
+        return ke_import.state(str(args.get("batch", "")))
+    if name == "audit_purge":
+        return ke_audit.purge(str(args.get("kb_id", "")), str(args.get("kinds", "all")), "all", 5000,
+                              args.get("slugs") or None, None, bool(args.get("dry_run", False)))
+    if name == "rules_of_policy":
+        return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
+                                         int(args.get("limit", 300) or 300))
+    if name == "graph_query":
+        return ke_review.graph_query(str(args.get("cypher", "")), int(args.get("limit", 200) or 200))
+    if name == "review_apply":
+        return ke_review.review_apply(kb_id=str(args.get("kb_id", "")), doc=str(args.get("doc", "")),
+                                      policy=str(args.get("policy", "")),
+                                      policy_slug=str(args.get("policy_slug", "")),
+                                      findings=args.get("findings") or [],
+                                      page_type=str(args.get("page_type", "") or "bmm:Assessment"),
+                                      actor=str(args.get("actor", "agent:document_review")))
     if name == "doc_outline":
         return doc_outline(str(args["kb_id"]), str(args.get("knowledge_id", "")),
                            int(args.get("budget_tokens", 0) or 0), int(args.get("cursor", 0) or 0),
@@ -3683,6 +3834,36 @@ class MCPHandler(BaseHTTPRequestHandler):
                                                     b.get("acknowledge_risks") or [],
                                                     str(b.get("actor", "")),
                                                     apply=bool(b.get("apply", False))),
+            # 结构化批量建模（一次一个类/一条关系）
+            "/bodhi/import/plan":
+                lambda b: ke_import.plan(kind=str(b.get("kind", "")), target=str(b.get("target", "")),
+                                         file=str(b.get("file", "")), kb_id=str(b.get("kb_id", "")),
+                                         sheet=str(b.get("sheet", "")), mapping=b.get("mapping") or {},
+                                         key_column=str(b.get("key_column", "")),
+                                         title=str(b.get("title", "")), aliases=b.get("aliases") or [],
+                                         source_key_column=str(b.get("source_key_column", "")),
+                                         target_key_column=str(b.get("target_key_column", "")),
+                                         source_class=str(b.get("source_class", "")),
+                                         target_class=str(b.get("target_class", "")),
+                                         unknown_to_description=bool(b.get("unknown_to_description", True)),
+                                         prune=bool(b.get("prune", False)),
+                                         batch_id=str(b.get("batch_id", "")),
+                                         limit=int(b.get("limit", 0) or 0)),
+            "/bodhi/import/apply":
+                lambda b: ke_import.apply(str(b.get("ticket", "")), actor=str(b.get("actor", "http:import")),
+                                          prune=bool(b["prune"]) if "prune" in b else None),
+            # 巡检清理：有库写权限即可一步硬删
+            "/bodhi/audit/purge":
+                lambda b: ke_audit.purge(str(b.get("kb_id", "")), str(b.get("kinds", "all")), "all", 5000,
+                                         b.get("slugs") or None, None, bool(b.get("dry_run", False))),
+            # 文档评审
+            "/bodhi/review/apply":
+                lambda b: ke_review.review_apply(kb_id=str(b.get("kb_id", "")), doc=str(b.get("doc", "")),
+                                                 policy=str(b.get("policy", "")),
+                                                 policy_slug=str(b.get("policy_slug", "")),
+                                                 findings=b.get("findings") or [],
+                                                 page_type=str(b.get("page_type", "") or "bmm:Assessment"),
+                                                 actor=str(b.get("actor", "http:review"))),
             "/bodhi/context/ensure-marks":
                 lambda b: ke_context.ensure_marks(),
             "/bodhi/docs/purge":
@@ -3784,6 +3965,41 @@ class MCPHandler(BaseHTTPRequestHandler):
                     params.get("include_unknown", "0") not in ("0", "false")), 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/context/concept/preview 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/import/probe", "/bodhi/import/probe.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_sheet.probe(params.get("file", ""), params.get("sheet", ""),
+                                          int(params.get("sample", 3) or 3)), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/import/probe 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/import/state", "/bodhi/import/state.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_import.state(params.get("batch", "")), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/import/state 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/review/rules", "/bodhi/review/rules.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_review.rules_of_policy(params.get("kb_id", ""), params.get("policy", ""),
+                                                     int(params.get("limit", 300) or 300)), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/review/rules 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/review/graph", "/bodhi/review/graph.json"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_review.graph_query(params.get("cypher", ""),
+                                                 int(params.get("limit", 200) or 200)), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/review/graph 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/context/authority", "/bodhi/context/authority.json"):
