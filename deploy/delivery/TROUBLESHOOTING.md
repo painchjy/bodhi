@@ -90,7 +90,76 @@ connect() failed (111: Connection refused) while connecting to upstream:
 **根因**：容器里要装 `postgresql-client`（提供 `psql`），而**公网 Debian 源在内网/受限网络下常常不通**。
 **修法**：① `docker build --build-arg APT_MIRROR=<内网 debian 源> ...`；② 或改用**裸机 systemd** 方式（§MCP-SERVER 方式 B）。
 
+## 14. 改了配置/代码但"没生效"（我们踩过，2026-09-29）
+
+**现象**：接口少字段（例如 `/bodhi/context/page` 回执里没有 `state`）→ 前端「跨库上下文」面板的**治理状态徽标不显示**；或改了 `.env` 但认库/租户行为没变。
+
+**根因**：`bodhi-mcp` 是**长驻进程**：
+- 改**代码**（`tools/ke-core/*.py`、`tools/ontology-mcp/server.py`）→ 进程里还是旧模块；
+- 改 **`.env`** → systemd 只在**启动时**读 `EnvironmentFile`（`daemon-reload` 只重载 unit 定义，不改已运行进程的环境）。
+
+**修法**：
+```bash
+systemctl restart bodhi-mcp && sleep 3
+systemctl show -p EnvironmentFiles --value bodhi-mcp      # 确认读的是哪个 .env
+tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value bodhi-mcp)/environ | grep '^BODHI_'
+# 容器部署：docker compose up -d --force-recreate bodhi-mcp
+```
+**自检一行**（服务与 CLI 应看到同一份配置）：
+```bash
+python3 -c "import sys;sys.path.insert(0,'tools/ke-core');import ke_db,ke_ontology,ke_context;\
+print('tenant=',ke_db.caller_tenant(),'ontology=',ke_ontology.resolve_ontology_kb()['source'],\
+'concept=',ke_context.concept_kb()['source'],'db_pwd_len=',len(ke_db.DB_PASSWORD or ''))"
+```
+
+## 15. CLI 报 `need_write_permission`、`caller_tenant: null`（2026-09-29 已修）
+
+**现象**：手敲 `ke_context.py concept-state …` / `concept-apply …` 落库失败，回执里 `caller_tenant` 是 `null`：
+```json
+{"error":"need_write_permission","permission":{"allowed":false,"caller_tenant":null,
+ "why":"无法确定调用者租户（身份缺失 → 拒写，只读放行）"}}
+```
+**根因**：写权限要**调用者租户**（fail-closed 设计）。MCP 服务由 systemd 注入 env，**CLI 进程拿不到**；当时 `.env` 只被用来读 DB 口令，其它键不读 —— 于是 CLI 一律"身份缺失"。
+
+**修法（已内置，v1.0 之后版本）**：`ke_db.env_value()` 统一读配置 —— **进程 env → `BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`**；
+`caller_tenant()`、`resolve_ontology_kb()`、`concept_kb()` 都走它。老版本临时绕过：`BODHI_TENANT_ID=10000 python3 …` 或加 `--tenant 10000`。
+**排查顺序**：① `.env` 里有没有 `BODHI_TENANT_ID`；② 该租户是不是目标库属主，或该租户所在组织在 `kb_shares` 上的权限是 `editor/admin`（`viewer` 只读）；
+③ 目标库是否是**另一个租户**的库（那就得先共享/给写权限）。
+
+## 16. `docker build` 报 `NotFound: parent snapshot … does not exist`（2026-09-29）
+
+**现象**：打前端/MCP 镜像时失败：
+```
+NotFound: parent snapshot sha256:… does not exist: not found
+```
+**根因**：containerd 快照存储里**基础镜像的父层丢了**（常见于 dockerd 被反复重启/被强杀之后，快照索引与内容库不一致）。
+**修法**（任选，通常第 1 条就够）：
+```bash
+docker pull nginx:alpine           # 或目标基础镜像，把缺的层补回来
+docker build --no-cache -f Dockerfile -t weknora-ui:bodhi2 .
+# 仍失败再退回传统构建器：
+DOCKER_BUILDKIT=0 docker build --no-cache -f Dockerfile -t weknora-ui:bodhi2 .
+```
+前端重建的完整流程见 `FRONTEND.md` §4（本仓 `deploy/weknora-fork/build_frontend.sh` 会自动构建并自检）。
+
+## 17. 整栈"莫名其妙全重启"/ `localhost` 时通时断（2026-09-28 排查结论）
+
+**现象**：容器 `Up` 只有几十秒；`http://localhost/` 有时连不上，稍后 `/platform/creatChat` 又能开。
+
+**两个独立根因**：
+1. **WeKnora-app 的"技能沙箱 Docker 后端"**（`system_settings.sandbox.docker_enabled=true` + 挂载宿主 `/var/run/docker.sock`）
+   在应用启动时"应用 docker 后端设置"会 **`systemctl restart docker`** → 全栈容器被杀重启 → 应用再启动 → 再重启 dockerd，形成**约 40 秒一轮的循环**。
+   - **判别法**：`journalctl -u docker --since "$(uptime -s)" | grep -c 'Started docker.service'` > 1；
+     停掉 app 观察 75 秒增量是否归零。
+   - **缓解**：`/etc/docker/daemon.json` 加 `"live-restore": true`（dockerd 重启不再杀容器）+ `systemctl restart docker` 一次；
+     彻底消除则关掉沙箱 docker 后端（会同时失去沙箱能力）。
+2. **WSL 空闲被回收**：`.wslconfig` 未设 `vmIdleTimeout` 时，最后一个 WSL 进程退出约 60 秒后整台 VM 被关 → docker 引擎与容器一起停。
+   - **修法**：`%USERPROFILE%\.wslconfig` 加 `[wsl2] vmIdleTimeout=86400000`（并保持一个 WSL 会话/或按时唤醒），
+     容器 `restart: unless-stopped` 会在下次进入 WSL 时自动拉起。
+
+> 排查入口：本仓 `deploy/weknora-fork/stack_ctl.sh status|watch|up|stop`（一条命令打出容器/健康/端口/端点/dockerd 重启次数/ MCP 自检）。
 ## 13. 沙箱相关（本交付**不需要**，仅备查）
+
 WeKnora 原生技能是"沙箱安装型"（装进快照镜像）。要用需同时满足：`WEKNORA_SANDBOX_DOCKER_ENABLED=true`、
 app 挂载 `docker.sock`（≈宿主机 root）、沙箱基础镜像可用、以及上面的 §1 SSRF 白名单。
 我们已验证可行，但**方案上以 MCP 承载技能为主**（不需要沙箱）；若你们要开，照 `docs/agent-design-flow.md` §11.7。
