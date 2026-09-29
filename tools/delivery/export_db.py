@@ -138,7 +138,7 @@ BODHI_DB_HOST="${BODHI_DB_HOST:-127.0.0.1}" python3 - <<PY
 import sys; sys.path.insert(0, 'tools/ke-core'); import ke_pages
 print('sync_folders →', ke_pages.sync_folders('$ONT_KB'))
 PY
-echo "== 导入完成（期望 248 页：类 52 / 关系 80 / 属性 107 / 模块 6 / 轻量版 2 / 索引 1）"
+echo "== 导入完成（期望 254 页：类 50 / 关系 81 / 属性 114 / 模块 6 / 轻量版 2 / 索引 1）"
 """
 
 AGENTS = ("bodhi-ea-modeler", "bodhi-kb-ops")

@@ -29,7 +29,10 @@
 | 功能简介 | `summary`（列表页摘要）+ 正文「## 定义」| |
 | 重要性等级 / 状态 | 正文表 + `page_metadata`（**不造新枚举类**）| 以后要治理再进 TTL |
 | 核心功能（子系统） | 正文「## 核心功能」| |
-| 主→子关系 | 子系统页 `out_links`/`category_path` 指向主系统；**目录树**三级（主系统 → 子系统）| 见 §2.3 的取舍 |
+| 主系统 / 子系统（Excel） | 页 `bmm/mainsystem/<系统编号>` / `bmm/subsystem/<系统编号>`，`page_type=bmm:MainSystem` / `bmm:SubSystem`（2026-09-29 起 IT 资产在 BMM；原 `ea:Application` = `bmm:SubSystem`）|
+| 主→子关系 | 子系统页 `## 本体关系`：`- 包含子系统（bmm:mainSystemContainsSubSystem）→ [[bmm/mainsystem/xxx\|…]]`（**本体已提供该关系**，图谱可见）|
+| 硬件资产 | 页 `bmm/hardwareasset/<编号>`，`page_type=bmm:HardwareAsset`；`bmm:hardwareAssetBelongsToSubSystem` 指向子系统；属性 `bmm:hardwareAssetCategory`（硬件资产分类）|
+| 6 列数据属性 | `bmm:systemNo`（系统编号）/ `bmm:systemAbbr`（英文简称）/ `bmm:englishName`（英文名称，复用）/ `bmm:description`（功能简介，复用）/ `bmm:systemCriticality`（重要性等级）/ `bmm:systemStatus`（状态）；子系统另加 `bmm:coreFunction`（核心功能）|
 
 ```markdown
 # <英文名称>（<系统编号>）

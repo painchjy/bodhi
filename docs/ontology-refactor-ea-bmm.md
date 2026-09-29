@@ -111,11 +111,21 @@ bash deploy/weknora-fork/build_frontend.sh /root/fe-build && bash deploy/weknora
 
 ## 5. 需要你点头的 4 个点（其余按上面执行）
 
-> **已按 D 执行完第 1 阶段（2026-09-29）**：TTL 真源已改 + lexicon/轻量版已同步 + **编译产物已重生成**；
-> **未做**（等你审完 diff 再动）：本体库重新投影、前端类型清单/镜像重建、交付包重打、库内页面迁移。
+> **已按 D 执行完（2026-09-29，含 C 追加的 ③④⑥⑦）**：
+> ① TTL 真源已改 + lexicon/轻量版已同步；② 编译产物已重生成（validate ok、error 0，20 个产物更新）；
+> ③ 投影清单 `artifacts/weknora/ontology_wiki.jsonl` 已重生成（253 行）；
+> ④ **Neo4j 本体投影已清空重灌**（旧节点 205 → 0，重灌 701 条语句；类 50 / 属性 114 / 限制 29 / 枚举 7 / 模块 5），
+>   随后重投影本体库 → **254 页**（类 50 / 关系 81 / 属性 114 / 模块 6 / 轻量版 2 / 索引 1），
+>   新类页 4 个 + 新关系页 2 个 + 新数据属性页 6 个，旧类页已消失；
+> ⑥ 连带文字：`config/agent_system_prompt.yaml`（ea 段 11→5 类、关系去重并更新 range；BMM 段 26→30 类、33→35 关系）、
+>   `frontend/ontologyTypes.ts`（57→**55** 类型）、`frontend/patch_frontend.py`、`docs/agent-design-flow.md`、
+>   `skills/ea_overview_design/SKILL.md`、`tools/ontology-mcp/server.py`（`app_types` 加新类并兼容存量）；
+>   交付文档页数口径 248 → 254、类型数 57 → 55（MANUAL/KB-CONFIG/ONTOLOGY-KB/FRONTEND/export_db.py）；
+> ⑦ 前端镜像已重建（`ontologyTypes.ts` 生成 → 构建树 → vite build 1m58s → docker build → 切换）；
+> **未做**（你选择 C 明确排除）：交付包重打、那 9 个存量实例页的处理（6 个 `ea:Application` + 3 个 `ea:Customer`）。
+>
+> ⚠️ **留意**：那 9 页的 `page_type` 已不在本体里 → 巡检 **B1** 会报它们（这是预期的，等你决定 retag/软删）。
 > 备份：`/root/onto-backup-20260929-211245/ontology`（37 个文件）+ git（`git revert` 可回）。
-> 编译核对：`validate ok=True（error 0）`；label_map 新 12 项在、旧 5 项零；`alias_index` 里
-> `主系统→bmm:MainSystem`、`子系统→bmm:SubSystem`、`硬件资产→bmm:HardwareAsset`、`it资产→bmm:ITAsset`。
 
 1. **IT 资产挂哪**：`bmm:ITAsset ⊑ bmm:Asset`（我的默认，与"固定资产"同级）还是 `⊑ bmm:Resource`（直接挂资源）？
 2. **`ea:Application` 归并**：6 个 `ea:Application` 页 retag 成 `bmm:SubSystem`（默认），还是 `bmm:Application`（保留"应用系统"名、另加"子系统"概念）？

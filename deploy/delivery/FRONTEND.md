@@ -12,7 +12,7 @@
 | 能力 | 位置 | 说明 |
 |---|---|---|
 | **本体图谱 tab** | `components/bodhi/BodhiGraphTab.vue` 等 | 知识库里第三个 tab：按本体模型渲染图谱（节点=wiki 页、边=本体关系），支持按类型过滤 |
-| **类型可视化** | `utils/ontologyTypes.ts`（**57 个类型**） | 类型彩色圆点 + 悬停中文类名；列表视图同样显示徽标；新增 `easvc:*`（服务详设）类型 |
+| **类型可视化** | `utils/ontologyTypes.ts`（**55 个类型**） | 类型彩色圆点 + 悬停中文类名；列表视图同样显示徽标；新增 `easvc:*`（服务详设）与 `bmm:MainSystem/SubSystem/HardwareAsset`（2026-09-29 EA 瘦身后）类型 |
 | **本体关系维护面板** | `components/bodhi/BodhiRelationsPanel.vue` | 阅读页右侧：出边可改/可删、入边只读；调 MCP 的 `/bodhi/relations*` |
 | **版本徽标位置** | `views/knowledge/wiki/WikiBrowser.vue`（补丁 v10） | 列表行 `v3` 徽标放在**标题之后**（放前面会让各行标题起始位置不齐，用户 2026-09-21 反馈）；`tools/delivery/patch_version_badge.py` 可对已有源码单独归一化（幂等）|
 | **类型下拉（编辑页）** | `src/bodhi/typeMigration.ts`（补丁 `patch_wikibrowser_v10_retag`） | 改**本体类型 = 迁移页面**：保存时先 `POST /bodhi/page/retag/preview` 算影响面（新 slug / 引用处数 / 预计违规 / 风险 / ticket）→ **弹确认框** → `POST /bodhi/page/retag/apply`（带 ticket + 风险确认）。取消则不改；不适用迁移的页自动退回旧通道（`/bodhi/page/type`，只改类型） |
@@ -57,7 +57,7 @@ E. 待确认合并队列：pending=0
 # 需要：Node ≥ 20、能访问 npm 源
 cp -r /path/to/01-frontend/frontend/patches /tmp/fe-patches
 python3 /tmp/fe-patches/patch_frontend.py --fe /path/to/weknora/frontend      # 打补丁（幂等）
-python3 /tmp/fe-patches/gen_frontend_types.py --fe /path/to/weknora/frontend   # 生成 ontologyTypes.ts（57 类型）
+python3 /tmp/fe-patches/gen_frontend_types.py --fe /path/to/weknora/frontend   # 生成 ontologyTypes.ts（55 类型）
 cd /path/to/weknora/frontend && npm install && npm run build                   # 产物 dist/
 # 用上游 Dockerfile 重建 UI 镜像并替换
 docker compose build frontend && docker compose up -d --no-build frontend
@@ -99,7 +99,7 @@ docker compose build frontend && docker compose up -d --no-build frontend
 | `views/knowledge/wiki/BodhiGraphTab.vue`（本体图谱 tab） | **0** |
 | `views/knowledge/wiki/BodhiRelationsPanel.vue`（关系维护面板） | **0** |
 | `views/knowledge/wiki/BodhiOntologyUpload.vue`（本体上传） | **0** |
-| `utils/ontologyTypes.ts`（57 类型配色/中文名） | **0** |
+| `utils/ontologyTypes.ts`（55 类型配色/中文名） | **0** |
 | `WikiBrowser.vue` 补丁（类型圆点、**版本徽标**、待确认裁决、多选删、编辑下拉） | **0** |
 | `KnowledgeBase.vue` 补丁（本体图谱 tab、上传自动生成 wiki 开关） | **0** |
 

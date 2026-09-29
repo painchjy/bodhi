@@ -7,7 +7,7 @@ when: 用户要求基于**已建好的业务模型（wiki 知识）**做 IT 服�
 models: [ea]
 default_model: ea
 scope:
-  classes: [ea:Service, ea:APIService, ea:MCPService, ea:SkillService, ea:Application, ea:Step, ea:Task, ea:BusinessEntity, ea:ITAsset]
+  classes: [ea:Service, ea:APIService, ea:MCPService, ea:SkillService, bmm:SubSystem, bmm:MainSystem, ea:Step, ea:Task, ea:BusinessEntity, bmm:HardwareAsset]
   relations: [ea:stepUsesService, ea:applicationProvidesService, ea:stepOperatesOnEntity, ea:stepSupportedByAsset, ea:taskHasStep]
 sources: [graph, document]
 stages: [report, graph]
@@ -40,7 +40,7 @@ guard: 两段都要人工确认；落库必须 mode="apply"；新建应用/系�
    把将要新建/更新的清单给用户看；**用户确认后同载荷 `mode="apply"` 重跑**，记下返回的报告页 **slug**。
    （重跑**同一标题** = 更新该报告页：slug 不变、正文整体替换 —— 不要为"改版"改标题。）
 5. **第二段（细分）**：调 `save_knowledge(stage="graph", mode="dry_run")`：
-   - 节点：IT 服务 → `ea:Service` 或子类；应用系统 → `ea:Application`；
+   - 节点：IT 服务 → `ea:Service` 或子类；子系统 → `bmm:SubSystem`（主系统 `bmm:MainSystem`）；
      可引用已有页时**节点名用库里已有标题**（如步骤页）以便连边；
    - 关系：`ea:stepUsesService`（步骤 → 服务）、`ea:applicationProvidesService`（应用 → 服务）；
    - `report.slug` 传第一段拿到的 slug（细分页挂到报告页下）；

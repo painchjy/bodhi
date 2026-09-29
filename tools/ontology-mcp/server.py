@@ -1783,7 +1783,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
       节点页通过 `report.slug` 挂到报告页下（`parent_slug`），形成「报告页 → 细分页」的层级，
       与报告正文一一对应（图谱内容 = 设计 wiki 的细分）。
     - 合规：类必须在本体里、关系的 range 闭包必须包含目标页类型，违规进 `violations`（不入库）；
-    - 确认：新建「应用/系统」类节点（`bmm-ea-ext:Application` / `ea:Application` / `ITAsset`）
+    - 确认：新建「应用/系统」类节点（`bmm:MainSystem` / `bmm:SubSystem` / `bmm:HardwareAsset`；兼容旧的
+      `ea:Application` / `ITAsset`）
       **必须**在 `confirmed_new_applications` 里列出，否则只在 dry_run 清单里回报；
     - 幂等：同标题（同 slug）重跑 = 合并更新，不重复建页。
     """
@@ -1903,7 +1904,9 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
         model, model_obj, nodes or [], edges or [], doc_meta,
         upstream=[s for s in ((report or {}).get("upstream") or []) if s],
         kb_id=kb_id, context=ctx["id"])
-    app_types = ("bmm-ea-ext:Application", "ea:Application", "bmm-ea-ext:ITAsset", "ea:ITAsset")
+    app_types = ("bmm:MainSystem", "bmm:SubSystem", "bmm:HardwareAsset", "bmm:ITAsset",
+                 # 兼容存量页（EA 瘦身前建的 6 个 ea:Application 页；用户口径：本期不动）
+                 "bmm-ea-ext:Application", "ea:Application", "bmm-ea-ext:ITAsset", "ea:ITAsset")
     allowed, blocked = [], []
     for payload in payloads:
         if payload["type"] in app_types and payload["name"] not in confirmed:
@@ -2889,7 +2892,7 @@ def tool_definitions() -> list[dict]:
                     "nodes": {
                         "type": "array",
                         "description": ("细分节点：[{name, type(本体类，如 ea:Service / ea:APIService / "
-                                        "ea:MCPService / ea:SkillService / ea:Application), "
+                                        "ea:MCPService / ea:SkillService / bmm:SubSystem / bmm:MainSystem), "
                                         "purpose(用途), inputs[], outputs[], "
                                         "assertions[{id,kind:'N|E',assertion}], attributes{数据属性:值}, "
                                         "definition, description?, aliases?, retag?}]；"

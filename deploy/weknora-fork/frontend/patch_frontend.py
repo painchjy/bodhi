@@ -532,7 +532,7 @@ def patch_wikibrowser_v6(fe: pathlib.Path) -> None:
         '                        :style="{ background: ontologyColor(editForm.page_type) }"></span>\n'
         '                      <t-select v-model="editForm.page_type" :options="ontologyClassOptions" filterable clearable\n'
         '                        :loading="ontologyClassesLoading" class="wiki-edit-type-select"\n'
-        '                        placeholder="选择本体类（bmm:Goal / ea:Customer …）" />\n'
+        '                        placeholder="选择本体类（bmm:Goal / bmm:SubSystem …）" />\n'
         '                      <span v-if="editForm.page_type && editForm.page_type !== editBaseType"\n'
         '                        class="wiki-edit-type-hint">\n'
         '                        保存后类型、目录与徽标一起更新（旧版本可回退）\n'

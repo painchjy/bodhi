@@ -15,7 +15,7 @@
 |---|---|---|
 | `bodhi2-01-frontend.tar.gz` | 补丁后的 UI 镜像（`weknora-ui:bodhi2`）+ nginx 模板 + compose overlay + 验收脚本 + 打补丁脚本（若你们要自己构建）| `FRONTEND.md` |
 | `bodhi2-02-mcp-server.tar.gz` | MCP 服务**整包（就是仓库根）**：`tools/`（服务 + 编译/投影工具）+ `artifacts/`（编译产物）+ `skills/` + Dockerfile + compose + systemd + 自检 | `MCP-SERVER.md` |
-| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源**：`docs/` + `ontology/`（TTL/词表/shapes）+ **可直接导入的种子**（248 页本体模型库）+ 登记 SQL + 维护工具 | 本文件 + `ONTOLOGY-KB.md` + `KB-CONFIG.md` + `TROUBLESHOOTING.md` + `AGENTS-SQL.md` |
+| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源**：`docs/` + `ontology/`（TTL/词表/shapes）+ **可直接导入的种子**（254 页本体模型库）+ 登记 SQL + 维护工具 | 本文件 + `ONTOLOGY-KB.md` + `KB-CONFIG.md` + `TROUBLESHOOTING.md` + `AGENTS-SQL.md` |
 | `MANIFEST.json` / `SHA256SUMS` | 版本、文件清单、校验和 | — |
 
 **一张图看懂彼此关系**
@@ -30,7 +30,7 @@
                                     │ MCP(HTTP)
                                   app/智能体 ── 按 skills/<id>/SKILL.md 干活
                                     │
-                        本体模型知识库（248 页，类型真源；由 03 包的种子导入或 02 包编译器生成）
+                        本体模型知识库（254 页，类型真源；由 03 包的种子导入或 02 包编译器生成）
                         业务知识库（你们的文档 → 实例页，由智能体写入）
 ```
 
@@ -40,7 +40,7 @@
 |---|---|---|
 | **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（24 个）` |
 | **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 24 个 |
-| **3** | 导入本体模型知识库（`bodhi2-03`：**种子导入**最省事；或用 02 包的编译器按 TTL 重新生成）| 页数 **248**（类 52 / 关系 80 / 属性 107 / 模块 6 / 轻量版 2 / 索引 1）|
+| **3** | 导入本体模型知识库（`bodhi2-03`：**种子导入**最省事；或用 02 包的编译器按 TTL 重新生成）| 页数 **254**（类 50 / 关系 81 / 属性 114 / 模块 6 / 轻量版 2 / 索引 1）|
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
 | **5** | 替换前端（`bodhi2-01`）+ 挂载 nginx 模板 | `deploy_frontend.sh check` 全绿；类型下拉能看到 `easvc:*` |
 | **6** | 注册智能体（`AGENTS-SQL.md`：提示词 + 两个库 + MCP + 工具清单）| 让智能体跑一轮"先 `skills()` 看目录"的任务，能正常列出 3 个技能 |
@@ -109,7 +109,7 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 |---|---|---|
 | 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（24 个）` + `skills() OK（3 个）` |
 | 2 | 智能体一轮只读任务 | `tool_count=18`；`logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录 |
-| 3 | 本体模型库 | 248 页；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
+| 3 | 本体模型库 | 254 页（类 50 / 关系 81 / 属性 114 / 模块 6 / 轻量版 2 / 索引 1）；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
 | 4 | 业务库上传+抽取 | 页面类型都在本体里，`source_refs` 非空（无 C1）|
 | 5 | `curl <mcp>/bodhi/audit?kb_id=<业务库>` | 无 **C1/C3** 类"无来源"发现；A1/A2 若有，按提示修 |
 | 6 | 前端 | 登录正常；本体图谱 tab 出图；关系面板出边可改；类型下拉含 `easvc:*` |
