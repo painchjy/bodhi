@@ -2,12 +2,12 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **20 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射与渲染（只读）** …）
+> 作用：给 WeKnora 提供 **22 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
 > 的零依赖子集解析（我们逐键比对过，3 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list 14 个 / skills() 3 个）。
+> `selfcheck.py` 全绿（initialize / tools/list **22 个** / skills() 3 个）。
 
 ---
 
@@ -92,8 +92,57 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 | `BODHI_DB_CONTAINER` | `WeKnora-postgres` | 仅 docker-exec 模式用 |
 | `BODHI_NEO4J_HTTP` | `http://127.0.0.1:7474` | **可选**；不部署 Neo4j 就保持默认 |
 | `NEO4J_USERNAME` / `NEO4J_PASSWORD` | `neo4j` / `password` | 同上（仅投影类巡检项用到）|
+| `BODHI_ONTOLOGY_KB_ID` | 空 | **本体模型知识库 id**（`env` 是唯一权威；不配则按 `wiki_config.bodhi_ontology_kb` → 库名 → 内容探测兜底）|
+| `BODHI_ONTOLOGY_KB_NAME` | `企业本体模型` | 同上（库名匹配用）|
+| `BODHI_CONCEPT_KB_ID` | 空 | **企业共享概念模型**知识库 id（跨库上下文映射的落点，见 `KB-CONFIG.md`）|
+| `BODHI_CONCEPT_KB_NAME` | `企业共享概念模型` | 同上（库名匹配用）|
+| `BODHI_TENANT_ID` | 空 | **写权限判定**用的调用者租户；不配且没带请求头 `X-Bodhi-Tenant` → 写路径 fail-closed 拒（读不受影响）|
 
 `.env.example` 已给出容器部署的推荐值（`BODHI_DB_HOST=postgres`）。
+
+### 2.1 配置只有一处（**推荐做法**，2026-09-29 起）
+
+**唯一事实源 = 一份 `.env`**（只放"业务变量"：两个治理库 id/名 + 租户；DB/Neo4j 变量按需）；
+**MCP 服务、CLI、脚本、容器都读这同一个文件**，不再两处维护：
+
+```bash
+# ① 容器部署（compose 已经这么写）
+env_file: [.env]
+
+# ② systemd 裸机部署：drop-in 只写一行，别再重复变量
+sudo mkdir -p /etc/systemd/system/bodhi2-mcp.service.d
+sudo tee /etc/systemd/system/bodhi2-mcp.service.d/env.conf >/dev/null <<'EOF'
+# 配置只有一处：本服务目录下的 .env
+[Service]
+EnvironmentFile=/opt/bodhi2/.env
+EOF
+sudo systemctl daemon-reload && sudo systemctl restart bodhi2-mcp
+
+# ③ CLI / 一次性脚本：同源（ke_db.env_value 会读 .env）
+cd /opt/bodhi2 && python3 tools/ke-core/ke_context.py contexts --print 400
+```
+
+**凭据不在业务 `.env` 里，按下面的链自动找**（所以我们不把口令写进任何配置文件）：
+
+| 要连的 | 读取顺序 |
+|---|---|
+| Postgres 口令 | `BODHI_DB_PASSWORD`（env）→ `BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`（键名 `DB_PASSWORD` / `POSTGRES_PASSWORD`）|
+| Postgres 位置 | `BODHI_DB_HOST/PORT/USER/NAME`（env）→ 默认 `docker exec <BODHI_DB_CONTAINER> psql -U postgres -d WeKnora` |
+| Neo4j | `BODHI_NEO4J_HTTP` / `BODHI_NEO4J_DB`（默认 `http://127.0.0.1:7474` / `neo4j`）+ `NEO4J_USERNAME` / `NEO4J_PASSWORD` |
+
+> **不需要**在本服务里配任何 LLM / 嵌入 / 本体编译参数：MCP **不调用大模型**，模型与向量能力都由 WeKnora 提供。
+
+**两条硬规矩**：
+1. **改 `.env` 后**：`systemctl daemon-reload && systemctl restart bodhi2-mcp`（容器：`docker compose up -d` 重建容器）；
+2. **改代码后**：也要 `systemctl restart bodhi2-mcp`（否则服务仍跑旧代码——我们踩过：接口少了字段，前端看不到状态徽标）。
+
+自检一行：
+```bash
+python3 -c "import sys;sys.path.insert(0,'tools/ke-core');import ke_db,ke_ontology,ke_context;\
+print('tenant=',ke_db.caller_tenant(),'ontology=',ke_ontology.resolve_ontology_kb()['source'],\
+'concept=',ke_context.concept_kb()['source'],'db_pwd_len=',len(ke_db.DB_PASSWORD or ''))"
+# 期望类似：tenant= 10000 ontology= env concept= env db_pwd_len= 14
+```
 
 ## 3. 部署方式 A：容器（推荐；与 WeKnora 同一 compose 网络）
 

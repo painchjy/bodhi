@@ -38,15 +38,37 @@
 
 | 步 | 动作 | 验收（不通过就别往下走）|
 |---|---|---|
-| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（14 个）` |
-| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 14 个 |
+| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（22 个）` |
+| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 22 个 |
 | **3** | 导入本体模型知识库（`bodhi2-03`：**种子导入**最省事；或用 02 包的编译器按 TTL 重新生成）| 页数 **248**（类 52 / 关系 80 / 属性 107 / 模块 6 / 轻量版 2 / 索引 1）|
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
 | **5** | 替换前端（`bodhi2-01`）+ 挂载 nginx 模板 | `deploy_frontend.sh check` 全绿；类型下拉能看到 `easvc:*` |
-| **6** | 注册智能体（`AGENTS-SQL.md`：提示词 + 两个库 + MCP + 18 个工具）| 让智能体跑一轮"先 `skills()` 看目录"的任务，能正常列出 3 个技能 |
+| **6** | 注册智能体（`AGENTS-SQL.md`：提示词 + 两个库 + MCP + 工具清单）| 让智能体跑一轮"先 `skills()` 看目录"的任务，能正常列出 3 个技能 |
 | **7** | 端到端验证 | 见 §4「验收清单」|
 
 > **只想要本体建模/设计能力、暂时不动前端**也可以：1→2→3→4→6 就能跑（前端替换只影响"类型下拉/本体图谱 tab/关系面板"这些可视化）。
+
+## 1.1 配置放在哪（**只有一处**，2026-09-29 起）
+
+**唯一事实源 = MCP 服务目录下的 `.env`**（02 包里就是 `02-mcp-server/.env`，由 `.env.example` 复制而来）：
+
+```bash
+cd 02-mcp-server
+cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id/名 + 租户；DB/Neo4j 按需
+```
+
+| 谁 | 怎么读这同一个 `.env` |
+|---|---|
+| MCP 服务（容器） | `docker-compose.mcp.yml` 里 `env_file: [.env]` |
+| MCP 服务（systemd 裸机） | drop-in 只写一行 `EnvironmentFile=/opt/bodhi2/.env`（**不要**再逐条写 `Environment`） |
+| CLI / 运维脚本 | `ke_db.env_value()` 也读它 → 与服务的配置天然一致 |
+
+- **凭据不写进业务 `.env`**：Postgres 口令按 `BODHI_DB_PASSWORD` → `BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`
+  的顺序自动找（键名 `DB_PASSWORD`/`POSTGRES_PASSWORD`）；Neo4j 用 `BODHI_NEO4J_HTTP`/`BODHI_NEO4J_DB`（默认 `127.0.0.1:7474`/`neo4j`）。
+- **不需要**配 LLM / 嵌入 / 本体编译参数：MCP **不调用大模型**（模型与向量能力都由 WeKnora 提供）。
+- **两条硬规矩**：改 `.env` → `systemctl daemon-reload && restart`（容器则 `docker compose up -d` 重建）；
+  **改代码 → 也要 restart**（否则服务跑旧代码；我们踩过：接口少字段 → 前端看不到治理状态徽标）。
+- 详见 `MCP-SERVER.md` §2 / §2.1（含逐项变量表与自检命令）。
 
 ## 2. 环境要求
 
