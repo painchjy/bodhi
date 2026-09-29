@@ -478,6 +478,25 @@ draft（自动摘取/智能体起草，默认）
 - 改 env 后必须 `systemctl daemon-reload && systemctl restart bodhi-mcp`；**改代码后也必须重启**
   （本轮踩坑：`_concept_lookup` 加了 `state` 却忘了重启 → 前端徽标不显示）。
 
+**A2. 配置收敛（2026-09-29 落地）：只有一处 `.env`**
+
+```
+/mnt/c/Users/PHJY/source/bodhi2/.env      ← 唯一事实源（12 行：注释 + 5 变量）
+  BODHI_ONTOLOGY_KB_ID / BODHI_ONTOLOGY_KB_NAME
+  BODHI_CONCEPT_KB_ID  / BODHI_CONCEPT_KB_NAME
+  BODHI_TENANT_ID
+```
+- **MCP 服务**：systemd drop-in 只写一行 `EnvironmentFile=/mnt/c/Users/PHJY/source/bodhi2/.env`（不再重复 5 行）；
+- **CLI / 脚本 / 容器**：`ke_db.env_value()` 读同一文件 → 两边的配置天然一致；
+- **已删除的退役配置**（代码里早已不读，MCP 不再调用大模型）：`LLM_API_KEY/BASE_URL/MODEL/TEMPERATURE/MAX_TOKENS`、
+  `API_KEY_METHOD/BASE_URL`、`SCENE_CODE`、`EMBEDDING_MODEL`、`UPLOAD_DIR`、`MAX_UPLOAD_SIZE_MB`、
+  `SIMILARITY_THRESHOLD`、`ONTOLOGY_DIR`、`ONTOLOGY_MODELS`（原文件备份为 `.env.bak-<时间戳>`）；
+- **DB / Neo4j 凭据不在本仓库**：`ke_db` 自动去 `BODHI_WEKNORA_DIR/.env` → `/mnt/c/Users/PHJY/source/WeKnora/.env`
+  → 仓库根 `.env` 找 `DB_PASSWORD/POSTGRES_PASSWORD`；Neo4j 走 `BODHI_NEO4J_HTTP`（默认 `http://127.0.0.1:7474`）
+  + `BODHI_NEO4J_DB`（默认 `neo4j`），凭据可用 env 覆盖。
+- 本机实测（裸 shell，`BODHI_*` 变量数 0）：`caller_tenant=10000`、两库 `source=env`、DB 连通（7 个库、
+  口令来自 WeKnora `.env`）、Neo4j 查询 OK（62 类）、CLI `concept-state` 写成功（`mode=owner`）。
+
 **B. 权限（用户 2026-09-29 拍板）**
 
 - **读：全部放开，不做控制**（读接口不校验租户；这两个治理库也一样，任何租户可读）。
