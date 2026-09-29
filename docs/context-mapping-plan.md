@@ -463,6 +463,30 @@ draft（自动摘取/智能体起草，默认）
 - [ ] 前端面板加"状态徽标 + 编辑入口"（点概念页名 → 打开概念库该页编辑；只读面板已完成）；
 - [ ] 《术语评审》轻流程：`draft → reviewed → approved` 只看 `page_metadata.concept.state`，无需额外表。
 
+### 13.13 环境与权限（2026-09-29 用户口径）
+
+**A. env 位置与权威性（两处，各司其职）**
+
+| 位置 | 作用 | 内容 |
+|---|---|---|
+| `/etc/systemd/system/bodhi-mcp.service.d/env.conf`（systemd drop-in） | **本机服务的运行时 env**（MCP 进程真正读到的） | `BODHI_ONTOLOGY_KB_ID/NAME`、`BODHI_CONCEPT_KB_ID/NAME`、`BODHI_TENANT_ID` |
+| 仓库 **`.env`**（无 `tools/*/.env`） | 脚本/容器/交付用（`ke_db` 只从它读 DB 口令） | 同样 5 个变量（已补） |
+| 交付模板 `deploy/delivery/payload/mcp/.env.example` | 客户环境填写 | 同上（已取消注释并补概念库） |
+
+- **唯一权威 = env**；`wiki_config.bodhi_ontology_kb / bodhi_concept_kb` 标记降级为"未配 env 时的兜底"，
+  由 `ke_context.ensure_marks()`（MCP 启动自愈 / CLI / HTTP）**自动维护**，不需要人维护。
+- 改 env 后必须 `systemctl daemon-reload && systemctl restart bodhi-mcp`；**改代码后也必须重启**
+  （本轮踩坑：`_concept_lookup` 加了 `state` 却忘了重启 → 前端徽标不显示）。
+
+**B. 权限（用户 2026-09-29 拍板）**
+
+- **读：全部放开，不做控制**（读接口不校验租户；这两个治理库也一样，任何租户可读）。
+- **写：严格守门** —— `ke_db.assert_can_write(kb_id, tenant)`：属主 / `kb_shares`（经
+  `organization_tenant_members`）中的 **editor / writer / admin / owner** 可写；`viewer` 或**身份缺失 → 拒**
+  （fail-closed）。调用者租户来自 MCP 头 `X-Bodhi-Tenant`（`mcp_services.headers`）或 env `BODHI_TENANT_ID`。
+- 若日后要"给某租户可写"：把该租户所属组织在 `kb_shares` 上由 `viewer` 改为 `editor` 即可
+  （`kb_shares.permission` 无约束、前端权限卡语义就是 admin/editor）。
+
 ### 13.12 二期实施结果（2026-09-28）：B 案迁移 + 概念页写路径 + 缓存
 
 **1. 存量修复（用户口径：`ea/offering` 是旧类名 → 走 B 案，统一 slug）**
