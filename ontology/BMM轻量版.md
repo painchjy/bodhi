@@ -106,6 +106,8 @@
 ### IT 资产 / 系统（2026-09-29 新增）
 - mainSystemContainsSubSystem（主系统 → 子系统）：主系统包含子系统
 - hardwareAssetBelongsToSubSystem（硬件资产 → 子系统）：硬件资产归属于某个子系统
+- mainSystemBelongsToOrganizationUnit（主系统 → 组织机构）：主系统归属业务部门
+- subSystemBelongsToOrganizationUnit（子系统 → 组织机构）：子系统归属业务部门
 
 ### 信息来源追踪
 - hasSource（DesiredResult/Means/Influencer/Assessment → 来源文档）
@@ -127,6 +129,8 @@
   - coreFunction（核心功能）—— 仅子系统（`SubSystem`）；
   - hardwareAssetCategory（硬件资产分类）—— 仅硬件资产（`HardwareAsset`）；
   - 系统的「英文名称/功能简介」**复用** `englishName` / `description`。
+  - **业务规则（2026-09-29）**：`ruleScope`（适用范围）、`ruleImplementation`（实现方式）、
+    `ruleReference`（参考规范细则）—— domain 均为 `OperativeBusinessRule`；逐字原文仍写正文「## 原文依据」。
 - documentTitle、documentId、publicationDate（来源文档）
 - text、sourcePosition（原文摘录）
 

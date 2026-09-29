@@ -480,6 +480,18 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:range :SubSystem ;
     rdfs:comment "硬件资产归属于某个子系统"@zh .
 
+:mainSystemBelongsToOrganizationUnit rdf:type owl:ObjectProperty ;
+    rdfs:label "归属业务部门"@zh ;
+    rdfs:domain :MainSystem ;
+    rdfs:range :OrganizationUnit ;
+    rdfs:comment "主系统归属（由哪个）业务部门负责"@zh .
+
+:subSystemBelongsToOrganizationUnit rdf:type owl:ObjectProperty ;
+    rdfs:label "归属业务部门"@zh ;
+    rdfs:domain :SubSystem ;
+    rdfs:range :OrganizationUnit ;
+    rdfs:comment "子系统归属（由哪个）业务部门负责"@zh .
+
 # ============================================================
 # 四、数据属性（Datatype Properties）
 # ============================================================
@@ -553,6 +565,25 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:domain :HardwareAsset ;
     rdfs:range xsd:string ;
     rdfs:comment "硬件资产分类，如'服务器'/'网络设备'/'终端'/'存储'" .
+
+### 业务规则属性（2026-09-29 新增；用于结构化批量建模：规则表的「适用范围/实现方式/参考规范细则」）
+:ruleScope rdf:type owl:DatatypeProperty ;
+    rdfs:label "适用范围"@zh ;
+    rdfs:domain :OperativeBusinessRule ;
+    rdfs:range xsd:string ;
+    rdfs:comment "规则适用的范围/场景，如'技术方案/总体方案/应用架构'" .
+
+:ruleImplementation rdf:type owl:DatatypeProperty ;
+    rdfs:label "实现方式"@zh ;
+    rdfs:domain :OperativeBusinessRule ;
+    rdfs:range xsd:string ;
+    rdfs:comment "规则的落地方式，如'LLM软规则'/'图谱检索'/'人工检查'" .
+
+:ruleReference rdf:type owl:DatatypeProperty ;
+    rdfs:label "参考规范细则"@zh ;
+    rdfs:domain :OperativeBusinessRule ;
+    rdfs:range xsd:string ;
+    rdfs:comment "规则出处/参考规范的链接或文档标题（逐字原文请写进正文「## 原文依据」）" .
 
 
 # ============================================================
