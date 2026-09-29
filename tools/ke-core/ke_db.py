@@ -45,18 +45,27 @@ DB_NAME = os.environ.get("BODHI_DB_NAME", "WeKnora")
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
-def _password_from_env_file() -> str:
-    """从 WeKnora 部署的 `.env` 取数据库口令 —— **口令绝不写进代码/仓库**。
-
-    查找顺序：`BODHI_WEKNORA_DIR`（推荐显式指定）→ 常见的 `…/source/WeKnora/.env` → 仓库根 `.env`；
-    键名兼容 `DB_PASSWORD` / `POSTGRES_PASSWORD`。
-    """
-    candidates = []
+def _env_file_candidates() -> list[pathlib.Path]:
+    """可能写着配置的 `.env`（按优先级）：`BODHI_WEKNORA_DIR` → WeKnora 部署目录 → 仓库根。"""
+    candidates: list[pathlib.Path] = []
     if os.environ.get("BODHI_WEKNORA_DIR"):
         candidates.append(pathlib.Path(os.environ["BODHI_WEKNORA_DIR"]) / ".env")
     candidates += [pathlib.Path("/mnt/c/Users/PHJY/source/WeKnora/.env"),
                    REPO_ROOT.parent / "WeKnora" / ".env", REPO_ROOT / ".env"]
-    for path in candidates:
+    return candidates
+
+
+def env_value(key: str, default: str = "") -> str:
+    """读配置：**进程 env 优先**，其次 `.env` 文件（2026-09-29）。
+
+    为什么要有它：MCP 服务的 env 由 systemd 注入，但 **CLI / 一次性脚本 / 容器** 拿到的是另一份环境；
+    过去只有 DB 口令会去读 `.env`，于是手敲 `ke_context.py concept-state ...` 会因为"身份缺失"被拒
+    （用户实测踩到）。统一走这里：进程 env → `BODHI_WEKNORA_DIR/.env` → `…/source/WeKnora/.env` → 仓库根 `.env`。
+    """
+    raw = (os.environ.get(key) or "").strip()
+    if raw:
+        return raw
+    for path in _env_file_candidates():
         try:
             if not path.is_file():
                 continue
@@ -64,11 +73,37 @@ def _password_from_env_file() -> str:
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#") or "=" not in stripped:
                     continue
-                key, _, value = stripped.partition("=")
-                if key.strip() in ("DB_PASSWORD", "POSTGRES_PASSWORD"):
-                    return value.strip().strip("'\"")
+                k, _, v = stripped.partition("=")
+                if k.strip() == key:
+                    return v.strip().strip("'\"")
         except Exception:  # noqa: BLE001
             continue
+    return default
+
+
+def _password_from_env_file() -> str:
+    """从 WeKnora 部署的 `.env` 取数据库口令 —— **口令绝不写进代码/仓库**。
+
+    查找顺序见 `_env_file_candidates()`；键名兼容 `DB_PASSWORD` / `POSTGRES_PASSWORD`。
+    """
+    for path in _env_file_candidates():
+        for key in ("DB_PASSWORD", "POSTGRES_PASSWORD"):
+            val = ""
+            try:
+                if not path.is_file():
+                    break
+                for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#") or "=" not in stripped:
+                        continue
+                    k, _, v = stripped.partition("=")
+                    if k.strip() == key:
+                        val = v.strip().strip("'\"")
+                        break
+            except Exception:  # noqa: BLE001
+                continue
+            if val:
+                return val
     return ""
 
 
@@ -255,11 +290,11 @@ def set_request_tenant(tenant: int | None) -> None:
 
 
 def caller_tenant(default: int | None = None) -> int | None:
-    """调用者租户：优先**本请求头**（`X-Bodhi-Tenant`），其次 env `BODHI_TENANT_ID`/`BODHI_DEFAULT_TENANT`。"""
+    """调用者租户：优先**本请求头**（`X-Bodhi-Tenant`），其次 env，其次 `.env` 文件（CLI/脚本也能用）。"""
     if _REQUEST_TENANT is not None:
         return _REQUEST_TENANT
     for key in ("BODHI_TENANT_ID", "BODHI_DEFAULT_TENANT"):
-        raw = (os.environ.get(key) or "").strip()
+        raw = env_value(key).strip()
         if raw.isdigit():
             return int(raw)
     return default

@@ -592,9 +592,8 @@ def _match_kb(cands: list[dict], raw: str) -> dict | None:
 
 def resolve_ontology_kb(asked: str = "") -> dict:
     """认「本体模型知识库」：返回 `{id, name, source, pages, candidates[]}`（认不出 id 为空）。"""
-    env_id = (os.environ.get("BODHI_ONTOLOGY_KB_ID")
-              or os.environ.get("ONTOLOGY_KB_ID") or "").strip()
-    env_name = (os.environ.get("BODHI_ONTOLOGY_KB_NAME") or ONTOLOGY_DEFAULT_NAME).strip()
+    env_id = (ke_db.env_value("BODHI_ONTOLOGY_KB_ID") or ke_db.env_value("ONTOLOGY_KB_ID")).strip()
+    env_name = (ke_db.env_value("BODHI_ONTOLOGY_KB_NAME") or ONTOLOGY_DEFAULT_NAME).strip()
     cands = _kb_candidates()
     hit, source = None, ""
     if env_id:                                     # ① env 显式指定

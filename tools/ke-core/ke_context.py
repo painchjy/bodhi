@@ -245,8 +245,8 @@ def concept_kb(kbs: list[dict] | None = None) -> dict:
     与 `ke_ontology.resolve_ontology_kb` 同款套路（换库不用改代码/不用重建前端）。
     """
     kbs = kbs if kbs is not None else kb_rows()
-    env_id = (os.environ.get("BODHI_CONCEPT_KB") or os.environ.get("BODHI_CONCEPT_KB_ID") or "").strip()
-    env_name = (os.environ.get("BODHI_CONCEPT_KB_NAME") or CONCEPT_DEFAULT_NAME).strip()
+    env_id = (ke_db.env_value("BODHI_CONCEPT_KB") or ke_db.env_value("BODHI_CONCEPT_KB_ID")).strip()
+    env_name = (ke_db.env_value("BODHI_CONCEPT_KB_NAME") or CONCEPT_DEFAULT_NAME).strip()
     rows = ke_db.psql_csv(
         "SELECT knowledge_base_id AS kb, count(*) AS n FROM wiki_pages "
         " WHERE deleted_at IS NULL AND slug LIKE 'concept/%' GROUP BY 1")
