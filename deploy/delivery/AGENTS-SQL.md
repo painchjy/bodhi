@@ -64,9 +64,11 @@ done
 
 | 智能体 | 提示词 | 工具面（`allowed_tools`） | 备注 |
 |---|---|---|---|
-| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + 17 个 `mcp_bodhi_ontology_*`（含 `skills`/`ontology_types`/`service_overview`/**`retag_preview`+`retag_apply`**/**`context_scan`+`context_lookup`**；**无**抽取类） | **不给** `wiki_write_page`：写库只走 MCP；改类型必须两段式（preview → 用户确认 → apply）；跨库引用前先 `context_lookup` |
-| `bodhi-kb-ops` | 「知识运维」——只做体检与清理计划，绝不改数据 | 5 个 wiki 工具 + `audit_scan`/`audit_plan`/`retag_preview`/`context_scan`/`context_lookup`（全只读） | 执行清理始终由人确认（`plan → apply --confirm`）|
-| `bodhi-kb-ops` | 「知识运维」——只做体检与清理计划，绝不改数据 | 5 个 wiki 工具 + `audit_scan`/`audit_plan` | 执行清理始终由人确认（`plan → apply --confirm`）|
+| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + `mcp_bodhi_ontology_*`（含 `skills`/`ontology_types`/`service_overview`/**`retag_preview`+`retag_apply`**/**`context_scan`+`context_lookup`+`context_page`+`context_concept_apply`/`_rollback`**/**`context_authority`+`context_authority_apply`**；**无**抽取类）—— 当前 **27 个** | **不给** `wiki_write_page`：写库只走 MCP；改类型必须两段式（preview → 用户确认 → apply）；跨库引用前先 `context_lookup`；**同义知识先认定权威**（`context_authority` → `context_authority_apply{action:"decide"}`），副本只能 `action:"pull"` 从权威复制 |
+| `bodhi-kb-ops` | 「知识运维」——只做体检与清理计划，绝不改数据 | 5 个 wiki 工具 + `audit_scan`/`audit_plan`/`retag_preview`/`context_scan`/`context_lookup`/`context_page`/**`context_authority`**（全只读）—— 当前 **12 个** | 执行清理始终由人确认（`plan → apply --confirm`）；只读的 `context_authority` 让它能报"副本漂移/落后权威"，但**没有** `_apply`，改不了 |
+
+> 工具面的**单一来源**是本仓 `deploy/weknora-fork/gen_agents.py`（`TOOLS_BY_AGENT`）与下面的导出 SQL；
+> 数字随工具面演进会变，验收时以 SQL 执行后的 `jsonb_array_length(config->'allowed_tools')` 为准。
 
 技能（3 个）由 MCP 下发、**不写进提示词**：`domain_modeling` / `ea_overview_design` / `service_detailed_design`
 （源在 `02-mcp-server/skills/<id>/SKILL.md`，改完即生效，无需重启/重新注册智能体）。
@@ -77,7 +79,7 @@ done
 # ① 智能体在位
 psql "$PSQL_URL" -At -F' | ' -c "SELECT id, name, deleted_at IS NULL AS live FROM custom_agents WHERE id LIKE 'bodhi-%'"
 
-# ② 工具面 18 个（5 wiki + 13 MCP）、MCP 已挂
+# ② 工具面（`bodhi-ea-modeler` 当前 27 个：5 wiki + 22 MCP）、MCP 已挂
 psql "$PSQL_URL" -At -c "SELECT jsonb_array_length(config->'allowed_tools') || ' 工具 / MCP=' || (config->'mcp_services')::text FROM custom_agents WHERE id='bodhi-ea-modeler'"
 
 # ③ 真跑一轮（让智能体先 skills() 再报目录）——用交付里的驱动脚本或 App 里直接对话
@@ -91,7 +93,7 @@ print([a['id'] for a in json.loads(urllib.request.urlopen(req, timeout=30).read(
 PY
 ```
 
-期望：`custom_agents` 里能看到两个 `bodhi-*` 为 live；工具数 **15**；App 里用 `bodhi-ea-modeler` 问一句
+期望：`custom_agents` 里能看到两个 `bodhi-*` 为 live；`bodhi-ea-modeler` 工具 **27 个**、`bodhi-kb-ops` **12 个**（以 SQL 执行后实际为准）；App 里用 `bodhi-ea-modeler` 问一句
 "先看技能目录再告诉我有哪些技能"，它应调用 `skills()` 并列出 3 个技能；
 `logs/mcp_calls_YYYYMMDD.log`（MCP 侧）里能看到对应记录。
 

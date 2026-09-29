@@ -99,6 +99,8 @@ MODELER_TOOLS = [
     "mcp_bodhi_ontology_context_scan", "mcp_bodhi_ontology_context_lookup",
     "mcp_bodhi_ontology_context_page",
     "mcp_bodhi_ontology_context_concept_apply", "mcp_bodhi_ontology_context_concept_rollback",
+    # 权威/副本（2026-09-29）：同义知识认定一个领域为权威，其它领域只读 + 只能从权威复制
+    "mcp_bodhi_ontology_context_authority", "mcp_bodhi_ontology_context_authority_apply",
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
                   "design": DESIGN_TOOLS, "modeler": MODELER_TOOLS}

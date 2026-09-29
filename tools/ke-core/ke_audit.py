@@ -1010,6 +1010,47 @@ def check_context_map(ctx: dict, rep: Report) -> None:
                         "复核后重新置 approved（或先退回 reviewed）")
         ctx["data"]["context_concept_states"] = counts
 
+    # ---- G10 权威/副本：副本本地漂移 / 落后权威 / 未绑定（2026-09-29 口径）---------
+    #   口径：同义知识**认定一个领域为权威（master）**，其它领域**只读**、只能 `authority_pull`
+    #   从权威复制。事实源 = 概念页「## 权威与副本」表（缓存 → `authority` 段）。
+    auth_entries = cache.get("authority") or []
+    drift = outdated = unbound = detached = 0
+    for entry in auth_entries:
+        cslug = str(entry.get("concept_slug") or "")
+        master = entry.get("master") or {}
+        m_name = str(master.get("kb_name") or str(master.get("kb") or "")[:8])
+        if not entry.get("master_version"):
+            detached += 1
+            rep.add("G10", "medium", cslug,
+                    "权威/副本关系**失去权威**（detached）：master 页 %s/%s 不存在或已删 —— 副本没有同步来源"
+                    % (m_name, master.get("slug") or ""),
+                    "重新指认权威：`ke_context.py authority-decide <slug> --master <库>`（两段式，带 ticket）")
+        for r in (entry.get("replicas") or []):
+            r_name = str(r.get("kb_name") or str(r.get("kb") or "")[:8])
+            pull = "`ke_context.py authority-pull %s --kb \"%s\" --apply`" % (cslug, r_name)
+            state = str(r.get("state") or "")
+            if state == "local_drift":
+                drift += 1
+                rep.add("G10", "high", "%s @%s" % (r.get("slug"), r_name),
+                        "副本正文**本地漂移**（local_drift）：上次从权威（%s v%s）复制后又被人本地改过 —— "
+                        "违反\"副本只读\"，下次从权威复制会被**覆盖**"
+                        % (m_name, entry.get("master_version") or "?"),
+                        "把本地补充挪进 `page_metadata.local_notes`，然后从权威复制：%s" % pull)
+            elif state == "outdated":
+                outdated += 1
+                rep.add("G10", "medium", "%s @%s" % (r.get("slug"), r_name),
+                        "副本**落后于权威**（outdated）：已同步 v%s，权威已到 v%s（权威前进不自动推送）"
+                        % (r.get("synced_version") or "?", entry.get("master_version") or "?"),
+                        "评估下游影响后从权威复制：%s" % pull)
+            elif state == "unbound":
+                unbound += 1
+                rep.add("G10", "low", "%s @%s" % (r.get("slug"), r_name),
+                        "副本**尚未绑定同步指纹**（unbound）：还没跑过 `authority-pull`，漂移检测不到",
+                        "从权威复制一次即绑定：%s" % pull)
+    ctx["data"]["authority_replicas"] = {"groups": len(auth_entries), "local_drift": drift,
+                                         "outdated": outdated, "unbound": unbound,
+                                         "detached": detached}
+
     # ---- G7 领域库**不得互相引用**（跨库直接引用 → high）------------------------
     #   用户口径（2026-09-28）：领域库之间不能互相引用；相互关系必须**经企业共享概念页转换**。
     out_slugs: set = set()
@@ -1111,11 +1152,66 @@ def check_governance(ctx: dict, rep: Report) -> None:
 
 def check_governance_rest(ctx: dict, rep: Report, mine: list) -> None:
     """F2 权威/副本绑定漂移 + F3 原文依据不达标（F1 见 `check_governance`）。"""
-    # ---- F2 权威/副本绑定漂移 ---------------------------------------------
+    # ---- F2 权威/副本绑定漂移（口径 2026-09-29：事实源=概念页「## 权威与副本」→ 缓存）----
+    cache_auth: list = []
+    try:
+        import ke_context as _kc      # 与 check_context_map 一致：按需导入，缺依赖时降级
+        cache_auth = _kc.read_cache().get("authority") or []
+    except Exception:  # noqa: BLE001
+        cache_auth = []
+    cache_rep: dict = {}
+    c_by_slug: dict = {}
+    for entry in cache_auth:
+        for r in (entry.get("replicas") or []):
+            hit = {"entry": entry, "replica": r}
+            cache_rep[(str(r.get("kb") or ""), str(r.get("slug") or ""))] = hit
+            c_by_slug.setdefault(str(r.get("slug") or ""), []).append(hit)
     bindings = 0
+    seen: set = set()
+    for page in ctx["pages"]:
+        slug = str(page["slug"])
+        kb_id = str(page.get("knowledge_base_id") or "")
+        hit = cache_rep.get((kb_id, slug))
+        if hit is None:
+            cands = c_by_slug.get(slug) or []
+            hit = cands[0] if len(cands) == 1 else None
+            if hit is not None and kb_id and str(hit["replica"].get("kb") or "") != kb_id:
+                hit = None
+        if hit is None:
+            continue
+        entry, replica = hit["entry"], hit["replica"]
+        seen.add((str(replica.get("kb") or ""), slug))
+        bindings += 1
+        master = entry.get("master") or {}
+        r_name = str(replica.get("kb_name") or str(replica.get("kb") or "")[:8])
+        cslug = str(entry.get("concept_slug") or slug)
+        pull = ("从权威复制：`ke_context.py authority-pull %s --kb \"%s\" --apply`" % (cslug, r_name))
+        if not entry.get("master_version"):
+            rep.add("F2", "medium", slug,
+                    "绑定失效：权威页 %s/%s 不存在或已删（detached）"
+                    % (str(master.get("kb") or "")[:8], master.get("slug") or ""),
+                    "重新指认权威（`ke_context.py authority-decide <slug> --master <库>`）或解除副本")
+        st = str(replica.get("state") or "")
+        if st == "local_drift":
+            rep.add("F2", "high", slug,
+                    "副本正文在复制后被**本地改写**（local_drift）—— 副本只读、只能从权威复制；"
+                    "本页上次同步于权威 v%s" % (replica.get("synced_version") or "?"),
+                    "本地补充挪进 `page_metadata.local_notes`，然后 " + pull)
+        elif st == "outdated":
+            rep.add("F2", "medium", slug,
+                    "副本落后于权威（outdated）：已同步 v%s，权威已到 v%s —— 权威前进**不自动推送**"
+                    % (replica.get("synced_version") or "?", entry.get("master_version") or "?"),
+                    "评估引用本页的页/边后 " + pull)
+        elif st == "unbound":
+            rep.add("F2", "low", slug,
+                    "副本尚未绑定同步指纹（unbound）—— 还没从权威复制过，漂移检测不到", pull)
+
+    # 旧口径兜底：页上仍有 `page_metadata.authority`（历史/手工绑定）且概念页权威表未覆盖到
     for page in ctx["pages"]:
         auth = _meta_full(page.get("meta")).get("authority")
         if not isinstance(auth, dict) or str(auth.get("role") or "") != "replica":
+            continue
+        if (str(page.get("knowledge_base_id") or ""), str(page["slug"])) in seen:
             continue
         bindings += 1
         master = auth.get("master") if isinstance(auth.get("master"), dict) else {}
@@ -1123,7 +1219,7 @@ def check_governance_rest(ctx: dict, rep: Report, mine: list) -> None:
         m_slug = str((master or {}).get("slug") or "")
         if not (m_kb and m_slug):
             rep.add("F2", "medium", page["slug"], "副本已登记权威但缺 `master{kb_id, slug}`",
-                    "补全绑定信息（`/bodhi/authority/decide`）")
+                    "补全绑定信息（`ke_context.py authority-decide`）")
             continue
         mrows = ke_db.psql_csv(
             "SELECT COALESCE(version,1) AS version, COALESCE(content,'') AS content "

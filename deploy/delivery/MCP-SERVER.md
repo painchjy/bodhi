@@ -2,12 +2,18 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **22 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径** …）
+> 作用：给 WeKnora 提供 **24 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
 > 的零依赖子集解析（我们逐键比对过，3 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list **22 个** / skills() 3 个）。
+> `selfcheck.py` 全绿（initialize / tools/list **24 个** / skills() 3 个）。
+
+**权威 / 副本（2026-09-29 新增，2 个工具）**：同义知识**认定一个领域为权威**，其它领域**只读**、
+**只能从权威复制** —— 工具面 `context_authority`（只读：谁是权威、副本漂移、ticket）+
+`context_authority_apply`（`action=decide|pull`，两段式写；HTTP 对应
+`GET /bodhi/context/authority`、`POST /bodhi/context/authority/{decide,pull}`）。
+副本页的本地写会被服务端**拒绝**（`ke_pages.replica_guard`），错误里直接给「从权威复制」的命令。
 
 ---
 

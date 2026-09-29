@@ -1341,6 +1341,18 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     # 旧实现会因 `_graph_target_slug` 全库查而把**别的知识库**的 slug 写进本库页 → 回执成功但本库没记录。
     known_slugs = {p["slug"] for p in pages} | {p.get("slug") for p in payloads if p.get("slug")}
     dropped_relations: list = []
+    # 副本写保护（2026-09-29 用户口径）：目标页若是**权威副本** → 拒写，回执给"从权威复制"的指引
+    if payloads:
+        kept_payloads: list = []
+        for payload in payloads:
+            try:
+                ke_pages.replica_guard(kb_id, str(payload.get("slug") or ""), TOOL_TAG)
+                kept_payloads.append(payload)
+            except ValueError as exc:
+                dropped_relations.append({
+                    "source": payload.get("name"), "target_slug": payload.get("slug"),
+                    "reason": str(exc), "action_required": "authority_pull"})
+        payloads = kept_payloads
     for payload in payloads:
         kept = []
         for rel in payload.get("relations") or []:
@@ -3120,6 +3132,32 @@ def tool_definitions() -> list[dict]:
                 "ticket": {"type": "string", "description": "apply 时的 ticket"},
             }, "required": ["ticket"]},
         },
+        {
+            "name": "context_authority",
+            "description": ("**权威/副本（只读）**：某跨库同名组的「谁是企业权威、谁是只读副本」分工与影响面 —— "
+                            "master（唯一可编辑）、replicas（含是否 `local_drift`/`outdated`）、需要的风险确认与 ticket。"
+                            "口径：同义知识**认定一个领域为权威**，其它领域**只读**、只能 `authority_pull` 从权威复制。"),
+            "inputSchema": {"type": "object", "properties": {
+                "slug": {"type": "string", "description": "同名组的 slug（概念页同名）"},
+                "master": {"type": "string", "description": "候选权威库（id/前缀/精确库名）；留空=用概念页已登记的"},
+            }, "required": ["slug"]},
+        },
+        {
+            "name": "context_authority_apply",
+            "description": ("**权威/副本（写，两段式）**：`action=decide` 把分工写进概念页的「权威与副本」小节（只写概念库）；"
+                            "`action=pull` 从权威**复制正文**到某副本页（只写副本库，副本页 `version+1` 可回退，并写同库自述元数据）。"
+                            "两者都要 `ticket` + `acknowledge_risks`（与预览一致）+ 对目标库的写权限。"
+                            "副本页**不允许**用其它写路径修改（服务端会拒并提示 pull）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["decide", "pull"]},
+                "slug": {"type": "string"},
+                "master": {"type": "string", "description": "action=decide 时的权威库（id/前缀/库名）"},
+                "kb": {"type": "string", "description": "action=pull 时的副本库（id/名称）"},
+                "ticket": {"type": "string"},
+                "acknowledge_risks": {"type": "array", "items": {"type": "string"}},
+                "actor": {"type": "string"},
+            }, "required": ["action", "slug", "ticket", "acknowledge_risks"]},
+        },
     ]
 
 
@@ -3165,6 +3203,26 @@ def context_concept_apply(slug: str, ticket: str = "", acknowledge_risks: list |
 def context_concept_rollback(ticket: str) -> dict:
     """**写**：回滚概念页 apply（幂等）+ 刷新缓存。"""
     return ke_context.concept_rollback(str(ticket or ""))
+
+
+def context_authority(slug: str, master: str = "") -> dict:
+    """**只读**：权威/副本分工与影响面（`ke_context.authority_preview` 的入口）。"""
+    return ke_context.authority_preview(str(slug or ""), str(master or ""))
+
+
+def context_authority_apply(action: str, slug: str, master: str = "", kb: str = "",
+                            ticket: str = "", acknowledge_risks: list | None = None,
+                            actor: str = "") -> dict:
+    """**写**：`action=decide` 写概念库（登记权威）；`action=pull` 写副本库（从权威复制）。"""
+    act = str(action or "").strip().lower()
+    ack = [str(x) for x in (acknowledge_risks or [])]
+    if act == "decide":
+        return ke_context.authority_decide(str(slug or ""), str(master or ""), str(ticket or ""), ack,
+                                           actor=str(actor or ""))
+    if act == "pull":
+        return ke_context.authority_pull(str(kb or ""), str(slug or ""), str(ticket or ""), ack,
+                                         actor=str(actor or ""), apply=True)
+    return {"error": "action 只能是 decide / pull"}
 
 
 def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
@@ -3347,6 +3405,14 @@ def call_tool(name: str, args: dict) -> dict:
                                      str(args.get("actor", "")))
     if name == "context_concept_rollback":
         return context_concept_rollback(str(args.get("ticket", "")))
+    if name == "context_authority":
+        return context_authority(str(args.get("slug", "")), str(args.get("master", "")))
+    if name == "context_authority_apply":
+        return context_authority_apply(str(args.get("action", "")), str(args.get("slug", "")),
+                                       str(args.get("master", "")), str(args.get("kb", "")),
+                                       str(args.get("ticket", "")),
+                                       args.get("acknowledge_risks") or [],
+                                       str(args.get("actor", "")))
     raise RuntimeError("未知工具：%s" % name)
 
 
@@ -3603,6 +3669,17 @@ class MCPHandler(BaseHTTPRequestHandler):
             "/bodhi/context/concept/state":
                 lambda b: ke_context.set_concept_state(str(b.get("slug", "")), str(b.get("state", "")),
                                                        by=str(b.get("by", "")), note=str(b.get("note", ""))),
+            "/bodhi/context/authority/decide":
+                lambda b: ke_context.authority_decide(str(b.get("slug", "")), str(b.get("master", "")),
+                                                      str(b.get("ticket", "")),
+                                                      b.get("acknowledge_risks") or [],
+                                                      str(b.get("actor", ""))),
+            "/bodhi/context/authority/pull":
+                lambda b: ke_context.authority_pull(str(b.get("kb", "")), str(b.get("slug", "")),
+                                                    str(b.get("ticket", "")),
+                                                    b.get("acknowledge_risks") or [],
+                                                    str(b.get("actor", "")),
+                                                    apply=bool(b.get("apply", False))),
             "/bodhi/context/ensure-marks":
                 lambda b: ke_context.ensure_marks(),
             "/bodhi/docs/purge":
@@ -3704,6 +3781,16 @@ class MCPHandler(BaseHTTPRequestHandler):
                     params.get("include_unknown", "0") not in ("0", "false")), 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/context/concept/preview 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path in ("/bodhi/context/authority", "/bodhi/context/authority.json"):
+            # 权威/副本（只读）：给前端面板与运维看分工、副本漂移、pull 预览 ticket
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_context.authority_preview(params.get("slug", ""), params.get("master", "")),
+                           200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/context/authority 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/context/cache", "/bodhi/context/cache.json"):

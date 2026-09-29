@@ -175,6 +175,35 @@ def rebuild_in_links_sql(kb_id: str) -> str:
             % (ke_db.sql_str(kb_id), arr, ke_db.sql_str(kb_id), ke_db.sql_str(kb_id)))
 
 
+# ---------------------------------------------------------------------------
+# 副本写保护（2026-09-29 用户口径）：同义知识的副本页**不能本地修改**，只能从权威复制。
+#   命中来源 = 映射缓存 `state/context_map/mappings.json` 的 `replica_protect`
+#   （由 ke_context.rebuild_cache 从概念页「## 权威与副本」+ 各副本页自述派生）
+# ---------------------------------------------------------------------------
+CXT_PULL_TAG = "bodhi-cxt-pull"          # 唯一允许改副本正文的 tag（authority_pull 用）
+
+
+def replica_guard(kb_id: str, slug: str, tag: str) -> None:
+    """该页若是权威副本且不是 pull 通道 → 抛错并给"从权威复制"的指引（服务端强约束）。"""
+    if tag == CXT_PULL_TAG:
+        return
+    try:
+        import json as _json
+        import pathlib as _pathlib
+        cache = _pathlib.Path(__file__).resolve().parents[2] / "state" / "context_map" / "mappings.json"
+        data = _json.loads(cache.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return
+    hit = (data.get("replica_protect") or {}).get("%s:%s" % (kb_id, slug))
+    if not hit:
+        return
+    raise ValueError(
+        "该页是**权威副本**（replica；权威=%s/%s）→ 领域库不能本地修改，只能从权威复制："
+        "`ke_context.py authority-pull %s --kb <本库> --apply`（带 ticket + 风险确认）"
+        % (str(hit.get("master_kb") or "")[:8], hit.get("master_slug") or "",
+           hit.get("concept_slug") or slug))
+
+
 def _snapshot_stmt(kb_id: str, slug: str, tag: str) -> str:
     """把当前版本快照进 wiki_page_revisions（沿用 server.py 的合并语义）。"""
     return ("INSERT INTO wiki_page_revisions (id, tenant_id, knowledge_base_id, page_id, slug, version, "
@@ -190,6 +219,7 @@ def _snapshot_stmt(kb_id: str, slug: str, tag: str) -> str:
 def _apply_content_update(kb_id: str, slug: str, content: str, tag: str,
                           extra_set: str = "") -> str:
     """快照 + 更新正文/out_links/version+1 + 重算 in_links，返回一条可执行 SQL 批。"""
+    replica_guard(kb_id, slug, tag)      # 副本页禁止本地修改（pull 通道除外）
     stmts = [_snapshot_stmt(kb_id, slug, tag),
              "UPDATE wiki_pages SET content = %s, out_links = %s::jsonb, "
              "version = version + 1, updated_at = now(), last_edit_source = '%s'%s "

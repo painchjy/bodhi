@@ -547,11 +547,82 @@ draft（自动摘取/智能体起草，默认）
 | 渲染 | `page_view`/`context_page`：概念页 `exists=true`、标准定义、映射表逐行、peers（concept/domain 分类）、warnings |
 | 缓存 | `pairs=3`、概念页=3、`stale=0`；3 份领域库局部缓存 + 2 条 history |
 | 权限 | 无线程头 → `need_write_permission`（fail-closed）；带 `X-Bodhi-Tenant: 10000` → `owner` 通过并写成功 |
-| 工具面 | MCP **22 个**（新增 `context_page` + `context_concept_apply` + `context_concept_rollback`）；modeler 系 25 个（含写路径），知识运维保持只读 |
+| 工具面 | MCP **24 个**（新增 `context_page` + `context_concept_apply` + `context_concept_rollback`；2026-09-29 再加 `context_authority` + `context_authority_apply`）；modeler 系含写路径，知识运维保持只读 |
 
 **5. 待办（下一轮）**
 - 概念页的**标准定义**目前多为占位（领域页无 `summary`）→ 由人/智能体在概念页里补写（或 `apply --definition`）；
 - **异义组的映射语义**（`unrelated`/`rename`/`split`）目前在概念页表格里人工填写 → 缓存解析即生效（G5 会随之清零）；
 - 前端"跨库上下文"面板（渲染 `context_page` 结果；可在领域页显示"经企业概念 X 关联到 B 领域页"）；
 - `mappings.json` 的巡检口径（G3/G4 现已读缓存并可报 `stale`；下一步把"缓存过期"并入巡检提示）。
+
+### 13.14 权威 / 副本治理写路径（2026-09-29 用户口径，**已落地并实测**）
+
+**用户原话口径**：同义知识要**认定一个领域为权威**，其它领域**只读**、**只能从权威复制**（1+2+3 一起做）。
+
+#### 13.14.1 事实源与缓存（谁说了算）
+
+| 数据 | 落点 | 谁写 | 说明 |
+|---|---|---|---|
+| **谁是权威（master）** | **概念页正文** `## 权威与副本` 表 | `authority_decide`（**只写概念库**） | **事实源**；表里每行 = 一个上下文的角色（master / replica）|
+| 副本自述 | 副本页自己的 `page_metadata.authority` | `authority_pull`（**只写副本库**） | `{role: replica, master:{kb_id,slug}, synced_version, synced_hash, policy: one_way_upgrade}` |
+| 加速/守门缓存 | `state/context_map/mappings.json` 的 `authority` + `replica_protect` | `rebuild_cache()` 派生 | **程序产物**，可随时重建；不因 `pull` 改动概念页 |
+
+> 单库写入原则：`authority_decide` **只写概念库**；`authority_pull` **只写副本库**（副本页 `version+1`，快照可回退）。
+> 概念页的「权威与副本」表**不会因为 pull 而变**（换权威才变，那时走 `decide`）。
+
+#### 13.14.2 三种通道（运维/智能体/前端都够用）
+
+| 通道 | 只读视图 | 登记权威 | 从权威复制 |
+|---|---|---|---|
+| CLI | `ke_context.py authority-preview <slug> [--master <库>]` | `authority-decide <slug> --master <库> --ticket <t> --ack replica_protection` | `authority-pull <slug> --kb <副本库> [--apply] --ticket <t> --ack replica_overwrite,replica_version_bump` |
+| HTTP | `GET /bodhi/context/authority?slug=&master=` | `POST /bodhi/context/authority/decide` | `POST /bodhi/context/authority/pull`（`apply:false` 只预览） |
+| MCP | `context_authority` | `context_authority_apply{action:"decide"}` | `context_authority_apply{action:"pull", apply:true}` |
+
+**两段式（所有写路径）**：① 预览拿 `ticket` + `required_risks` → ② 带 **完全一致的** `acknowledge_risks` 才执行；
+写权限 `ke_db.assert_can_write(kb_id, tenant)`（属主 / `kb_shares` 的 editor|writer|admin / **身份缺失 fail-closed**），
+租户来自 `X-Bodhi-Tenant` 头或 env `BODHI_TENANT_ID`。
+
+#### 13.14.3 副本写保护（服务端强约束，不靠提示词）
+
+- `ke_pages.replica_guard(kb_id, slug, tag)`：命中缓存 `replica_protect` → **抛错拒写**，错误里直接给
+  「`authority-pull …`」的指引；**唯一放行**的 tag 是 `bodhi-cxt-pull`（`authority_pull` 专用）。
+- 挂点两处：`ke_pages._apply_content_update()`（页/关系/巡检修复全走它）与 **`server.py` 的 `save_elements`**
+  （智能体 `save_knowledge` 落库路径，按 payload 逐页过滤 → 被拒的页进 `dropped_relations`，回执带
+  `action_required: "authority_pull"`）。即：**领域库本地改副本页 = 改不进去**，只能从权威复制。
+
+#### 13.14.4 巡检口径
+
+- **新增 G10**（`ke_audit.check_context_map`，只读；读缓存 `authority` 段）：
+  `local_drift` → **high**（副本被本地改，违反"只读"）｜`outdated` → **medium**（权威已前进、未同步）｜
+  `unbound` → **low**（还没 pull 过，漂移检测不到）｜`detached` → **medium**（权威页不存在/已删）。
+- **F2 口径切到概念页**（`check_governance_rest`）：优先按缓存 `authority`（事实源=概念页）判
+  `local_drift/outdated/unbound/detached`；页上仍有历史 `page_metadata.authority` 绑定的走**旧口径兜底**
+  （两条路用 `(kb_id, slug)` 去重，不会重复报同一条）。
+
+#### 13.14.5 前端（同源只读增列 + 一个写按钮）
+
+「跨库上下文」面板新增「权威 / 副本」块：master（库名 + slug + 版本）、各副本同步状态徽标
+（已同步 / 落后于权威 / 本地漂移 / 未绑定）、本库角色徽标；**本库是副本时**给「从权威复制」按钮 →
+两段式（点开显示影响面：`v4 → v5`、权威 `v6`、风险清单 → 「确认复制」调
+`POST /bodhi/context/authority/pull {apply:true}`）。徽标也随角色变（`权威（其余领域只能从此复制）` /
+`副本·只读（落后于权威）`）。
+
+#### 13.14.6 实测（2026-09-29，真实库）
+
+| 项 | 结果 |
+|---|---|
+| `authority-preview` | master = `FD案例沙箱-手机银行`（v6）、replica = `领域知识库-测试1`（v4，`local_drift=false`）、`required_risks=[replica_protection]`、出 ticket |
+| `authority-decide` | 概念页 `ea/businessentity/登录凭据` v4 → **v5**（新增「## 权威与副本」表），缓存刷新 `concept_pages=3 pairs=3` |
+| `authority-pull`（预览 → apply） | 预览要 `replica_overwrite,replica_version_bump`；apply 后副本 **v4 → v5**、`synced_version=6`、`permission=owner` |
+| 副本写保护 | 用非 pull 通道写副本页 → **被拒**，错误里带「只能从权威复制：`ke_context.py authority-pull …`」 |
+| 缓存 | `authority` 1 段（master v6 + 副本 `in_sync`）、`replica_protect` 1 条 |
+| G10 / F2 判据 | 喂假缓存四类状态 → G10 命中 4 条（high/medium/low/medium）✓；F2 新口径 1 条（`local_drift`→high）+ 旧口径兜底 1 条 ✓；真实库当前 `in_sync` → 0 条告警 ✓ |
+| MCP | `tools/list OK（24 个，期望 24）` ✓ |
+
+#### 13.14.7 待办
+
+- 前端按钮目前**不做写权限预判**（无权限时服务端回 `need_write_permission`，面板直接展示原文）——够用；
+  若要在 UI 里隐藏按钮，可再暴露一个 `GET /bodhi/context/authority` 的 `can_write` 字段。
+- `local_notes` 约定（副本本地补充的落点）已在巡检 fix 文案里提示，尚未做成专门的写入口。
+- 批量升级（一次把某库里所有 outdated 副本拉齐）暂缓：现按页执行，影响面看得清。
 

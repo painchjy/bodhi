@@ -972,9 +972,49 @@ def rebuild_cache() -> dict:
                 {"kb_id": node["kb"], "slug": node["slug"], "concept_slug": row["slug"],
                  "concept_kb": ckb, "mapping": node["mapping"],
                  "peers": [p["slug"] for p in nodes if p["slug"] != node["slug"]]})
+    # 权威/副本（2026-09-29）：概念页「## 权威与副本」定谁 master + 各同名页 metadata.authority 自述
+    authority: list = []
+    replica_protect: dict = {}
+    for row in rows:
+        master = _authority_master(row["content"], names)
+        if not master.get("kb"):
+            continue
+        m_ver, m_sha = _page_ver_sha(master["kb"], master["slug"])
+        entry = {"concept_slug": row["slug"], "concept_kb": ckb, "master": master,
+                 "master_version": m_ver, "master_hash": m_sha, "replicas": []}
+        for r in ke_db.psql_csv(
+                "SELECT knowledge_base_id AS kb, slug, COALESCE(version,1) AS version, "
+                "       COALESCE(page_metadata::text,'{}') AS meta FROM wiki_pages "
+                " WHERE deleted_at IS NULL AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s)"
+                " LIMIT 30" % ke_db.sql_str(norm_slug(row["slug"]))):
+            if r["kb"] in (ckb, master["kb"], ke_ontology.resolve_ontology_kb().get("id") or ""):
+                continue
+            ver, sha = _page_ver_sha(r["kb"], r["slug"])
+            ameta = (_json_load_str(r["meta"], {}) or {}).get(AUTH_MARK) or {}
+            if ameta.get("synced_hash") and ameta.get("synced_hash") != sha:
+                state = "local_drift"
+            elif ameta.get("synced_version") and m_ver and int(ameta["synced_version"]) < int(m_ver):
+                state = "outdated"
+            elif ameta.get("synced_hash"):
+                state = "in_sync"
+            else:
+                state = "unbound"          # 还没 pull 过（副本页尚未绑定同步指纹）
+            item = {"context": "kb:%s" % r["kb"][:8], "kb": r["kb"], "kb_name": names.get(r["kb"], ""),
+                    "slug": r["slug"], "version": ver, "hash": sha, "state": state,
+                    "synced_version": int(ameta.get("synced_version") or 0),
+                    "synced_hash": str(ameta.get("synced_hash") or "")}
+            entry["replicas"].append(item)
+            replica_protect["%s:%s" % (r["kb"], r["slug"])] = {
+                "concept_slug": row["slug"], "concept_kb": ckb, "master_kb": master["kb"],
+                "master_slug": master["slug"], "master_version": m_ver,
+                "synced_version": item["synced_version"]}
+        if entry["replicas"]:
+            authority.append(entry)
+
     payload = {"version": 1, "kind": "cache", "built_at": ke_db.now_text(), "concept_kb": concept,
                "generated_from": generated_from, "pairs": pairs,
-               "note": "缓存（程序产物）：事实源是概念页正文的「各领域映射」表"}
+               "authority": authority, "replica_protect": replica_protect,
+               "note": "缓存（程序产物）：事实源是概念页正文的「各领域映射」表与「权威与副本」表"}
     _json_dump(MAPPINGS_FILE, payload)
     for ctx_key, items in per_kb.items():
         _json_dump(CACHE_DIR / ("%s.json" % ctx_key.replace(":", "-")),
@@ -1037,6 +1077,291 @@ def ensure_marks(tenant: int | None = None) -> dict:
                       "source": info.get("source")}
     return {"ok": True, "marks": out,
             "note": "env 是唯一权威；标记只是未配 env 时的兜底，由本函数自动维护（幂等）"}
+
+
+# ---------------------------------------------------------------------------
+# 权威 / 副本（2026-09-29 用户口径：同义知识认定一个领域为权威，其他领域只读 + 只能从权威复制）
+#   · 权威选择（谁是 master）记录在**企业概念页**的小节 `## 权威与副本`（事实源，概念库写入）
+#   · 副本自述记录在**副本页自己的** `page_metadata.authority`（同库写入 = 每轮只写一个库）
+#   · 副本正文只能由 `authority_pull`（tag=bodhi-cxt-pull）改写；其它写路径一律被拦
+# ---------------------------------------------------------------------------
+AUTH_SECTION = "## 权威与副本"
+PULL_TAG = "bodhi-cxt-pull"
+AUTH_MARK = "authority"          # 副本页元数据键
+
+
+def _page_ver_sha(kb_id: str, slug: str) -> tuple:
+    """页的 `(version, sha1)`；页不存在返回 `(None, "")`（权威/副本比对用）。"""
+    rows = ke_db.psql_csv(
+        "SELECT COALESCE(version,1) AS version, COALESCE(content,'') AS content FROM wiki_pages "
+        " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if not rows:
+        return None, ""
+    return int(rows[0]["version"] or 1), _sha1(rows[0]["content"])
+
+
+def _authority_rows(content: str) -> list:
+    """解析概念页的「## 权威与副本」表（列：上下文 / 角色 / 页 slug / 类 / 说明）。"""
+    return _table_rows(content, AUTH_SECTION)
+
+
+def _resolve_context(text: str, names: dict) -> dict:
+    """把表里的「上下文」列（库名或 `kb:xxxx`）解析成 `{context, kb, kb_name}`。"""
+    raw = str(text or "").strip()
+    kb_id = ""
+    if raw.startswith("kb:"):
+        kb_id = next((k for k in names if k[:8] == raw[3:]), "")
+    if not kb_id:
+        kb_id = next((k for k, v in names.items() if v == raw), "")
+    return {"context": "kb:%s" % kb_id[:8] if kb_id else raw, "kb": kb_id,
+            "kb_name": names.get(kb_id, raw)}
+
+
+def _authority_master(content: str, names: dict) -> dict:
+    """从概念页正文取 master 行（角色列含 master，忽略 markdown 粗体 `**`）；没有就返回 `{}`。"""
+    for row in _authority_rows(content):
+        role = str(row.get("角色") or "").replace("*", "").strip().lower()
+        if role.startswith("master"):
+            info = _resolve_context(row.get("上下文"), names)
+            info["slug"] = str(row.get("页 slug") or "").strip("` ")
+            info["page_type"] = str(row.get("类") or "")
+            return info
+    return {}
+
+
+def _upsert_section(content: str, header: str, lines: list) -> str:
+    """把 `header` 小节**整段替换**为新内容；没有就插到 `## 各领域映射` 之前（没有则追加）。"""
+    src = (content or "").splitlines()
+    start = next((i for i, l in enumerate(src) if l.strip() == header), -1)
+    if start >= 0:
+        end = next((i for i in range(start + 1, len(src)) if src[i].strip().startswith("#")), len(src))
+        return "\n".join(src[:start] + [header, ""] + lines + src[end:]).strip() + "\n"
+    anchor = next((i for i, l in enumerate(src) if l.strip() == "## 各领域映射"), -1)
+    block = [header, ""] + lines + [""]
+    if anchor >= 0:
+        return "\n".join(src[:anchor] + block + src[anchor:]).strip() + "\n"
+    return ("\n".join(src).strip() + "\n\n" + "\n".join([header, ""] + lines)).strip() + "\n"
+
+
+def _authority_body_lines(master: dict, members: list, names: dict) -> list:
+    """生成「## 权威与副本」小节内容（权威=master，其它=replica 只读）。"""
+    lines = ["| 上下文 | 角色 | 页 slug | 类 | 说明 |", "|---|---|---|---|---|"]
+    for m in members:
+        is_master = m["kb"] == master.get("kb")
+        role = "**master**（权威）" if is_master else "replica（副本，只读）"
+        note = ("该领域是权威：副本从这里复制" if is_master
+                else "其它领域**只能从权威复制**（`authority_pull`），不得自行修改")
+        lines.append("| %s | %s | `%s` | %s | %s |"
+                     % (names.get(m["kb"], m["context"]), role, m["slug"], m["page_type"], note))
+    lines += ["", "> 权威=**唯一可编辑**的领域；副本页正文只能由 `authority_pull` 从权威复制（版本化可回退）。",
+              "> 副本自述写在副本页的 `page_metadata.authority`（同库写入）；本表由 `authority-decide` 维护。"]
+    return lines
+
+
+def authority_preview(slug: str, master: str = "") -> dict:
+    """**只读预览**：某同名组的「权威/副本」分工怎么定、影响哪些页、需要确认哪些风险。
+
+    `master` 可为库 id / id 前缀 / 精确库名；留空则用概念页里已登记的 master。
+    """
+    concept = concept_kb()
+    ckb = concept.get("id") or ""
+    page = _one_page(ckb, slug) if ckb else None
+    if page is None:
+        return {"error": "概念页还不存在（先 `concept-apply`）", "slug": slug, "need_concept_apply": True}
+    names = {k["id"]: k["name"] for k in kb_rows()}
+    ont_id = ke_ontology.resolve_ontology_kb().get("id") or ""
+    members = [{"context": "kb:%s" % r["kb"][:8], "kb": r["kb"],
+                "kb_name": names.get(r["kb"], ""), "slug": r["slug"],
+                "page_type": r["page_type"], "version": int(r["version"] or 1)}
+               for r in ke_db.psql_csv(
+                   "SELECT knowledge_base_id AS kb, slug, COALESCE(page_type,'') AS page_type, "
+                   "       COALESCE(version,1) AS version FROM wiki_pages WHERE deleted_at IS NULL "
+                   "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
+                   % ke_db.sql_str(norm_slug(slug)))
+               if r["kb"] not in (ckb, ont_id)]
+    if len(members) < 2:
+        return {"error": "该 slug 不是跨库同名组（<2 个领域上下文），无需权威/副本", "slug": slug,
+                "members": members}
+    current_rows = _authority_rows(page["content"])
+    chosen = _authority_master(page["content"], names)
+    if master:
+        want = master.strip()
+        hit = next((m for m in members if m["kb"] == want or m["kb"].startswith(want)
+                    or names.get(m["kb"]) == want), None)
+        if hit is None:
+            return {"error": "master 不在本同名组里：%s" % master, "slug": slug,
+                    "members": [{"kb": m["kb"], "kb_name": m["kb_name"], "slug": m["slug"]}
+                                for m in members]}
+        chosen = {"context": hit["context"], "kb": hit["kb"], "kb_name": hit["kb_name"],
+                  "slug": hit["slug"], "page_type": hit["page_type"]}
+    if not chosen:
+        return {"error": "还没指定权威：请带 `master=<库名或 id>` 再预览", "slug": slug,
+                "members": [{"kb": m["kb"], "kb_name": m["kb_name"], "slug": m["slug"]}
+                            for m in members]}
+    m_ver, m_sha = _page_ver_sha(chosen["kb"], chosen["slug"])
+    replicas = []
+    for m in members:
+        if m["kb"] == chosen["kb"]:
+            continue
+        ver, sha = _page_ver_sha(m["kb"], m["slug"])
+        self_meta = (_meta_dict(_one_page(m["kb"], m["slug"]) or {}).get(AUTH_MARK) or {})
+        drift = bool(self_meta.get("synced_hash") and self_meta.get("synced_hash") != sha)
+        behind = bool(self_meta.get("synced_version") and m_ver
+                      and int(self_meta["synced_version"]) < int(m_ver))
+        # 与 rebuild_cache 的口径一致（前端/巡检都读 state）
+        state = ("local_drift" if drift else "outdated" if behind
+                 else "in_sync" if self_meta.get("synced_hash") else "unbound")
+        replicas.append({"context": m["context"], "kb": m["kb"], "kb_name": m["kb_name"],
+                         "slug": m["slug"], "page_type": m["page_type"], "version": ver,
+                         "role": str(self_meta.get("role") or ""),
+                         "synced_version": int(self_meta.get("synced_version") or 0),
+                         "synced_hash": str(self_meta.get("synced_hash") or ""),
+                         "local_drift": drift, "outdated": behind, "state": state})
+    risks = ["replica_protection"]
+    if current_rows and chosen.get("kb") and \
+            _authority_master(page["content"], names).get("kb") not in ("", chosen["kb"]):
+        risks.append("authority_conflict")
+    if any(r["local_drift"] for r in replicas):
+        risks.append("replica_local_drift")
+    ticket = _sha1("authority-v1|%s|%s|%s|%s" % (ckb, slug, page["version"], json.dumps(
+        {"master": chosen, "members": members}, ensure_ascii=False, sort_keys=True)))
+    return {"slug": slug, "concept_kb": concept,
+            "concept_page": {"version": int(page["version"] or 1), "page_type": page["page_type"]},
+            "master": chosen, "master_version": m_ver, "master_hash": m_sha,
+            "members": members, "replicas": replicas, "current_rows": current_rows,
+            "body_lines": _authority_body_lines(chosen, members, names),
+            "required_risks": sorted(set(risks)),
+            "ticket": ticket, "generated_at": ke_db.now_text(), "permission": "read_only",
+            "note": "权威选择写在概念页（概念库写入）；副本自述写在自己的元数据（同库写入）"}
+
+
+def authority_decide(slug: str, master: str, ticket: str = "", acknowledge_risks: list | None = None,
+                     actor: str = "", tenant: int | None = None) -> dict:
+    """**写（概念库）**：把「权威/副本」分工写进概念页的 `## 权威与副本` 小节（版本化可回退）。"""
+    prev = authority_preview(slug, master)
+    if prev.get("error"):
+        return prev
+    concept = prev["concept_kb"]
+    ckb = concept.get("id") or ""
+    acl = ke_db.assert_can_write(ckb, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl["allowed"]:
+        return {"error": "need_write_permission", "permission": acl}
+    if str(ticket or "") != str(prev.get("ticket") or ""):
+        return {"error": "ticket 不匹配（影响面已变化或未先 preview）→ need_repreview=true",
+                "need_repreview": True, "ticket": prev.get("ticket"), "slug": slug}
+    want = sorted(prev.get("required_risks") or [])
+    if sorted(acknowledge_risks or []) != want:
+        return {"error": "风险确认不一致：需 acknowledge_risks=%s" % want, "required_risks": want}
+    page = _one_page(ckb, slug)
+    body = _upsert_section(page["content"], AUTH_SECTION, prev["body_lines"])
+    written = ke_pages.upsert_page(ckb, slug, page["title"], page["page_type"], body, summary="",
+                                   tag="bodhi-cxt-edit",
+                                   metadata={"concept": dict((_meta_dict(page).get("concept") or {}))})
+    cache = rebuild_cache()
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    path = HISTORY_DIR / ("%s.json" % prev["ticket"])
+    _json_dump(path, {"kind": "authority_decide", "ticket": prev["ticket"], "slug": slug,
+                      "at": ke_db.now_text(), "actor": actor or "unknown",
+                      "master": prev["master"], "replicas": prev["replicas"],
+                      "before_content": page["content"], "after_content": body,
+                      "concept_kb": concept, "permission": acl})
+    return {"ok": True, "authority": "decided", "slug": slug, "master": prev["master"],
+            "replicas": [{"kb_name": r["kb_name"], "slug": r["slug"], "local_drift": r["local_drift"],
+                          "outdated": r["outdated"]} for r in prev["replicas"]],
+            "concept_page_version": written["after_version"], "cache": cache.get("stats"),
+            "permission": acl, "record": str(path.relative_to(REPO)),
+            "note": "只写了概念库；副本页从下一次写入起会被拒并提示 authority_pull"}
+
+
+def authority_pull(replica_kb: str = "", slug: str = "", ticket: str = "",
+                   acknowledge_risks: list | None = None, actor: str = "",
+                   tenant: int | None = None, apply: bool = False) -> dict:
+    """**从权威复制到副本**（唯一允许改副本的通道；`apply=False` 时只预览）。
+
+    - 写的是**副本所在库**（单库写入）；正文走 `rewrite_page_content`（`version+1` + 快照，可回退）；
+    - 同库写一份 `page_metadata.authority` 自述（role=replica + master 指针 + 同步版本/指纹）；
+    - 概念页的「权威与副本」表**不因 pull 改动**（避免一次调用写两个库）；G10/缓存按需派生。
+    """
+    if not slug:
+        return {"error": "需要 slug"}
+    concept = concept_kb()
+    ckb = concept.get("id") or ""
+    names = {k["id"]: k["name"] for k in kb_rows()}
+    page = _one_page(ckb, slug) if ckb else None
+    master = _authority_master(page["content"], names) if page else {}
+    if not master or not master.get("kb"):
+        return {"error": "还没登记权威：先 `authority-decide <slug> --master <库名>`",
+                "need_authority_decide": True, "slug": slug}
+    if not replica_kb:
+        return {"error": "需要 replica_kb（要复制的目标库 id/名称）", "master": master, "slug": slug}
+    try:
+        rid, rname, _note = ke_db.resolve_kb_id(replica_kb)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "副本库解析失败：%s" % exc}
+    if rid == master["kb"]:
+        return {"error": "目标库就是权威库（%s），无需复制" % rname, "master": master}
+    m_ver, m_sha = _page_ver_sha(master["kb"], master["slug"])
+    r_page = _one_page(rid, slug)
+    if r_page is None:
+        return {"error": "副本页不存在：%s/%s（先在副本库建同名页）" % (rname, slug), "master": master}
+    r_ver, r_sha = _page_ver_sha(rid, slug)
+    self_meta = (_meta_dict(r_page).get(AUTH_MARK) or {})
+    drift_now = bool(self_meta.get("synced_hash") and self_meta.get("synced_hash") != r_sha)
+    behind_now = bool(self_meta.get("synced_version") and m_ver
+                      and int(self_meta["synced_version"]) < int(m_ver))
+    sync_state = ("local_drift" if drift_now else "outdated" if behind_now
+                  else "in_sync" if self_meta.get("synced_hash") else "unbound")
+    risks = sorted(set(["replica_overwrite", "replica_version_bump"]
+                       + (["local_drift_overwrite"] if drift_now else [])))
+    ticket_new = _sha1("pull-v1|%s|%s|%s|%s|%s|%s" % (master["kb"], master["slug"], m_ver, rid, r_ver,
+                                                      int((page or {}).get("version") or 0)))
+    out = {"slug": slug, "master": master, "master_version": m_ver, "master_hash": m_sha,
+           "replica_version": r_ver, "replica_state": sync_state,
+           "replica": {"kb": rid, "kb_name": rname, "slug": slug, "version": r_ver, "hash": r_sha,
+                       "role": str(self_meta.get("role") or ""),
+                       "synced_version": int(self_meta.get("synced_version") or 0),
+                       "local_drift": drift_now, "state": sync_state},
+           "concept_page": {"version": int((page or {}).get("version") or 0)}, "concept_kb": concept,
+           "required_risks": risks, "ticket": ticket_new, "permission": "read_only（预览）",
+           "generated_at": ke_db.now_text()}
+    if not apply:
+        out["apply_hint"] = ("确认后：`authority-pull %s --kb %s --apply --ticket %s --ack %s`"
+                             % (slug, rname, ticket_new, ",".join(risks)))
+        return out
+    acl = ke_db.assert_can_write(rid, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl["allowed"]:
+        return {"error": "need_write_permission", "permission": acl,
+                "hint": "pull 写副本所在库，需要对该库的写权限"}
+    if str(ticket or "") != ticket_new:
+        return {"error": "ticket 不匹配（影响面已变化或未先预览）→ need_repreview=true",
+                "need_repreview": True, "ticket": ticket_new}
+    if sorted(acknowledge_risks or []) != risks:
+        return {"error": "风险确认不一致：需 acknowledge_risks=%s" % risks, "required_risks": risks}
+    m_content = str((_one_page(master["kb"], master["slug"]) or {}).get("content") or "")
+    ke_pages.rewrite_page_content(rid, slug, m_content, tag=PULL_TAG)
+    meta = {"role": "replica",
+            "master": {"kb": master["kb"], "kb_name": master.get("kb_name", ""),
+                       "slug": master["slug"], "page_type": master.get("page_type", "")},
+            "master_version": m_ver, "master_hash": m_sha, "synced_version": m_ver,
+            "synced_hash": m_sha, "synced_at": ke_db.now_text(),
+            "policy": "one_way_upgrade", "actor": actor or "unknown", "state": "in_sync"}
+    ke_db.psql("UPDATE wiki_pages SET page_metadata = COALESCE(page_metadata,'{}'::jsonb) || %s::jsonb, "
+               "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+               % (ke_db.sql_json({AUTH_MARK: meta}), ke_db.sql_str(rid), ke_db.sql_str(slug)))
+    cache = rebuild_cache()
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    path = HISTORY_DIR / ("pull-%s.json" % ticket_new)
+    _json_dump(path, {"kind": "authority_pull", "ticket": ticket_new, "slug": slug,
+                      "at": ke_db.now_text(), "actor": actor or "unknown", "master": master,
+                      "replica_kb": rid, "replica_before_version": r_ver,
+                      "master_version": m_ver, "master_hash": m_sha, "permission": acl})
+    out.update({"ok": True, "pulled": True, "replica_version_before": r_ver,
+                "replica_version_after": (r_ver or 0) + 1, "synced_version": m_ver,
+                "cache": cache.get("stats"), "permission": acl.get("mode"),
+                "permission_why": acl.get("why", ""), "record": str(path.relative_to(REPO)),
+                "note": "只写了副本库（正文版本化 + 元数据自述）；概念页未改动"})
+    return out
 
 
 def lookup(kb_ids: list[str] | None = None, q: str = "", slug: str = "", limit: int = 20) -> dict:
@@ -1168,6 +1493,24 @@ def main() -> int:
     p_state.add_argument("--note", default="")
     p_state.add_argument("--tenant", type=int, default=None)
     sub.add_parser("ensure-marks", help="给本体库/概念库自动补 wiki_config 标记（派生、幂等）")
+    p_aprev = sub.add_parser("authority-preview", help="只读：看某同名组的权威/副本分工与影响面")
+    p_aprev.add_argument("slug")
+    p_aprev.add_argument("--master", default="", help="权威库（id/前缀/精确库名）；留空=用已登记的")
+    p_adec = sub.add_parser("authority-decide", help="**写概念库**：登记权威/副本分工（两段式）")
+    p_adec.add_argument("slug")
+    p_adec.add_argument("--master", required=True)
+    p_adec.add_argument("--ticket", default="")
+    p_adec.add_argument("--ack", default="")
+    p_adec.add_argument("--actor", default="")
+    p_adec.add_argument("--tenant", type=int, default=None)
+    p_apull = sub.add_parser("authority-pull", help="**写副本库**：从权威复制到副本（两段式；--apply 才写）")
+    p_apull.add_argument("slug")
+    p_apull.add_argument("--kb", required=True, help="副本所在库（id/名称）")
+    p_apull.add_argument("--ticket", default="")
+    p_apull.add_argument("--ack", default="")
+    p_apull.add_argument("--actor", default="")
+    p_apull.add_argument("--tenant", type=int, default=None)
+    p_apull.add_argument("--apply", action="store_true", help="不带则只预览")
     p_print = ap.add_argument("--print", type=int, default=6000, help="打印字符上限")
     for _p in list(sub.choices.values()):        # 所有子命令都接受 --print（写法随意）
         _p.add_argument("--print", dest="print", type=int, default=int(p_print.default),
@@ -1199,6 +1542,16 @@ def main() -> int:
         out = set_concept_state(args.slug, args.state, by=args.by, note=args.note, tenant=args.tenant)
     elif args.cmd == "ensure-marks":
         out = ensure_marks()
+    elif args.cmd == "authority-preview":
+        out = authority_preview(args.slug, args.master)
+    elif args.cmd == "authority-decide":
+        out = authority_decide(args.slug, args.master, ticket=args.ticket,
+                               acknowledge_risks=[x.strip() for x in (args.ack or "").split(",") if x.strip()],
+                               actor=args.actor, tenant=args.tenant)
+    elif args.cmd == "authority-pull":
+        out = authority_pull(args.kb, args.slug, ticket=args.ticket,
+                             acknowledge_risks=[x.strip() for x in (args.ack or "").split(",") if x.strip()],
+                             actor=args.actor, tenant=args.tenant, apply=bool(args.apply))
     else:
         kb_ids = [x.strip() for x in (args.kb_ids or "").split(",") if x.strip()]
         out = lookup(kb_ids or None, q=args.q, slug=args.slug)

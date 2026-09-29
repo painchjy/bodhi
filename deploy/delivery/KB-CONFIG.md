@@ -140,6 +140,13 @@ systemd 用 `EnvironmentFile=` 读它，CLI/脚本也读它）。`wiki_config.bo
 - **写**：只有**对该库有写权限**的租户能落概念页 —— 属主租户，或该租户所在组织在 `kb_shares` 上的权限为
   **editor / admin**（默认共享是 `viewer`，只能读）。调用者租户取 `X-Bodhi-Tenant` 头或 `BODHI_TENANT_ID`；
   取不到 → 拒写（fail-closed），回执里给 `need_write_permission` 与原因。
+- **权威 / 副本（2026-09-29）**：同义知识要**认定一个领域为权威**，其它领域**只读、只能从权威复制**。
+  - 权威表写在**概念页正文**「`## 权威与副本`」（`authority-decide`，只写概念库）；
+  - 副本页正文只能由 `authority_pull` 从权威复制（写**副本库**，`version+1` 可回退）；**本地写一律被拒**
+    （`ke_pages.replica_guard`，唯一放行 tag `bodhi-cxt-pull`），错误里给 `authority-pull` 命令；
+  - 副本库的 `pull` 判**对该副本库**的写权限（与概念库权限各自独立）；副本页自述落在
+    `page_metadata.authority`（role / master 指针 / `synced_version` / `synced_hash`）。
+  - 巡检 **G10** 报副本漂移（`local_drift` high / `outdated` medium / `unbound` low / `detached` medium）。
 
 ### 5.1.4 验收
 

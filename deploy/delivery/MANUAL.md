@@ -38,8 +38,8 @@
 
 | 步 | 动作 | 验收（不通过就别往下走）|
 |---|---|---|
-| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（22 个）` |
-| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 22 个 |
+| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（24 个）` |
+| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 24 个 |
 | **3** | 导入本体模型知识库（`bodhi2-03`：**种子导入**最省事；或用 02 包的编译器按 TTL 重新生成）| 页数 **248**（类 52 / 关系 80 / 属性 107 / 模块 6 / 轻量版 2 / 索引 1）|
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
 | **5** | 替换前端（`bodhi2-01`）+ 挂载 nginx 模板 | `deploy_frontend.sh check` 全绿；类型下拉能看到 `easvc:*` |
@@ -98,7 +98,7 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 1. `02-mcp-server/.env`：`BODHI_DB_HOST/PORT/USER/PASSWORD/NAME`（改成你们的 Postgres）；
 2. WeKnora `.env`（仅当 MCP URL 不是容器 DNS 时）：`SSRF_WHITELIST_EXTRA` 加上 MCP 的主机名/IP；
 3. `mcp_services` 一行：URL 指向 `http://bodhi-mcp:8765/mcp`（SQL 在 `MCP-SERVER.md` §6）；
-4. `custom_agents` 一行：提示词 + `knowledge_bases`（两个库）+ `mcp_services` + `allowed_tools`（18 个）；
+4. `custom_agents` 一行：提示词 + `knowledge_bases`（两个库）+ `mcp_services` + `allowed_tools`（modeler **27** / kb-ops **12**，见 `AGENTS-SQL.md` §2）；
    **SQL 在 `03-manual/AGENTS-SQL.md`**（可回滚）；
 5. `knowledge_bases.wiki_config`：抽取指令按你们领域改（`KB-CONFIG.md` §3）；
 6. 前端 nginx 模板挂载 + `image: weknora-ui:bodhi2`（`FRONTEND.md`）。
@@ -107,7 +107,7 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 
 | # | 检查 | 期望 |
 |---|---|---|
-| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（14 个）` + `skills() OK（3 个）` |
+| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（24 个）` + `skills() OK（3 个）` |
 | 2 | 智能体一轮只读任务 | `tool_count=18`；`logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录 |
 | 3 | 本体模型库 | 248 页；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
 | 4 | 业务库上传+抽取 | 页面类型都在本体里，`source_refs` 非空（无 C1）|
