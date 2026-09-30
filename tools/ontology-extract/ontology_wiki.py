@@ -259,7 +259,9 @@ class WikiBuilder:
         self.pages.append({
             "slug": slug, "title": title, "page_type": page_type,
             "content": content, "summary": summary,
-            "category_path": ["企业本体模型", module_label, group],
+            # 空 group（模块页/总览页）→ 直接落 module_label 这一层，**不再多嵌套一层同名目录**
+            # （2026-09-30 用户实测：目录显示数量但展开没有页面 —— 页被挂到了 `…/总览/总览`、`…/模块/模块`）
+            "category_path": ["企业本体模型", module_label] + ([group] if group else []),
             "wiki_path": wiki_path,
             "out_links": sorted({s for s in out_slugs if s}),
             "page_metadata": {"ontology": metadata},
@@ -468,7 +470,7 @@ class WikiBuilder:
                   % (key, TOOL_TAG, self.generated_at), ""]
 
         self.add(slug=slug_module(key), title="%s（%s）" % (label, key),
-                 page_type=TYPE_MODULE, module_label=label, group="模块",
+                 page_type=TYPE_MODULE, module_label=label, group="",
                  content="\n".join(lines).rstrip() + "\n",
                  summary="%s 模块：%d 个本体类、%d 条关系。" % (label, len(classes), len(rels)),
                  wiki_path=slug_module(key), out_slugs=out_slugs,
@@ -788,7 +790,9 @@ def overview_page(builder: WikiBuilder) -> None:
               "- 归类时：`page_type` 一律写成 `模块:类`（例如 `bmm:Goal`），必须取自上面的类页；",
               "- 关系必须满足其 domain → range（见对应关系页的「方向」），否则视为违规。", ""]
     builder.add(slug="ontology/index", title="企业本体模型 · 总览", page_type=TYPE_MODULE,
-                module_label="总览", group="总览",
+                # group 留空：总览页**直接落「总览」目录**（旧实现 group="总览" → 页被挂到
+                # `企业本体模型/总览/总览`，目录树里「总览」显示数量却看不到页 —— 2026-09-30 用户实测）
+                module_label="总览", group="",
                 content="\n".join(lines).rstrip() + "\n",
                 summary="企业本体模型总览：%d 个模块、%d 个本体类、%d 条关系（含 %d 条跨模块桥）；页面类型与用法说明。"
                         % (len(builder.models), classes_total, relations_total, bridges_total),
