@@ -43,9 +43,11 @@ REPO = HERE.parents[1]
 # 本体模型知识库：**不再写死 uuid**（客户环境不是我们的 uuid）。
 # 解析顺序见 ke_ontology.resolve_ontology_kb：env → wiki_config 标记 → 库名 → 内容探测。
 PROJECTION_DIR = REPO / "artifacts" / "neo4j"
+ONTOLOGY_DIR = REPO / "ontology"                       # 本体真源目录（含中文完整版 TTL）
 # 上传的扩展模块：TTL 落到这里（真源）并登记进 `_registry.json`，编译器/导入器都读它。
-EXTENSIONS_DIR = REPO / "ontology" / "extensions"
+EXTENSIONS_DIR = ONTOLOGY_DIR / "extensions"
 EXT_REGISTRY = EXTENSIONS_DIR / "_registry.json"
+_COMP_DIR = REPO / "tools" / "ontology-compiler"       # 编译器包目录（惰性加进 sys.path）
 
 
 def _index_totals() -> dict:
@@ -102,6 +104,125 @@ def _index_module_keys() -> list[str]:
         elif isinstance(item, str):
             keys.append(item)
     return sorted(keys)
+
+
+def _builtin_specs() -> dict:
+    """**内置清单**（`config.builtin_specs()`，不受 registry 覆盖影响）—— 判断"上传的是内置模块"。"""
+    if _COMP_DIR not in sys.path:
+        sys.path.insert(0, str(_COMP_DIR))
+    try:
+        from ontology_compiler.config import builtin_specs  # noqa: PLC0415
+        return dict(builtin_specs())
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _builtin_file_for(module: str) -> pathlib.Path | None:
+    """内置模块在清单里的**真源文件路径**（如 bmm → `ontology/BMM完整版.ttl`）。
+
+    为什么：上传内置模块（bmm/ea）时**就地覆盖这份文件**，而不是新建 `extensions/<key>-ext.ttl`。
+    这样①"真源"就是你上传的那个文件名/位置（不再出现"文件名都不对"）②不产生三份重复内容
+    ③老版本（清单指向根目录中文完整版）与新版本一致，从根上避免"清单路径 vs extensions 路径"错配。
+    """
+    spec = _builtin_specs().get((module or "").strip())
+    if not spec:
+        return None
+    for path in spec.files:
+        if path.is_file():
+            return path
+    return spec.files[0] if spec.files else None
+
+
+def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "") -> dict:
+    """**只读预检**（2026-09-30 新增）：编译所需的模块文件是否齐、TTL 能否解析 —— 不删任何数据、不写任何产物。
+
+    为什么需要：编译是**全量**的（任一模块缺文件就整次失败），而旧的上传链路**先做级联删**再编译 →
+    失败后用户看到"wiki 和图谱都删了、却报别的模块缺文件"。预检把这件事提前到**任何写操作之前**，
+    并把"缺哪些文件、期望路径、目录里现在有什么"一次性说清楚。
+    """
+    if _COMP_DIR not in sys.path:
+        sys.path.insert(0, str(_COMP_DIR))
+    from ontology_compiler.config import ModuleSpec, build_modules  # noqa: PLC0415
+    from ontology_compiler.loader import parse_module_graphs        # noqa: PLC0415
+
+    mods = build_modules()
+    missing: list[dict] = []
+    notes: list[str] = []
+    for key, spec in mods.items():
+        miss = spec.missing_files()
+        if miss:
+            missing.append({"module": key, "missing": miss,
+                            "note": getattr(spec, "file_note", "")})
+        elif getattr(spec, "file_note", ""):
+            notes.append("%s：%s" % (key, spec.file_note))
+    if module and ttl_path is not None and module not in mods:
+        # 新模块：把上传的文件塞进清单跑一遍解析（只解析，不落盘、不删数据）
+        try:
+            probe = ModuleSpec(key=module, prefix=module, label=module, short_label=module.upper(),
+                               ontology_iri="", namespace="", files=(pathlib.Path(ttl_path),),
+                               kind="extension")
+            parse_module_graphs({**mods, module: probe})
+            notes.append("新模块 %s：TTL 可解析，将落真源 + 登记后参与编译" % module)
+        except Exception as exc:  # noqa: BLE001
+            missing.append({"module": module, "missing": [str(ttl_path)], "error": str(exc)[:300]})
+    if module and ttl_path is not None and module in mods:
+        try:
+            probe_files = tuple(pathlib.Path(ttl_path) for _ in mods[module].files)
+            spec = mods[module]
+            from dataclasses import replace as _replace  # noqa: PLC0415
+            parse_module_graphs({**mods, module: _replace(spec, files=probe_files)})
+            notes.append("模块 %s：上传的 TTL 可解析" % module)
+        except Exception as exc:  # noqa: BLE001
+            missing.append({"module": module, "missing": [str(ttl_path)], "error": str(exc)[:300]})
+    hints: list[str] = []
+    if missing:
+        seen_dir = sorted(p.name for p in ONTOLOGY_DIR.glob("*.ttl")) if ONTOLOGY_DIR.is_dir() else []
+        seen_ext = (sorted(p.name for p in EXTENSIONS_DIR.glob("*.ttl"))
+                    if EXTENSIONS_DIR.is_dir() else [])
+        hints = ["`ontology/` 现有 TTL：%s" % ("、".join(seen_dir) or "（无）"),
+                 "`ontology/extensions/` 现有 TTL：%s" % ("、".join(seen_ext) or "（无）"),
+                 "修法：把缺的 TTL 放进上面任一路径（命名 `BMM完整版.ttl` / `EA完整版.ttl` 或 "
+                 "`extensions/<模块>-ext.ttl` 都能被识别）；或改 `ontology_compiler/config.py` 的清单",
+                 "本次**没有删除任何 wiki 页/图谱节点**（预检失败即中止）"]
+    return {"ok": not missing, "missing": missing, "notes": notes, "hints": hints}
+
+
+def _index_per_module() -> dict:
+    """按模块的产物规模（`ontology_index.json` 的 models[]）—— 用于回执里"这次编了什么"。"""
+    path = REPO / "artifacts" / "weknora" / "ontology_index.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict = {}
+    for item in (data.get("models") or []):
+        if not isinstance(item, dict) or not item.get("key"):
+            continue
+        out[str(item["key"])] = {k: item.get(k) for k in
+                                 ("classes", "relations", "properties", "data_properties", "label")
+                                 if k in item}
+    return out
+
+
+def _load_registry_entries() -> list[dict]:
+    """读 `_registry.json` 的模块条目（缺失/坏文件 → 空表）。"""
+    if not EXT_REGISTRY.is_file():
+        return []
+    try:
+        return list(json.loads(EXT_REGISTRY.read_text(encoding="utf-8")).get("modules") or [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _unregister_extension(key: str) -> dict:
+    """从 `_registry.json` 摘掉一个模块（回滚用；原子写）。"""
+    key = (key or "").strip().lower()
+    entries = [e for e in _load_registry_entries() if str(e.get("key")) != key]
+    EXT_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    tmp = EXT_REGISTRY.with_name("_registry.json.tmp")
+    tmp.write_text(json.dumps({"modules": entries}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(EXT_REGISTRY)
+    return {"removed": key, "remaining": len(entries)}
 
 
 def _register_extension(meta: dict) -> dict:
@@ -640,21 +761,26 @@ def _registered_module_keys() -> list[str]:
 def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki: bool = False,
                kb_id: str = "", write_source: bool = True, compile_after: bool = True,
                apply_after: bool = False) -> dict:
-    """前端「上传本体文件」的完整链路（2026-09-24 打通）：
+    """前端「上传本体文件」的完整链路 —— **2026-09-30 改为安全顺序**：
 
     ```
     ① 留痕：TTL 落 ontology/uploads/<时间戳>-<名>.ttl
-    ② 图库：import_ttl()（级联删下游 → 解析 → 灌 Neo4j，只执行本模块语句）
-    ③ 真源（write_source，默认开）：TTL 落 ontology/extensions/<key>-ext.ttl
-       并登记进 ontology/extensions/_registry.json → **编译器从此认得这个模块**
-    ④ 编译并生效（compile_after，默认开）：compile.py compile → artifacts 更新
-       →（可选 apply_after，默认关）全量回放投影 →（可选）regen_wiki() 重投影本体库
-       → 回执里给出**编译了什么**（totals before→after 与 delta、认识的模块清单）
+    ② **预检（只读）**：编译所需模块文件是否齐 + 该 TTL 能否解析 → 缺就**直接中止**
+       （旧实现把"级联删下游"放在编译之前，编译一失败就是"wiki 和图谱都删了才报错"）
+    ③ 真源：**内置模块（bmm/ea/…）就地覆盖清单里的文件**（如 `ontology/BMM完整版.ttl`，不新增登记）；
+       新模块 → `ontology/extensions/<key>-ext.ttl` + 登记 `_registry.json`（登记表只放元数据）
+    ④ 编译 artifacts（不碰 wiki / 图谱）
+    ⑤ **成功后才** 灌图库：`import_ttl()`（级联删本模块+下游模块的图库/wiki → 全量重灌 Neo4j）
+    ⑥ 可选：`apply_after` 全量回放投影、`project_wiki` 重投影本体库 wiki
     ```
 
-    为什么要 `apply_after` 默认关：②已经把这个模块的语句写进了图库，而**全量回放**要逐条执行
-    整份投影 cypher（实测几十秒到几分钟）—— 上传路径不需要它；整库一致性交给运维
-    `ke_admin.py repair`（编译 + 全量回放 + 重投影 + 体检，幂等）。
+    任一步失败：**不删任何 wiki/图谱**，真源与登记**回滚**，回执给出可自助修的 hints。
+
+    > 回执里的 `compiled.totals` 是**全量总数**（所有模块合计）—— 两次上传若模块集合没变，数字本来就相同，
+    > 别把它当成"这次没生效"；要判断本次影响请看 `compiled.per_module` / `compiled.modules_added`。
+
+    为什么要 `apply_after` 默认关：⑤已经把该模块写进图库，而**全量回放**要逐条执行整份投影 cypher
+    （实测几十秒到几分钟）—— 上传路径不需要它；整库一致性交给运维 `ke_admin.py repair`（幂等）。
 
     两个开关都默认打开；关掉 `write_source` 就回到旧行为（只更新图库、不动产物）。
     """
@@ -669,81 +795,127 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     safe = pathlib.Path(filename or "upload.ttl").name
     target = UPLOAD_DIR / ("%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), safe))
     target.write_text(content, encoding="utf-8")
+    out: dict = {"upload_saved": str(target.relative_to(REPO))}
+
+    # ② 预检（只读）：此时磁盘上除了"留痕"那份，什么都没改
     try:
-        # project_wiki 统一放到**编译之后**执行（旧实现是导入后立刻投影，那时产物还是旧的）
-        out = import_ttl(target, module=module, project_wiki=False, kb_id=kb_id)
-        out["upload_saved"] = str(target.relative_to(REPO))
-    except Exception:
-        # 导入失败（例如依赖未就绪）→ 不要留下"看似已上传"的文件：改名标记为被拒（便于事后查看）
-        try:
-            target.rename(target.with_name(target.name + ".rejected"))
-        except OSError:
-            pass
-        raise
+        meta = inspect_ttl(target)
+    except Exception as exc:  # noqa: BLE001
+        return {**out, "ok": False, "error": "ttl_unparsable",
+                "note": "TTL 无法解析（**没有改动真源、没有删除任何数据**）：%s" % str(exc)[:300]}
+    module_key = (module or str(meta.get("key") or "") or "").strip().lower()
+    if not module_key:
+        module_key = re.sub(r"[^a-z0-9-]+", "-", pathlib.Path(safe).stem.lower()).strip("-") or "upload"
+    pre = preflight_compile(target, module_key)
+    out["preflight"] = pre
+    out["module_key"] = module_key
+    if not pre["ok"]:
+        return {**out, "ok": False, "error": "preflight_failed",
+                "note": ("预检未通过：**没有删除任何 wiki 页/图谱节点，也没有改真源**。"
+                         "按 hints 补齐文件后重试即可。"),
+                "missing": pre["missing"], "hints": pre["hints"]}
 
     if not write_source:
-        if project_wiki:
-            out["wiki"] = regen_wiki(kb_id)
+        out["import"] = import_ttl(target, module=module, project_wiki=project_wiki, kb_id=kb_id)
         out["note"] = ("只更新了图库（write_source=false）：类型校验 / 前端类型下拉 / 投影回放仍以"
                        "**编译产物**为准，新类会被判「本体里没有这个类」；要完整生效请打开该开关"
-                       "（或把 TTL 放进 ontology/extensions/ 登记后再跑 `ke_admin.py repair`）")
+                       "（或把 TTL 放进 ontology/extensions/ 后跑 `ke_admin.py repair`）")
         return out
 
-    # ③ 落真源 + 登记（编译器读 _registry.json）
-    ext_path = EXTENSIONS_DIR / ("%s-ext.ttl" % out["module"])
-    ext_path.parent.mkdir(parents=True, exist_ok=True)
-    # 编译器要求每个模块有 bodhi:expertRole；缺了就补一条默认值（并把"补了什么"回报出来）
-    source_text, injected = _ensure_expert_role(content, out["module"],
-                                                out.get("ontology_iri") or "")
-    ext_path.write_text(source_text, encoding="utf-8")
-    entry = _register_extension({
-        "key": out["module"],
-        "prefix": out.get("prefix") or out["module"],
-        "short_label": out.get("short_label") or "",
-        "namespace": out.get("namespace") or "",
-        "ontology_iri": out.get("ontology_iri") or "",
-        # label 不再写死成模块 key（2026-09-26：那会把中文 label 覆盖成英文，连带
-        # 本体库目录从「EA 服务契约扩展」变成「ea-service」并留下重复目录）
-        "label": out.get("label") or out["module"],
-        "affects": [],
-    })
-    out["source"] = {"file": str(ext_path.relative_to(REPO)), "registered": entry,
-                     "injected": injected,
-                     "note": ("为了让编译通过，真源副本里自动补了：%s" % "、".join(injected))
-                             if injected else "原样写入（TTL 已含全部必需声明）"}
-    if out.get("warning_prefix"):
-        out.setdefault("warnings", []).append(out["warning_prefix"])
-    out["prefix_check"] = check_prefix_drift()
+    # ③ 落真源：内置模块**就地覆盖**清单文件；新模块落 `extensions/` 并登记
+    known = _registered_modules().get(module_key)
+    ontology_iri = str(meta.get("ontology_iri") or "")
+    prefix = str(meta.get("prefix") or getattr(known, "prefix", "") or module_key)
+    label = str(meta.get("label") or getattr(known, "label", "") or module_key)
+    short_label = getattr(known, "short_label", "") or module_key.upper()
+    source_text, injected = _ensure_expert_role(content, module_key, ontology_iri)
+    builtin_path = _builtin_file_for(module_key)
+    is_builtin = builtin_path is not None and module_key in _builtin_specs()
+    if is_builtin:
+        src_path = builtin_path
+        mode = "就地覆盖内置清单文件（不新增 _registry.json 条目）"
+    else:
+        src_path = EXTENSIONS_DIR / ("%s-ext.ttl" % module_key)
+        src_path.parent.mkdir(parents=True, exist_ok=True)
+        mode = "新模块：落 ontology/extensions/ 并登记（登记表只放元数据）"
+    backup = src_path.read_text(encoding="utf-8") if src_path.is_file() else None
+    created_file = backup is None
+    entry = None
+    old_registry_entry = None
+    try:
+        src_path.write_text(source_text, encoding="utf-8")
+        if is_builtin:
+            # 内置模块：**摘掉** registry 里的同名条目（否则它会覆盖内置清单，让编译继续读旧文件）
+            old_registry_entry = next((e for e in _load_registry_entries()
+                                       if str(e.get("key")) == module_key), None)
+            if old_registry_entry is not None:
+                _unregister_extension(module_key)
+        else:
+            entry = _register_extension({"key": module_key, "prefix": prefix, "short_label": short_label,
+                                         "namespace": str(meta.get("namespace") or ""),
+                                         "ontology_iri": ontology_iri, "label": label, "affects": []})
+        out["source"] = {"file": str(src_path.relative_to(REPO)), "mode": mode, "registered": entry,
+                         "injected": injected,
+                         "note": ("为了让编译通过，真源副本里自动补了：%s" % "、".join(injected))
+                                 if injected else "原样写入（TTL 已含全部必需声明）"}
+        out["prefix_check"] = check_prefix_drift()
 
-    if not compile_after:
-        out["note"] = ("已落真源并登记（编译器下次运行会包含它）；本次未编译（compile_after=false）"
-                       "—— 需要时跑 `ke_admin.py repair`（编译+灌投影+重投影+体检）")
+        if not compile_after:
+            out["note"] = ("已落真源%s；本次未编译（compile_after=false）—— 需要时跑 `ke_admin.py repair`"
+                           "（编译+灌投影+重投影+体检）" % ("（就地覆盖）" if is_builtin else "并登记"))
+            return out
+
+        # ④ 编译（不碰 wiki / 图谱）
+        before, keys_before = _index_totals(), _index_module_keys()
+        out["compile"] = compile_artifacts()
+        after, keys_after = _index_totals(), _index_module_keys()
+        out["compiled"] = {
+            "artifact": "artifacts/weknora/ontology_index.json",
+            "totals_before": before, "totals_after": after,
+            "delta": {k: after.get(k, 0) - before.get(k, 0) for k in sorted(set(before) | set(after))},
+            "per_module": _index_per_module(),
+            "modules": keys_after,
+            "modules_added": sorted(set(keys_after) - set(keys_before)),
+            "registered_extensions": sorted(
+                str(e.get("key")) for e in _load_registry_entries() if isinstance(e, dict) and e.get("key")),
+            "note": ("`totals_*` 是**全量总数**（所有模块合计）—— 与上次相同说明模块集合没变，"
+                     "不代表本次没生效；本次影响看 `per_module` 与 `modules_added`"),
+        }
+
+        # ⑤ 编译成功**之后**才灌图库（内部会级联删本模块+下游模块的图谱/wiki，再全量重灌）
+        out["import"] = import_ttl(src_path, module=module_key, project_wiki=False, kb_id=kb_id)
+    except Exception as exc:  # noqa: BLE001
+        # 回滚真源与登记；**不删任何 wiki/图谱**
+        try:
+            if created_file:
+                src_path.unlink(missing_ok=True)
+            elif backup is not None:
+                src_path.write_text(backup, encoding="utf-8")
+            if entry is not None:
+                _unregister_extension(module_key)
+            if old_registry_entry is not None:
+                _register_extension(old_registry_entry)
+        except Exception:  # noqa: BLE001
+            pass
+        out["rollback"] = {"restored_source": str(src_path.relative_to(REPO)),
+                           "removed_registry_entry": bool(entry),
+                           "deleted_any_data": False}
+        out["error"] = "upload_failed"
+        out["note"] = ("失败已回滚（真源/登记恢复原状；**没有删除任何 wiki 页或图谱节点**）：%s"
+                       % str(exc)[:300])
         return out
 
-    # ④ 编译并生效（并把"编译了什么"回报出来）
-    before, keys_before = _index_totals(), _index_module_keys()
-    out["compile"] = compile_artifacts()
-    after, keys_after = _index_totals(), _index_module_keys()
-    out["compiled"] = {
-        "artifact": "artifacts/weknora/ontology_index.json",
-        "totals_before": before, "totals_after": after,
-        "delta": {k: after.get(k, 0) - before.get(k, 0) for k in sorted(set(before) | set(after))},
-        "modules": keys_after,
-        "modules_added": sorted(set(keys_after) - set(keys_before)),
-        "registered_extensions": sorted(
-            str(e.get("key")) for e in (json.loads(EXT_REGISTRY.read_text(encoding="utf-8")).get("modules") or [])
-            if isinstance(e, dict) and e.get("key")) if EXT_REGISTRY.is_file() else [],
-    }
     if apply_after:
         out["apply"] = apply_projection()
     else:
         out["apply"] = {"skipped": True,
-                        "reason": ("本模块语句已由导入步骤写入图库，无需全量回放；"
+                        "reason": ("本模块语句已由灌图步骤写入图库，无需全量回放；"
                                    "要重建整库投影一致性请跑 `ke_admin.py repair`（编译+回放+重投影+体检）")}
     if project_wiki:
         out["wiki"] = regen_wiki(kb_id)
-    out["note"] = ("已把该 TTL 纳入真源（ontology/extensions/）并**自动编译**：类型校验、前端类型下拉与"
-                   "本体库 wiki 现在都以新产物为准（详见回执 compiled.delta）")
+    out["note"] = ("已把该 TTL 纳入真源（%s）并**自动编译**：类型校验、前端类型下拉与"
+                   "本体库 wiki 现在都以新产物为准（详见回执 compiled.per_module）"
+                   % out["source"]["file"])
     return out
 
 

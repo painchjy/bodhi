@@ -198,6 +198,38 @@ DOCKER_BUILDKIT=0 docker build --no-cache -f Dockerfile -t weknora-ui:bodhi2 .
      容器 `restart: unless-stopped` 会在下次进入 WSL 时自动拉起。
 
 > 排查入口：本仓 `deploy/weknora-fork/stack_ctl.sh status|watch|up|stop`（一条命令打出容器/健康/端口/端点/dockerd 重启次数/ MCP 自检）。
+## 11e. 【2026-09-30】上传 TTL 报「模块 X 缺少本体文件」，且 **wiki/图谱已经被删了**
+
+**旧行为（已修）**：上传链路是「留痕 → **级联删下游（本模块+下游模块的 wiki 页与图谱节点）** → 落真源 →
+登记 → 编译」——编译一旦失败（例如内置清单里的 `ontology/EA完整版.ttl` 不在、或某个模块文件被改名），
+用户看到的就是"**数据已删、产物未更新、却报别的模块缺文件**"。
+
+**新行为（2026-09-30 起）**：
+1. **预检先行**（只读）：先确认编译所需模块文件齐、你上传的 TTL 能解析 → 不齐就**直接中止**，
+   回执给 `missing[]`（缺哪个模块的哪个文件）+ `hints[]`（`ontology/` 与 `ontology/extensions/` 现有哪些 TTL）；
+   **此时没有删除任何 wiki 页/图谱节点**；
+2. 只有 ③落真源 + ④编译**都成功**之后，才会执行"级联删下游 + 灌图库"；
+3. 中途失败会**回滚真源/登记**（`rollback.deleted_any_data = false`）。
+
+**"上传 bmm 为什么牵扯 ea"**：编译是**全量**的（一次编译所有模块）→ 任一模块缺文件就整次失败。
+现在预检会把这件事提前说清楚；另外模块文件有**候选回退**（清单路径不在时会找
+`extensions/<key>-ext.ttl` / `<key>.ttl` / `*<key>*完整版.ttl`）。
+
+**另外**：上传后若勾选「重投影本体库 wiki」为**关**，灌图步骤删掉的该模块 wiki 页**不会自动回来** →
+跑一次 `POST /bodhi/ontology/repair`（`{"compile":true,"project_wiki":true}`）或 `ke_admin.py repair` 即可重建。
+
+## 11f. 【2026-09-30】本体库目录结构 / `_registry.json` / "两次上传数字一样"
+
+- **目录**：现在每个模块下只有「**数据属性**」与「**本体关系**」两个目录 ——
+  数据属性页（`ontology:Property`，仅数据属性）进「数据属性」；对象属性由「本体关系」目录下的**关系页**承担
+  （不再为对象属性重复建属性页，也不会再出现"属性目录里混着对象属性"）。
+- **`_registry.json` 有用么**：它只承载**元数据**（prefix / label / 短名）。**新模块**落 `extensions/` 时会被登记；
+  没登记但**文件在**的 `extensions/*.ttl` 也会被自动纳入（"文件即登记"）。
+  **内置模块（bmm/ea）不再登记**，而是**就地覆盖**清单里的文件（`ontology/BMM完整版.ttl` / `EA完整版.ttl`）——
+  所以"真源"就是你上传的那个文件名/位置，也不会再产生 `bmm-ext.ttl` 这种重复副本。
+- **两次上传回执数字一样**：`compiled.totals_*` 是**全量总数**（所有模块合计），模块集合没变时它当然相同；
+  判断本次影响请看 **`compiled.per_module`**（按模块的类/关系/属性）与 `compiled.modules_added`。
+
 ## 附录：沙箱相关（本交付**不需要**，仅备查）
 
 WeKnora 原生技能是"沙箱安装型"（装进快照镜像）。要用需同时满足：`WEKNORA_SANDBOX_DOCKER_ENABLED=true`、

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -113,6 +114,8 @@ class ModuleSpec:
     expert_role: str = ""
     # 轻量版 md（人工撰写、供提取提示词使用；**不注入完整 TTL**）。None = 本模块暂无轻量版。
     light_file: Path | None = None
+    # 文件来源说明（候选回退时写明"清单路径不在，改用哪个候选"；见 `_resolve_module_files`）。
+    file_note: str = ""
 
     def rel_light(self) -> str:
         """轻量版的仓库相对路径（无轻量版时返回空串）。"""
@@ -131,8 +134,44 @@ class ModuleSpec:
         return [p.relative_to(REPO_ROOT).as_posix() for p in self.files if not p.is_file()]
 
 
-def build_modules() -> dict[str, ModuleSpec]:
-    """返回全部模块，插入顺序即文档与提示词的稳定顺序（base 在前，extension 在后）。"""
+def _resolve_module_files(key: str, files: tuple[Path, ...]) -> tuple[tuple[Path, ...], str]:
+    """模块文件**候选回退**（2026-09-30）：清单首选不在时，按命名约定找候选。
+
+    为什么需要（内网实测事故）：内置清单写的是 `ontology/BMM完整版.ttl` / `ontology/EA完整版.ttl`，
+    而前端「上传本体文件」通道把 TTL 规范化落成 `ontology/extensions/<key>-ext.ttl`（并登记 registry）。
+    两边命名/位置不一致时，**一次编译会因任一模块缺文件而整次失败**，报错只提清单路径
+    （"模块 ea 缺少本体文件：ontology/EA完整版.ttl"），而当时的调用链已经把 wiki/图谱删了 → 用户看到
+    "先删后报错"。这里让两种布局都能被认出来：找到就用，并把"用了哪个候选"记进 `file_note`。
+
+    候选顺序：清单原路径 → `extensions/<key>-ext.ttl` → `extensions/<key>.ttl` → `<key>.ttl`
+             → `ontology/*<key>*完整版.ttl` → `ontology/*<key>*.ttl`
+    """
+    if all(p.is_file() for p in files):
+        return files, ""
+    found: list[Path] = []
+    for path in files:
+        if path.is_file():
+            found.append(path)
+            continue
+        cands = [EXTENSIONS_DIR / ("%s-ext.ttl" % key), EXTENSIONS_DIR / ("%s.ttl" % key),
+                 ONTOLOGY_DIR / ("%s.ttl" % key)]
+        cands += sorted(ONTOLOGY_DIR.glob("*%s*完整版.ttl" % key))
+        cands += sorted(ONTOLOGY_DIR.glob("*%s*.ttl" % key))
+        hit = next((c for c in cands if c.is_file()), None)
+        if hit is None:
+            return files, ""                     # 一个都没找到 → 保留原路径，让缺文件报错定位到清单口径
+        found.append(hit)
+        note = "清单路径 `%s` 不存在，改用候选 `%s`" % (
+            path.relative_to(REPO_ROOT).as_posix(), hit.relative_to(REPO_ROOT).as_posix())
+    return tuple(found), "；".join([note] if not all(p.is_file() for p in files) else [])
+
+
+def builtin_specs() -> dict[str, ModuleSpec]:
+    """**内置清单**（不含 `_registry.json` 覆盖）—— 供 `ke_admin` 判断"上传的是内置模块"并就地覆盖其文件。"""
+    return _builtin_specs()
+
+
+def _builtin_specs() -> dict[str, ModuleSpec]:
     return {
         "bmm": ModuleSpec(
             key="bmm",
@@ -189,7 +228,28 @@ def build_modules() -> dict[str, ModuleSpec]:
             kind="extension",
             affects=("bmm", "ea"),
         ),
-    } | registry_modules()          # 上传注册的扩展模块（同名覆盖，2026-09-24）
+    }
+
+
+def build_modules() -> dict[str, ModuleSpec]:
+    """返回全部模块，插入顺序即文档与提示词的稳定顺序（base 在前，extension 在后）。
+
+    清单来源 = **内置（`_builtin_specs()`）+ `ontology/extensions/_registry.json` 登记 + 目录扫描兜底**
+    （后者见 `registry_modules_from_dir()`：`extensions/*.ttl` 里没登记的 TTL 也自动纳入 —— 用户口径
+    "统一通过导入完成所有产物和注册的变更"，见 2026-09-30）。
+    每个模块的文件再做**候选回退**（`_resolve_module_files`），兼容老版本目录布局。
+    """
+    builtin = _builtin_specs()
+    merged = {**builtin, **registry_modules()}      # 上传登记的扩展模块（同名覆盖，2026-09-24）
+    # 目录扫描兜底：`extensions/*.ttl` 里**有文件但没登记**的也纳入（"文件即登记"）
+    for spec in registry_modules_from_dir().values():
+        merged.setdefault(spec.key, spec)
+    from dataclasses import replace as _replace      # 局部导入：本文件顶部只用到 dataclass
+    out: dict[str, ModuleSpec] = {}
+    for key, spec in merged.items():
+        files, note = _resolve_module_files(key, spec.files)
+        out[key] = _replace(spec, files=files, file_note=note) if (note or files != spec.files) else spec
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -202,16 +262,52 @@ def build_modules() -> dict[str, ModuleSpec]:
 REGISTRY_PATH = EXTENSIONS_DIR / "_registry.json"
 
 
+def registry_modules_from_dir() -> dict[str, ModuleSpec]:
+    """**目录扫描兜底**（2026-09-30 用户口径）：`ontology/extensions/*.ttl` 里**有文件但没登记**的模块也纳入。
+
+    为什么：用户质疑"除了导入 ttl 难道还要额外注册么？统一通过导入完成所有产物和注册的变更不行么" ——
+    合理。`_registry.json` 只承载**元数据**（prefix/label/短名，用于类名前缀与显示名），
+    不该是"能不能被编译认识"的开关。这里按"**文件即登记**"补位：扫描到的模块用文件名当 key、
+    用**TTL 里的 @prefix / rdfs:label** 当元数据（解析不出来就退回 key），登记表里有它就仍以登记表为准。
+    """
+    if not EXTENSIONS_DIR.is_dir():
+        return {}
+    known = {str(m.get("key")) for m in _load_registry()}
+    builtin_keys = set(_builtin_specs())      # 内置模块优先：遗留的 `<内置key>-ext.ttl` 不得覆盖内置清单
+    out: dict[str, ModuleSpec] = {}
+    for path in sorted(EXTENSIONS_DIR.glob("*-ext.ttl")):
+        key = path.name[: -len("-ext.ttl")].strip().lower()
+        if not key or key in known or key in builtin_keys:
+            continue
+        head = path.read_text(encoding="utf-8", errors="replace")[:4000]
+        prefix = ""
+        for m in re.finditer(r"@prefix\s+([A-Za-z0-9_.-]+)\s*:\s*<([^>]+)>", head):
+            if m.group(1) and m.group(2).rstrip("/#").endswith("/%s" % key):
+                prefix = m.group(1)
+                break
+        out[key] = ModuleSpec(
+            key=key, prefix=prefix or key,
+            label=key, short_label=(prefix or key).upper(),
+            ontology_iri="", namespace="", files=(path,), kind="extension",
+            file_note="目录扫描纳入（`extensions/%s` 未登记；文件即登记）" % path.name,
+        )
+    return out
+
+
+def _load_registry() -> list[dict]:
+    """读 `_registry.json` 的模块条目（缺失/坏文件 → 空表；**不能让编译被一条坏数据打断**）。"""
+    if not REGISTRY_PATH.is_file():
+        return []
+    try:
+        return list(json.loads(REGISTRY_PATH.read_text(encoding="utf-8")).get("modules") or [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def registry_modules() -> dict[str, ModuleSpec]:
     """读上传注册表 → ModuleSpec；文件缺失/坏行都**静默跳过**（不能让编译被一条坏数据打断）。"""
-    if not REGISTRY_PATH.is_file():
-        return {}
-    try:
-        data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return {}
     out: dict[str, ModuleSpec] = {}
-    for item in (data.get("modules") or []):
+    for item in _load_registry():
         try:
             key = str(item.get("key") or "").strip().lower()
             rel = str(item.get("file") or "").strip()

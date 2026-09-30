@@ -234,10 +234,16 @@ class WikiBuilder:
         return slug_property(module, prop.get("name") or "")
 
     def property_link(self, module: str, prop: dict) -> str:
-        """对象属性优先指到「关系页」，数据属性/无关系页的指到「属性定义页」。"""
+        """对象属性一律指「关系页」；数据属性指「属性定义页」。
+
+        2026-09-30 修：对象属性**不再建属性页**（目录只放数据属性）→ 若仍退回属性页 slug 就是悬空边
+        （实测 33 条 A1）。所以对象属性：有关系页就链接它；没有则**纯文本**（不产生链接）。
+        """
         name = prop.get("prefixed") or prop.get("name") or ""
-        if prop.get("kind") == "ObjectProperty" and name in self.relation_index:
-            return self.relation_link(name)
+        if prop.get("kind") == "ObjectProperty":
+            if self.relation_slug_of(name):
+                return self.relation_link(name)
+            return "%s（`%s`，对象属性；无独立关系页）" % (prop.get("label") or name, name)
         return wlink("%s（%s）" % (prop.get("label") or name, name),
                      slug_property(module, prop.get("name") or name))
 
@@ -328,7 +334,13 @@ class WikiBuilder:
                     target = "→ ?（未声明 range）"
                 lines.append("- %s %s%s" % (self.property_link(module["key"], prop), target,
                                             ("  — " + prop["comment"][:60]) if prop.get("comment") else ""))
-                out_slugs.append(self.property_slug_of(module["key"], prop))
+                # 出边：对象属性 → 关系页；数据属性 → 属性页（对象属性不再建属性页，否则悬空）
+                if prop.get("kind") == "ObjectProperty":
+                    rel_slug = self.relation_slug_of(prop.get("prefixed") or prop.get("name") or "")
+                    if rel_slug:
+                        out_slugs.append(rel_slug)
+                else:
+                    out_slugs.append(self.property_slug_of(module["key"], prop))
             lines.append("")
 
         if cls.get("restriction_count"):
@@ -430,14 +442,22 @@ class WikiBuilder:
         props = self.properties.get(key) or []
         if props:
             data_props = [p for p in props if p.get("kind") == "DatatypeProperty"]
-            lines += ["", "## 本体属性（%d 条，含数据属性 %d 条）" % (len(props), len(data_props)), ""]
+            lines += ["", "## 本体属性（%d 条，含数据属性 %d 条；对象属性见「本体关系」目录）"
+                      % (len(props), len(data_props)), ""]
             for prop in props:
                 lines.append("- %s：%s → %s"
                              % (self.property_link(key, prop),
                                 "、".join(prop.get("domains") or []) or "?",
                                 "、".join(prop.get("ranges") or [])
                                 or ("（字面量）" if prop.get("kind") == "DatatypeProperty" else "?")))
-                out_slugs.append(self.property_slug_of(key, prop))
+                # 出边：数据属性 → 属性页；对象属性 → 关系页（对象属性**不再建属性页**，
+                # 若仍记属性页 slug 就会产生悬空边 —— 2026-09-30 实测 33 条 A1）
+                if prop.get("kind") == "ObjectProperty":
+                    rel_slug = self.relation_slug_of(prop.get("prefixed") or prop.get("name") or "")
+                    if rel_slug:
+                        out_slugs.append(rel_slug)
+                else:
+                    out_slugs.append(self.property_slug_of(key, prop))
         if module.get("light_available"):
             light_slug = slug_module(key) + "/light"
             lines += ["", "## 轻量版提示词", "",
@@ -466,7 +486,7 @@ class WikiBuilder:
         kind_cn = ("对象属性（连到其它知识节点）" if kind == "ObjectProperty"
                    else "数据属性（字面量取值）")
         lines = ["# %s（`%s`）" % (plabel, prefixed), "",
-                 "> **类型**：本体属性（`%s`）  " % TYPE_PROPERTY,
+                 "> **类型**：数据属性（`%s`）  " % TYPE_PROPERTY,
                  "> **模块**：%s（`%s`）  " % (label, key),
                  "> **属性种类**：%s  " % kind_cn,
                  "> **命名空间**：`%s`" % prop.get("uri", ""), ""]
@@ -495,7 +515,7 @@ class WikiBuilder:
                   % (TOOL_TAG, self.generated_at), ""]
 
         self.add(slug=slug_property(key, name), title="%s（%s）" % (plabel, prefixed),
-                 page_type=TYPE_PROPERTY, module_label=label, group="本体属性",
+                 page_type=TYPE_PROPERTY, module_label=label, group="数据属性",
                  content="\n".join(lines).rstrip() + "\n",
                  summary=(prop.get("comment") or "")[:400]
                          or "%s 模块的本体属性 %s" % (label, prefixed),
@@ -746,7 +766,7 @@ def overview_page(builder: WikiBuilder) -> None:
              % (TOOL_TAG, builder.generated_at, index.get("artifact_schema_version", "?")), "",
              "## 这个知识库是什么", "",
              "这里存放**企业本体模型的权威定义**：每个本体类一页、每条关系一页、"
-             "**每个属性（含数据属性）一页**，关系在页面里用链接表达（domain → range）。"
+             "**每个数据属性一页**（对象属性由「本体关系」目录下的关系页承担，不再重复建属性页）。"
              "页面由 `ontology/*.ttl` 编译 + Neo4j 本体投影生成，"
              "**改 TTL → 重新编译/加载 → 重新投影**即可更新本库。", "",
              "## 页面类型说明", "",
@@ -754,7 +774,7 @@ def overview_page(builder: WikiBuilder) -> None:
              "| `%s` | 模块页/总览页（本页） |" % TYPE_MODULE,
              "| `%s` | 一个本体类：定义、父类/子类、相关关系（domain/range）、**属性定义**、约束 |" % TYPE_CLASS,
              "| `%s` | 一条本体关系：方向 domain → range、逆关系、函数型、定义 |" % TYPE_RELATION,
-             "| `%s` | 一个本体属性（对象属性/数据属性）：定义、定义域、值域、反向属性 |" % TYPE_PROPERTY,
+             "| `%s` | 一个**数据属性**：定义、定义域、值域、反向属性 |" % TYPE_PROPERTY,
              "| `%s` | 该模块的轻量版提示词全文（抽取时喂给 LLM 的正文） |" % TYPE_LIGHT, "",
              "## 模块", ""]
     for module in builder.models:
@@ -800,8 +820,11 @@ def build_pages() -> tuple[list[dict], dict]:
             builder.relation_page(module, rel, is_bridge=rel["name"] in bridge_names)
         for rel in module.get("cross_module_bridges") or []:
             builder.relation_page(module, rel, is_bridge=True)
-        # 属性定义页（对象 + 数据）—— 由 Neo4j 提供，保证「属性定义在 wiki 中完整」
+        # **数据属性**定义页（用户口径 2026-09-30：属性目录**只放数据属性**；
+        # 对象属性由「关系页」承担 → 不再重复建属性页，目录也不该混着放）
         for prop in builder.properties.get(module["key"]) or []:
+            if (prop.get("kind") or "ObjectProperty") == "ObjectProperty":
+                continue
             builder.property_page(module, prop)
         light = load_light_text(module)
         if light:
