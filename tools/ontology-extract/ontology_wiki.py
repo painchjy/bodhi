@@ -266,10 +266,10 @@ class WikiBuilder:
             "slug": slug, "title": title, "page_type": page_type,
             "content": content, "summary": summary,
             "category_path": cat,
-            # `wiki_path` **必须**是「目录路径/标题」——前端**按 wiki_path 把页挂到目录上**
-            # （业务库页就是这样：`系统与规则台账/主系统/<标题>`）。
-            # 旧实现写的是 slug（`ontology/bmm/assessment`）→ 目录树里第二层展开为空（2026-09-30 用户实测）。
-            "wiki_path": "/".join([str(x) for x in cat] + [title]),
+            # **回滚为 slug**（2026-09-30 对照实验）：早上"能显示页"的那版就是 slug；
+            # 改成「目录路径/标题」后前端列表反而打不开（本库与业务库取值来源不同：
+            # 业务库页由 ke_import 写、本库页由本投影器写，前者才是老路径的既有行为）。
+            "wiki_path": wiki_path,
             "out_links": sorted({s for s in out_slugs if s}),
             "page_metadata": {"ontology": metadata},
         })
