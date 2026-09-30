@@ -104,61 +104,51 @@ curl -s "http://127.0.0.1:8765/bodhi/audit?kb_id=<业务库>" | head -c 400
 
 业务库的智能体在**查类型**时读前者；写实例时只写后者。两个库可以都给智能体绑定（智能体配置里 `knowledge_bases` 两项都填）。
 
-## 6. 上传 TTL 现在会**自动编译**（2026-09-24 打通；**2026-09-30 改为安全顺序**）
+## 6. 本体真源目录、上传与「编译范围 / 级联删除」（**2026-09-30 新设计**）
 
-> **顺序（每次上传都按这个走）**：① 留痕 `ontology/uploads/` → ② **预检（只读）**：编译所需模块文件是否齐、
-> 该 TTL 能否解析 → ③ 真源：**内置模块（bmm/ea）就地覆盖清单文件**（`ontology/BMM完整版.ttl` / `EA完整版.ttl`，
-> **不新增登记**）；新模块 → `ontology/extensions/<key>-ext.ttl` + 登记 `_registry.json` → ④ 编译 artifacts →
-> ⑤ **成功后才**灌图库（级联删本模块+下游模块的图谱/wiki → 全量重灌）→ ⑥ 可选全量回放 / 重投影 wiki。
->
-> **任一步失败：不删任何 wiki/图谱，真源与登记回滚**（旧实现把"级联删下游"放在编译**之前**，编译一失败
-> 就是"wiki 和图谱都删了才报错" —— 这是 2026-09-30 内网实测事故，已修）。
->
-> 关于「真源为什么显示 `extensions/xxx-ext.ttl`」：那是**上传新模块**时的规范化落盘（登记表只放元数据）；
-> **bmm / ea 这类内置模块**现在**就地覆盖**你上传的那个文件（名字与位置都不变）。
-> 「模块 X 缺少本体文件」类报错现在由**预检**提前拦住，并会列出"缺哪个文件、期望路径、目录里现有哪些 TTL"。
-> 模块文件**候选回退**：清单路径不在时，会按 `extensions/<key>-ext.ttl` → `<key>.ttl` → `*<key>*完整版.ttl`
-> 顺序找候选，兼容老版本目录布局（回执里会写明用了哪个候选）。
-> `_registry.json` **只承载元数据**（prefix/label/短名）；`extensions/*.ttl` 里**有文件但没登记**的模块也会被
-> 自动纳入（"文件即登记"）—— 你不需要为了"能被编译认识"而额外注册。
+### 6.1 目录口径（**`extensions/` 已废弃**）
 
+| 目录 | 角色 |
+|---|---|
+| `ontology/sources/` | **上传真源**：所有"上传/新增"的模块 TTL 落这里（`sources/<模块>.ttl`），登记表也在这里（`sources/_registry.json`，只存 prefix/label/短名等元数据） |
+| `ontology/*完整版.ttl` | 随包自带的**基础模块**（bmm / ea）出厂版本 |
+| `ontology/lexicon/`、`queries/`、`shapes/` | 词表 / 图查询 / SHACL |
 
-前端「上传本体文件」对话框里有两个开关，**默认都打开**：
+> `extensions/` 目录**不再使用**（2026-09-30 用户口径）。真源文件**文件名 = 模块 key**（`sources/ea.ttl` → 模块 `ea`）。
+> 模块文件**候选回退**：`sources/<key>.ttl` 不在时找 `ontology/<key>.ttl` / `*<key>*完整版.ttl`，兼容老版本布局。
 
-| 开关 | 默认 | 作用 |
+### 6.2 上传一次，走这六步
+
+```
+① 留痕      TTL → ontology/uploads/<时间戳>-<名>.ttl
+② 预检      **只读**：本次编译范围内的模块文件是否齐 + 该 TTL 能否解析
+            → 缺就**直接中止**（不删任何数据），并列出缺哪个文件、目录里现有哪些 TTL
+③ 落真源    → ontology/sources/<模块>.ttl（+ 登记元数据）
+④ 级联删除  本模块 + **下游依赖**（依赖它的模块）：图库节点 / 本体库 wiki 页 /
+            **sources 下的真源文件** / **注册信息**（用户口径：文件没了 ⇒ 该模块的产物不该存在）
+⑤ 编译      **只编本次范围 = 本模块 + 上游依赖闭包**
+            上传 bmm → 只编 bmm；上传 ea → 编 bmm+ea（`EA完整版.ttl` 里有 29 处引用 `bmm:`）
+⑥ 生效      按**编译产物**灌 Neo4j 投影 + 重投影本体库 wiki（默认开）
+```
+
+**任一步失败：不删任何数据、真源与登记回滚**（旧实现把级联删放在编译**之前** → "wiki 和图谱都删了才报错"，已修）。
+
+### 6.3 依赖与范围（一次说清）
+
+| 场景 | 级联删除（产物 + 真源 + 注册） | 编译范围 |
 |---|---|---|
-| **上传后编译并生效** | ✅ 开 | TTL 落进真源 `ontology/extensions/<key>-ext.ttl` + 登记 `ontology/extensions/_registry.json` → 自动 `compile.py compile`（artifacts 更新）→ 回执给出**编译了什么**（`compiled.delta`：模块/类/关系/属性 的 before→after）|
-| 重投影本体 wiki 页 | ✅ 开 | 编译完成后再把「本体模型知识库」重投影一遍（页 + 目录）|
+| 上传 **bmm** | bmm + 其下游（ea、ea-service、ea-ownership、bmmfd …） | **bmm** |
+| 上传 **ea** | ea + 其下游（ea-service、ea-ownership …；**不含 bmm**，它是上游） | **bmm + ea** |
+| **重传 bmm** | 同"上传 bmm"（bmm+ea 被清） | **bmm** |
+| `repair`（运维） | 不删 | **全部"文件齐"的模块**；缺文件的模块**单独列出并跳过**，不整次失败 |
 
-- 关闭「上传后编译并生效」= 老行为：**只更新图库**（Neo4j），产物不动 → 智能体校验仍会说
-  「本体里没有这个类」、前端类型下拉也不认它（这是以前的坑，现在默认不走这条路了）。
-- **缺 `bodhi:expertRole` 会自动补**：编译器要求每个模块声明专家角色，否则整次编译失败；
-  上传时若缺，服务端会在**真源副本**里补一条默认值（回执 `source.injected` 会写清楚），原上传件不动。
-- **全量投影回放默认不做**（`apply_after=false`）：导入步骤已把本模块语句写进图库；全量回放要逐条执行
-  整份投影 cypher（实测几十秒到几分钟），那是**运维修复**的事（见下）。要强制回放可传 `apply_after=true`。
+> 依赖判定：内置模块显式声明（`BUILTIN_REQUIRES`）+ TTL 里的跨模块 IRI 引用推断。
+> 因此"上游缺文件"不会阻塞本次上传 —— 例如 bmm 单独上传时**不需要** ea 的文件存在。
 
-### 运维修复（崩溃/手工改动导致四层不一致时）
+### 6.4 回执怎么看
 
-```
-真源 TTL ──compile──► artifacts/（编译产物）──apply──► Neo4j 投影 ──project──► 本体知识库 wiki
-```
+- `compile_scope` / `compile.module_scope`：**本次编译范围**（如 `["bmm"]`）；
+- `cascade_purge.modules` / `.files_removed` / `.registry_removed`：级联删掉的模块、真源文件、注册条目；
+- `compile.skipped_modules`：`repair`（编译全部）时**缺文件被跳过**的模块（要恢复：把 TTL 放回 `sources/` 再上传）；
+- `compiled.totals_*` 是**全量总数**（所有模块合计），与上次相同 ≠ 没生效；本次影响看 `per_module` / `modules_added`。
 
-任一层被破坏（或换机器重建）都可以用**幂等**的修复入口恢复：
-
-```bash
-# 编译 → 全量回放投影 → 重投影 wiki → 一致性体检（含 C5：会话页是否落错库）
-/opt/bodhi-venv/bin/python3 tools/ke-core/ke_admin.py repair [kb_id]
-
-# 也可以走 HTTP（MCP 服务）
-curl -s -X POST http://127.0.0.1:8765/bodhi/ontology/repair \
-     -H 'Content-Type: application/json' -d '{"compile": true, "project_wiki": true}'
-```
-
-体检项里与本体相关的：
-- **C5**：领域建模会话记着的页**不在本库**（历史跨库同 slug 撞主键的存量，见 `ke_audit`）→ 需要重跑建模或人工处理；
-- **D4/D5**（页身份完整性，2026-09-24 加固）：D4 = 同库同 slug 多行（"影子页"，更新只命中其中一行）；D5 = 页 id 非规范派生（走了兜底分支或有人直接写库）。**正常都为 0**，出现即为信号；
-- **C1/C3**：实例页无来源 / 正文称有来源但 `source_refs` 空；
-- **B4/B5**：模型库页与 Neo4j 投影、编译产物不一致 → 跑一次 `repair` 即可对齐。
-
-> 页数变少的常见原因：投影会按 **Neo4j 实况做减法**。若 Neo4j 里缺对象属性/模块节点，
-> 投影出的页就会少于产物规模 → 先 `apply_projection()`（`repair` 已包含）再投影。

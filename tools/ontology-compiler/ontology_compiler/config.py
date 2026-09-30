@@ -32,6 +32,8 @@ GENERATED_AT_ENV = "BODHI_GENERATED_AT"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ONTOLOGY_DIR = REPO_ROOT / "ontology"
 EXTENSIONS_DIR = ONTOLOGY_DIR / "extensions"
+# 上传真源目录（用户口径 2026-09-30：上传的 TTL 落这里，不再放 extensions/）
+SOURCES_DIR = ONTOLOGY_DIR / "sources"
 LEXICON_DIR = ONTOLOGY_DIR / "lexicon"
 SHAPES_DIR = ONTOLOGY_DIR / "shapes"
 QUERIES_DIR = ONTOLOGY_DIR / "queries"
@@ -116,6 +118,9 @@ class ModuleSpec:
     light_file: Path | None = None
     # 文件来源说明（候选回退时写明"清单路径不在，改用哪个候选"；见 `_resolve_module_files`）。
     file_note: str = ""
+    # **上游依赖**（编译这个模块时**必须一起编**的模块；用户口径 2026-09-30：
+    # "上传 bmm 只编译 bmm；上传 ea 编译 bmm+ea"）。空 = 自足（如 bmm）。
+    requires: tuple[str, ...] = ()
 
     def rel_light(self) -> str:
         """轻量版的仓库相对路径（无轻量版时返回空串）。"""
@@ -153,8 +158,7 @@ def _resolve_module_files(key: str, files: tuple[Path, ...]) -> tuple[tuple[Path
         if path.is_file():
             found.append(path)
             continue
-        cands = [EXTENSIONS_DIR / ("%s-ext.ttl" % key), EXTENSIONS_DIR / ("%s.ttl" % key),
-                 ONTOLOGY_DIR / ("%s.ttl" % key)]
+        cands = [SOURCES_DIR / ("%s.ttl" % key), ONTOLOGY_DIR / ("%s.ttl" % key)]
         cands += sorted(ONTOLOGY_DIR.glob("*%s*完整版.ttl" % key))
         cands += sorted(ONTOLOGY_DIR.glob("*%s*.ttl" % key))
         hit = next((c for c in cands if c.is_file()), None)
@@ -169,6 +173,17 @@ def _resolve_module_files(key: str, files: tuple[Path, ...]) -> tuple[tuple[Path
 def builtin_specs() -> dict[str, ModuleSpec]:
     """**内置清单**（不含 `_registry.json` 覆盖）—— 供 `ke_admin` 判断"上传的是内置模块"并就地覆盖其文件。"""
     return _builtin_specs()
+
+
+# 内置模块的上游依赖（编译一个模块时须一起编的模块；用户口径 2026-09-30）：
+#   EA完整版.ttl 里 29 处引用 bmm: → ea 依赖 bmm；扩展都依赖它们 affects 的基础模块。
+BUILTIN_REQUIRES: dict[str, tuple[str, ...]] = {
+    "bmm": (),
+    "ea": ("bmm",),
+    "ea-service": ("ea",),
+    "ea-ownership": ("ea",),
+    "bmmfd": ("bmm", "ea"),
+}
 
 
 def _builtin_specs() -> dict[str, ModuleSpec]:
@@ -202,7 +217,7 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
             short_label="EA-SVC",
             ontology_iri="http://example.org/bodhi/ext/ea-service",
             namespace=NS["easvc"],
-            files=(EXTENSIONS_DIR / "ea-service-ext.ttl",),
+            files=(SOURCES_DIR / "ea-service.ttl",),
             kind="extension",
             affects=("ea",),
         ),
@@ -213,7 +228,7 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
             short_label="EA-OWN",
             ontology_iri="http://example.org/bodhi/ext/ea-ownership",
             namespace=NS["eaown"],
-            files=(EXTENSIONS_DIR / "ea-ownership-ext.ttl",),
+            files=(SOURCES_DIR / "ea-ownership.ttl",),
             kind="extension",
             affects=("ea",),
         ),
@@ -224,7 +239,7 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
             short_label="BMMFD",
             ontology_iri="http://example.org/bodhi/ext/bmmfd",
             namespace=NS["bmmfd"],
-            files=(EXTENSIONS_DIR / "bmmfd-ext.ttl",),
+            files=(SOURCES_DIR / "bmmfd.ttl",),
             kind="extension",
             affects=("bmm", "ea"),
         ),
@@ -248,7 +263,8 @@ def build_modules() -> dict[str, ModuleSpec]:
     out: dict[str, ModuleSpec] = {}
     for key, spec in merged.items():
         files, note = _resolve_module_files(key, spec.files)
-        out[key] = _replace(spec, files=files, file_note=note) if (note or files != spec.files) else spec
+        req = (BUILTIN_REQUIRES.get(key, ()) or spec.requires) if key in builtin else spec.requires
+        out[key] = _replace(spec, files=files, file_note=note, requires=req)
     return out
 
 
@@ -259,7 +275,7 @@ def build_modules() -> dict[str, ModuleSpec]:
 #   为什么用 sidecar JSON 而不是往 build_modules() 里写死：服务端不该改源码（易冲突、难回滚）；
 #   登记表是**数据**，可 git 追踪、可单独回滚；正式产物仍只由 compile.py 生成。
 # --------------------------------------------------------------------------
-REGISTRY_PATH = EXTENSIONS_DIR / "_registry.json"
+REGISTRY_PATH = SOURCES_DIR / "_registry.json"
 
 
 def registry_modules_from_dir() -> dict[str, ModuleSpec]:
@@ -270,14 +286,14 @@ def registry_modules_from_dir() -> dict[str, ModuleSpec]:
     不该是"能不能被编译认识"的开关。这里按"**文件即登记**"补位：扫描到的模块用文件名当 key、
     用**TTL 里的 @prefix / rdfs:label** 当元数据（解析不出来就退回 key），登记表里有它就仍以登记表为准。
     """
-    if not EXTENSIONS_DIR.is_dir():
-        return {}
     known = {str(m.get("key")) for m in _load_registry()}
-    builtin_keys = set(_builtin_specs())      # 内置模块优先：遗留的 `<内置key>-ext.ttl` 不得覆盖内置清单
+    builtin_keys = set(_builtin_specs())      # 内置模块优先：遗留文件不得覆盖内置清单
     out: dict[str, ModuleSpec] = {}
-    for path in sorted(EXTENSIONS_DIR.glob("*-ext.ttl")):
-        key = path.name[: -len("-ext.ttl")].strip().lower()
-        if not key or key in known or key in builtin_keys:
+    # ① sources/：**上传真源**（文件即登记；同名覆盖内置清单）
+    # ② extensions/：随包自带的扩展（`*-ext.ttl`），内置 key 跳过
+    for path in sorted(SOURCES_DIR.glob("*.ttl")) if SOURCES_DIR.is_dir() else []:
+        key = path.name[: -len(".ttl")].strip().lower()
+        if not key or key.startswith("_") or key in known or key in out:
             continue
         head = path.read_text(encoding="utf-8", errors="replace")[:4000]
         prefix = ""
@@ -354,3 +370,68 @@ def parse_module_selection(raw: str | None, modules: dict[str, ModuleSpec] | Non
         if key not in wanted:
             wanted.append(key)
     return wanted
+
+
+def _module_requires(modules=None) -> dict:
+    """每个模块的上游依赖：显式声明优先（requires / BUILTIN_REQUIRES），否则按 TTL 里的跨模块 IRI 引用推断。"""
+    mods = modules if modules is not None else build_modules()
+    out: dict = {}
+    ns_to_key = {}
+    for key, spec in mods.items():
+        for ns in (spec.namespace, spec.ontology_iri):
+            if ns:
+                ns_to_key[ns.rstrip("#/")] = key
+    for key, spec in mods.items():
+        deps = set(spec.requires)
+        try:
+            body = "\n".join(p.read_text(encoding="utf-8", errors="replace")
+                             for p in spec.files if p.is_file())
+        except Exception:  # noqa: BLE001
+            body = ""
+        for ns, other in ns_to_key.items():
+            if other != key and ns and (ns in body):
+                deps.add(other)
+        if deps:
+            out[key] = deps
+    return out
+
+
+def upstream_closure(key: str, modules=None) -> list:
+    """**编译范围**：key 自身 + 上游依赖（传递），被依赖的排在前。
+
+    例：upstream_closure("bmm") == ["bmm"]；upstream_closure("ea") == ["bmm", "ea"]。
+    """
+    mods = modules if modules is not None else build_modules()
+    req = _module_requires(mods)
+    ordered: list = []
+    seen: set = set()
+
+    def _visit(k: str) -> None:
+        if k in seen or k not in mods:
+            return
+        seen.add(k)
+        for up in sorted(req.get(k, ())):
+            _visit(up)
+        ordered.append(k)
+
+    _visit((key or "").strip())
+    return ordered or ([key] if key else [])
+
+
+def downstream_closure(key: str, modules=None) -> list:
+    """**级联删除范围**：key 自身 + 所有依赖它的模块（传递），最下游在前。"""
+    mods = modules if modules is not None else build_modules()
+    req = _module_requires(mods)
+    out: list = []
+    seen: set = set()
+    queue = [(key or "").strip()]
+    while queue:
+        cur = queue.pop(0)
+        if not cur or cur in seen:
+            continue
+        seen.add(cur)
+        for other, deps in req.items():
+            if cur in deps and other not in seen:
+                queue.append(other)
+        out.append(cur)
+    return list(reversed(out))
