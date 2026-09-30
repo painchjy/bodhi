@@ -2,6 +2,36 @@
 
 > 都是 2026-09 这轮真实故障，含"现象 / 日志特征 / 根因 / 修法 / 验证"。
 
+## 上传成功但「结果面板」全是空白（本模块类/属性/执行语句没有数字）
+
+**症状**：`POST /bodhi/ontology/upload` 返回 200、导入确实成功，但前端结果面板显示
+`前缀 （默认 :） ·`、`本模块类：（库内已定义共 ）`、`本模块属性：`、`执行语句：（跳过非本模块 ）`、
+`占位跳过：0` —— **所有数字为空**。
+
+**根因**：2026-09-30 重写 `ke_admin.upload_ttl()` 时换了回执结构（新增 `preflight`/`source`/
+`compiled`），但**丢掉了前端一直在读的那批字段**（`module`/`prefix`/`ontology_iri`/`label`/
+`short_label`/`identity`/`prefix_source`/`label_source`/`module_classes`/`classes`/
+`module_properties`/`cypher_statements`/`statements_skipped`/`placeholders_skipped`/`cross_refs`/`hint`），
+它们原本由老函数 `import_ttl()` 产出。前端读不到 → 全部 `undefined` → 空白。
+
+**修法（已固化）**：
+1. `ke_admin._module_import_stats(module, namespace, iri)`：按**编译产物**
+   `artifacts/neo4j/10_ontology.cypher` + Neo4j 只读统计（本模块类/属性数、本模块语句数、
+   外部占位、交叉引用），与 `import_ttl` 的语义对齐。
+2. `upload_ttl()` 返回前补齐上述全部字段；`statements_skipped=0`（新链路第⑥步 `apply_projection()`
+   是**全量回放**，不跳过任何模块语句；实际执行总数见回执 `apply.statements`）。
+3. `short_label` 改为**只认 TTL 的 `bodhi:shortName`**（不再用 `模块名.upper()` 兜底）。
+4. 回执字段同样**必须落在源码里**——改完要 `systemctl restart bodhi-mcp`，
+   否则运行中的服务仍返回旧结构（本次即如此）。
+
+**验收**：`POST /bodhi/ontology/upload`（bmm）→ `module=bmm`、`short_label=bmm`、
+`module_classes=30`、`module_properties=52`、`cypher_statements=319`、`statements_skipped=0`、
+`compiled.modules=['bmm']`、`apply={statements:334, classes:30}`。
+
+**注意（既定 B 案）**：上传 bmm 会**级联删除其下游模块**（如 ea：wiki 页 + 图谱节点 + `sources/ea.ttl`），
+这是口径而非 bug；恢复方式：重新上传 ea 的 TTL，或跑全量 `ke_admin.py repair`
+（`repair_all("", compile_first=True, project_wiki=True)`）。
+
 ## 目录名过长 → 前端截断 `category_path` → 目录点开空白
 
 **症状**：左侧目录树有数字角标，点进去列表空白（`total=0`）。

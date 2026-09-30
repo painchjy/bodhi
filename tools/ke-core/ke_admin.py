@@ -488,6 +488,67 @@ def _cypher_statements(path: pathlib.Path) -> list[str]:
     return [s.strip() for s in text.split(";") if s.strip()]
 
 
+def _module_import_stats(module: str, namespace: str, ontology_iri: str) -> dict:
+    """前端「结果报告」要的统计（老 `import_ttl` 的回执字段，2026-09-30 重写时漏掉过一次）：
+    本模块类/属性数、投影语句数、外部占位、交叉引用。数据源 = **编译产物**
+    `artifacts/neo4j/10_ontology.cypher` + Neo4j（只读）。
+
+    语义（新上传链路第⑥步 `apply_projection()` 是**全量回放**）：
+    `cypher_statements` = 产物中**属于本模块**的语句数；`statements_skipped` = 0
+    （新链路不跳过任何模块的语句，全量幂等重放）；实际执行总数见回执 `apply.statements`。
+    """
+    ns = namespace or ontology_iri or ""
+    stmts = 0
+    placeholders: list[str] = []
+    own_key_re = re.compile(r"key:\s*'%s'" % re.escape(module))
+    path = PROJECTION_DIR / "10_ontology.cypher"
+    if path.is_file():
+        for stmt in _cypher_statements(path):
+            stubs = (re.findall(r"iri:\s*'([^']+)'", stmt)
+                     + re.findall(r'iri:\s*"([^"]+)"', stmt))
+            low = stmt.lower()
+            if stubs and "external" in low and "true" in low and \
+                    all(not i.startswith(ns) for i in stubs):
+                placeholders += stubs
+                continue
+            iris = _STMT_IRI_RE.findall(stmt)
+            own = ((iris[0].startswith(ns) or iris[0] == ontology_iri) if iris
+                   else bool(own_key_re.search(stmt)))
+            if own:
+                stmts += 1
+    refs: list[dict] = []
+    try:
+        for r in ke_neo4j.query(
+                "MATCH (s)-[rel:BODHI_SUBCLASS_OF|BODHI_DOMAIN|BODHI_RANGE|BODHI_INVERSE_OF]->(t) "
+                "WHERE s.module = $m AND t.module IS NOT NULL AND t.module <> $m "
+                "RETURN DISTINCT t.module AS module, t.iri AS iri, coalesce(t.local_name,'') AS name, "
+                "       type(rel) AS kind ORDER BY module, iri", {"m": module}):
+            row = ke_neo4j.query("MATCH (c:BodhiOntClass {iri: $iri}) "
+                                 "RETURN coalesce(c.external, false) AS ext", {"iri": r["iri"]})
+            r["defined"] = bool(row) and not row[0]["ext"]
+            refs.append(dict(r))
+        classes = int(ke_neo4j.query(
+            "MATCH (c:BodhiOntClass) WHERE c.external IS NULL RETURN count(c) AS n")[0]["n"] or 0)
+        module_classes = int(ke_neo4j.query(
+            "MATCH (c:BodhiOntClass) WHERE c.module = $m AND c.external IS NULL "
+            "RETURN count(c) AS n", {"m": module})[0]["n"] or 0)
+        module_properties = int(ke_neo4j.query(
+            "MATCH (p:BodhiOntProperty) WHERE p.module = $m RETURN count(p) AS n",
+            {"m": module})[0]["n"] or 0)
+    except Exception as exc:  # noqa: BLE001
+        return {"stats_error": str(exc)[:200]}
+    dangling = [r["iri"] for r in refs if not r["defined"]]
+    return {"classes": classes, "module_classes": module_classes,
+            "module_properties": module_properties,
+            "cypher_statements": stmts, "statements_skipped": 0,
+            "statements_executed": stmts,
+            "placeholders_skipped": sorted(set(placeholders)),
+            "cross_refs": refs, "dangling_refs": dangling,
+            "hint": ("本模块交叉引用了 %d 个外部类（来自 %s）；未定义的引用：%s"
+                     % (len(refs), "、".join(sorted({r["module"] for r in refs})) or "无",
+                        "、".join(dangling) if dangling else "无"))}
+
+
 def import_ttl(ttl_path, module: str = "", project_wiki: bool = False, kb_id: str = "",
                allow_dangling: bool = False) -> dict:
     """上传/替换一个本体模块：**级联删下游 → 解析 → 灌 Neo4j**（零产物）。
@@ -854,7 +915,13 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     ontology_iri = str(meta.get("ontology_iri") or "")
     prefix = str(meta.get("prefix") or getattr(known, "prefix", "") or module_key)
     label = str(meta.get("label") or getattr(known, "label", "") or module_key)
-    short_label = getattr(known, "short_label", "") or module_key.upper()
+    # 短名口径（2026-09-30）：**只认 TTL 的 `bodhi:shortName`**（≤16 字符，预检已校验）；
+    # 老代码用 `known.short_label or module_key.upper()` 会绕开 TTL —— 已移除。
+    try:
+        from ontology_compiler.config import _spec_from_ttl as _sft  # noqa: PLC0415
+        short_label = (getattr(_sft(target, module_key, None), "short_label", "") or "").strip()
+    except Exception:  # noqa: BLE001
+        short_label = ""
     source_text, injected = _ensure_expert_role(content, module_key, ontology_iri)
     src_path = SOURCES_DIR / ("%s.ttl" % module_key)
     src_path.parent.mkdir(parents=True, exist_ok=True)
@@ -935,6 +1002,24 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     out["note"] = ("已把该 TTL 纳入真源（%s）并**自动编译**：类型校验、前端类型下拉与"
                    "本体库 wiki 现在都以新产物为准（详见回执 compiled.per_module）"
                    % out["source"]["file"])
+    # —— 前端「结果报告」契约字段（2026-09-30 用户复现：重写本函数时漏掉 → 那几格全空白）——
+    out["module"] = module_key
+    out["prefix"] = prefix
+    out["ontology_iri"] = ontology_iri
+    out["namespace"] = meta.get("namespace", "")
+    out["label"] = label
+    out["short_label"] = short_label
+    out["prefix_source"] = ("TTL 用默认前缀 → 按约定取模块名当类前缀（%s）" % prefix
+                            if meta.get("prefix_derived_from_key")
+                            else ("取自 TTL 命名前缀 `@prefix %s:`" % prefix if meta.get("prefix")
+                                  else "TTL 推不出前缀 → 回退模块名（%s）" % prefix))
+    out["label_source"] = ("取自 TTL 的 rdfs:label（%s）" % label if meta.get("label")
+                           else "TTL 未声明显示名 → 用模块名（%s）" % label)
+    out["identity"] = {"key": module_key, "prefix": prefix, "label": label,
+                       "short_label": short_label, "key_from_ttl": meta.get("key"),
+                       "label_from_ttl": meta.get("label") or None,
+                       "short_from_ttl": short_label or None}
+    out.update(_module_import_stats(module_key, str(meta.get("namespace") or ""), ontology_iri))
     return out
 
 
