@@ -273,8 +273,11 @@ def _spec_from_ttl(path: pathlib.Path, key: str, base: ModuleSpec | None = None)
             label = m.group(1)
             break
     if base is not None:
-        # 内置模块：沿用出厂的 prefix/label（除非 TTL 自己写了）
-        return ModuleSpec(key=key, prefix=prefix or base.prefix, label=label or base.label,
+        # 内置模块：**显示名一律用内置清单的 label**（2026-09-30 事故：TTL 里的 rdfs:label 很长
+        # 如「BMM 扩展本体（含信息来源追踪与枚举类型）」，前端拼 `category_path` 时会把长目录名**截断**
+        # （实测少掉末尾的「）」）→ 目录下的页永远查不到、列表空白）。
+        # prefix/iri/namespace 仍以 TTL 为准（TTL 是本体真源），只有展示名以出厂名为准。
+        return ModuleSpec(key=key, prefix=prefix or base.prefix, label=base.label,
                           short_label=base.short_label, ontology_iri=ontology_iri or base.ontology_iri,
                           namespace=namespace or base.namespace, files=(path,),
                           kind=base.kind, affects=base.affects, light_file=base.light_file,
