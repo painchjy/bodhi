@@ -78,5 +78,5 @@ def sdc_name(bundle: OntologyBundleView, iri: str) -> str:
     """把本体类 IRI 映射成 Neo4j / JSON Schema 里安全的标识名（模块前缀 + 本地名）。"""
     module = bundle.module_of(iri)
     local = iri.split("#")[-1] if "#" in iri else iri.rsplit("/", 1)[-1]
-    prefix = bundle.modules[module].prefix if module in bundle.modules else "ext"
+    prefix = bundle.modules[module].prefix if module in bundle.modules else module
     return "%s__%s" % (prefix, local)

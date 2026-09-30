@@ -1,0 +1,304 @@
+@prefix :       <http://example.org/ea#> .
+@prefix bmm:    <http://example.org/bmm#> .
+@prefix bodhi:  <http://example.org/bodhi#> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<http://example.org/ea> rdf:type owl:Ontology ;
+    rdfs:label "企业架构框架本体（与BMM扩展本体协同）"@zh ;
+    owl:imports <http://example.org/bmm> ;
+    owl:versionIRI <http://example.org/ea/1.0> ;
+    bodhi:expertRole "企业架构分析专家，精通 EA 企业架构（含 IT 服务层与系统定位）"@zh .
+
+
+
+# ============================================================
+# 2. 业务层核心类
+# ============================================================
+
+:Activity           rdf:type owl:Class ;
+    rdfs:label "活动"@zh ;
+    rdfs:comment "活动，对任务的编排，完成业务上特定的目标" .
+
+:Task               rdf:type owl:Class ;
+    rdfs:label "任务"@zh ;
+    rdfs:comment "任务，某个岗位或角色连续执行的操作" .
+
+:Step               rdf:type owl:Class ;
+    rdfs:label "步骤"@zh ;
+    rdfs:comment "步骤，对单个或一组紧耦合业务实体的操作" .
+
+:BusinessRole       rdf:type owl:Class ;
+    rdfs:label "业务角色"@zh ;
+    rdfs:comment "业务角色或岗位" .
+
+:BusinessEntity     rdf:type owl:Class ;
+    rdfs:label "业务实体"@zh ;
+    rdfs:comment "业务实体，如客户、合同、账户、申请单等" .
+
+# 2026-09-29：测试用的客户类（Customer / CustomerWithExpiringProduct /
+#   CustomerWithoutExpiringProduct）及 holdsProduct 已按用户口径删除
+#   —— EA 只做流程建模；对外交付物/产品/业务服务/即将到期的产品 早已在 BMM 完整版
+#   （bmm:Offering / bmm:Product / bmm:BusinessService / bmm:ExpiringProduct）。
+
+# ============================================================
+# 3. IT 服务（IT 资产类已迁至 BMM：bmm:ITAsset / bmm:MainSystem / bmm:SubSystem / bmm:HardwareAsset）
+# ============================================================
+
+:Service            rdf:type owl:Class ;
+    rdfs:label "IT服务"@zh ;
+    rdfs:comment "IT 服务（或称为功能），由（子）系统提供，用于实现步骤" .
+
+# --- IT 服务子类：三种可执行服务形态 ---
+:APIService         rdf:type owl:Class ;
+    rdfs:subClassOf :Service ;
+    rdfs:label "API服务"@zh ;
+    rdfs:comment "传统服务接口，ai_skill 按标准 HTTP API 定义（method/url/headers/params/body/response）"@zh .
+
+:MCPService         rdf:type owl:Class ;
+    rdfs:subClassOf :Service ;
+    rdfs:label "MCP服务"@zh ;
+    rdfs:comment "支持智能体工具调用，ai_skill 以 MCP 规范定义（transport/url 或 command/tool/arguments）"@zh .
+
+:SkillService       rdf:type owl:Class ;
+    rdfs:subClassOf :Service ;
+    rdfs:label "Skill服务"@zh ;
+    rdfs:comment "以 Markdown 形式定义 skill，供 agent 执行"@zh .
+
+# ============================================================
+# 4. 关系属性
+# ============================================================
+
+# --- 流程组成关系 ---
+:businessProcessHasActivity   rdf:type owl:ObjectProperty ;
+    rdfs:domain bmm:BusinessProcess ;
+    rdfs:range :Activity ;
+    rdfs:label "包含活动"@zh ;
+    rdfs:comment "业务流程包含活动" .
+
+:activityHasTask              rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range :Task ;
+    rdfs:label "包含任务"@zh ;
+    rdfs:comment "活动包含任务" .
+
+:taskHasStep                  rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range :Step ;
+    rdfs:label "包含步骤"@zh ;
+    rdfs:comment "任务包含步骤" .
+
+# --- 执行与操作关系 ---
+:taskPerformedByRole          rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range :BusinessRole ;
+    rdfs:label "由角色执行"@zh ;
+    rdfs:comment "任务由业务角色执行" .
+
+:stepOperatesOnEntity         rdf:type owl:ObjectProperty ;
+    rdfs:domain :Step ;
+    rdfs:range :BusinessEntity ;
+    rdfs:label "操作业务实体"@zh ;
+    rdfs:comment "步骤操作业务实体" .
+
+# --- 规则约束 ---
+:taskGovernedByRule           rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range bmm:BusinessRule ;
+    rdfs:label "受规则约束"@zh ;
+    rdfs:comment "任务受业务规则约束" .
+
+# --- IT 资源支撑 ---
+:stepSupportedByAsset         rdf:type owl:ObjectProperty ;
+    rdfs:domain :Step ;
+    rdfs:range bmm:ITAsset ;                # IT 资产类在 BMM（2026-09-29 自 EA 迁出）
+    rdfs:label "由IT资产支撑"@zh ;
+    rdfs:comment "步骤由 IT 资产（主系统/子系统/硬件资产）支撑" .
+
+:applicationProvidesService   rdf:type owl:ObjectProperty ;
+    rdfs:domain bmm:SubSystem ;             # 原 :Application → BMM 的「子系统」
+    rdfs:range :Service ;
+    rdfs:label "提供服务"@zh ;
+    rdfs:comment "系统（子系统）提供服务/功能" .
+
+:stepUsesService              rdf:type owl:ObjectProperty ;
+    rdfs:domain :Step ;
+    rdfs:range :Service ;
+    rdfs:label "使用IT服务"@zh ;
+    rdfs:comment "步骤使用 IT 服务实现" .
+
+# --- 目标与交付 ---
+:activityDelivers             rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range bmm:Offering ;
+    rdfs:label "交付"@zh ;
+    rdfs:comment "活动交付某个产品或业务服务" .
+
+:taskDelivers                 rdf:type owl:ObjectProperty ;
+    rdfs:domain :Task ;
+    rdfs:range bmm:Offering ;
+    rdfs:label "交付"@zh ;
+    rdfs:comment "任务交付某个产品或业务服务" .
+
+:activityAchievesDesiredResult   rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range bmm:DesiredResult ;
+    rdfs:label "实现预期成果"@zh ;
+    rdfs:comment "活动实现某个预期成果" .
+
+:activityRealizesActionPlan   rdf:type owl:ObjectProperty ;
+    rdfs:domain :Activity ;
+    rdfs:range bmm:CourseOfAction ;
+    rdfs:label "实现行动方案"@zh ;
+    rdfs:comment "活动实现某个行动方案" .
+
+:businessProcessRealizesActionPlan rdf:type owl:ObjectProperty ;
+    rdfs:domain bmm:BusinessProcess ;
+    rdfs:range bmm:CourseOfAction ;
+    rdfs:label "实现行动方案"@zh ;
+    rdfs:comment "业务流程实现某个行动方案" .
+
+# --- 客户与产品（2026-09-29：客户类已删，holdsProduct 随之移除；
+#     若将来要表达"客户持有产品"，请在 BMM 侧建模（bmm:Product 已在 BMM））---
+# ============================================================
+# 4.5 数据属性（Datatype Properties）
+# ============================================================
+
+:ai_skill rdf:type owl:DatatypeProperty ;
+    rdfs:domain :Service ;
+    rdfs:range xsd:string ;
+    rdfs:label "AI技能"@zh ;
+    rdfs:comment """IT 服务关联的 AI 技能/工具定义（JSON 字符串）。按 IT 服务子类采用三种格式之一：
+
+1) API服务（APIService）—— 标准 HTTP API 定义：
+{"type":"api","name":"技能名","description":"说明","method":"GET|POST|PUT|DELETE","url":"https://...","headers":{},"params":{},"body":{},"response":"响应说明"}
+
+2) MCP服务（MCPService）—— MCP 规范定义（供智能体工具调用）：
+{"type":"mcp","name":"技能名","description":"说明","transport":"streamable_http|stdio","url":"http://host/mcp","command":["npx","-y","..."],"tool":"工具名","arguments":{}}
+
+3) Skill服务（SkillService）—— Markdown 形式定义 skill（供 agent 执行）：
+{"type":"skill","name":"技能名","description":"说明","content":"# skill 的 Markdown 内容"}
+
+通用格式（当 IT 服务描述采用"输入参数…… 预期结果……"结构时）：
+{"name":"技能名称","description":"技能功能说明","parameters":[{"name":"参数名","type":"参数类型","description":"参数说明"}],"expected_results":["预期结果要点1","预期结果要点2"]}"""@zh .
+
+# ============================================================
+# 5. 公理约束（TBox）
+# ============================================================
+
+# 业务流程至少包含一个活动
+bmm:BusinessProcess rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :businessProcessHasActivity ;
+    owl:someValuesFrom :Activity
+] .
+
+# 活动至少包含一个任务
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityHasTask ;
+    owl:someValuesFrom :Task
+] .
+
+# 任务至少包含一个步骤
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskHasStep ;
+    owl:someValuesFrom :Step
+] .
+
+# 任务必须由至少一个角色执行
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskPerformedByRole ;
+    owl:someValuesFrom :BusinessRole
+] .
+
+# 步骤必须至少操作一个业务实体
+:Step rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :stepOperatesOnEntity ;
+    owl:someValuesFrom :BusinessEntity
+] .
+
+# 步骤必须至少由一个 IT 资产支撑（IT 资产类在 BMM）
+:Step rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :stepSupportedByAsset ;
+    owl:someValuesFrom bmm:ITAsset
+] .
+
+# 步骤必须使用至少一个 IT 服务
+:Step rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :stepUsesService ;
+    owl:someValuesFrom :Service
+] .
+
+# 任务必须至少受一条业务规则约束
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskGovernedByRule ;
+    owl:someValuesFrom bmm:BusinessRule
+] .
+
+# （2026-09-29 删除）原公理「每个应用至少提供一个服务」：
+#   应用/子系统类已迁 BMM（bmm:SubSystem）；"至少一个"约束对批量台账不友好（会刷 violation）。
+#   如需该约束，请在 BMM 里对 bmm:SubSystem 声明。
+
+# 活动必须交付至少一个产品或业务服务
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityDelivers ;
+    owl:someValuesFrom bmm:Offering
+] .
+
+# 任务必须交付至少一个产品或业务服务
+:Task rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :taskDelivers ;
+    owl:someValuesFrom bmm:Offering
+] .
+
+# 活动必须实现至少一个预期成果
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityAchievesDesiredResult ;
+    owl:someValuesFrom bmm:DesiredResult
+] .
+
+# 活动必须实现至少一个行动方案
+:Activity rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :activityRealizesActionPlan ;
+    owl:someValuesFrom bmm:CourseOfAction
+] .
+
+# 业务流程必须实现至少一个行动方案
+bmm:BusinessProcess rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty :businessProcessRealizesActionPlan ;
+    owl:someValuesFrom bmm:CourseOfAction
+] .
+
+# ============================================================
+# 6. 说明注释
+# ============================================================
+# 本扩展模型在 BMM 四大支柱基础上：
+#   - 将业务流程（BusinessProcess）视为 BMM 行动方案（CourseOfAction）的一种，
+#     活动、任务、步骤作为其组成部分；
+#   - **IT 资产类已迁至 BMM**（2026-09-29）：bmm:ITAsset 及其子类 主系统（bmm:MainSystem）/
+#     子系统（bmm:SubSystem，原 EA 的 Application）/ 硬件资产（bmm:HardwareAsset）；
+#     本模型只保留「IT 服务」层与两条连接关系：步骤由 IT 资产支撑（stepSupportedByAsset）、
+#     系统提供服务（applicationProvidesService，domain 指向 bmm:SubSystem）；
+#   - 活动/任务必须交付具体产品或业务服务；
+#   - 活动必须实现预期成果（DesiredResult）和行动方案（CourseOfAction）；
+#   - 业务流程必须实现行动方案（CourseOfAction）。
+#
+# 实际使用时，请将 bmm: 命名空间指向标准 BMM 本体 URI，
+# 并确保与已有的 BMM 实例数据整合。
+
+# 模块短名（目录名/列表名；≤16 字符，导入时校验）
+<http://example.org/ea> bodhi:shortName "ea" .

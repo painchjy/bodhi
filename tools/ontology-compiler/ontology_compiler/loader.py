@@ -110,7 +110,17 @@ def build_prefix_map(modules: dict[str, ModuleSpec]) -> dict[str, str]:
     编译产物叫 `ea:`」这类不一致（曾经因此把 Neo4j 里的 `ea:Activity` 写成 `bmm-EA-ext:Activity`，
     前端按类查关系类型全空）。空前缀（`@prefix :`）忽略——它只是文件内部的默认前缀，不适合做展示前缀。
     """
-    prefix_map = {spec.namespace: spec.prefix for spec in modules.values()}
+    prefix_map: dict[str, str] = {}
+    for spec in modules.values():
+        if not spec.namespace:
+            continue
+        prefix_map[spec.namespace] = spec.prefix
+        # 双保险：`spec.namespace` 若没带分隔符（历史 TTL/手写 spec 可能有），
+        # 也登记 `…/x#` 与 `…/x/` 两个键 —— 否则 `namespace_of(iri)`（永远带 `#`）
+        # 查不中，`prefix_map.get(ns, "ext")` 会把前缀兜成 `ext`（2026-09-30 事故）。
+        if not spec.namespace.endswith(("#", "/")):
+            prefix_map[spec.namespace + "#"] = spec.prefix
+            prefix_map[spec.namespace + "/"] = spec.prefix
     for spec in modules.values():
         for path in spec.files:
             try:
@@ -326,7 +336,7 @@ def build_enum_member(
         iri=iri,
         local=local_name(iri),
         module=module,
-        prefix=prefix_map.get(namespace_of(iri), "ext"),
+        prefix=prefix_map.get(namespace_of(iri), module),
         labels=pick_labels(combined, node),
         comment=pick_comment(combined, node),
         source_files=list(source_files.get(module, [])),
@@ -417,7 +427,7 @@ def extract_classes(
                 iri=iri,
                 local=local_name(iri),
                 module=module_key,
-                prefix=prefix_map.get(namespace_of(iri), "ext"),
+                prefix=prefix_map.get(namespace_of(iri), module_key),
                 labels=pick_labels(combined, subject),
                 comment=pick_comment(combined, subject),
                 source_files=list(spec_files),
@@ -471,7 +481,7 @@ def extract_properties(
                     iri=str(subject),
                     local=local_name(str(subject)),
                     module=module_key,
-                    prefix=prefix_map.get(namespace_of(str(subject)), "ext"),
+                    prefix=prefix_map.get(namespace_of(str(subject)), module_key),
                     labels=pick_labels(combined, subject),
                     comment=pick_comment(combined, subject),
                     source_files=list(spec_files),

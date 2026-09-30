@@ -400,7 +400,7 @@ class WikiBuilder:
 
         self.add(slug=slug_relation(module["key"], name),
                  title="%s（%s）" % (label, name), page_type=TYPE_RELATION,
-                 module_label=module["key"],
+                 module_label=(module.get("short_label") or module["key"]),
                  group="跨模块桥" if is_bridge else "本体关系",
                  content="\n".join(lines).rstrip() + "\n",
                  summary=(rel.get("definition") or "")[:400]

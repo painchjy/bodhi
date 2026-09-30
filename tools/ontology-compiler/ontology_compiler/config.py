@@ -268,7 +268,13 @@ def _spec_from_ttl(path: pathlib.Path, key: str, base: ModuleSpec | None = None)
     m = re.search(r"<([^>]+)>\s+(?:a|rdf:type)\s+owl:Ontology", head)
     if m:
         ontology_iri = m.group(1)
-        namespace = namespace or ontology_iri
+        # **namespace 必须是命名空间形式**（带 `#` 或 `/`）——与 `inspect_ttl()` 同一约定。
+        # 事故（2026-09-30）：TTL 只用默认前缀 `@prefix :` 时，这里曾直接拿 ontology IRI
+        # （`http://example.org/bmm`，没有 `#`），而类的 IRI 命名空间是 `…/bmm#`
+        # → `loader.build_prefix_map()` 查不中 → 三处 `prefix_map.get(ns, "ext")` 兜底成 `ext`
+        # → 图库/产物/wiki 里 BMM、EA 的类全变成 `ext:Goal`、`ext:Activity`。
+        namespace = namespace or (ontology_iri if ontology_iri.endswith(("#", "/"))
+                                  else ontology_iri + "#")
     # label / shortName 都**只在「模块 IRI 主体」的那条语句里**找（避免抓到类/属性的 label）
     body = head
     if ontology_iri:

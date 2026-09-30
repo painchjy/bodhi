@@ -2,6 +2,29 @@
 
 > 都是 2026-09 这轮真实故障，含"现象 / 日志特征 / 根因 / 修法 / 验证"。
 
+## 图库/产物/wiki 里的类前缀全变成 `ext:`（应为 `bmm:` / `ea:`）
+
+**症状**：wiki 类页标题变成 `资产（ext:Asset）`、`活动（ext:Activity）`；Neo4j 节点
+`c.prefix='ext'`、`c.prefixed='ext:Goal'`；`artifacts/json_schema/*.json` 枚举是 `ext:*`。
+
+**根因（2026-09-30）**：TTL 只用**默认前缀** `@prefix : <http://example.org/bmm#>` 时，
+`config._spec_from_ttl()` 取不到「指向本模块命名空间的命名前缀」，于是拿 ontology IRI 当 namespace
+—— 结果是 `http://example.org/bmm`（**少一个 `#`**）。而 `loader.build_prefix_map()` 的键就是
+`spec.namespace`，`namespace_of('…/bmm#Goal')` 返回的是 `…/bmm#` → **查不中** →
+三处 `prefix_map.get(namespace_of(iri), "ext")` 一律落到硬编码兜底 **`"ext"`**。
+
+**修法（已固化）**：
+1. `_spec_from_ttl()`：namespace 统一成命名空间形式（无分隔符则补 `#`），与 `inspect_ttl()` 一致。
+2. `loader.build_prefix_map()`：`spec.namespace` 不带分隔符时**同时登记 `…/x#` 与 `…/x/`** 两个键（双保险）。
+3. 三处 `"ext"` 兜底改为**模块名**（`module_key`）；`emitters/_common.py` 的 `sdc_name()` 同理。
+   以后绝不会再出现来路不明的 `ext:`。
+4. 关系页目录段也统一用 TTL 短名（`module_label=(module.short_label or key)`），
+   否则改短名后关系页留在旧目录里（表现为旧模块目录清不掉）。
+
+**验收**：`grep -c 'ext:' artifacts/neo4j/10_ontology.cypher` → **0**（`bmm:` 103 / `ea:` 30）；
+Neo4j `MATCH (c:BodhiOntClass) RETURN c.module, c.prefix, count(*)` → `bmm/bmm/30`、`ea/ea/9`；
+目录 12 行、页 112。
+
 ## 上传成功但「结果面板」全是空白（本模块类/属性/执行语句没有数字）
 
 **症状**：`POST /bodhi/ontology/upload` 返回 200、导入确实成功，但前端结果面板显示
