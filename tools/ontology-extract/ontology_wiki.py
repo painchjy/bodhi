@@ -356,7 +356,7 @@ class WikiBuilder:
 
         self.add(slug=slug_class(module["key"], name),
                  title="%s（%s）" % (label, name), page_type=TYPE_CLASS,
-                 module_label=module["key"], group="本体类",
+                 module_label=(module.get("short_label") or module["key"]), group="本体类",
                  content="\n".join(lines).rstrip() + "\n",
                  summary=(cls.get("definition") or "")[:400]
                          or "%s 模块的本体类 %s" % (module["label"], name),
@@ -476,7 +476,7 @@ class WikiBuilder:
                   % (key, TOOL_TAG, self.generated_at), ""]
 
         self.add(slug=slug_module(key), title="%s（%s）" % (label, key),
-                 page_type=TYPE_MODULE, module_label=key, group="",
+                 page_type=TYPE_MODULE, module_label=(module.get("short_label") or key), group="",
                  content="\n".join(lines).rstrip() + "\n",
                  summary="%s 模块：%d 个本体类、%d 条关系。" % (label, len(classes), len(rels)),
                  wiki_path=slug_module(key), out_slugs=out_slugs,
@@ -523,7 +523,7 @@ class WikiBuilder:
                   % (TOOL_TAG, self.generated_at), ""]
 
         self.add(slug=slug_property(key, name), title="%s（%s）" % (plabel, prefixed),
-                 page_type=TYPE_PROPERTY, module_label=key, group="数据属性",
+                 page_type=TYPE_PROPERTY, module_label=(module.get("short_label") or key), group="数据属性",
                  content="\n".join(lines).rstrip() + "\n",
                  summary=(prop.get("comment") or "")[:400]
                          or "%s 模块的本体属性 %s" % (label, prefixed),
@@ -544,7 +544,7 @@ class WikiBuilder:
                  "下面是喂给抽取提示词的**轻量版本体正文**（不含完整 TTL），"
                  "供智能体/人理解该模块的类与取值口径。", "", "---", "", text.strip(), ""]
         self.add(slug=slug, title="%s · 轻量版提示词" % label, page_type=TYPE_LIGHT,
-                 module_label=key, group="轻量版",
+                 module_label=(module.get("short_label") or key), group="轻量版",
                  content="\n".join(lines).rstrip() + "\n",
                  summary="%s 模块的轻量版提示词全文（%d 字符）。" % (label, len(text)),
                  wiki_path=slug, out_slugs=[slug_module(key)],

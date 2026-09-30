@@ -176,6 +176,23 @@ def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "",
             notes.append("模块 %s：上传的 TTL 可解析" % module)
         except Exception as exc:  # noqa: BLE001
             missing.append({"module": module, "missing": [str(ttl_path)], "error": str(exc)[:300]})
+    # **模块身份校验**（用户口径 2026-09-30）：短名必须来自 TTL 的 `bodhi:shortName`，
+    # 且 ≤ SHORT_NAME_MAX、不含 `/`；不合格 → 拒绝导入（不落真源、不删任何数据）。
+    from ontology_compiler.config import SHORT_NAME_MAX  # noqa: PLC0415
+    for key in keys:
+        spec = mods.get(key)
+        short = (getattr(spec, "short_label", "") or "").strip() if spec else ""
+        if not short:
+            missing.append({"module": key, "missing": ["`bodhi:shortName`（TTL 未声明模块短名）"],
+                            "hint": '在本体 IRI 上加一行：<%s> bodhi:shortName "%s" .'
+                                    % (getattr(spec, "ontology_iri", "") or ("http://example.org/%s" % key), key)})
+        elif len(short) > SHORT_NAME_MAX:
+            missing.append({"module": key,
+                            "missing": ["`bodhi:shortName` 超长：%r（%d 字符 > 上限 %d）"
+                                        % (short, len(short), SHORT_NAME_MAX)],
+                            "hint": "短名会被前端截断导致目录下的页查不到；请改短（建议用模块名）"})
+        elif "/" in short:
+            missing.append({"module": key, "missing": ["`bodhi:shortName` 不能含 /"]})
     hints: list[str] = []
     if missing:
         seen_dir = sorted(p.name for p in ONTOLOGY_DIR.glob("*.ttl")) if ONTOLOGY_DIR.is_dir() else []

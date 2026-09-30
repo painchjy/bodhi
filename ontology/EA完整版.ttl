@@ -299,3 +299,6 @@ bmm:BusinessProcess rdfs:subClassOf [
 #
 # 实际使用时，请将 bmm: 命名空间指向标准 BMM 本体 URI，
 # 并确保与已有的 BMM 实例数据整合。
+
+# 模块短名（目录名/列表名；≤16 字符，导入时校验）
+<http://example.org/ea> bodhi:shortName "ea" .

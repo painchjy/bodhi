@@ -619,3 +619,5 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "每一项评估必须且只能属于优势、劣势、机会、威胁中的一种"
 ] .
 
+# 模块短名（目录名/列表名；≤16 字符，导入时校验）
+<http://example.org/bmm> bodhi:shortName "bmm" .

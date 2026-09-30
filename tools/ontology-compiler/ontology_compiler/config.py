@@ -34,6 +34,9 @@ ONTOLOGY_DIR = REPO_ROOT / "ontology"
 EXTENSIONS_DIR = ONTOLOGY_DIR / "extensions"
 # 上传真源目录（用户口径 2026-09-30：上传的 TTL 落这里，不再放 extensions/）
 SOURCES_DIR = ONTOLOGY_DIR / "sources"
+# **模块短名上限**（用户口径 2026-09-30）：TTL 里声明的 `bodhi:shortName`
+# 必须存在且不超过这个长度（目录名/列表名都用它；太长会被前端截断）。
+SHORT_NAME_MAX = 16
 LEXICON_DIR = ONTOLOGY_DIR / "lexicon"
 SHAPES_DIR = ONTOLOGY_DIR / "shapes"
 QUERIES_DIR = ONTOLOGY_DIR / "queries"
@@ -191,8 +194,8 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
         "bmm": ModuleSpec(
             key="bmm",
             prefix="bmm",
-            label="BMM 业务动机模型",
-            short_label="BMM",
+            label="",            # 显示名一律来自 TTL（rdfs:label）
+            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
             ontology_iri="http://example.org/bmm",
             namespace=NS["bmm"],
             files=(ONTOLOGY_DIR / "BMM完整版.ttl",),
@@ -202,8 +205,8 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
         "ea": ModuleSpec(
             key="ea",
             prefix="ea",
-            label="EA 企业架构",
-            short_label="EA",
+            label="",            # 显示名一律来自 TTL（rdfs:label）
+            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
             ontology_iri="http://example.org/ea",
             namespace=NS["ea"],
             files=(ONTOLOGY_DIR / "EA完整版.ttl",),
@@ -213,8 +216,8 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
         "ea-service": ModuleSpec(
             key="ea-service",
             prefix="easvc",
-            label="EA 服务契约扩展",
-            short_label="EA-SVC",
+            label="",            # 显示名一律来自 TTL（rdfs:label）
+            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
             ontology_iri="http://example.org/bodhi/ext/ea-service",
             namespace=NS["easvc"],
             files=(SOURCES_DIR / "ea-service.ttl",),
@@ -224,8 +227,8 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
         "ea-ownership": ModuleSpec(
             key="ea-ownership",
             prefix="eaown",
-            label="EA 所有权与控制关系扩展",
-            short_label="EA-OWN",
+            label="",            # 显示名一律来自 TTL（rdfs:label）
+            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
             ontology_iri="http://example.org/bodhi/ext/ea-ownership",
             namespace=NS["eaown"],
             files=(SOURCES_DIR / "ea-ownership.ttl",),
@@ -235,8 +238,8 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
         "bmmfd": ModuleSpec(
             key="bmmfd",
             prefix="bmmfd",
-            label="BMM 规则可执行化扩展",
-            short_label="BMMFD",
+            label="",            # 显示名一律来自 TTL（rdfs:label）
+            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
             ontology_iri="http://example.org/bodhi/ext/bmmfd",
             namespace=NS["bmmfd"],
             files=(SOURCES_DIR / "bmmfd.ttl",),
@@ -262,28 +265,45 @@ def _spec_from_ttl(path: pathlib.Path, key: str, base: ModuleSpec | None = None)
         if ns.rstrip("#/").endswith("/%s" % key):
             prefix = prefix or name
             namespace = namespace or ns
-    m = re.search(r"<([^>]+)>\s+a\s+owl:Ontology", head)
+    m = re.search(r"<([^>]+)>\s+(?:a|rdf:type)\s+owl:Ontology", head)
     if m:
         ontology_iri = m.group(1)
         namespace = namespace or ontology_iri
+    # label / shortName 都**只在「模块 IRI 主体」的那条语句里**找（避免抓到类/属性的 label）
+    body = head
+    if ontology_iri:
+        seg = re.search(r"<%s>\s+(.{0,600}?)\." % re.escape(ontology_iri), head, re.S)
+        if seg:
+            body = seg.group(1)
+    # **显示名（不限长）**：rdfs:label / bodhi:label —— 只用于模块说明页展示
     label = ""
-    for pat in (r'bodhi:label\s+"([^"]+)"', r'rdfs:label\s+"([^"]+)"', r'rdfs:label\s+"([^"]+)"@zh'):
-        m = re.search(pat, head)
+    for pat in (r'bodhi:label\s+"([^"]+)"', r'rdfs:label\s+"([^"]+)"'):
+        m = re.search(pat, body)
         if m:
             label = m.group(1)
             break
+    # **短名（目录名/列表名）**：`bodhi:shortName`，必须 ≤ SHORT_NAME_MAX（导入/编译时校验，不合格拒绝）。
+    # 不再有任何代码内置的兜底显示名 —— TTL 是唯一真源。
+    # 短名可以写在模块语句里，也可以是文件尾部独立语句 `<模块IRI> bodhi:shortName "x" .`
+    m = None
+    if ontology_iri:
+        m = re.search(r"<%s>[^.]*?\bbodhi:shortName\s+\"([^\"]*)\"" % re.escape(ontology_iri),
+                      head, re.S)
+    if m is None:
+        m = re.search(r'bodhi:shortName\s+"([^"]*)"', head)
+    short_name = (m.group(1).strip() if m else "")
     if base is not None:
-        # 内置模块：**显示名一律用内置清单的 label**（2026-09-30 事故：TTL 里的 rdfs:label 很长
-        # 如「BMM 扩展本体（含信息来源追踪与枚举类型）」，前端拼 `category_path` 时会把长目录名**截断**
-        # （实测少掉末尾的「）」）→ 目录下的页永远查不到、列表空白）。
-        # prefix/iri/namespace 仍以 TTL 为准（TTL 是本体真源），只有展示名以出厂名为准。
-        return ModuleSpec(key=key, prefix=prefix or base.prefix, label=base.label,
-                          short_label=base.short_label, ontology_iri=ontology_iri or base.ontology_iri,
+        # 内置模块：**显示名以 TTL 为准**（`rdfs:label`/`bodhi:label`），内置清单的 label 只作兜底 ——
+        # 用户口径：不要让任何"不是从 TTL 生成"的配置项混进来。
+        # 目录名太长被前端截断的问题**已在目录段解决**：目录名用**模块 key**（短），
+        # label 只出现在页标题与 wiki_path 里（悬浮/点开可见，不参与目录匹配）。
+        return ModuleSpec(key=key, prefix=prefix or base.prefix, label=label,
+                          short_label=short_name, ontology_iri=ontology_iri or base.ontology_iri,
                           namespace=namespace or base.namespace, files=(path,),
                           kind=base.kind, affects=base.affects, light_file=base.light_file,
                           requires=base.requires)
-    return ModuleSpec(key=key, prefix=prefix or key, label=label or key,
-                      short_label=(prefix or key).upper(), ontology_iri=ontology_iri,
+    return ModuleSpec(key=key, prefix=prefix or key, label=label,
+                      short_label=short_name, ontology_iri=ontology_iri,
                       namespace=namespace, files=(path,), kind="extension",
                       file_note="文件即模块（由 `sources/%s` 生成，无注册表）" % path.name)
 
@@ -298,8 +318,15 @@ def build_modules() -> dict[str, ModuleSpec]:
     for key, spec in _builtin_specs().items():
         files, note = _resolve_module_files(key, spec.files)
         from dataclasses import replace as _replace  # noqa: PLC0415
-        out[key] = _replace(spec, files=files, file_note=note,
-                            requires=spec.requires or BUILTIN_REQUIRES.get(key, ()))
+        requires = spec.requires or BUILTIN_REQUIRES.get(key, ())
+        # **显示名/短名一律从 TTL 解析**（用户口径：不允许任何非 TTL 的配置项）——
+        # 没有 sources/<key>.ttl 时，就用出厂 TTL（内清单里的 files，已做候选回退）。
+        ttl = next((p for p in files if p.is_file()), None)
+        if ttl is not None:
+            parsed = _spec_from_ttl(ttl, key, spec)
+            out[key] = _replace(parsed, files=files, file_note=note, requires=requires)
+        else:
+            out[key] = _replace(spec, files=files, file_note=note, requires=requires)
     for path in sorted(SOURCES_DIR.glob("*.ttl")) if SOURCES_DIR.is_dir() else []:
         key = path.name[: -len(".ttl")].strip().lower()
         if not key or key.startswith("_"):
