@@ -328,7 +328,22 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
         if (DELIVERY / fname).is_file():
             shutil.copy2(DELIVERY / fname, d / fname)
     copy_tree(REPO / "docs", d / "docs")
-    copy_tree(REPO / "ontology", d / "ontology")          # uploads/ 由 copy_tree 默认排除
+    # 本体真源（2026-09-30）：`ontology/sources/` 是**上传真源**；若它与根目录的出厂副本
+    # （`BMM完整版.ttl` / `EA完整版.ttl`）内容相同，则**只带 sources/ 那份** ——
+    # 同一份真源只放一个路径（否则去重断言会拦下"上传 bmm = 随包那份"的常见情形）。
+    import hashlib as _hashlib
+
+    def _sha(p: pathlib.Path) -> str:
+        return _hashlib.sha256(p.read_bytes()).hexdigest()
+
+    src_dir = REPO / "ontology" / "sources"
+    src_hashes = {_sha(p) for p in src_dir.glob("*.ttl")} if src_dir.is_dir() else set()
+    dup_root = tuple(p.name for p in (REPO / "ontology").glob("*完整版.ttl")
+                     if _sha(p) in src_hashes)
+    copy_tree(REPO / "ontology", d / "ontology",
+              skip_names=("uploads",), skip_files=dup_root + ("_registry.json.tmp",))
+    if dup_root:
+        print("   ontology/：跳过与 sources/ 内容相同的出厂副本 %s（真源只带一份）" % "、".join(dup_root))
     copy_tree(seed_dir / "sql", d / "sql")
     copy_tree(seed_dir / "seed", d / "seed")
     copy_tree(REPO / "tools" / "delivery", d / "tools" / "delivery")
