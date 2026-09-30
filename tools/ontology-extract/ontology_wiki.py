@@ -258,18 +258,17 @@ class WikiBuilder:
         self.seen.add(slug)
         # 空 group（模块页/总览页）→ 直接落 module_label 这一层，**不再多嵌套一层同名目录**
         # （2026-09-30 用户实测：目录显示数量但展开没有页面 —— 页被挂到了 `…/总览/总览`、`…/模块/模块`）
-        # **恢复含库名的一级**（2026-09-30 回滚）：早上那版（category_path 含"企业本体模型"）
-        # 前端**能正常列出目录下的页**；下午把它缩成 2 段后页面列表反而打不开。
-        # 保留的修复只有两条：① 空 group 不再多套一层（模块页/总览页直落目录）② wiki_path=目录路径/标题。
-        cat = ["企业本体模型", module_label] + ([group] if group else [])
+        # **根级 = 模块短名**（用户口径 2026-09-30）：目录名用模块 key（`bmm`/`ea`），
+        # ① 不再有"企业本体模型"这个无意义的根；② 名字短，避免前端拼 `category_path` 时截断
+        # （长名曾被截掉末尾「）」，导致目录下的页永远查不到、列表空白）。
+        # 完整名称在**页标题**与 **wiki_path**（"目录路径/标题"）里，悬浮/点开即可看到。
+        cat = [module_label] + ([group] if group else [])
         self.pages.append({
             "slug": slug, "title": title, "page_type": page_type,
             "content": content, "summary": summary,
             "category_path": cat,
-            # **回滚为 slug**（2026-09-30 对照实验）：早上"能显示页"的那版就是 slug；
-            # 改成「目录路径/标题」后前端列表反而打不开（本库与业务库取值来源不同：
-            # 业务库页由 ke_import 写、本库页由本投影器写，前者才是老路径的既有行为）。
-            "wiki_path": wiki_path,
+            # 「目录路径/标题」：目录名短（bmm/ea），**完整中文名在标题里** → 悬浮/点开可见
+            "wiki_path": "/".join([str(x) for x in cat] + [title]),
             "out_links": sorted({s for s in out_slugs if s}),
             "page_metadata": {"ontology": metadata},
         })
@@ -357,7 +356,7 @@ class WikiBuilder:
 
         self.add(slug=slug_class(module["key"], name),
                  title="%s（%s）" % (label, name), page_type=TYPE_CLASS,
-                 module_label=module["label"], group="本体类",
+                 module_label=module["key"], group="本体类",
                  content="\n".join(lines).rstrip() + "\n",
                  summary=(cls.get("definition") or "")[:400]
                          or "%s 模块的本体类 %s" % (module["label"], name),
@@ -401,7 +400,7 @@ class WikiBuilder:
 
         self.add(slug=slug_relation(module["key"], name),
                  title="%s（%s）" % (label, name), page_type=TYPE_RELATION,
-                 module_label=module["label"],
+                 module_label=module["key"],
                  group="跨模块桥" if is_bridge else "本体关系",
                  content="\n".join(lines).rstrip() + "\n",
                  summary=(rel.get("definition") or "")[:400]
@@ -477,7 +476,7 @@ class WikiBuilder:
                   % (key, TOOL_TAG, self.generated_at), ""]
 
         self.add(slug=slug_module(key), title="%s（%s）" % (label, key),
-                 page_type=TYPE_MODULE, module_label=label, group="",
+                 page_type=TYPE_MODULE, module_label=key, group="",
                  content="\n".join(lines).rstrip() + "\n",
                  summary="%s 模块：%d 个本体类、%d 条关系。" % (label, len(classes), len(rels)),
                  wiki_path=slug_module(key), out_slugs=out_slugs,
@@ -524,7 +523,7 @@ class WikiBuilder:
                   % (TOOL_TAG, self.generated_at), ""]
 
         self.add(slug=slug_property(key, name), title="%s（%s）" % (plabel, prefixed),
-                 page_type=TYPE_PROPERTY, module_label=label, group="数据属性",
+                 page_type=TYPE_PROPERTY, module_label=key, group="数据属性",
                  content="\n".join(lines).rstrip() + "\n",
                  summary=(prop.get("comment") or "")[:400]
                          or "%s 模块的本体属性 %s" % (label, prefixed),
@@ -545,7 +544,7 @@ class WikiBuilder:
                  "下面是喂给抽取提示词的**轻量版本体正文**（不含完整 TTL），"
                  "供智能体/人理解该模块的类与取值口径。", "", "---", "", text.strip(), ""]
         self.add(slug=slug, title="%s · 轻量版提示词" % label, page_type=TYPE_LIGHT,
-                 module_label=label, group="轻量版",
+                 module_label=key, group="轻量版",
                  content="\n".join(lines).rstrip() + "\n",
                  summary="%s 模块的轻量版提示词全文（%d 字符）。" % (label, len(text)),
                  wiki_path=slug, out_slugs=[slug_module(key)],
