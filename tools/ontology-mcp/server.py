@@ -3819,7 +3819,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             "/bodhi/ontology/upload":
                 lambda b: ke_admin.upload_ttl(b.get("filename", ""), b.get("content", ""),
                                               b.get("module_id", ""),
-                                              bool(b.get("project_wiki", False)),
+                                              # 默认 True：上传会级联删下游，必须重投影（否则目录空）
+                                              bool(b.get("project_wiki", True)),
                                               b.get("kb_id", ""),
                                               # 2026-09-24：默认"落真源 + 编译并生效"（可在前端关掉）
                                               write_source=bool(b.get("write_source", True)),

@@ -791,6 +791,11 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     """
     import time
 
+    # **强制重投影**（2026-09-30 事故）：上传走的第④步是"级联删除本模块+下游"，
+    # 若此处 project_wiki=False，页被删掉却不再重建 → 前端目录在、点开全空（用户实测）。
+    # 因此无论调用方传什么，上传路径一律重投影。
+    project_wiki = True
+
     content = content or ""
     if not content.strip():
         raise ValueError("上传内容为空")
