@@ -256,13 +256,17 @@ class WikiBuilder:
             print("[ontology-wiki] 跳过重复 slug：%s" % slug)
             return
         self.seen.add(slug)
+        # 空 group（模块页/总览页）→ 直接落 module_label 这一层，**不再多嵌套一层同名目录**
+        # （2026-09-30 用户实测：目录显示数量但展开没有页面 —— 页被挂到了 `…/总览/总览`、`…/模块/模块`）
+        cat = ["企业本体模型", module_label] + ([group] if group else [])
         self.pages.append({
             "slug": slug, "title": title, "page_type": page_type,
             "content": content, "summary": summary,
-            # 空 group（模块页/总览页）→ 直接落 module_label 这一层，**不再多嵌套一层同名目录**
-            # （2026-09-30 用户实测：目录显示数量但展开没有页面 —— 页被挂到了 `…/总览/总览`、`…/模块/模块`）
-            "category_path": ["企业本体模型", module_label] + ([group] if group else []),
-            "wiki_path": wiki_path,
+            "category_path": cat,
+            # `wiki_path` **必须**是「目录路径/标题」——前端**按 wiki_path 把页挂到目录上**
+            # （业务库页就是这样：`系统与规则台账/主系统/<标题>`）。
+            # 旧实现写的是 slug（`ontology/bmm/assessment`）→ 目录树里第二层展开为空（2026-09-30 用户实测）。
+            "wiki_path": "/".join([str(x) for x in cat] + [title]),
             "out_links": sorted({s for s in out_slugs if s}),
             "page_metadata": {"ontology": metadata},
         })
