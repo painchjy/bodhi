@@ -155,6 +155,12 @@ def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "",
     missing: list[dict] = []
     notes: list[str] = []
     for key in keys:
+        if ttl_path is not None and key == module:
+            # **正在上传的这份 TTL 就是该模块的定义文件** —— 新模块（清单里还没有）也能上传。
+            # 旧实现这里报「（清单里没有这个模块）」→ 全新模块永远传不进来（2026-09-30 发现）。
+            notes.append("模块 %s：本次上传的 TTL 作为其定义文件（落 %s）"
+                         % (key, SOURCES_DIR / ("%s.ttl" % key)))
+            continue
         spec = mods.get(key)
         if spec is None:
             missing.append({"module": key, "missing": ["（清单里没有这个模块）"]})
@@ -180,6 +186,10 @@ def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "",
     # 且 ≤ SHORT_NAME_MAX、不含 `/`；不合格 → 拒绝导入（不落真源、不删任何数据）。
     from ontology_compiler.config import SHORT_NAME_MAX  # noqa: PLC0415
     for key in keys:
+        if ttl_path is not None and key == module:
+            continue        # 本模块以**上传的这份 TTL** 为准（紧接着单独校验）——
+                            # 否则会出现"磁盘上的旧真源/出厂 TTL 有 shortName，
+                            # 上传的这份没有却照样放行"的漏洞（2026-09-30 用户实测）。
         spec = mods.get(key)
         short = (getattr(spec, "short_label", "") or "").strip() if spec else ""
         if not short:
@@ -193,6 +203,33 @@ def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "",
                             "hint": "短名会被前端截断导致目录下的页查不到；请改短（建议用模块名）"})
         elif "/" in short:
             missing.append({"module": key, "missing": ["`bodhi:shortName` 不能含 /"]})
+    # **上传件自身的身份校验**（用户口径 2026-09-30：TTL 是唯一真源，不合格就拒绝导入）——
+    # 直接解析**你上传的这份** TTL：`bodhi:shortName` 必填、≤ SHORT_NAME_MAX、不含 `/`。
+    if module and ttl_path is not None:
+        from ontology_compiler.config import _spec_from_ttl  # noqa: PLC0415
+        try:
+            up = _spec_from_ttl(pathlib.Path(ttl_path), module, None)
+            short = (up.short_label or "").strip()
+            iri = up.ontology_iri or ("http://example.org/%s" % module)
+            if not short:
+                missing.append({
+                    "module": module,
+                    "missing": ["`bodhi:shortName`（**这次上传的 TTL** 未声明模块短名）"],
+                    "hint": ('在 TTL 里加一行（短名 = 目录名，≤%d 字符）：'
+                             '<%s> bodhi:shortName "%s" .' % (SHORT_NAME_MAX, iri, module))})
+            elif len(short) > SHORT_NAME_MAX:
+                missing.append({
+                    "module": module,
+                    "missing": ["`bodhi:shortName` 超长：%r（%d 字符 > 上限 %d）"
+                                % (short, len(short), SHORT_NAME_MAX)],
+                    "hint": ("目录名太长会被前端截断，导致该目录下的页查不到；"
+                             "请改短（建议直接用模块名 %s）" % module)})
+            elif "/" in short:
+                missing.append({"module": module,
+                                "missing": ["`bodhi:shortName` 不能含 `/`（目录层级分隔符）"],
+                                "hint": "把 / 换成空格或连字符"})
+        except Exception as exc:  # noqa: BLE001
+            notes.append("模块 %s：身份解析失败（%s）" % (module, str(exc)[:120]))
     hints: list[str] = []
     if missing:
         seen_dir = sorted(p.name for p in ONTOLOGY_DIR.glob("*.ttl")) if ONTOLOGY_DIR.is_dir() else []
