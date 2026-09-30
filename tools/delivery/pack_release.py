@@ -95,6 +95,8 @@ def copy_tree(src: pathlib.Path, dst: pathlib.Path, ignore_pycache: bool = True,
         for n in names:
             if n == "archive" or n in skip_names or n in skip_files:
                 out.append(n)
+            elif n.startswith("~$"):          # Excel/Office 临时锁文件（0 字节，内容相同会撞去重断言）
+                out.append(n)
             elif cur == src and n in skip_top:
                 out.append(n)
             elif ignore_pycache and (n == "__pycache__" or n.endswith(".pyc")):
