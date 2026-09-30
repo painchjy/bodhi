@@ -107,13 +107,13 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 
 | # | 检查 | 期望 |
 |---|---|---|
-| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（34 个）` + `skills() OK（5 个）` |
+| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（34 个）` + `skills() OK（3 个）` |
 | 2 | 智能体一轮只读任务 | `logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录（模型侧工具数见 `AGENTS-SQL.md`） |
 | 3 | 本体模型库 | **178 页**（类 50 / 本体关系 83 / **数据属性 36** / 模块 6 / 轻量版 2 / 索引 1）；目录每模块下只有「数据属性」「本体关系」；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
 | 4 | 业务库上传+抽取 | 页面类型都在本体里，`source_refs` 非空（无 C1）|
 | 5 | `curl <mcp>/bodhi/audit?kb_id=<业务库>` | 无 **C1/C3** 类"无来源"发现；A1/A2 若有，按提示修 |
 | 6 | 前端 | 登录正常；本体图谱 tab 出图；关系面板出边可改；类型下拉含 `easvc:*` |
-| 7 | 设计流程 | 让智能体按 `service_detailed_design` 技能做一个服务，末尾调 `service_overview(apply=true)` → 生成/刷新「IT 服务详细设计总览」页 |
+| 7 | 设计流程 | **设计类技能（概要/详细设计）重构中，本版不含** —— `service_overview` 等工具仍在；重构完成前由用户在对话里直接说明步骤 |
 | 8 | **结构化批量建模**（`structured_modeling` 技能）| 给一张 Excel + 中文说明：`import_probe` → 逐目标 `import_plan`/`import_apply` → `import_state` 的 `remaining` 为空；页有「定义/属性/原文依据」；**前端目录里能看到这批页**（`wiki_path`=目录路径/标题、`folder_id` 非空）|
 | 9 | **文档评审**（`document_review` 技能）| 选文档 + 选策略：`rules_of_policy` 出规则清单（级别/范围/实现方式）→ 逐条判（LLM软规则 / `graph_query`）→ `review_apply` 写出 `review/<文档>-<策略>` 页（逐条结论 + 逐字证据 + `promotesDirective → 策略页`）|
 | 10 | 巡检清理 | `audit_purge(kb_id, dry_run=true)` 先看 `per_kind` 清单（导入页/评审页应被**豁免**）→ 确认后再执行（**一步硬删**，不可逆）|

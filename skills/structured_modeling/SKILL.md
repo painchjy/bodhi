@@ -4,26 +4,34 @@ name: 结构化数据批量建模（Excel / CSV → 本体类与关系）
 description: 读用户对表格结构的中文描述，把列对应到本体的类/数据属性、把外键列对应到关系，然后一次一个类或一条关系地批量建页
 when: 用户给出「结构化文件（Excel/CSV）」并说明「这些列是什么意思」「要建到哪个知识库」时
 models: [bmm, ea]
-stages: [probe, plan, apply, verify]
-scope:
-  classes: [bmm:MainSystem, bmm:SubSystem, bmm:HardwareAsset, bmm:ITAsset, bmm:OrganizationUnit,
-            bmm:BusinessPolicy, bmm:BusinessRule, bmm:OperativeBusinessRule, bmm:StructuralBusinessRule]
-  relations: [bmm:mainSystemContainsSubSystem, bmm:mainSystemBelongsToOrganizationUnit,
-              bmm:subSystemBelongsToOrganizationUnit, bmm:hardwareAssetBelongsToSubSystem,
-              bmm:isDerivedFrom, bmm:isBasisFor, bmm:guides, bmm:hasEnforcementLevel]
+default_model: bmm
+stages: [model, probe, plan, apply, verify]
 tools: [import_probe, import_plan, import_apply, import_state, ontology_types, audit_scan]
-version: 1
+version: 2
 ---
 
 # 结构化数据批量建模（技能）
 
-## 0. 分工（**第一原则**）
+## 0. 第一步：先定**模型范围**（单选）
+
+> **本技能只限模型、不限本体类型**（用户口径 2026-09-30）：类/关系/数据属性一律用
+> `ontology_types("<模型>")` **现查**，不写死在技能里 —— 换模型/本体演进时技能不用改。
+
+1. **模型（单选）**：先和用户确认这批页建到**哪个模型**（`models: [bmm, ea]`，默认 `bmm`）。
+   - **一律单选底层模型**；一张表一般只落一个模型。
+   - 跨模型场景（如系统/资源在 `ea`、策略/规则在 `bmm`）：**单选底层模型**，再按**依赖**
+     引入关联模型的本体类型（`ontology_types("<模型>")` 回执里有 `requires`/`affects` 线索）。
+   - **不要**把类清单写死在流程里；每一步的目标类型都要 `ontology_types` 查证（工具会拒绝本体里没有的类型，`B1`）。
+2. 定完模型再往下走：探表 → 逐目标 plan → apply → 记账。
+
+### 分工（**第一原则**）
 
 - **你（智能体）负责"理解"**：从**用户对表的中文描述** + 表头/抽样，判断这份表里有哪些**类**、哪些**关系**、
   哪列是键、哪列对应哪个**数据属性**、哪列是**外键**（指向另一个类）。
 - **工具负责"执行"**：你把这些结论作为**参数**传给工具；工具只做**确定性的事**——读表、校验（类/属性是否已声明、
   键是否唯一、外键能否命中已有页）、按模板建页、写关系、记账。**工具不做语义推断**。
-- 所以：换一份表不用换工具，**只换参数**。你不确定某类/某属性是否存在时，先 `ontology_types` 查（或看本技能 front-matter 的 scope）。
+- 所以：换一份表不用换工具，**只换参数**。你不确定某类/某属性是否存在时，先 `ontology_types("<模型>")` 查
+  （**本技能不写死类型清单**；类型由第 0 步选定的模型决定，关联模型按依赖再查）。
 
 ## 1. 铁律（用户口径）
 

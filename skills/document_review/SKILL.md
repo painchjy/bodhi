@@ -4,22 +4,27 @@ name: 文档评审（按业务策略下的业务规则逐条评）
 description: 选定文档（知识库文档或附件）→ 选业务策略 → 按该策略下的业务规则逐条评审：LLM软规则交大模型判定，图检索规则生成图检索语句分析，有参考规范先取规范；每条规则只在它的适用范围内（一般=文档章节）判断
 when: 用户要"按某策略/规范评审这份文档（方案、需求、设计）"时
 models: [bmm]
-stages: [pick, rules, scope, judge, report]
-scope:
-  classes: [bmm:BusinessPolicy, bmm:OperativeBusinessRule, bmm:StructuralBusinessRule, bmm:BusinessRule]
-  relations: [bmm:isDerivedFrom, bmm:isBasisFor, bmm:guides, bmm:hasEnforcementLevel]
+stages: [model, pick, rules, judge, report]
 tools: [rules_of_policy, graph_query, reference_lookup, review_apply, doc_outline, get_document_info,
-        list_knowledge_chunks, grep_chunks, wiki_search, wiki_read_page, audit_scan]
-version: 1
+        list_knowledge_chunks, grep_chunks, wiki_search, wiki_read_page, ontology_types, audit_scan]
+version: 2
 ---
 
 # 文档评审（技能）
 
-## 0. 输入（先问清三件事）
+## 0. 第一步：先定**模型范围**（单选），再问清三件事
 
-1. **文档**：要评审的**知识库文档或附件**（`knowledge_id` / 文件名）——用户常说"评审《XXX 方案》"。
-2. **策略**：用哪条**业务策略**（`bmm:BusinessPolicy`）评审（如"应用架构设计原则""技术架构设计原则"）。
-3. **目标库**：结论页写到哪个知识库（默认与文档同库）。
+> **本技能只限模型、不限本体类型**（用户口径 2026-09-30）：类型一律用 `ontology_types(<model>)` **现查**，
+> 不写死在技能里 —— 模型/本体演进时技能不用改。
+
+1. **模型（单选）**：先和用户确认**用哪个模型**评审（`models: [bmm]` 只是默认面）。
+   - **一律以"底层模型"为单位单选**（通常 = 业务模型的底座，如 `bmm`）。
+   - 评审**可能跨模型**：这时仍**单选底层模型**，再按**依赖**把需要的关联本体类型引进来：
+     `ontology_types("<模型>")` 给出该模型的类 / 关系 / 数据属性（含 `requires`/`affects` 依赖线索），
+     按依赖再查关联模型（如 `ontology_types("ea")`）即可 —— **不要**在流程里写死类清单。
+2. **文档**：要评审的**知识库文档或附件**（`knowledge_id` / 文件名）——用户常说"评审《XXX 方案》"。
+3. **策略**：用哪条**业务策略**评审（具体类先 `ontology_types("<模型>")` 查，例：`bmm:BusinessPolicy`）。
+4. **目标库**：结论页写到哪个知识库（默认与文档同库）。
 
 ## 1. 流程（一条规则一轮，**不要全文通读**）
 

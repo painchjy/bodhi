@@ -70,9 +70,15 @@ done
 > 工具面的**单一来源**是本仓 `deploy/weknora-fork/gen_agents.py`（`TOOLS_BY_AGENT`）与下面的导出 SQL；
 > 数字随工具面演进会变，验收时以 SQL 执行后的 `jsonb_array_length(config->'allowed_tools')` 为准。
 
-技能（**5 个**）由 MCP 下发、**不写进提示词**：`domain_modeling` / `ea_overview_design` / `service_detailed_design` /
+技能（**3 个**）由 MCP 下发、**不写进提示词**：`domain_modeling`（领域知识建模）/
 `structured_modeling`（Excel/CSV → 本体类与关系，一次一个目标）/ `document_review`（按策略逐条评文档）
 （源在 `02-mcp-server/skills/<id>/SKILL.md`，改完即生效，无需重启/重新注册智能体）。
+
+> **技能只限「模型」、不限「本体类型」**（用户口径 2026-09-30）：front-matter 只写 `models:`（可加
+> `default_model:`），**不写 `scope.classes/relations`**。每个技能的第 0 步先与用户**明确模型范围**：
+> 一般**单选模型**；**评审 / 设计可能跨模型 → 单选底层模型**，再按**依赖**把需要的关联本体类型引进来；
+> 类/关系/数据属性一律 `ontology_types("<模型>")` 现查（关联线索见回执 `requires`/`affects`）。
+> 设计类技能（`ea_overview_design` 企架概要设计、`service_detailed_design` 服务详细设计）**已移除、待重构**。
 
 ## 3. 落库后立即验收
 

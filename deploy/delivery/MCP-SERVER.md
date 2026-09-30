@@ -252,7 +252,7 @@ initialize  OK（session=…）
 tools/list  OK（14 个）：list_pending_merges, resolve_pending_merge, ontology_types, skills, job_status,
                         service_overview, audit_scan, audit_plan, save_knowledge, doc_outline, extract_state,
                         link_candidates, list_link_candidates, resolve_link_candidate
-skills()    OK（3 个：domain_modeling / ea_overview_design / service_detailed_design）
+skills()    OK（3 个：document_review / domain_modeling / structured_modeling）
 ```
 
 > **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /

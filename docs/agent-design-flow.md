@@ -259,7 +259,7 @@ OWL 表达不了的（FK 配引用、写操作非幂等需说明、同属性被 
 
 > **落库必须带 `report.upstream`（服务页 + 报告页）**：新属性/操作页的 `source_refs` 从上游页继承
 > （`save_knowledge` 里 `report.slug` 或 `report.upstream` 任一有值即可），否则新页是"实例页无来源" → 巡检 **C1**（high）。
-> 完整样例见 `skills/service_detailed_design/EXAMPLE.json`（真实数据「身份三要素采集服务」：3 操作 / 5 属性 / 24 条边）。
+> 完整样例（**已随技能移除、待重构重建**）：原路径 `skills/service_detailed_design/EXAMPLE.json`（真实数据「身份三要素采集服务」：3 操作 / 5 属性 / 24 条边）。
 
 ### 10.3 派生一：`## CRUD 矩阵`（服务页，确定性渲染）
 落库后自动刷新（`server.refresh_crud_matrix`；跨页聚合：服务 → 操作 → 属性 + `crudKind` + `keyRole`）。
@@ -309,7 +309,7 @@ target 的 `## 本体关系` 行 + 同键的 `## 关系限定（边属性）` �
 - 踩到的坑（已修）：同一操作对同一属性给了**两条边**（一条 C、一条 R）→ `## 本体关系` 出现
   **两行完全相同** → 巡检 **A5**。修法：渲染层按 `(类型, 目标)` 去重、`## 关系限定` 按同键合并
   （`crudKind=C,R`），并在技能里明确"读写都用时写**一条边**"。
-  样例：`skills/service_detailed_design/examples/coupling_example.json`（14 节点 / 37 边）。
+  样例（**已随技能移除**）：原 `skills/service_detailed_design/examples/coupling_example.json`（14 节点 / 37 边）。
 
 ## 11. 技能驱动与合并智能体（2026-09-21）
 
@@ -328,12 +328,17 @@ app env `WEKNORA_SANDBOX_DOCKER_ENABLED=false` —— 原生技能不可用。
 好处：① 提示词只留"目录 + 纪律"，省 token；② 改技能**不用重新注册智能体**（mtime 缓存自动重读）；
 ③ 将来开沙箱后，**同一份 SKILL.md 可直接打成 bundle** 注册成原生技能（一份源两种呈现）。
 
-### 11.2 三个技能
+### 11.2 技能（现有 3 个）
 | id | 名称 | 源 | 模型（front-matter） | 阶段 |
 |---|---|---|---|---|
 | `domain_modeling` | 领域知识建模 | 文档 | `models: [ea, bmm]`，default `bmm` | `extract` |
-| `ea_overview_design` | 企架概要设计 | 知识图谱 + 文档 | `models: [ea]` | `report` → `graph` |
-| `service_detailed_design` | 服务详细设计 | 服务页 + 图谱 | `models: [ea-service, ea]` | `detail` |
+| `structured_modeling` | 结构化数据批量建模 | Excel/CSV + 中文说明 | `models: [bmm, ea]`，default `bmm` | `model` → `probe` → `plan` → `apply` → `verify` |
+| `document_review` | 文档评审 | 文档 + 业务策略 | `models: [bmm]` | `model` → `pick` → `rules` → `judge` → `report` |
+
+> **技能只限「模型」、不限「本体类型」**（用户口径 2026-09-30）：front-matter **不写** `scope.classes/relations`；
+> 每个技能第 0 步先与用户**单选模型**（评审/设计可能跨模型 → 单选底层模型），类型一律
+> `ontology_types("<模型>")` 现查、按依赖引入关联模型。
+> 设计类技能 `ea_overview_design` / `service_detailed_design` **已移除、待重构**（下方正文保留作设计记录）。
 
 新增技能 = 建目录写 `SKILL.md`（front-matter 必填 `id`/`name`/`when`），MCP 重启后自动出现在目录里，**无需改代码**。
 

@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 PROTOCOL = "2024-11-05"
-EXPECT_SKILLS = {"domain_modeling", "ea_overview_design", "service_detailed_design"}
+EXPECT_SKILLS = {"document_review", "domain_modeling", "structured_modeling"}
 
 
 def rpc(url: str, method: str, params: dict | None, session: str = "", rpc_id: int = 1,
