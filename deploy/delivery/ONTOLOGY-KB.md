@@ -110,7 +110,7 @@ curl -s "http://127.0.0.1:8765/bodhi/audit?kb_id=<业务库>" | head -c 400
 
 | 目录 | 角色 |
 |---|---|
-| `ontology/sources/` | **上传真源**：所有"上传/新增"的模块 TTL 落这里（`sources/<模块>.ttl`），登记表也在这里（`sources/_registry.json`，只存 prefix/label/短名等元数据） |
+| `ontology/sources/` | **真源**：所有模块 TTL 放这里（`sources/<模块>.ttl`）。**文件即模块** —— 编译直接扫目录、模块身份从 TTL 自身解析（`@prefix` / `owl:Ontology` / `rdfs:label`），**没有注册表**（`_registry.json` 已退役，2026-09-30 用户口径）|
 | `ontology/*完整版.ttl` | 随包自带的**基础模块**（bmm / ea）出厂版本 |
 | `ontology/lexicon/`、`queries/`、`shapes/` | 词表 / 图查询 / SHACL |
 
@@ -123,9 +123,9 @@ curl -s "http://127.0.0.1:8765/bodhi/audit?kb_id=<业务库>" | head -c 400
 ① 留痕      TTL → ontology/uploads/<时间戳>-<名>.ttl
 ② 预检      **只读**：本次编译范围内的模块文件是否齐 + 该 TTL 能否解析
             → 缺就**直接中止**（不删任何数据），并列出缺哪个文件、目录里现有哪些 TTL
-③ 落真源    → ontology/sources/<模块>.ttl（+ 登记元数据）
+③ 落真源    → ontology/sources/<模块>.ttl（**只写文件**；文件即模块，无需登记）
 ④ 级联删除  本模块 + **下游依赖**（依赖它的模块）：图库节点 / 本体库 wiki 页 /
-            **sources 下的真源文件** / **注册信息**（用户口径：文件没了 ⇒ 该模块的产物不该存在）
+            **sources 下的真源文件**（用户口径：文件没了 ⇒ 该模块的产物不该存在）
 ⑤ 编译      **只编本次范围 = 本模块 + 上游依赖闭包**
             上传 bmm → 只编 bmm；上传 ea → 编 bmm+ea（`EA完整版.ttl` 里有 29 处引用 `bmm:`）
 ⑥ 生效      按**编译产物**灌 Neo4j 投影 + 重投影本体库 wiki（默认开）
@@ -148,7 +148,7 @@ curl -s "http://127.0.0.1:8765/bodhi/audit?kb_id=<业务库>" | head -c 400
 ### 6.4 回执怎么看
 
 - `compile_scope` / `compile.module_scope`：**本次编译范围**（如 `["bmm"]`）；
-- `cascade_purge.modules` / `.files_removed` / `.registry_removed`：级联删掉的模块、真源文件、注册条目；
+- `cascade_purge.modules` / `.files_removed`：级联删掉的模块与其真源文件；
 - `compile.skipped_modules`：`repair`（编译全部）时**缺文件被跳过**的模块（要恢复：把 TTL 放回 `sources/` 再上传）；
 - `compiled.totals_*` 是**全量总数**（所有模块合计），与上次相同 ≠ 没生效；本次影响看 `per_module` / `modules_added`。
 

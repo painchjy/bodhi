@@ -246,113 +246,63 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
     }
 
 
+def _spec_from_ttl(path: pathlib.Path, key: str, base: ModuleSpec | None = None) -> ModuleSpec:
+    """**文件即模块**（用户口径 2026-09-30）：从 TTL 文件**自身**解析模块身份。
+
+    key = 文件名（`sources/ea.ttl` → `ea`）；prefix/label/iri 一律**从 TTL 里读**
+    （`@prefix <名>: <命名空间>` 指向本模块命名空间的那个；`<iri> a owl:Ontology`；`rdfs:label`/`bodhi:label`）。
+    **不看任何注册表** —— "每次编译从文件生成，而不是从注册信息发起"。
+    """
+    head = path.read_text(encoding="utf-8", errors="replace")
+    prefix, namespace, ontology_iri = "", "", ""
+    for m in re.finditer(r"@prefix\s+([A-Za-z0-9_.-]*)\s*:\s*<([^>]+)>", head):
+        name, ns = m.group(1), m.group(2)
+        if not name:
+            continue
+        if ns.rstrip("#/").endswith("/%s" % key):
+            prefix = prefix or name
+            namespace = namespace or ns
+    m = re.search(r"<([^>]+)>\s+a\s+owl:Ontology", head)
+    if m:
+        ontology_iri = m.group(1)
+        namespace = namespace or ontology_iri
+    label = ""
+    for pat in (r'bodhi:label\s+"([^"]+)"', r'rdfs:label\s+"([^"]+)"', r'rdfs:label\s+"([^"]+)"@zh'):
+        m = re.search(pat, head)
+        if m:
+            label = m.group(1)
+            break
+    if base is not None:
+        # 内置模块：沿用出厂的 prefix/label（除非 TTL 自己写了）
+        return ModuleSpec(key=key, prefix=prefix or base.prefix, label=label or base.label,
+                          short_label=base.short_label, ontology_iri=ontology_iri or base.ontology_iri,
+                          namespace=namespace or base.namespace, files=(path,),
+                          kind=base.kind, affects=base.affects, light_file=base.light_file,
+                          requires=base.requires)
+    return ModuleSpec(key=key, prefix=prefix or key, label=label or key,
+                      short_label=(prefix or key).upper(), ontology_iri=ontology_iri,
+                      namespace=namespace, files=(path,), kind="extension",
+                      file_note="文件即模块（由 `sources/%s` 生成，无注册表）" % path.name)
+
+
 def build_modules() -> dict[str, ModuleSpec]:
-    """返回全部模块，插入顺序即文档与提示词的稳定顺序（base 在前，extension 在后）。
+    """返回全部模块：**出厂内置（bmm/ea + 根目录/`sources` 下的 TTL）+ `sources/*.ttl`**。
 
-    清单来源 = **内置（`_builtin_specs()`）+ `ontology/extensions/_registry.json` 登记 + 目录扫描兜底**
-    （后者见 `registry_modules_from_dir()`：`extensions/*.ttl` 里没登记的 TTL 也自动纳入 —— 用户口径
-    "统一通过导入完成所有产物和注册的变更"，见 2026-09-30）。
-    每个模块的文件再做**候选回退**（`_resolve_module_files`），兼容老版本目录布局。
+    口径（2026-09-30 用户）：**文件即模块** —— 编译**从文件生成**，
+    **不再读 `_registry.json`**（注册表已废弃）；`sources/<模块>.ttl` 同名覆盖内置清单。
     """
-    builtin = _builtin_specs()
-    merged = {**builtin, **registry_modules()}      # 上传登记的扩展模块（同名覆盖，2026-09-24）
-    # 目录扫描兜底：`extensions/*.ttl` 里**有文件但没登记**的也纳入（"文件即登记"）
-    for spec in registry_modules_from_dir().values():
-        merged.setdefault(spec.key, spec)
-    from dataclasses import replace as _replace      # 局部导入：本文件顶部只用到 dataclass
     out: dict[str, ModuleSpec] = {}
-    for key, spec in merged.items():
+    for key, spec in _builtin_specs().items():
         files, note = _resolve_module_files(key, spec.files)
-        req = (BUILTIN_REQUIRES.get(key, ()) or spec.requires) if key in builtin else spec.requires
-        out[key] = _replace(spec, files=files, file_note=note, requires=req)
-    return out
-
-
-# --------------------------------------------------------------------------
-# 上传注册表（2026-09-24）：`ontology/extensions/_registry.json`
-#   前端「上传本体文件」勾选「编译并生效」时，ke_admin 会把 TTL 落到 EXTENSIONS_DIR，
-#   并把模块元数据登记到这里；本文件与其它导入器都读它。
-#   为什么用 sidecar JSON 而不是往 build_modules() 里写死：服务端不该改源码（易冲突、难回滚）；
-#   登记表是**数据**，可 git 追踪、可单独回滚；正式产物仍只由 compile.py 生成。
-# --------------------------------------------------------------------------
-REGISTRY_PATH = SOURCES_DIR / "_registry.json"
-
-
-def registry_modules_from_dir() -> dict[str, ModuleSpec]:
-    """**目录扫描兜底**（2026-09-30 用户口径）：`ontology/extensions/*.ttl` 里**有文件但没登记**的模块也纳入。
-
-    为什么：用户质疑"除了导入 ttl 难道还要额外注册么？统一通过导入完成所有产物和注册的变更不行么" ——
-    合理。`_registry.json` 只承载**元数据**（prefix/label/短名，用于类名前缀与显示名），
-    不该是"能不能被编译认识"的开关。这里按"**文件即登记**"补位：扫描到的模块用文件名当 key、
-    用**TTL 里的 @prefix / rdfs:label** 当元数据（解析不出来就退回 key），登记表里有它就仍以登记表为准。
-    """
-    known = {str(m.get("key")) for m in _load_registry()}
-    builtin_keys = set(_builtin_specs())      # 内置模块优先：遗留文件不得覆盖内置清单
-    out: dict[str, ModuleSpec] = {}
-    # ① sources/：**上传真源**（文件即登记；同名覆盖内置清单）
-    # ② extensions/：随包自带的扩展（`*-ext.ttl`），内置 key 跳过
+        from dataclasses import replace as _replace  # noqa: PLC0415
+        out[key] = _replace(spec, files=files, file_note=note,
+                            requires=spec.requires or BUILTIN_REQUIRES.get(key, ()))
     for path in sorted(SOURCES_DIR.glob("*.ttl")) if SOURCES_DIR.is_dir() else []:
         key = path.name[: -len(".ttl")].strip().lower()
-        if not key or key.startswith("_") or key in known or key in out:
+        if not key or key.startswith("_"):
             continue
-        head = path.read_text(encoding="utf-8", errors="replace")[:4000]
-        prefix = ""
-        for m in re.finditer(r"@prefix\s+([A-Za-z0-9_.-]+)\s*:\s*<([^>]+)>", head):
-            if m.group(1) and m.group(2).rstrip("/#").endswith("/%s" % key):
-                prefix = m.group(1)
-                break
-        out[key] = ModuleSpec(
-            key=key, prefix=prefix or key,
-            label=key, short_label=(prefix or key).upper(),
-            ontology_iri="", namespace="", files=(path,), kind="extension",
-            file_note="目录扫描纳入（`extensions/%s` 未登记；文件即登记）" % path.name,
-        )
+        out[key] = _spec_from_ttl(path, key, out.get(key))
     return out
-
-
-def _load_registry() -> list[dict]:
-    """读 `_registry.json` 的模块条目（缺失/坏文件 → 空表；**不能让编译被一条坏数据打断**）。"""
-    if not REGISTRY_PATH.is_file():
-        return []
-    try:
-        return list(json.loads(REGISTRY_PATH.read_text(encoding="utf-8")).get("modules") or [])
-    except Exception:  # noqa: BLE001
-        return []
-
-
-def registry_modules() -> dict[str, ModuleSpec]:
-    """读上传注册表 → ModuleSpec；文件缺失/坏行都**静默跳过**（不能让编译被一条坏数据打断）。"""
-    out: dict[str, ModuleSpec] = {}
-    for item in _load_registry():
-        try:
-            key = str(item.get("key") or "").strip().lower()
-            rel = str(item.get("file") or "").strip()
-            if not key or not rel:
-                continue
-            prefix = str(item.get("prefix") or key).strip()
-            namespace = str(item.get("namespace") or "").strip()
-            spec = ModuleSpec(
-                key=key,
-                prefix=prefix,
-                label=str(item.get("label") or key),
-                short_label=str(item.get("short_label") or prefix.upper()),
-                ontology_iri=str(item.get("ontology_iri") or ""),
-                namespace=namespace,
-                files=(REPO_ROOT / rel,),
-                kind="extension",
-                affects=tuple(item.get("affects") or ()),
-            )
-            if namespace:
-                NS.setdefault(prefix, namespace)     # cypher 占位符 / 提示词也认得这个前缀
-            out[key] = spec
-        except Exception:  # noqa: BLE001
-            continue
-    return out
-
-
-def module_keys(modules: dict[str, ModuleSpec] | None = None) -> list[str]:
-    mods = modules if modules is not None else build_modules()
-    return list(mods.keys())
 
 
 def parse_module_selection(raw: str | None, modules: dict[str, ModuleSpec] | None = None) -> list[str]:

@@ -836,7 +836,7 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     source_text, injected = _ensure_expert_role(content, module_key, ontology_iri)
     src_path = SOURCES_DIR / ("%s.ttl" % module_key)
     src_path.parent.mkdir(parents=True, exist_ok=True)
-    mode = "上传真源：ontology/sources/<模块>.ttl（+ 登记元数据；不再放 extensions/）"
+    mode = "上传真源：ontology/sources/<模块>.ttl（**文件即模块**，无注册表）"
     is_builtin = False                 # 上传**一律**落 sources/（内置清单文件保持出厂的随包版本）
     backup = src_path.read_text(encoding="utf-8") if src_path.is_file() else None
     created_file = backup is None
@@ -844,16 +844,8 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     old_registry_entry = None
     try:
         src_path.write_text(source_text, encoding="utf-8")
-        if is_builtin:
-            # 内置模块：**摘掉** registry 里的同名条目（否则它会覆盖内置清单，让编译继续读旧文件）
-            old_registry_entry = next((e for e in _load_registry_entries()
-                                       if str(e.get("key")) == module_key), None)
-            if old_registry_entry is not None:
-                _unregister_extension(module_key)
-        else:
-            entry = _register_extension({"key": module_key, "prefix": prefix, "short_label": short_label,
-                                         "namespace": str(meta.get("namespace") or ""),
-                                         "ontology_iri": ontology_iri, "label": label, "affects": []})
+        # **不再登记**：文件即模块（用户口径 2026-09-30）——编译器直接扫 `sources/*.ttl`，
+        # 模块身份从 TTL 自身解析；所以这里只写文件，没有"注册信息"这一步。
         out["source"] = {"file": str(src_path.relative_to(REPO)), "mode": mode, "registered": entry,
                          "injected": injected,
                          "note": ("为了让编译通过，真源副本里自动补了：%s" % "、".join(injected))
