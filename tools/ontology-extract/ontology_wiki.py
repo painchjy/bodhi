@@ -258,10 +258,10 @@ class WikiBuilder:
         self.seen.add(slug)
         # 空 group（模块页/总览页）→ 直接落 module_label 这一层，**不再多嵌套一层同名目录**
         # （2026-09-30 用户实测：目录显示数量但展开没有页面 —— 页被挂到了 `…/总览/总览`、`…/模块/模块`）
-        # **根级就是模块**（用户口径 2026-09-30：不要把库名当成一级目录 —— 上游 app 的目录树
-        # 是"模块级做根"，多出来的「企业本体模型」根节点既没意义，也会让前端按
-        # `category_path`/`category_depth` 定位目录时与页对不上）
-        cat = [module_label] + ([group] if group else [])
+        # **恢复含库名的一级**（2026-09-30 回滚）：早上那版（category_path 含"企业本体模型"）
+        # 前端**能正常列出目录下的页**；下午把它缩成 2 段后页面列表反而打不开。
+        # 保留的修复只有两条：① 空 group 不再多套一层（模块页/总览页直落目录）② wiki_path=目录路径/标题。
+        cat = ["企业本体模型", module_label] + ([group] if group else [])
         self.pages.append({
             "slug": slug, "title": title, "page_type": page_type,
             "content": content, "summary": summary,
