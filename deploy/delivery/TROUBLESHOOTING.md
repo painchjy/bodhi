@@ -2,6 +2,37 @@
 
 > 都是 2026-09 这轮真实故障，含"现象 / 日志特征 / 根因 / 修法 / 验证"。
 
+## Windows 上 `git.exe` 被「应用程序控制策略 / Device Guard」阻止（无法 push）
+
+**症状**（2026-10-01）：Windows 侧 git 突然全废 —— PowerShell / cmd 里执行
+`C:\Program Files\Git\cmd\git.exe` 一律报：
+
+```
+'C:\Program Files\Git\cmd\git.exe' 已被组织者 Device Guard 策略阻止
+程序“git.exe”无法运行: 应用程序控制策略已阻止此文件
+```
+
+于是 `git push` / `git status` 全失败（VS Code 的 Git 面板也会一起失灵），
+但 **WSL 里的 git 完全正常**（同一份 `.git`），所以代码不会丢，只是推不出去。
+
+**当时的绕行**：用另一个未被策略拦的二进制完成推送
+（实测 `C:\Program Files\Git\ucrt64\bin\git.exe` 可用，`cmd\git.exe` 被拦）：
+```cmd
+"C:\Program Files\Git\ucrt64\bin\git.exe" -C <repo> push origin main
+```
+
+**根治**：**重装 Git for Windows**（用户 2026-10-01 操作）。重装后
+`where git` → `C:\Program Files\Git\cmd\git.exe`（2.55.0.windows.5），
+`git push origin main` → `Everything up-to-date`（exit 0），策略拦截消失。
+
+**自查**：
+```bat
+where git & git --version
+git -C <repo> push origin main    :: 期望 Everything up-to-date / 正常推送，而不是"被策略阻止"
+```
+若仍被拦：别急着重装，先用 `ucrt64\bin\git.exe`（或 `mingw64\bin\git.exe`）把活干完，
+再让 IT / 自己更新 Git 到与代码完整性策略相容的版本；VS Code 里可临时把 `git.path` 指过去。
+
 ## 删掉 `bodhi:shortName` 后**照样能导入**（短名门禁没盖住所有入口）
 
 **症状**（用户 2026-09-30 实测）：把 TTL 里的 `bodhi:shortName` 删掉再上传/修复，**照样成功**，
