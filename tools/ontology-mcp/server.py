@@ -3782,6 +3782,31 @@ class MCPHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._json({"error": str(exc)}, 400, self.CORS)
             return
+        def _reject_if_failed(result, what: str):
+            """门禁回执（`ok=False`）→ 抛 ValueError（HTTP 层映射成 400 `{"error": …}`）。
+
+            用户口径 2026-09-30：不合格的 TTL **不允许导入**，且提示里要给出**可直接复制**的
+            修复片段。HTTP 层原本把 `ok=False` 的 dict 当 200 返回 → 前端弹"导入完成"面板，
+            用户会以为"删掉 bodhi:shortName 也能导入"（实测确认）。前端只展示 400 的
+            `error` 原文，所以下面把它拼成多行文本（含两行片段）。
+            """
+            if not (isinstance(result, dict) and result.get("ok") is False):
+                return result
+            parts = ["%s 被拒绝：%s" % (what, result.get("error") or "校验未通过")]
+            for key in ("note", "hint", "snippet"):
+                if result.get(key):
+                    parts.append(str(result[key]))
+            for m in result.get("missing") or []:
+                parts.append("· %s：%s" % (m.get("module") or "",
+                                           "、".join(m.get("missing") or [])))
+                if m.get("snippet"):
+                    parts.append(str(m["snippet"]))
+                if m.get("note"):
+                    parts.append(str(m["note"]))
+            for h in result.get("hints") or []:
+                parts.append("· %s" % h)
+            raise ValueError("\n".join(p for p in parts if p))
+
         handlers = {
             "/bodhi/relations/add":
                 lambda b: ke_pages.add_relation(b.get("kb_id", ""), b.get("slug", ""),
@@ -3817,7 +3842,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             # 上传即加载（用户 2026-09-20）：前端读文件文本 → JSON 传过来（免 multipart），
             # 落 ontology/uploads/ → 级联删下游 → 解析入库（零产物）。依赖未就绪会抛 ValueError → 400。
             "/bodhi/ontology/upload":
-                lambda b: ke_admin.upload_ttl(b.get("filename", ""), b.get("content", ""),
+                lambda b: _reject_if_failed(ke_admin.upload_ttl(b.get("filename", ""), b.get("content", ""),
                                               b.get("module_id", ""),
                                               # 默认 True：上传会级联删下游，必须重投影（否则目录空）
                                               bool(b.get("project_wiki", True)),
@@ -3826,11 +3851,13 @@ class MCPHandler(BaseHTTPRequestHandler):
                                               write_source=bool(b.get("write_source", True)),
                                               compile_after=bool(b.get("compile_after", True)),
                                               apply_after=bool(b.get("apply_after", False))),
+                                               what="上传导入"),
             # 运维修复（幂等）：编译 → 灌 Neo4j 投影 → 重投影本体库 wiki → 一致性体检
             "/bodhi/ontology/repair":
-                lambda b: ke_admin.repair_all(b.get("kb_id", ""),
-                                              bool(b.get("compile", True)),
-                                              bool(b.get("project_wiki", True))),
+                lambda b: _reject_if_failed(ke_admin.repair_all(b.get("kb_id", ""),
+                                                                bool(b.get("compile", True)),
+                                                                bool(b.get("project_wiki", True))),
+                                            what="repair"),
             # 类型迁移（retag，2026-09-27 用户口径）：改本体类型 = **迁移 slug + 联动引用**，
             #   两段式：preview（只读影响面 + ticket）→ 用户确认 → apply（ticket + 风险确认，缺一即拒）
             "/bodhi/page/retag/preview":

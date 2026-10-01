@@ -2,6 +2,44 @@
 
 > 都是 2026-09 这轮真实故障，含"现象 / 日志特征 / 根因 / 修法 / 验证"。
 
+## 删掉 `bodhi:shortName` 后**照样能导入**（短名门禁没盖住所有入口）
+
+**症状**（用户 2026-09-30 实测）：把 TTL 里的 `bodhi:shortName` 删掉再上传/修复，**照样成功**，
+目录名回落成模块名 —— 等于短名"建议"而非"强制"。
+
+**根因（两个叠加）**
+1. 短名校验**只在上传预检**（`preflight_compile`）里，`compile_artifacts()` / `repair_all()` /
+   `import_ttl()`（`load`、`write_source=false` 都走它）/ 命令行 `compile` **一律没查** →
+   删掉 shortName 后跑 `repair` 照样编过。
+2. HTTP 层把 `{"ok": false, …}` 当 **200** 返回 → 前端弹的是"导入完成"面板（不是错误），
+   观感上就是"不合格也能导入"。
+
+**修法（已固化，2026-09-30）**
+1. `ke_admin.short_name_gate(modules=None)`：**统一门禁** —— 本次会参与编译的模块，短名必须来自
+   TTL 的 `bodhi:shortName`（**必填** / ≤ 16 字符 / 不含 `/`）。覆盖 `upload` / `repair` /
+   `load` / `import_ttl` / 命令行 `compile` 全部入口。
+2. `compile_artifacts()`：**先过门禁再调编译器**（不过就返回 `ok=false`，**不编译、不改产物**）。
+3. `repair_all()`：编译门禁没过 → **立即中止**（旧实现无视 `ok` 继续 `apply`+重投影 wiki）。
+4. `upload_ttl()`：在**级联删除之前**再过一次门禁（避免"下游删了才发现不合格"）。
+5. `import_ttl()`：同样强制，不合法直接 `ValueError`。
+6. `server.py`：新增 `_reject_if_failed()` —— `ok=false` 的**门禁回执改抛 `ValueError` → HTTP 400**，
+   前端（`BodhiOntologyUpload.vue`）会把 `error` 原文展示出来。
+
+**提示格式（用户口径：给两行、复制即可）**
+```
+@prefix bodhi: <http://example.org/bodhi#> .
+<模块IRI> bodhi:shortName "<建议短名=模块名>" .
+```
+第 1 行在 TTL 已声明 `@prefix bodhi:` 时自动省略说明（"只加第 2 行即可"）。
+
+**验收**
+- 负例（TTL 删掉 `bodhi:shortName`）→ `POST /bodhi/ontology/upload` **HTTP 400**，正文含上面两行 +
+  "本次没有删除任何 wiki 页/图谱节点"；CLI `repair` → `ok=false, error=invalid_short_name` 且**不重投影 wiki**。
+- 正例（TTL 有合法短名）→ **HTTP 200**。
+
+**注意**：`config.py` 里 **不再有任何内置显示名兜底**；`ontology_wiki.py` 里 `short_label or key`
+只作渲染兜底，正常永远走不到（门禁已拦）。
+
 ## 图库/产物/wiki 里的类前缀全变成 `ext:`（应为 `bmm:` / `ea:`）
 
 **症状**：wiki 类页标题变成 `资产（ext:Asset）`、`活动（ext:Activity）`；Neo4j 节点

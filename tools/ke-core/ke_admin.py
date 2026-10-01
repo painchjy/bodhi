@@ -135,6 +135,81 @@ def _builtin_file_for(module: str) -> pathlib.Path | None:
     return spec.files[0] if spec.files else None
 
 
+BODHI_PREFIX_LINE = "@prefix bodhi: <http://example.org/bodhi#> ."
+
+
+def _ttl_text(path) -> str:
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def short_name_fix(key: str, iri: str = "", ttl_text: str = "") -> dict:
+    """**给用户可直接复制粘贴的修复片段**（TTL 缺 `bodhi:shortName` 时）。
+
+    用户口径（2026-09-30）：提示里要给出建议的**两行**，用户复制一下就能改：
+        第 1 行  `@prefix bodhi: <http://example.org/bodhi#> .`（TTL 里已有可省略）
+        第 2 行  `<模块IRI> bodhi:shortName "<建议短名>" .`
+    短名 = 目录名，≤ SHORT_NAME_MAX 字符，建议直接用模块名。
+    """
+    try:
+        from ontology_compiler.config import SHORT_NAME_MAX as _MAX  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        _MAX = 16
+    iri = (iri or "").strip() or ("http://example.org/%s" % key)
+    lines = [BODHI_PREFIX_LINE, '<%s> bodhi:shortName "%s" .' % (iri, key)]
+    has_prefix = "@prefix bodhi:" in (ttl_text or "")
+    return {"snippet": "\n".join(lines), "lines": lines,
+            "suggested_short_name": key, "limit": _MAX,
+            "note": ("TTL 里已有 `@prefix bodhi:` → **只加第 2 行**即可；短名 ≤ %d 字符，建议直接用模块名。"
+                     % _MAX) if has_prefix else
+                    ("**两行都加**：第 1 行放文件顶部的前缀区，第 2 行放模块 IRI 语句处；短名 ≤ %d 字符，"
+                     "建议直接用模块名。" % _MAX)}
+
+
+def short_name_gate(modules=None) -> dict | None:
+    """**短名门禁**（用户口径 2026-09-30）：本次会参与编译的模块，短名必须来自 TTL 的
+    `bodhi:shortName` —— 必填、≤ SHORT_NAME_MAX、不含 `/`。
+
+    返回 `None` = 全部合格；否则返回 `{"invalid": [...], "snippet": …, "message": …}`。
+    覆盖所有入口（`upload` / `repair` / `load` / 命令行 `compile`）—— 早期只有上传预检有，
+    于是删掉真源里的 `bodhi:shortName` 后跑 `repair` 照样能过（2026-09-30 用户实测）。
+    """
+    try:
+        from ontology_compiler.config import SHORT_NAME_MAX  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        SHORT_NAME_MAX = 16
+    mods = _registered_modules()
+    keys = list(modules) if modules else [k for k, sp in mods.items() if not sp.missing_files()]
+    invalid: list[dict] = []
+    for key in keys:
+        spec = mods.get(key)
+        if spec is None or spec.missing_files():
+            continue                      # 缺文件的模块本次不编译，不在这里拦
+        short = (getattr(spec, "short_label", "") or "").strip()
+        ttl_text = _ttl_text(spec.files[0]) if spec.files else ""
+        fix = short_name_fix(key, getattr(spec, "ontology_iri", ""), ttl_text)
+        if not short:
+            invalid.append({"module": key, "issue": "missing",
+                            "message": "TTL 未声明 `bodhi:shortName`（模块短名必填）", **fix})
+        elif len(short) > SHORT_NAME_MAX:
+            invalid.append({"module": key, "issue": "too_long",
+                            "message": "`bodhi:shortName` 超长：%r（%d 字符 > 上限 %d）"
+                                       % (short, len(short), SHORT_NAME_MAX), **fix})
+        elif "/" in short:
+            invalid.append({"module": key, "issue": "slash",
+                            "message": "`bodhi:shortName` 不能含 `/`（目录层级分隔符）", **fix})
+    if not invalid:
+        return None
+    first = invalid[0]
+    msg = "；".join("%s：%s" % (x["module"], x["message"]) for x in invalid)
+    return {"invalid": invalid, "snippet": first["snippet"], "lines": first["lines"],
+            "message": msg,
+            "hint": ("在对应 TTL 里补 `bodhi:shortName`（**可直接复制下面 %d 行**）：\n%s\n%s"
+                     % (len(first["lines"]), first["snippet"], first["note"]))}
+
+
 def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "",
                       scope: list[str] | None = None) -> dict:
     """**只读预检**：**本次编译范围内**文件是否齐、上传的 TTL 能否解析 —— 不删数据、不写产物。
@@ -193,9 +268,10 @@ def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "",
         spec = mods.get(key)
         short = (getattr(spec, "short_label", "") or "").strip() if spec else ""
         if not short:
-            missing.append({"module": key, "missing": ["`bodhi:shortName`（TTL 未声明模块短名）"],
-                            "hint": '在本体 IRI 上加一行：<%s> bodhi:shortName "%s" .'
-                                    % (getattr(spec, "ontology_iri", "") or ("http://example.org/%s" % key), key)})
+            fix = short_name_fix(key, getattr(spec, "ontology_iri", ""),
+                                 _ttl_text(spec.files[0]) if spec and spec.files else "")
+            missing.append({"module": key,
+                            "missing": ["`bodhi:shortName`（TTL 未声明模块短名）"], **fix})
         elif len(short) > SHORT_NAME_MAX:
             missing.append({"module": key,
                             "missing": ["`bodhi:shortName` 超长：%r（%d 字符 > 上限 %d）"
@@ -215,8 +291,7 @@ def preflight_compile(ttl_path: pathlib.Path | None = None, module: str = "",
                 missing.append({
                     "module": module,
                     "missing": ["`bodhi:shortName`（**这次上传的 TTL** 未声明模块短名）"],
-                    "hint": ('在 TTL 里加一行（短名 = 目录名，≤%d 字符）：'
-                             '<%s> bodhi:shortName "%s" .' % (SHORT_NAME_MAX, iri, module))})
+                    **short_name_fix(module, iri, _ttl_text(ttl_path))})
             elif len(short) > SHORT_NAME_MAX:
                 missing.append({
                     "module": module,
@@ -315,6 +390,14 @@ def repair_all(kb_id: str = "", compile_first: bool = True, project_wiki: bool =
     report: dict = {"kb_id": kb}
     if compile_first:
         report["compile"] = compile_artifacts()
+        comp = report["compile"] or {}
+        if not comp.get("ok"):
+            # **门禁未过 → 立即中止**（旧实现无视 ok 继续 apply/wiki，等于"不合格也能导入"）
+            return {**report, "ok": False, "error": comp.get("error") or "compile_failed",
+                    "hint": comp.get("hint"), "snippet": comp.get("snippet"),
+                    "lines": comp.get("lines"), "invalid": comp.get("invalid"),
+                    "note": ("编译门禁未过 → **已中止**：没有灌图、没有重投影 wiki、"
+                             "没有删除任何数据。按上面片段补 TTL 的 `bodhi:shortName` 后重跑 repair。")}
         report["totals"] = _index_totals()
     report["apply"] = apply_projection()
     if project_wiki:
@@ -633,6 +716,15 @@ def import_ttl(ttl_path, module: str = "", project_wiki: bool = False, kb_id: st
     spec = ModuleSpec(key=module, prefix=prefix, label=label, short_label=short_label,
                       ontology_iri=meta["ontology_iri"], namespace=meta["namespace"],
                       files=(ttl,), kind="extension", affects=())
+    # **短名门禁**（2026-09-30）：TTL 必须声明 `bodhi:shortName`（≤16、不含 `/`），
+    # 否则拒绝导入（这条链路以前完全没有校验 —— `load`/`write_source=false` 都能绕过）。
+    if not short_label.strip():
+        _fix = short_name_fix(module, meta["ontology_iri"], ttl.read_text(encoding="utf-8",
+                                                                          errors="replace"))
+        raise ValueError("TTL 未声明 `bodhi:shortName`（模块短名必填）：\n%s\n%s"
+                         % (_fix["snippet"], _fix["note"]))
+    if len(short_label) > 16 or "/" in short_label:
+        raise ValueError("`bodhi:shortName` 不合法（%r）：≤16 字符且不含 `/`" % short_label)
 
     if meta.get("prefix_derived_from_key"):
         prefix_source = "TTL 用默认前缀 → 按约定取模块名当类前缀（%s）" % prefix
@@ -986,6 +1078,13 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
         # ④ **级联删除**（本模块 + 下游依赖）：图库/wiki + 真源文件 + 注册信息
         from ontology_compiler.config import downstream_closure, upstream_closure  # noqa: PLC0415
         scope = upstream_closure(module_key)                    # 编译范围 = 本模块 + 上游
+        # 删除任何东西**之前**再确认一次范围内的短名都合格（含上游模块）——
+        # 否则会出现"下游已删、编译才失败"，回滚也救不回被删的模块（2026-09-30）。
+        gate = short_name_gate(scope)
+        if gate:
+            raise ValueError("短名门禁未过（%s）：\n%s\n%s"
+                             % (gate["message"], gate["snippet"],
+                                "修好后重新上传；**本次没有删除任何数据**（真源已回滚）。"))
         victims = [k for k in downstream_closure(module_key) if k != module_key]
         out["compile_scope"] = scope
         out["cascade_purge"] = cascade_delete_modules(victims, keep_files=(src_path.name,))
@@ -1156,6 +1255,15 @@ def compile_artifacts(modules: list | None = None) -> dict:
             modules = complete or None
         except Exception:  # noqa: BLE001
             skipped = {}
+    # **短名门禁**（2026-09-30）：TTL 不合格（缺/超长/含 `/` 的 `bodhi:shortName`）→ **不编译**，
+    # 直接把"可复制的两行"回给调用方（upload / repair / load / CLI 全都走这里）。
+    gate = short_name_gate(modules)
+    if gate:
+        return {"ok": False, "error": "invalid_short_name", "invalid": gate["invalid"],
+                "hint": gate["hint"], "snippet": gate["snippet"], "lines": gate["lines"],
+                "module_scope": list(modules) if modules else "all",
+                "note": ("本次**没有编译、没有改动任何产物、没有删除任何 wiki/图谱数据**："
+                         "先按下面片段在 TTL 里补 `bodhi:shortName` 再重试。")}
     args = ["compile"]
     if modules:
         args += ["--module", ",".join(modules)]

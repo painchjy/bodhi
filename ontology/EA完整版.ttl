@@ -301,4 +301,4 @@ bmm:BusinessProcess rdfs:subClassOf [
 # 并确保与已有的 BMM 实例数据整合。
 
 # 模块短名（目录名/列表名；≤16 字符，导入时校验）
-<http://example.org/ea> bodhi:shortName "ea" .
+<http://example.org/ea> bodhi:shortName "ea企架流程模型" .
