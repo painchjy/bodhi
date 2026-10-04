@@ -1106,10 +1106,19 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
                      "不代表本次没生效；本次影响看 `per_module` 与 `modules_added`"),
         }
 
-        # ⑥ 编译成功**之后**才灌图库：执行**编译产物的投影**（`artifacts/neo4j/*.cypher`，幂等 MERGE）
-        #    为什么不用 import_ttl：它按"全部已登记模块"生成投影，会把刚级联删除的模块又灌回去
-        #    （产物里已经没有它们）→ 用产物投影才能保证"只编 bmm ⇒ 图里也只有 bmm"。
-        out["apply"] = apply_projection()
+        # ⑥ 编译成功**之后**才灌图库。
+        #    2026-10-04（用户口径）：**按模块硬替换** —— 先按命名空间 `DETACH DELETE` 该模块的全部节点
+        #    （含**所有边**），再把该模块的投影语句灌回去。**不做 merge 兼容**：
+        #    改继承关系（如 `agent:Stub` 从 `bmm:Means` 子类改成 `owl:Thing` 子类）后，
+        #    旧边必须消失 —— 否则图谱仍认为它是旧父类的子类（用户实测）。
+        #    知识库侧的"类被删/改名"由**巡检服务**治理（本体与知识库松耦合，这里不保护依赖）。
+        repl = []
+        for key in sorted({str(module_key)} | {str(s) for s in (scope or []) if str(s)}):
+            try:
+                repl.append(replace_module_in_neo4j(key))
+            except Exception as exc:  # noqa: BLE001
+                repl.append({"ok": False, "module": key, "reason": str(exc)[:200]})
+        out["apply"] = {"replace": repl, "full": apply_projection()}
     except Exception as exc:  # noqa: BLE001
         # 回滚真源与登记；**不删任何 wiki/图谱**
         try:
@@ -1159,7 +1168,69 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     return out
 
 
-def apply_projection() -> dict:
+def _module_namespace(module_key: str) -> str:
+    """模块的命名空间（`http://example.org/<key>#`）——优先编译产物，其次 TTL 的 `@prefix`。"""
+    try:
+        idx = json.loads((WEKNORA_DIR / "ontology_index.json").read_text(encoding="utf-8"))
+        for m in idx.get("models") or []:
+            if str(m.get("key") or "").lower() == module_key.lower():
+                ns = str(m.get("namespace") or m.get("ontology_iri") or "")
+                if ns:
+                    return ns if ns.endswith(("#", "/")) else ns + "#"
+    except Exception:  # noqa: BLE001
+        pass
+    ttl = SOURCES_DIR / ("%s.ttl" % module_key)
+    if ttl.is_file():
+        try:
+            meta = inspect_ttl(ttl)
+            ns = str(meta.get("namespace") or meta.get("iri") or "")
+            if ns:
+                return ns if ns.endswith(("#", "/")) else ns + "#"
+        except Exception:  # noqa: BLE001
+            pass
+    return ""
+
+
+def replace_module_in_neo4j(module_key: str) -> dict:
+    """**硬替换一个本体模块在图库里的全部内容**（用户口径 2026-10-04）：
+
+    ① **按命名空间 DETACH DELETE** 该模块的所有节点（含**全部边**）—— 不做 merge 兼容，
+       所以"改继承关系后旧边还在"的问题不再发生（例：`agent:Stub` 从 `bmm:Means` 的子类
+       改成 `owl:Thing` 的子类，旧边 `Stub→Means` 必须消失）；
+    ② 把编译产物里**属于本模块**的投影语句灌回去（`10_ontology.cypher` 中首 `iri:` 在本命名空间的语句）。
+
+    为什么可以这么"粗暴"：**本体与知识库是松耦合**——知识库里出现的"类被删/改名"由**巡检服务**
+    负责治理，不需要在替换模块时保护知识库依赖。
+    """
+    module_key = (module_key or "").strip().lower()
+    if not module_key:
+        return {"ok": False, "reason": "缺少模块 key"}
+    ns = _module_namespace(module_key)
+    if not ns:
+        return {"ok": False, "module": module_key, "reason": "找不到该模块的命名空间（先在 ontology/sources/ 放 TTL 或跑编译）"}
+    before = ke_neo4j.query("MATCH (n) WHERE n.iri STARTS WITH $ns RETURN count(n) AS n", {"ns": ns})
+    deleted = int((before[0]["n"] if before else 0) or 0)
+    ke_neo4j.query("MATCH (n) WHERE n.iri STARTS WITH $ns DETACH DELETE n", {"ns": ns})
+    path = PROJECTION_DIR / "10_ontology.cypher"
+    if not path.is_file():
+        return {"ok": False, "module": module_key, "reason": "缺投影产物（先跑 compile_artifacts）"}
+    statements = []
+    for stmt in _cypher_statements(path):
+        m = _STMT_IRI_RE.search(stmt)
+        if m and str(m.group(1)).startswith(ns):
+            statements.append(stmt)
+    for stmt in statements:
+        ke_neo4j.query(stmt)
+    after = ke_neo4j.query("MATCH (n) WHERE n.iri STARTS WITH $ns RETURN count(n) AS n", {"ns": ns})
+    cls = ke_neo4j.query("MATCH (c:BodhiOntClass) WHERE c.iri STARTS WITH $ns AND coalesce(c.external,false)=false "
+                         "RETURN count(c) AS n", {"ns": ns})
+    return {"ok": True, "module": module_key, "namespace": ns,
+            "deleted_nodes": deleted, "inserted_statements": len(statements),
+            "nodes_after": int((after[0]["n"] if after else 0) or 0),
+            "classes": int((cls[0]["n"] if cls else 0) or 0)}
+
+
+
     """把 `artifacts/neo4j/{00_constraints,10_ontology}.cypher` 灌进 Neo4j（幂等 MERGE）。"""
     total = 0
     for name in ("00_constraints.cypher", "10_ontology.cypher"):

@@ -180,12 +180,10 @@ def builtin_specs() -> dict[str, ModuleSpec]:
 
 # 内置模块的上游依赖（编译一个模块时须一起编的模块；用户口径 2026-09-30）：
 #   EA完整版.ttl 里 29 处引用 bmm: → ea 依赖 bmm；扩展都依赖它们 affects 的基础模块。
+# 2026-10-01 用户口径：**移除 ea-service / ea-ownership / bmmfd 三个扩展**（源文件已删、
+#   不再参与编译；保留在清单里会让"整包编译"因缺文件直接中止）。
 BUILTIN_REQUIRES: dict[str, tuple[str, ...]] = {
     "bmm": (),
-    "ea": ("bmm",),
-    "ea-service": ("ea",),
-    "ea-ownership": ("ea",),
-    "bmmfd": ("bmm", "ea"),
 }
 
 
@@ -202,50 +200,8 @@ def _builtin_specs() -> dict[str, ModuleSpec]:
             lexicon=LEXICON_DIR / "bmm.keywords.yaml",
             light_file=ONTOLOGY_DIR / "BMM轻量版.md",
         ),
-        "ea": ModuleSpec(
-            key="ea",
-            prefix="ea",
-            label="",            # 显示名一律来自 TTL（rdfs:label）
-            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
-            ontology_iri="http://example.org/ea",
-            namespace=NS["ea"],
-            files=(ONTOLOGY_DIR / "EA完整版.ttl",),
-            lexicon=LEXICON_DIR / "ea.keywords.yaml",
-            light_file=ONTOLOGY_DIR / "EA轻量版.md",
-        ),
-        "ea-service": ModuleSpec(
-            key="ea-service",
-            prefix="easvc",
-            label="",            # 显示名一律来自 TTL（rdfs:label）
-            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
-            ontology_iri="http://example.org/bodhi/ext/ea-service",
-            namespace=NS["easvc"],
-            files=(SOURCES_DIR / "ea-service.ttl",),
-            kind="extension",
-            affects=("ea",),
-        ),
-        "ea-ownership": ModuleSpec(
-            key="ea-ownership",
-            prefix="eaown",
-            label="",            # 显示名一律来自 TTL（rdfs:label）
-            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
-            ontology_iri="http://example.org/bodhi/ext/ea-ownership",
-            namespace=NS["eaown"],
-            files=(SOURCES_DIR / "ea-ownership.ttl",),
-            kind="extension",
-            affects=("ea",),
-        ),
-        "bmmfd": ModuleSpec(
-            key="bmmfd",
-            prefix="bmmfd",
-            label="",            # 显示名一律来自 TTL（rdfs:label）
-            short_label="",      # 短名一律来自 TTL（bodhi:shortName）
-            ontology_iri="http://example.org/bodhi/ext/bmmfd",
-            namespace=NS["bmmfd"],
-            files=(SOURCES_DIR / "bmmfd.ttl",),
-            kind="extension",
-            affects=("bmm", "ea"),
-        ),
+        # 2026-10-01 用户口径：**ea 不再参与编译**（只保留 bmm + agent；EA完整版.ttl 留作人工参考）。
+        #   原因：① ea 的源真源已删；② ea:MCPService 与 agent:MCPService 触发 E3 跨模块同名冲突。
     }
 
 

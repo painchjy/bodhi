@@ -89,6 +89,18 @@ def module_label(module_key: str) -> str:
     return module_key
 
 
+def module_short(module_key: str) -> str:
+    """**模块短名**（TTL `bodhi:shortName`；未知则回退 label → key）。
+
+    目录一级名必须用短名（≤16 字符、无全角括号）：长名会让前端目录路径对不上 → 目录里看不到页
+    （2026-10-04 用户实测；口径与 `ontology_wiki.py` 的 `module.short_label or key` 一致）。
+    """
+    for model in (index_data().get("models") or []):
+        if model.get("key") == module_key:
+            return model.get("short_label") or model.get("label") or module_key
+    return module_key
+
+
 # ---------------------------------------------------------------------------
 # JSON 编译产物（兜底 + 颜色/顺序增强）
 # ---------------------------------------------------------------------------
@@ -117,6 +129,12 @@ def _index_classes() -> dict[str, dict]:
                 "color": cls.get("color") or "#94a3b8",
                 "module": model["key"],
                 "module_label": model.get("label") or model["key"],
+                # **模块短名**（TTL `bodhi:shortName`，≤16 字符、无全角括号）—— 目录一级名必须用它：
+                # 2026-10-04 用户实测「目录里没有新页、统计不变」，根因就是这里用**长名**
+                # （`智能体开发本体（业务智能体 + 技能/工具开发 + 评估与改进建议）`），
+                # 而本体投影/其它库用短名 → 顶层目录名两套、前端按 category_path 分桶对不上。
+                # 与 `ontology_wiki.py` 的目录口径（`module.short_label or key`）保持一致。
+                "module_short": model.get("short_label") or model.get("label") or model["key"],
                 "parents": list(cls.get("parents") or []),
                 "is_enum": bool(cls.get("is_enum")),
                 "order": mi * 1000 + order,
@@ -206,6 +224,7 @@ def class_meta() -> dict[str, dict]:
     for name, meta in _index_classes().items():
         out[name] = {"key": name, "label": meta["label"], "color": meta["color"],
                      "module": meta["module"], "module_label": meta["module_label"],
+                     "module_short": meta.get("module_short") or meta["module_label"],
                      "parents": list(meta["parents"]), "is_enum": meta["is_enum"],
                      "order": meta["order"]}
     # 补录"不在编译产物里的类" —— **上传导入的模块不产 json**（见 docs/session-handoff.md §3.4bis）。
@@ -225,6 +244,7 @@ def class_meta() -> dict[str, dict]:
                 out[name] = {"key": name, "label": row.get("label") or name,
                              "color": module_color(mod), "module": mod,
                              "module_label": module_label(mod) or mod,
+                             "module_short": module_short(mod) or mod,
                              "parents": list(), "is_enum": False, "order": 999999}
     except Exception:  # noqa: BLE001  （补录失败不影响 json 版结果）
         pass
@@ -293,19 +313,58 @@ def descendants(type_name: str, meta: dict[str, dict] | None = None) -> list[str
     return out
 
 
+def top_ancestor(type_name: str, meta: dict[str, dict] | None = None) -> str:
+    """**顶层类** = 沿 `subClassOf` 向上走到的根（= 直接继承 owl:Thing 的那个类）。
+
+    2026-10-04 修（重要）：原实现用 `ancestors()[-1]`，而那条 Cypher **没有 ORDER BY**
+    （`*0..` 变长路径的返回顺序**不保证**）⇒ 顶层类会**乱**：实测 `bmm:MainSystem`
+    被算成「影响因素」→ `recategorize` 会把主系统页迁到错的目录。
+    这里改为**确定性**取根：优先 Neo4j 里"没有任何父的祖先"（多根时取**路径最短**的），
+    再退化为 JSON 里的单链游走（取第一个父直到无父）。
+    """
+    if not type_name:
+        return ""
+    try:
+        if ke_neo4j.available():
+            rows = ke_neo4j.query(
+                "MATCH p=(c:BodhiOntClass {prefixed: $p})-[:BODHI_SUBCLASS_OF*1..]->(t:BodhiOntClass) "
+                "WHERE NOT (t)-[:BODHI_SUBCLASS_OF]->(:BodhiOntClass) "
+                "RETURN t.prefixed AS prefixed, length(p) AS d ORDER BY d ASC LIMIT 1",
+                {"p": type_name})
+            for row in rows:
+                if row.get("prefixed"):
+                    return row["prefixed"]
+    except Exception:  # noqa: BLE001
+        pass
+    meta = meta or class_meta()
+    cur, seen, last = type_name, set(), type_name
+    while cur and cur not in seen:
+        seen.add(cur)
+        last = cur
+        plist = (meta.get(cur) or {}).get("parents") or []
+        cur = plist[0] if plist else ""
+    return last
+
+
 def top_group(type_name: str, meta: dict[str, dict] | None = None) -> str:
     meta = meta or class_meta()
-    chain = ancestors(type_name, meta)
-    top = chain[-1] if chain else type_name
+    top = top_ancestor(type_name, meta) or type_name
     info = meta.get(top) or {}
     return info.get("label") or top
 
 
 def category_path(type_name: str) -> list[str]:
-    """目录路径 = [模型中文名, 顶层大类中文名]（与前端两级折叠一致）。"""
+    """目录路径 = [模型中文名, 顶层大类中文名]（与前端两级折叠一致）。
+
+    **一级名一律用「模块短名」**（TTL `bodhi:shortName`，≤16 字符、无全角括号）：
+    长名（`智能体开发本体（业务智能体 + 技能/工具开发 + 评估与改进建议）`）会让前端目录路径
+    对不上/被截断 → 目录里看不到页、统计不变（2026-10-04 用户实测；与 `ontology_wiki.py`
+    的目录口径 `module.short_label or key` 对齐）。
+    """
     meta = class_meta()
     info = meta.get(type_name) or {}
-    module_label = info.get("module_label") or info.get("module") or type_name
+    module_label = (info.get("module_short") or info.get("module_label")
+                    or info.get("module") or type_name)
     label = info.get("label") or type_name
     group = top_group(type_name, meta) or label
     return [module_label, group]
@@ -636,16 +695,23 @@ def ontology_kb_report(asked: str = "") -> dict:
                         "reason": "库里没有这个知识库（id/名称都对不上）"}
         return out
     reasons = []
-    if det["id"] and row["id"] == det["id"]:
-        reasons.append("就是识别出的本体库（source=%s）" % det["source"])
-    if row["marked"]:
-        reasons.append("带标记 wiki_config.%s=true" % ONTOLOGY_MARK_KEY)
-    if row["pages"] >= ONTOLOGY_MIN_PAGES:
-        reasons.append("含 %d 页 ontology:* 页面" % row["pages"])
+    # 2026-10-04 修：**优先级**而不是并列 OR —— env/权威识别的本体库（`det.id`）存在时，
+    # **只有它**才判为本体库；`wiki_config.bodhi_ontology_kb` 标记与内容探测**仅作兜底**
+    # （未配 env 时才用）。原来三者并列 OR ⇒ 一个**误标**（或残留标记）的非本体库
+    # 也会被判 true → 非本体库界面出现「上传本体文件」按钮（用户实测：系统与规则台账 被误标）。
+    if det["id"]:
+        if row["id"] == det["id"]:
+            reasons.append("就是识别出的本体库（source=%s）" % det["source"])
+    else:
+        if row["marked"]:
+            reasons.append("带标记 wiki_config.%s=true（未配 env，兜底）" % ONTOLOGY_MARK_KEY)
+        if row["pages"] >= ONTOLOGY_MIN_PAGES:
+            reasons.append("含 %d 页 ontology:* 页面（未配 env，兜底）" % row["pages"])
     out["asked"] = {"kb_id": row["id"], "name": row["name"],
                     "is_ontology_kb": bool(reasons),
-                    "reason": "；".join(reasons) or "无本体特征（既无标记，ontology:* 页数 %d < %d）"
-                              % (row["pages"], ONTOLOGY_MIN_PAGES)}
+                    "reason": "；".join(reasons) or ("不是本体库（权威=%s；本库标记=%s、ontology:* 页数 %d）"
+                                                     % (str(det.get("id") or "未配")[:8],
+                                                        row["marked"], row["pages"]))}
     return out
 
 

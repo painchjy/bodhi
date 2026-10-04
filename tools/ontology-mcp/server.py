@@ -1011,12 +1011,15 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
     if element.get("description"):
         lines += ["## 判定依据", "", element["description"].strip(), ""]
     lines += _design_sections(element)
+    _loc = (element.get("source_locator") or "").strip()
     lines += ["## 原文依据", "",
-              ("- %s（来源：《%s》%s）" % (element.get("source_text", "").strip(), doc_meta["title"],
-                                         (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""))
+              ("- %s（来源：《%s》%s%s）" % (element.get("source_text", "").strip(), doc_meta["title"],
+                                           (" 片段 #%d" % chunk_index) if chunk_index >= 0 else "",
+                                           ("；定位：%s" % _loc) if _loc else ""))
               if doc_meta.get("id") else
-              "- %s（%s）" % (element.get("source_text", "").strip(),
-                              context_meta(doc_meta.get("context"))["evidence_generated"]), ""]
+              ("- %s（%s%s）" % (element.get("source_text", "").strip(),
+                                context_meta(doc_meta.get("context"))["evidence_generated"],
+                                ("；定位：%s" % _loc) if _loc else "")), ""]
     if rels:
         lines += ["## 本体关系", ""]
         # 同 (类型, 目标) 只写一行：同一操作对同一属性可能有 C 与 R 两条边（crudKind 不同），
@@ -1039,15 +1042,19 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         for up in upstream:
             lines.append("- 上游页面：`%s`" % up)
         lines.append("")
+    _cat = element.get("category_path") or class_category_path(
+        element["type"], model["key"], model["label"], element["type_label"])
     return {
         "slug": slug, "title": element["name"], "page_type": element["type"],
         "summary": (element.get("definition") or "")[:500],
         "content": "\n".join(lines).rstrip() + "\n",
         # 分类路径：设计载荷可显式指定（如报告页用 `["概要设计报告"]`）；否则按本体类推导
-        "category_path": element.get("category_path")
-                          or class_category_path(element["type"], model["key"], model["label"],
-                                                 element["type_label"]),
-        "wiki_path": slug, "source_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
+        "category_path": _cat,
+        # `wiki_path` 供**前端目录树显示**：口径必须是「目录路径/标题」（与 `ke_pages.upsert_page` /
+        # `ke_import` 一致）。**不能写 slug** —— 2026-10-03 用户实测：写成 slug 时前端目录能列出目录名
+        # 但**展开取不到页**（与知识库既有排障结论 TROUBLESHOOTING §「wiki_path 写成 slug」同因）。
+        "wiki_path": "/".join([str(x) for x in _cat] + [element["name"]]),
+        "source_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
         "chunk_refs": [chunk_id] if chunk_id else [],
         "out_links": sorted({r.get("target_slug") for r in rels if r.get("target_slug")}),
         "aliases": element.get("aliases") or [element["name"]],
@@ -1737,6 +1744,7 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
         if dst and src and rel_type:
             incoming_map.setdefault(dst, []).append({"source_title": src, "type": rel_type})
 
+    injected_identity: dict = {}
     accepted = []
     payloads = []
     for node in nodes:
@@ -1755,28 +1763,262 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "inputs": node.get("inputs") or [],
             "outputs": node.get("outputs") or [],
             "assertions": node.get("assertions") or [],
-            "attributes": node.get("attributes") or {},
+            "attributes": _attrs_with_identity(node, kb_id, injected_identity),
             "retag": bool(node.get("retag")),   # true = 合并进既有页时**同时把该页类型改成 element 的类型**
             "incoming": incoming_map.get(name, []),
             "source_text": node.get("source_text") or ctx["no_quote"],
-            "chunk_id": "", "chunk_index": -1, "relations": rels,
+            # 来源定位（2026-10-01）：显式 `source_locator`/`locator` 优先，其次 `chunk_index` 兜底；
+            # 落到节点属性 `bmm:sourceLocator` + 页面「## 原文依据」的来源行（可查询、可复核）。
+            "source_locator": (str(node.get("source_locator") or node.get("locator") or "").strip()
+                               or _chunk_locator(node.get("chunk_index"))),
+            "chunk_id": str(node.get("chunk_id") or ""),
+            "chunk_index": _as_chunk_index(node.get("chunk_index")), "relations": rels,
             "upstream": upstream, "aliases": node.get("aliases") or [], "context": ctx["id"],
         })
+    # —— `bmm:sourceSession`：**自动连到本会话的会话页**（对象属性，2026-10-04 用户口径）——
+    # 为什么由服务端补：`sourceSession` 是**关系**（domain=owl:Thing → range=bmm:KnowledgeSession），
+    # 智能体常常只写数据属性/漏写；服务端在落库时补一条边，保证「每条知识都能从本体关系回到会话」。
+    # 目标 = 本会话在**本库**里的会话页（**分页页优先**；没有会话页就不补，绝不编造）。
+    _ident = _session_ident()
+    session_edges: list[dict] = []
+    if _ident.get("ok"):
+        _stitle, _ = _session_page_ref(kb_id, _ident["session_no"])
+        if _stitle:
+            for _p in payloads:
+                if (_p.get("type") or "").strip() == IDENTITY_CLASS:
+                    continue
+                if any((_r or {}).get("type") == "bmm:sourceSession" for _r in (_p.get("relations") or [])):
+                    continue
+                _p.setdefault("relations", []).append({"type": "bmm:sourceSession", "target": _stitle})
+                session_edges.append({"source": _p["name"], "type": "bmm:sourceSession", "target": _stitle})
+    accepted += session_edges
+
     cross_kb = _other_kb_same_name(kb_id, unresolved)
     return payloads, {"edges": accepted, "violations": violations, "unmatched": [],
                       "retract_edges": retract_edges,
                       "cross_kb_same_name": cross_kb,
+                      # 身份注入回执（2026-10-01）：会话类节点的 tenantName/agentName 由服务端注入，
+                      # 客户端传值一律丢弃（防伪造）——这里说明注入了什么，便于回执核对。
+                      "injected_identity": injected_identity,
                       "note": ("目标不在本库、但**同名页存在于其它知识库**：这些目标按"
                                "「本库没有」处理（不跨库合并、不入库）；要连到别库的页，"
                                "请先在本库建立对应节点。") if cross_kb else ""}
 
 
-def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
+# ---------------------------------------------------------------------------
+# 身份注入 & 来源定位（2026-10-01，闭环一）
+#   · 会话类节点（`bmm:KnowledgeSession`）的**租户/智能体身份只能由服务端注入**：
+#     客户端（智能体/用户）传的同名属性一律丢弃 —— 否则对话内容即可伪造身份。
+#   · 来源定位 `bmm:sourceLocator`：显式值优先，缺失时用 `chunk_index` 兜底成「片段 #n」。
+# ---------------------------------------------------------------------------
+IDENTITY_CLASS = "bmm:KnowledgeSession"
+
+# 目录层级参数（2026-10-04 用户口径）：
+#   第一层永远是**模块短名**；`depth` = 模块下再展开几层类（0=直接到本类；1=直接 Thing 子类；上限 5）；
+#   **weknora 自带类型**（无 `:`）固定第一层 `weknora`、第二层是类型名（与 depth 无关）。
+MAX_DIR_DEPTH = 5
+WEKNORA_MODULE_SHORT = "weknora"
+WEKNORA_TYPE_LABELS = {"summary": "摘要", "entity": "实体", "concept": "概念",
+                       "synthesis": "综合", "comparison": "对比", "question": "问题",
+                       "faq": "FAQ", "pipeline": "流水线", "chunk": "切片",
+                       "image": "图片", "table": "表格"}
+
+
+class _IdentCtx(threading.local):
+    """本次调用的**会话身份**（由 `save_knowledge` 解析后放进来，供各节点注入用）。
+
+    2026-10-04 用户口径：`agentName` **只认会话**（`sessions.agent_config->>'agent_id'` →
+    `custom_agents.name`），**不信任客户端自报、无 env 兜底**；取不到 → 拒绝写库（fail-closed）。
+    """
+    ident: dict | None = None
+
+
+_IDENT = _IdentCtx()
+
+
+def _session_ident() -> dict:
+    return _IDENT.ident or {}
+
+
+def _attach_session(summary: dict, ident: dict, session_warn: str) -> dict:
+    """把**会话身份**写进回执（`stage=report` 与 `stage=graph` **两条 return 路径共用**）。"""
+    if ident.get("ok"):
+        summary["session_identity"] = {"session_no": ident["session_no"], "agent_id": ident["agent_id"],
+                                       "agent_name": ident["agent_name"], "session_title": ident["title"]}
+    elif session_warn:
+        summary["need_session"] = session_warn
+    return summary
+
+
+def _resolve_session_identity(session_no: str) -> dict:
+    """会话编号（WeKnora `sessions.id`）→ **权威身份**：agentName / tenant / kb 范围。
+
+    - 会话编号必须**真实存在于 `sessions` 表**（否则视为编造 → 拒）；
+    - 智能体名取自 `sessions.agent_config.agent_id` → `custom_agents.name`（**会话选择的智能体**）；
+    - 任何一步取不到 → `ok=False` → 调用方**拒绝写库**。
+    """
+    sid = (session_no or "").strip()
+    if not sid:
+        return {"ok": False, "reason": "缺少会话编号（请把 WeKnora 会话编号作为 session_no / 会话页的 bmm:sessionNo 传入）"}
+    try:
+        rows = ke_db.psql_csv(
+            "SELECT id, tenant_id, COALESCE(agent_config->>'agent_id','') AS agent_id, "
+            "COALESCE(title,'') AS title FROM sessions "
+            "WHERE id = %s AND deleted_at IS NULL LIMIT 1" % sql_str(sid))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": "查会话失败：%s" % exc}
+    if not rows:
+        return {"ok": False, "reason": "会话编号在 WeKnora 里不存在：%s" % sid}
+    agent_id = (rows[0].get("agent_id") or "").strip()
+    if not agent_id:
+        return {"ok": False, "reason": "该会话未绑定智能体（sessions.agent_config.agent_id 为空）"}
+    try:
+        ar = ke_db.psql_csv("SELECT name FROM custom_agents WHERE id = %s LIMIT 1" % sql_str(agent_id))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": "查智能体名称失败：%s" % exc}
+    agent_name = ((ar[0].get("name") if ar else "") or "").strip()
+    if not agent_name:
+        return {"ok": False, "reason": "会话绑定的智能体 %s 在 custom_agents 里查不到名称" % agent_id}
+    return {"ok": True, "session_no": sid, "agent_id": agent_id, "agent_name": agent_name,
+            "tenant_id": rows[0].get("tenant_id"), "title": rows[0].get("title") or ""}
+
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                      r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _pick_session_no(session_no, session, nodes, report) -> str:
+    """取**会话编号**（= WeKnora `sessions.id`，uuid）。
+
+    来源优先级：显式参数 `session_no` → `session` 字典 → `bmm:KnowledgeSession` 节点属性 → `report`。
+    只接受 **uuid 形态**的值：非 uuid 一律忽略（防止把「会话-2026-10-04」这种自编号当会话编号）。
+    """
+    cands = [session_no]
+    if isinstance(session, dict):
+        cands += [session.get(k) for k in ("session_no", "sessionNo", "id")]
+    for nd in (nodes or []):
+        if isinstance(nd, dict) and (nd.get("type") or "").strip() == IDENTITY_CLASS:
+            at = nd.get("attributes") or {}
+            cands += [at.get("sessionNo"), at.get("session_no"), nd.get("session_no")]
+    if isinstance(report, dict):
+        cands += [report.get("session_no"), report.get("sessionNo")]
+    for c in cands:
+        v = str(c or "").strip()
+        if v and _UUID_RE.match(v):
+            return v
+    return ""
+
+
+def _session_page_ref(kb_id: str, session_no: str) -> tuple[str, str]:
+    """本会话在**目标库**里的会话页 → `(title, slug)`；优先**分页页**（partNo 最大的 p<n>）。
+
+    用于把 `bmm:sourceSession`（**对象属性**）连到会话页 —— 工具侧不再把它当数据属性写。
+    库里没有该会话页时返回 `("", "")`（**不编造**）。
+    """
+    sid = (session_no or "").strip()
+    if not sid:
+        return "", ""
+    try:
+        # 2026-10-04 修：**不能只按 slug 前缀 `session/<编号>` 找** —— 实测智能体常把会话页
+        # 命名成 `bmm/knowledgesession/会话-XXX`（slug 里没有编号前缀）⇒ 匹配不到、自动边挂不上。
+        # 改为：在本库的 `bmm:KnowledgeSession` 页里，按 **`bmm:sessionNo` 属性值**（正文里有
+        # `bmm:sessionNo（会话编号…） = <uuid>`）或 slug 前缀匹配；**分页页优先**（`/p<n>`）。
+        rows = psql_csv(
+            "SELECT title, slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+            "AND page_type = 'bmm:KnowledgeSession' AND (content LIKE %s OR slug LIKE %s) "
+            "ORDER BY (slug LIKE '%%/p%%') DESC, length(slug) DESC LIMIT 1"
+            % (sql_str(kb_id), sql_str("%" + sid + "%"), sql_str("session/" + sid + "%")))
+    except Exception:  # noqa: BLE001
+        return "", ""
+    if not rows:
+        return "", ""
+    return (rows[0].get("title") or "").strip(), (rows[0].get("slug") or "").strip()
+
+
+def _session_part_no(kb_id: str, session_no: str) -> str:
+    """会话分页序号（`bmm:partNo`）——`sourceLocator` 用它定位到**具体分页**。"""
+    title, slug = _session_page_ref(kb_id, session_no)
+    if not slug:
+        return ""
+    m = re.search(r"/p(\d+)$", slug)
+    return m.group(1) if m else ""
+
+
+def _attrs_with_identity(node: dict, kb_id: str, injected: dict) -> dict:
+    """节点数据属性（含**身份注入**与**来源会话注入**）。
+
+    规则（2026-10-04 用户口径）：
+      · `bmm:KnowledgeSession` 节点：`sessionNo` / `agentName` **由会话身份覆盖**（客户端值丢弃）、
+        `tenantName` = 租户名（服务端查 `tenants.name`）；
+      · **其它节点**：自动补 `bmm:sourceSession`（= `session/<会话编号>`）与
+        `bmm:sourceLocator` 兜底（= `session/<会话编号>/p<分页序号>`）→ 每条知识都能回到会话；
+      · **无 env 兜底**：会话身份解析不到时，`save_knowledge` 层已经**拒绝写库**（fail-closed）。
+    """
+    attrs = dict(node.get("attributes") or {})
+    ident = _session_ident()
+    is_session_node = (node.get("type") or "").strip() == IDENTITY_CLASS
+
+    if is_session_node:
+        attrs.pop("tenantName", None)          # 租户一律服务端注入（防伪造）
+        attrs.pop("sessionNo", None)           # 会话编号一律以会话身份为准（防编造）
+        attrs.pop("agentName", None)           # 智能体名一律取“会话选择的智能体”
+        tenant = get_kb_tenant(kb_id)
+        if tenant not in (None, ""):
+            attrs["tenantName"] = _tenant_name(tenant)
+            injected["tenantName"] = attrs["tenantName"]
+        if ident.get("ok"):
+            attrs["sessionNo"] = ident["session_no"]
+            attrs["agentName"] = ident["agent_name"]
+            injected["sessionNo"] = ident["session_no"]
+            injected["agentName"] = ident["agent_name"]
+        return attrs
+
+    # 非会话节点：**只自动补「来源定位」数据属性**（`bmm:sourceLocator`）。
+    # `bmm:sourceSession` 是**对象属性（关系）** ⇒ 由 `design_elements` 统一补关系边，
+    # **不再写进数据属性**（2026-10-04 用户实测：写成属性 ⇒ 正文出现裸键、本体关系里没有边、
+    # 也没连到会话分页；用户口径「本体关系要与会话有关系，定位要对应到知识分页」）。
+    if ident.get("ok"):
+        if not (attrs.get("sourceLocator") or "").strip():
+            part = _session_part_no(kb_id, ident["session_no"])
+            attrs["sourceLocator"] = ("session/%s/p%s" % (ident["session_no"], part)) if part \
+                else ("session/%s" % ident["session_no"])
+        injected.setdefault("sourceLocator", attrs["sourceLocator"])
+    return attrs
+
+
+def _chunk_locator(chunk_index) -> str:
+    """`chunk_index` → 「片段 #n」；无效/负值返回空串（**不编造定位**）。"""
+    try:
+        n = int(chunk_index)
+    except (TypeError, ValueError):
+        return ""
+    return "片段 #%d" % n if n >= 0 else ""
+
+
+def _as_chunk_index(chunk_index) -> int:
+    try:
+        return int(chunk_index)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _tenant_name(tenant_id) -> str:
+    """租户 id → **租户名**（`tenants` 表；查不到就回落 id 本身）。"""
+    try:
+        rows = ke_db.psql_csv("SELECT name FROM tenants WHERE id = %d LIMIT 1" % int(tenant_id))
+        name = ((rows[0].get("name") if rows else "") or "").strip()
+        return name or str(tenant_id)
+    except Exception:  # noqa: BLE001  查不到不改写主流程
+        return str(tenant_id)
+
+
+def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm",
                    report: dict | None = None, nodes: list | None = None, edges: list | None = None,
                    mode: str = "dry_run", confirmed_new_applications: list | None = None,
                    high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
                    session: dict | None = None, kb_ids: list | None = None,
-                   confirm_kb_match: bool = False, context: str = "") -> dict:
+                   confirm_kb_match: bool = False, context: str = "",
+                   session_no: str = "") -> dict:
     """**设计落库（不调 LLM）**：两段式，复用抽取路径的 `save_elements`（相似度合并/待确认/版本/目录）。
 
     - `stage="report"`：把**概要设计报告 md** 整篇写成 wiki 页（索引页/父页）。
@@ -1803,6 +2045,22 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
         raise ValueError("stage 只能是 report / graph")
     if mode not in ("dry_run", "apply"):
         raise ValueError("mode 只能是 dry_run / apply")
+    # —— 会话身份门禁（2026-10-04 用户口径，fail-closed）——
+    # `agentName` **只认会话**：`sessionNo` → `sessions.agent_config->>'agent_id'` → `custom_agents.name`；
+    # 不信任客户端自报、**无 env 兜底**；**取不到会话的智能体名称 → 不允许触碰知识库**
+    # （apply 直接拒写；dry_run 只回报、不落库）。同一批次的其它页也用它自动挂 `sourceSession`。
+    ident = _resolve_session_identity(_pick_session_no(session_no, session, nodes, report))
+    _IDENT.ident = ident if ident.get("ok") else None
+    if not ident.get("ok"):
+        if mode == "apply":
+            return {"ok": False, "stage": stage, "need_session": True,
+                    "reason": ident.get("reason"), "kb_id": kb_id,
+                    "hint": ("落库需要真实会话上下文：请把 WeKnora **会话编号**作为 `session_no`"
+                             "（或写在会话页属性 `bmm:sessionNo`）传入。服务端据此取出"
+                             "「会话选择的智能体」作为 `agentName`，并给本次所有页自动挂 `bmm:sourceSession`。")}
+        session_warn = ident.get("reason")
+    else:
+        session_warn = ""
     tenant_id = get_kb_tenant(kb_id)
     confirmed = {str(x).strip() for x in (confirmed_new_applications or []) if str(x).strip()}
 
@@ -1901,7 +2159,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
             summary["report_page"]["action"] = "pending"
         else:
             summary["report_page"]["action"] = "created"
-        return summary
+        return _attach_session(summary, ident, session_warn)
 
     payloads, checked = design_elements(
         model, model_obj, nodes or [], edges or [], doc_meta,
@@ -1925,6 +2183,10 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
     summary["stage"] = "graph"
     summary["pending_confirmation"] = blocked
     summary["context"] = ctx["id"]
+    # 来源会话边回执（2026-10-04）：服务端自动补的 `bmm:sourceSession`（对象属性）——
+    # 让调用方能一眼确认"本次每条知识都连回了会话页"（用户口径）。
+    summary["source_session_edges"] = [e for e in (checked.get("edges") or [])
+                                       if e.get("type") == "bmm:sourceSession"]
     # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"
     summary["cross_kb_same_name"] = checked.get("cross_kb_same_name") or []
     if checked.get("cross_kb_same_name"):
@@ -1946,7 +2208,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "ea",
             summary["session"] = adopted
     except Exception as exc:  # noqa: BLE001
         summary["session"] = {"error": str(exc)[:200]}
-    return summary
+    # 会话身份回执（2026-10-04）：说明本次落库用的**会话事实**（agentName 来自会话而非自报）
+    return _attach_session(summary, ident, session_warn)
 
 
 # ---------------------------------------------------------------------------
@@ -2517,7 +2780,7 @@ def refresh_service_overview(kb_id: str, slug: str = "", title: str = "") -> dic
     lines = service_overview_lines(kb_id)
     if not lines:
         return {"skipped": "没有已详设的服务"}
-    return save_knowledge(kb_id, stage="report", model="ea", mode="apply",
+    return save_knowledge(kb_id, stage="report", model="bmm", mode="apply",
                           report={"title": title or OVERVIEW_TITLE,
                                   "slug": slug or OVERVIEW_SLUG,
                                   "content_md": "\n".join(lines),
@@ -2873,13 +3136,21 @@ def tool_definitions() -> list[dict]:
                     "confirm_kb_match": {"type": "boolean",
                                         "description": ("模糊匹配（uuid 前缀 / 名称包含）命中唯一库时的**二次确认**："
                                                         "true 才允许写；精确匹配（完整 uuid / 精确库名）不需要")},
+                    "session_no": {
+                        "type": "string",
+                        "description": ("**本会话编号**（WeKnora 会话 id，uuid 形态）。**落库（apply）必传**："
+                                        "服务端拿它去 `sessions` 表取「**会话选择的智能体**」"
+                                        "（`agent_config.agent_id` → `custom_agents.name`）作为 `agentName`、"
+                                        "取租户名作为 `tenantName`，并给本次**所有**页自动挂 `bmm:sourceSession`。"
+                                        "**取不到会话身份 → 拒绝写库**（回执 `need_session=true` + `reason`）——"
+                                        "会话编号不由你编造，必须是运行时给你的编号（或写在会话页属性 `bmm:sessionNo`）。")},
                     "context": {"type": "string",
                                 "enum": ["domain_modeling", "ea_overview_design", "service_detailed_design"],
                                 "description": ("本技能上下文：决定文案（缺 source_text 时写哪句、报告页标题/分类）。"
                                                 "不传时按旧口径（概要设计）渲染")},
                     "stage": {"type": "string", "enum": ["report", "graph"],
                               "description": "report=先落报告页（返回 slug）；graph=再落细分节点与关系"},
-                    "model": {"type": "string", "description": "本体模型 key，默认 ea"},
+                    "model": {"type": "string", "description": "本体模块 key：`bmm`（默认，BMM/EA 业务本体）或 `agent`（智能体开发本体：技能/工具/MCP/评估）；`ea` 已退役（模块已删，传它会报错）"},
                     "report": {
                         "type": "object",
                         "description": ("报告页与溯源信息：{title, content_md(报告全文), slug(可选，"
@@ -2941,6 +3212,32 @@ def tool_definitions() -> list[dict]:
                     },
                 },
                 "required": ["kb_id", "stage"],
+            },
+        },
+        {
+            "name": "recategorize",
+            "description": ("**全量重刷目录（两段式，显式触发）**：按**当前本体 + 层级参数**重算该库所有页的 "
+                            "`category_path`/`wiki_path`，再重建目录树（挂页 + prune 空目录）。\n"
+                            "何时用：**改过本体**（新增类、改继承，如把 `Stub` 改成 `Tool` 的子类）、"
+                            "**手工改过页类型**、或只是想按新层级重排目录时（`category_path` 是写时物化的，"
+                            "不重算老页就留在旧目录）。\n"
+                            "**层级参数**：第一层永远是模块短名；`depth`=模块下再展开几层类 "
+                            "（**缺省 1** = 直接 Thing 子类，界面共 2 层；**0** = 第一层模块下直接到最底层的类；"
+                            "范围 0–5）。weknora 自带类型（`concept`/`entity`/`summary`…）固定放 "
+                            "`weknora/<类型>`，与 `depth` 无关。**本体模型库不支持本功能**（它另有 ontology:* 目录）。\n"
+                            "两段式：默认 `apply=false` 只回**变更清单**（页 / 旧目录 → 新目录）；"
+                            "确认后 `apply=true` 写库并自动重建目录。默认不动数据。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"},
+                    "apply": {"type": "boolean",
+                              "description": "false（默认）= 只出清单；true = 写库 + 重建目录"},
+                    "depth": {"type": "integer",
+                              "description": "层级参数：第一层永远是模块短名；depth=模块下再展开几层类"
+                                             "（缺省 1；0=直接到最底层的类；上限 5）"},
+                },
+                "required": ["kb_id"],
             },
         },
         {
@@ -3484,16 +3781,20 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "audit_plan":
         return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
                                    str(args.get("scope", "all")))
+    if name == "recategorize":
+        return recategorize(str(args.get("kb_id", "")), dry_run=not bool(args.get("apply")),
+                            depth=int(args.get("depth", 1) or 1))
     if name == "save_knowledge":
         return save_knowledge(
             str(args["kb_id"]), stage=str(args.get("stage", "report")),
-            model=str(args.get("model", "ea")), report=args.get("report"),
+            model=str(args.get("model", "bmm")), report=args.get("report"),
             nodes=args.get("nodes") or [], edges=args.get("edges") or [],
             mode=str(args.get("mode", "dry_run")),
             confirmed_new_applications=args.get("confirmed_new_applications") or [],
             session=args.get("session") or None, kb_ids=args.get("kb_ids") or None,
             confirm_kb_match=bool(args.get("confirm_kb_match")),
-            context=str(args.get("context", "")))
+            context=str(args.get("context", "")),
+            session_no=str(args.get("session_no", "")))
     if name == "import_probe":
         return ke_sheet.probe(str(args["file"]), str(args.get("sheet", "")), int(args.get("sample", 3) or 3))
     if name == "import_plan":
@@ -3663,6 +3964,144 @@ def _log_tool_call(name: str, args: dict, result, ms: float) -> None:
 PROTOCOL_VERSION = "2025-03-26"
 SERVER_NAME = "bodhi-ontology-mcp"
 SERVER_VERSION = "0.1.0"
+
+
+# ---------------------------------------------------------------------------
+# 目录按需全量重建（2026-10-04，用户口径）
+#   `wiki_folders` 是**物化**的目录表：新页落下后若不重建，前端（懒加载 + 已加载层不重取）
+#   就看不到新目录/新页（用户实测："目录更新时间早于最新页面"）。
+#   判据 = `max(页.updated_at) > max(目录.updated_at)` → **全量重建**该库目录树（幂等）：
+#   重算 category_path 前缀 → upsert 目录 → 把页挂到最深一级 → prune 掉不在计划里的空目录。
+#   前端进入 wiki tab / 切库时先调本接口（`/bodhi/folders/refresh?kb_id=…`）再拉目录。
+# ---------------------------------------------------------------------------
+def refresh_folders(kb_id: str = "", force: bool = False) -> dict:
+    kid = (kb_id or "").strip()
+    if not kid:
+        return {"ok": False, "reason": "缺少 kb_id"}
+    kb_id, note = resolve_kb_id(kid)
+    row = psql_csv(
+        "SELECT COALESCE(max(updated_at)::text,'') AS pages, "
+        "COALESCE((SELECT max(updated_at)::text FROM wiki_folders WHERE knowledge_base_id = %s "
+        "AND deleted_at IS NULL), '') AS folders "
+        "FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL"
+        % (sql_str(kb_id), sql_str(kb_id)))
+    pages_at = ((row[0].get("pages") if row else "") or "")
+    folders_at = ((row[0].get("folders") if row else "") or "")
+    out = {"ok": True, "kb_id": kb_id, "kb_note": note, "refreshed": False,
+           "stale": bool(force or (pages_at > folders_at)),
+           "max_page_updated_at": pages_at, "max_folder_updated_at": folders_at}
+    if not out["stale"]:
+        return out
+    try:
+        import sync_folders  # noqa: PLC0415  惰性导入：它 import server（避免环）
+        out["statements"] = sync_folders.sync_kb(kb_id, dry_run=False, link_pages=True, prune=True)
+        out["refreshed"] = True
+    except Exception as exc:  # noqa: BLE001
+        out.update({"ok": False, "reason": str(exc)[:300]})
+        return out
+    row2 = psql_csv("SELECT COALESCE(max(updated_at)::text,'') AS folders FROM wiki_folders "
+                    "WHERE knowledge_base_id = %s AND deleted_at IS NULL" % sql_str(kb_id))
+    out["max_folder_updated_at"] = ((row2[0].get("folders") if row2 else "") or "")
+    return out
+
+
+def _class_chain_labels(ptype: str, meta: dict[str, dict]) -> list[str]:
+    """`[根, …, 本类]` 的中文名（**确定性**：沿 `parents[0]` 上溯再反转）。"""
+    names, cur, seen = [], ptype, set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        names.append(cur)
+        plist = (meta.get(cur) or {}).get("parents") or []
+        cur = plist[0] if plist else ""
+    names.reverse()
+    return [(meta.get(n) or {}).get("label") or n for n in names]
+
+
+def _category_path_for(ptype: str, depth: int, meta: dict[str, dict]) -> list[str]:
+    """按**层级参数**生成目录路径（2026-10-04 用户口径）。
+
+    - **第一层永远是模块短名**（`bodhi:shortName`）；
+    - 本体实例类型（含 `:`）：`depth=0` → `[模块, 本类]`（第一层下直接展开**最底层的类**）；
+      `depth=N≥1` → `[模块, 根, …, 第 N 层类]`（N=1 即"模块下 1 层 = 直接 Thing 的子类"，
+      共展示 2 层；链不足 N 层时到本类为止）；N 上限 5；
+    - **weknora 自带类型**（无 `:`：`concept`/`entity`/`summary`…）：固定 `[weknora, 类型中文名]`
+      —— **与 depth 无关**（用户口径："weknora 也算一个模块放第一层，下面的类型放第二层"）。
+    """
+    info = meta.get(ptype) or {}
+    module = (info.get("module_short") or info.get("module_label")
+              or info.get("module") or ptype)
+    if ":" not in ptype:
+        return [WEKNORA_MODULE_SHORT, WEKNORA_TYPE_LABELS.get(ptype, ptype)]
+    chain = _class_chain_labels(ptype, meta)
+    if int(depth) <= 0:
+        tail = chain[-1:]
+    else:
+        tail = chain[:max(1, min(int(depth), MAX_DIR_DEPTH))]
+    return [module] + tail
+
+
+def recategorize(kb_id: str = "", dry_run: bool = True, depth: int = 1) -> dict:
+    """**全量重刷目录（按钮/显式入口触发）**：按**当前本体 + 层级参数**重算该库所有页的
+    `category_path` / `wiki_path`，再重建目录树（挂页 + prune 空目录）。
+
+    层级参数 `depth`（**缺省 1**，范围 **0–5**；用户口径 2026-10-04）：
+    `1` = 模块下 1 层（= 直接 Thing 的子类，界面共 2 层）；`0` = 第一层模块下直接展开最底层的类；
+    `2–5` = 再往下细化到第 N 层类。**weknora 自带类型**（`concept`/`entity`/`summary`…）
+    固定放 `weknora/<类型>`（与 `depth` 无关）。
+
+    **本体模型库不支持**（它的目录是另一套 `ontology:*`，由本体投影维护）→ 直接拒绝。
+    只动「本体实例页 + weknora 类型页」，跳过 `ontology:*` 与 `index`。
+    """
+    kid = (kb_id or "").strip()
+    if not kid:
+        return {"ok": False, "reason": "缺少 kb_id"}
+    kb_id, note = resolve_kb_id(kid)
+    rep = ke_ontology.ontology_kb_report(kb_id)
+    if (rep.get("asked") or {}).get("is_ontology_kb"):
+        return {"ok": False, "kb_id": kb_id, "reason": "本体模型库的目录是另一套（ontology:* 由本体投影维护），"
+                                                      "本功能（按本体重算目录）不适用"}
+    depth = max(0, min(int(depth or 0), MAX_DIR_DEPTH))
+    meta = ke_ontology.class_meta()
+    try:
+        rows = psql_csv("SELECT slug, title, page_type, COALESCE(category_path::text,'[]') AS cat "
+                        "FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                        "AND COALESCE(page_type,'') NOT LIKE 'ontology:%%' AND page_type <> 'index'"
+                        % sql_str(kb_id))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": str(exc)[:300]}
+    changes, skipped = [], 0
+    for row in rows:
+        ptype = (row.get("page_type") or "").strip()
+        if not ptype:
+            skipped += 1
+            continue
+        if ":" in ptype and ptype not in meta:
+            skipped += 1                      # 未知本体类型（本体里没有）→ 不动
+            continue
+        new_path = _category_path_for(ptype, depth, meta)
+        new_wp = "/".join(new_path + [(row.get("title") or "").strip()])
+        old_path = row.get("cat") or "[]"
+        if old_path == json.dumps(new_path, ensure_ascii=False):
+            continue
+        changes.append({"slug": row["slug"], "title": row.get("title"), "page_type": ptype,
+                        "old_path": json.loads(old_path or "[]"), "new_path": new_path,
+                        "new_wiki_path": new_wp})
+    out = {"ok": True, "kb_id": kb_id, "kb_note": note, "dry_run": bool(dry_run), "depth": depth,
+           "scanned": len(rows), "skipped_unknown_type": skipped, "changes": changes,
+           "changed": len(changes)}
+    if dry_run or not changes:
+        out["hint"] = ("dry_run：加 dry_run=false（或 HTTP `dry_run=0`）才写库；"
+                       "写库后会自动重建该库目录树（挂页 + prune 空目录）")
+        return out
+    statements = []
+    for ch in changes:
+        statements.append(
+            "UPDATE wiki_pages SET category_path = %s::jsonb, wiki_path = %s, updated_at = now() "
+            "WHERE knowledge_base_id = %s AND slug = %s;"
+            % (sql_json(ch["new_path"]), sql_str(ch["new_wiki_path"]), sql_str(kb_id), sql_str(ch["slug"])))
+    psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
+    out["folders"] = refresh_folders(kb_id, force=True)
+    return out
 
 
 class MCPHandler(BaseHTTPRequestHandler):
@@ -3991,6 +4430,30 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json(ke_ontology.relation_types_for(params.get("page_type", "")), 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/ontology/relation-types 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path.startswith("/bodhi/folders/recategorize"):
+            # **重新编目（显式入口，不自动跑）**：按当前本体重算本体实例页的 category_path/wiki_path
+            # 再重建目录（挂页+prune）。`dry_run=1`（默认）只出清单。用户口径 2026-10-04。
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(recategorize(params.get("kb_id", ""),
+                                        params.get("dry_run", "1") not in ("0", "false", ""),
+                                        int(params.get("depth", "1") or 1)),
+                           200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/folders/recategorize 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path.startswith("/bodhi/folders/refresh"):
+            # 目录按需全量重建（2026-10-04）：有比目录更新的页 → 重建（幂等，一般是 no-op）
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(refresh_folders(params.get("kb_id", ""),
+                                           params.get("force", "0") not in ("0", "false", "")),
+                           200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/folders/refresh 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/ontology/kb", "/bodhi/ontology/kb.json"):

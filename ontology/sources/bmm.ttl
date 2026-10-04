@@ -206,7 +206,7 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "操作性业务规则的执行强度分类"@zh ;
     owl:equivalentClass [
         rdf:type owl:Class ;
-        owl:oneOf ( :Strict :Override :Advisory )
+        owl:oneOf ( :Strict :Override :Advisory :Summary )
     ] .
 
 :Strict rdf:type :EnforcementLevel ;
@@ -220,6 +220,10 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 :Advisory rdf:type :EnforcementLevel ;
     rdfs:label "建议"@zh ;
     rdfs:comment "推荐遵守，但允许根据情况灵活调整"@zh .
+
+:Summary rdf:type :EnforcementLevel ;
+    rdfs:label "总结"@zh ;
+    rdfs:comment "在已有评审问题基础上进行总结（需求：『技术方案合理性评审』规则的执行级别，2026-10-01 新增第 4 档）"@zh .
 
 ### 25. 评估类型 AssessmentType（严格限定为SWOT四维度）
 :AssessmentType rdf:type owl:Class ;
@@ -618,6 +622,114 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     owl:cardinality 1 ;
     rdfs:comment "每一项评估必须且只能属于优势、劣势、机会、威胁中的一种"
 ] .
+
+# ============================================================
+# 六、知识来源：会话知识页（2026-10-01 新增 · 第一闭环）
+#   口径（用户）：知识的产生与变化都发生在与智能体的会话里 → 会话即来源；
+#   会话在系统里虽有保存，但被删就断链 → 必须作为知识入库（页面 + 本体个体）。
+# ============================================================
+
+### 31. 知识会话 KnowledgeSession
+:KnowledgeSession rdf:type owl:Class ;
+    rdfs:label "知识会话"@zh ;
+    rdfs:comment "与智能体的一次会话，是知识产生与变化的统一来源。会话起始页只保存基本信息（会话编号/名称/智能体名称/租户名称/初始问题/开始时间/权威库）；上下文过长且一组高相关知识已确认更新完成时可新开分页，各分页共享同一会话编号与名称；会话分页与其产出的知识必须在同一个知识库；跨库时会话起始页每库各一份副本，以初始库为权威。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+### 32. 会话状态 SessionStatus
+:SessionStatus rdf:type owl:Class ;
+    rdfs:label "会话状态"@zh ;
+    rdfs:comment "会话分页的处置状态（存档只改状态、不删页，保留溯源链）"@zh ;
+    owl:equivalentClass [
+        rdf:type owl:Class ;
+        owl:oneOf ( :SessionActive :SessionArchived )
+    ] .
+
+:SessionActive rdf:type :SessionStatus ;
+    rdfs:label "进行中"@zh ;
+    rdfs:comment "会话仍有未过期、未废弃的知识"@zh .
+
+:SessionArchived rdf:type :SessionStatus ;
+    rdfs:label "已存档"@zh ;
+    rdfs:comment "该会话各页关联的知识均已过期或废弃 → 可存档"@zh .
+
+### 33. 会话属性（起始页基本信息）与溯源定位
+:sessionNo rdf:type owl:DatatypeProperty ;
+    rdfs:label "会话编号"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string ;
+    rdfs:comment "**WeKnora 会话编号（由运行时注入）**：同一会话跨天续跑**编号不变**、各分页共享同一编号。**智能体不得自编编号、也不得按日期另起新会话**（否则连续性断裂：昨天的会话今天还会新建一个会话 + 一个 p1）。"@zh .
+
+:sessionName rdf:type owl:DatatypeProperty ;
+    rdfs:label "会话名称"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string .
+
+:agentName rdf:type owl:DatatypeProperty ;
+    rdfs:label "智能体名称"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string ;
+    rdfs:comment "**由运行时注入（只读）**（MCP 侧环境变量 `BODHI_AGENT_NAME`）；不得由智能体或用户提供（身份若取自对话内容即可被伪造）。"@zh .
+
+:tenantName rdf:type owl:DatatypeProperty ;
+    rdfs:label "租户名称"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string ;
+    rdfs:comment "**由落库工具按目标知识库所属租户注入（只读）**；不得由智能体或用户提供（可伪造）。当前注入值为租户标识。"@zh .
+
+:initialQuestion rdf:type owl:DatatypeProperty ;
+    rdfs:label "初始问题"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string ;
+    rdfs:comment "会话起始页只保存基本信息（会话编号/名称/智能体名称/租户名称/初始问题/开始时间）" .
+
+:startedAt rdf:type owl:DatatypeProperty ;
+    rdfs:label "开始时间"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string .
+
+:partNo rdf:type owl:DatatypeProperty ;
+    rdfs:label "分页序号"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string ;
+    rdfs:comment "上下文过长且一组高相关知识已确认更新完成时新开分页；分页关联同一会话编号与名称" .
+
+:isAuthoritative rdf:type owl:DatatypeProperty ;
+    rdfs:label "是否权威副本"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "跨库时会话起始页每库各一份：true=权威副本（初始库），false=副本（应指向权威页）" .
+
+:sessionStatus rdf:type owl:ObjectProperty ;
+    rdfs:label "会话状态"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range :SessionStatus ;
+    rdfs:comment "会话当前状态，取值来自枚举类 SessionStatus"@zh .
+
+:sourceSession rdf:type owl:ObjectProperty ;
+    rdfs:label "知识来源会话"@zh ;
+    rdfs:domain owl:Thing ;
+    rdfs:range :KnowledgeSession ;
+    rdfs:comment "任何知识页/知识项都应能指回其来源会话（来源都指向会话知识页的相关上下文）"@zh .
+
+:sourceLocator rdf:type owl:DatatypeProperty ;
+    rdfs:label "来源定位"@zh ;
+    rdfs:domain owl:Thing ;
+    rdfs:range xsd:string ;
+    rdfs:comment "**每条知识必填**：会话分页序号 + 轮次/消息/段落（或图坐标），用于可复核；落库工具会同时写入节点属性与「## 原文依据」来源行。与 sourceSession 成对出现。" .
+
+:sessionFor rdf:type owl:ObjectProperty ;
+    rdfs:label "服务方案"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range :CourseOfAction ;
+    rdfs:comment "该会话服务于哪个行动方案/需求/项目（弱桥，可选）"@zh .
+
+### 34. 规则元数据：判定所需知识（2026-10-01 新增）
+:knowledgeNeed rdf:type owl:DatatypeProperty ;
+    rdfs:label "判定所需知识"@zh ;
+    rdfs:domain :OperativeBusinessRule ;
+    rdfs:range xsd:string ;
+    rdfs:comment "判定该规则前必须先提取的知识项（需求『按规则需要的知识内容提取』的落点；也是抽取技能的输入契约）"@zh .
+
 
 # 模块短名（目录名/列表名；≤16 字符，导入时校验）
 <http://example.org/bmm> bodhi:shortName "BMM业务动机模型" .
