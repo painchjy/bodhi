@@ -416,5 +416,27 @@
     rdfs:domain :Advice ;
     rdfs:range xsd:string .
 
+# ------------------------------------------------------------
+# 工作知识库的数据属性（2026-10-04 用户口径；被「上传覆盖真源」冲掉后补回）
+#   三个属性域都是 `:WorkKnowledgeBase`；`depth`/目录只用到 domain，不依赖它们。
+# ------------------------------------------------------------
+:workKbName rdf:type owl:DatatypeProperty ;
+    rdfs:label "工作知识库名称"@zh ;
+    rdfs:domain :WorkKnowledgeBase ;
+    rdfs:range xsd:string ;
+    rdfs:comment "库名（= 实例页标题；业务智能体/技能/工具按**库名**限定调用范围）" .
+
+:workKbId rdf:type owl:DatatypeProperty ;
+    rdfs:label "工作知识库编号"@zh ;
+    rdfs:domain :WorkKnowledgeBase ;
+    rdfs:range xsd:string ;
+    rdfs:comment "WeKnora 知识库 uuid（调用工具时作为目标库参数）" .
+
+:workKbUsage rdf:type owl:DatatypeProperty ;
+    rdfs:label "工作知识库用途"@zh ;
+    rdfs:domain :WorkKnowledgeBase ;
+    rdfs:range xsd:string ;
+    rdfs:comment "该库在业务里读写什么（范围界定；如『评审任务/提取结果/问题清单/结论』）" .
+
 # 模块短名（目录名/列表名；≤16 字符，导入时校验）
 <http://example.org/agent> bodhi:shortName "智能体开发本体" .

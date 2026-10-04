@@ -28,7 +28,11 @@
 
 **期望**：
 - `bmm` 有 `KnowledgeSession` + 上述 6 个属性（`sessionStatus` 是**对象属性**，range=`SessionStatus`）
-- `agent` 有 **15 个类**：`Agent / Skill / Tool / MCPService / DesignSpec / InstallGuide / ToolContract / Stub / StubStatus / Evaluation / Metric / Advice / AdviceCategory / AdviceStatus / KbRole`
+- `agent` 有 **15 个类**：`Agent / Skill / Tool / MCPService / DesignSpec / InstallGuide / ToolContract / Stub / StubStatus / Evaluation / Metric / Advice / AdviceCategory / AdviceStatus / WorkKnowledgeBase`
+  - **2026-10-04 口径变更**：原 `KbRole` 词表（5 值）**已删除** → 改为普通类 **`WorkKnowledgeBase`（工作知识库，一库一页）**；
+    关系改名+重定向：`agentWorkKbRole→agentUsesWorkKb`、`skillTargetsKbRole→skillTargetsWorkKb`、`toolTargetsKbRole→toolTargetsWorkKb`（range 一律 `WorkKnowledgeBase`）；
+    新增数据属性 `workKbName` / `workKbId` / `workKbUsage`。**领域知识库不进本体**（由部署提示词上下文表达）。
+  - `sourceSession` 是**对象属性（关系）**（domain=owl:Thing → range=bmm:KnowledgeSession）；落库时**服务端会自动**给每条非会话页补这条边（指向本会话的会话页，分页优先）——回执 `source_session_edges` 可核对。
 - 若回答"本体里没有" → 说明 MCP 读的还是旧 index（需确认 `artifacts/weknora/ontology_index.json` 已更新）
 
 ## 3. 会话知识页（来源＝会话）

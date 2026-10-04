@@ -202,7 +202,14 @@
 6. **模拟验证模式可跑完整一轮**（见 §7-F）：`open_source_catalog` / `review_flow_status` / `issue_publish` **用挡板数据** → 结论页与问题必须带 **"模拟数据"** 标记 → A/B **一轮评估完成**（**不依赖**这三个工具真实投产）；
 7. **安装与配置可复现**：按 `skill_development` 的**安装指引**装完，业务方能**自行验证**（含"哪些工具是挡板、哪些已投产"的清单）。
 
-### 7-G 知识库分类与归属（2026-10-01 你裁定：**两类闭环共 3 类知识库，不可混用**）
+### 7-G 知识库分类与归属（2026-10-04 修订口径：**只有「工作知识库」进本体**）
+
+> **口径（用户裁定 2026-10-04）**：**只有工作知识库需要建模**（`agent:WorkKnowledgeBase`，**一库一页**）。
+> 其它知识库**都不进本体**：`.env` 注册的三个特殊库、以及**领域知识库**，分别是
+> **第二闭环 / 第一闭环的闭包载体**，不存在"多种知识库角色"这种要建模的分类。
+> **业务智能体能指定的目标库 = 工作知识库**，其范围 = **建模时（设计单）指定的知识库名称**。
+> （原 `agent:KbRole` 5 值词表与 `workKbRole`/`skillTargetsKbRole`/`toolTargetsKbRole` 已**废止并清理**，由
+> `agent:WorkKnowledgeBase` + `agentUsesWorkKb`/`skillTargetsWorkKb`/`toolTargetsWorkKb` 承接。）
 
 | 类 | 知识库 | 库 id（实测） | 谁写 | 说明 |
 |---|---|---|---|---|
@@ -214,7 +221,9 @@
 
 **DDD 的处理（你的裁定）**：**限界上下文 = 领域知识库**（知识库之间不能跨库引用、本地领域方言独立，天然满足）；**上下文映射 = 企业共享概念模型** → **本体里不建 DDD 概念**（`BoundedContext/Aggregate/Entity/ValueObject/DomainEvent` 已从 `agent.ttl` **移除**）。
 
-**本体只描述"业务智能体"**：`Agent / Skill / Tool / MCPService / DesignSpec / InstallGuide / ToolContract / Stub / Evaluation / Metric / Advice` + 4 张词表（`StubStatus / AdviceCategory / AdviceStatus / KbRole`）。**领域建模智能体、设计开发智能体、运维智能体不进本体**（属能力，由技能/工具面表达）。`KbRole`（5 值：企业本体模型库 / 企业共享概念知识库 / 企业知识管理领域知识库 / 领域知识库 / 工作知识库）供**技能（`skillTargetsKbRole`）与工具（`toolTargetsKbRole`）识别与管控**；业务智能体的 `agentWorkKbRole` 应为 **工作知识库**。
+**本体里的表达（现行，2026-10-04）**：`Agent / Skill / Tool / MCPService / DesignSpec / InstallGuide / ToolContract / Stub / StubStatus / Evaluation / Metric / Advice / AdviceCategory / AdviceStatus / **WorkKnowledgeBase**`（+ 词表 `StubStatus / AdviceCategory / AdviceStatus`）。**领域建模智能体、设计开发智能体、运维智能体不进本体**（属能力，由技能/工具面表达）。
+`WorkKnowledgeBase`（**只有这一类知识库进本体**）供**技能（`skillTargetsWorkKb`）与工具（`toolTargetsWorkKb`）识别与管控**；业务智能体用 **`agentUsesWorkKb`** 声明它使用的工作知识库；三个数据属性 `workKbName`/`workKbId`/`workKbUsage` 描述库名、库 id 与用途范围。
+**不进本体的知识库**（无需建模、不要在知识库里建"角色页"）：`.env` 三库（企业本体模型 / 企业共享概念模型 / 企业知识管理领域 —— **第二闭环**使用）与**领域知识库**（领域建模/设计开发的目标库 —— **第一闭环的闭包**，由部署提示词上下文表达）。
 
 > （闭环一交付清单的另一项 —— **挡板与模拟验证** —— 见**下一节 §7-F**。）
 
