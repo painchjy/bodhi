@@ -1775,23 +1775,9 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "chunk_index": _as_chunk_index(node.get("chunk_index")), "relations": rels,
             "upstream": upstream, "aliases": node.get("aliases") or [], "context": ctx["id"],
         })
-    # —— `bmm:sourceSession`：**自动连到本会话的会话页**（对象属性，2026-10-04 用户口径）——
-    # 为什么由服务端补：`sourceSession` 是**关系**（domain=owl:Thing → range=bmm:KnowledgeSession），
-    # 智能体常常只写数据属性/漏写；服务端在落库时补一条边，保证「每条知识都能从本体关系回到会话」。
-    # 目标 = 本会话在**本库**里的会话页（**分页页优先**；没有会话页就不补，绝不编造）。
-    _ident = _session_ident()
-    session_edges: list[dict] = []
-    if _ident.get("ok"):
-        _stitle, _ = _session_page_ref(kb_id, _ident["session_no"])
-        if _stitle:
-            for _p in payloads:
-                if (_p.get("type") or "").strip() == IDENTITY_CLASS:
-                    continue
-                if any((_r or {}).get("type") == "bmm:sourceSession" for _r in (_p.get("relations") or [])):
-                    continue
-                _p.setdefault("relations", []).append({"type": "bmm:sourceSession", "target": _stitle})
-                session_edges.append({"source": _p["name"], "type": "bmm:sourceSession", "target": _stitle})
-    accepted += session_edges
+    # 注：`bmm:sourceSession` 的自动挂**不在这里**（2026-10-04 修正）——把关系塞进 payload.relations 会因为
+    # 拿不到 slug 而渲染成**纯文本**（`→ <标题>`），页面 `in_links` 解析不到、会话页「被引用」为空。
+    # 改为**写入后**由 `link_source_session()` 按 slug 补双链（见 `save_knowledge` 的 graph 分支回执）。
 
     cross_kb = _other_kb_same_name(kb_id, unresolved)
     return payloads, {"edges": accepted, "violations": violations, "unmatched": [],
@@ -1942,6 +1928,114 @@ def _session_part_no(kb_id: str, session_no: str) -> str:
         return ""
     m = re.search(r"/p(\d+)$", slug)
     return m.group(1) if m else ""
+
+
+# ---------------------------------------------------------------------------
+# 来源会话边（`bmm:sourceSession`）：**写入后按 slug 补双链**（2026-10-04 用户实测修正）
+#   为什么不能用 payload 的 relations 自动追加：`ke_pages.relation_line()` 在**拿不到 slug**
+#   时会把关系渲染成**纯文本**（`→ <标题>`）→ 页面 `in_links` 解析不到、会话页「被引用」为空
+#   （用户实测："知识没有建立和会话的关系"）。
+#   所以：① 写入时**不再**往 payload.relations 里塞（避免产生纯文本行）；
+#         ② 写完后用本函数按 **slug** 补 `- 知识来源会话（`bmm:sourceSession`）→ [[slug|title]]`；
+#         ③ 同一函数也是**显式补挂入口**（存量页补一次 / 巡检用）。
+# ---------------------------------------------------------------------------
+SOURCE_SESSION_REL = "bmm:sourceSession"
+SOURCE_SESSION_LABEL = "知识来源会话"
+REL_SECTION = "## 本体关系"
+_SRC_SESS_LINE_RE = re.compile(r"^-\s*[^（(]*（`%s`）→\s*(.*)$" % re.escape(SOURCE_SESSION_REL))
+
+
+def _upsert_source_session_line(content: str, line: str) -> tuple[str, bool]:
+    """把来源会话行写进「## 本体关系」节（**幂等**：同目标已存在则替换成双链形态）。
+
+    返回 `(新正文, 是否改动)`；没有该小节则**补建**小节。
+    """
+    lines = (content or "").splitlines()
+    idx = next((i for i, l in enumerate(lines) if l.strip() == REL_SECTION), -1)
+    if idx < 0:
+        body = (content or "").rstrip() + "\n\n" + REL_SECTION + "\n\n" + line + "\n"
+        return body, True
+    # 节范围 = 标题后到下一个二级标题（或 EOF）
+    end = next((j for j in range(idx + 1, len(lines)) if lines[j].startswith("## ")), len(lines))
+    for j in range(idx + 1, end):
+        m = _SRC_SESS_LINE_RE.match(lines[j].strip())
+        if m:
+            if lines[j].strip() == line:
+                return content, False
+            lines[j] = line
+            return "\n".join(lines) + ("\n" if content.endswith("\n") else ""), True
+    # 没有该行 → 插到标题后的第一个空行之后（保持小节排版）
+    ins = idx + 1
+    while ins < end and not lines[ins].strip():
+        ins += 1
+    lines.insert(ins, line)
+    return "\n".join(lines) + ("\n" if content.endswith("\n") else ""), True
+
+
+def link_source_session(kb_id: str = "", session_no: str = "", slugs: list | None = None,
+                        all_pages: bool = False, dry_run: bool = True) -> dict:
+    """给知识页补 `bmm:sourceSession`（**双链**）→ **会话页（分页优先）**，并重建 `in_links`。
+
+    - 目标会话页：优先 `session_no` 指定；未给则用**本库唯一的** `bmm:KnowledgeSession` 页（多于一页时拒，不猜）；
+      分页存在时**优先分页**（`_session_page_ref` 已按 partNo 优先）。
+    - 要补的页：`slugs` 指定；或 `all_pages=True` 时=本库所有**缺该行**的非会话页。
+    - `dry_run=True`（默认）只出清单，不写库。
+    """
+    kid = (kb_id or "").strip()
+    if not kid:
+        return {"ok": False, "reason": "缺少 kb_id"}
+    kb_id, note = resolve_kb_id(kid)
+    if session_no:
+        title, slug = _session_page_ref(kb_id, session_no)
+    else:
+        rows = psql_csv("SELECT title, slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                        "AND page_type = 'bmm:KnowledgeSession' ORDER BY (slug LIKE '%%/p%%') DESC, "
+                        "length(slug) DESC" % sql_str(kb_id))
+        if len(rows) > 1:
+            return {"ok": False, "kb_id": kb_id, "reason": "本库有多个会话页且未指定 session_no（不猜）",
+                    "candidates": [r["slug"] for r in rows]}
+        title, slug = ((rows[0].get("title") or "").strip(), (rows[0].get("slug") or "").strip()) if rows else ("", "")
+    if not slug:
+        return {"ok": False, "kb_id": kb_id, "reason": "本库没有会话页（先在会话里落一张 bmm:KnowledgeSession 页）"}
+    line = "- %s（`%s`）→ [[%s|%s]]" % (SOURCE_SESSION_LABEL, SOURCE_SESSION_REL, slug, title)
+    if slugs:
+        rows = psql_csv("SELECT slug, content, out_links FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                        "AND slug IN (%s) AND COALESCE(page_type,'') NOT IN ('bmm:KnowledgeSession', 'index')"
+                        % (sql_str(kb_id), ", ".join(sql_str(s) for s in slugs)))
+    else:
+        # 2026-10-04 修正：**不要**只挑"没有该行"的页 —— 存量页常常**有行但是纯文本形态**
+        # （`→ <标题>`，正是要修的那种）。统一取本库全部非会话页，由下面两步幂等判断。
+        rows = psql_csv("SELECT slug, content, out_links FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                        "AND COALESCE(page_type,'') NOT IN ('bmm:KnowledgeSession', 'index')"
+                        % sql_str(kb_id))
+    changes, unchanged = [], 0
+    for row in rows:
+        new, touched = _upsert_source_session_line(row.get("content") or "", line)
+        # 正文已是双链、但 `out_links` 还没并入会话页 slug 的页**也要处理**（否则 in_links 不生效）
+        ol = row.get("out_links")
+        missing = slug not in (ol if isinstance(ol, list) else str(ol or ""))
+        if not touched and not missing:
+            unchanged += 1
+            continue
+        changes.append({"slug": row["slug"], "line_fixed": bool(touched), "out_links_fixed": bool(missing)})
+        if not dry_run:
+            # ⚠️ 关键：`in_links` 是**从 `out_links` 字段**反算的（`ke_pages.rebuild_in_links_sql`），
+            # 而 `out_links` 只在**写入页那一刻**算过 → 事后补正文行必须**同时**把会话页 slug
+            # 并入本页 `out_links`，否则会话页「被引用（入边）」永远是空（2026-10-04 用户实测）。
+            psql("UPDATE wiki_pages SET content = %s, "
+                 "out_links = (SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb) FROM ("
+                 "  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(COALESCE(out_links, '[]'::jsonb))"
+                 "         = 'array' THEN COALESCE(out_links, '[]'::jsonb) ELSE '[]'::jsonb END) AS v"
+                 "  UNION SELECT %s::text) u), updated_at = now() "
+                 "WHERE knowledge_base_id = %s AND slug = %s;"
+                 % (sql_str(new), sql_str(slug), sql_str(kb_id), sql_str(row["slug"])), stdin=True)
+    out = {"ok": True, "kb_id": kb_id, "session_page": {"slug": slug, "title": title}, "line": line,
+           "dry_run": bool(dry_run), "changed": len(changes), "unchanged": unchanged,
+           "changes": changes[:50]}
+    if not dry_run and changes:
+        psql(sql_rebuild_in_links(kb_id), stdin=True)
+        out["in_links"] = "rebuilt"
+    return out
 
 
 def _attrs_with_identity(node: dict, kb_id: str, injected: dict) -> dict:
@@ -2185,6 +2279,17 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
     summary["context"] = ctx["id"]
     # 来源会话边回执（2026-10-04）：服务端自动补的 `bmm:sourceSession`（对象属性）——
     # 让调用方能一眼确认"本次每条知识都连回了会话页"（用户口径）。
+    # 写入后**按 slug 补**来源会话边（双链）→ 会话页「被引用」可见；回执给明细（2026-10-04 修正）
+    if mode == "apply":
+        _se = _session_ident()
+        _slugs = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
+        _slugs += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
+        if _se.get("ok") and _slugs:
+            try:
+                summary["source_session_link"] = link_source_session(
+                    kb_id, _se["session_no"], slugs=_slugs, dry_run=False)
+            except Exception as exc:  # noqa: BLE001  补挂失败不影响落库，但要在回执里说清
+                summary["source_session_link"] = {"ok": False, "reason": str(exc)[:200]}
     summary["source_session_edges"] = [e for e in (checked.get("edges") or [])
                                        if e.get("type") == "bmm:sourceSession"]
     # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"
@@ -3215,6 +3320,28 @@ def tool_definitions() -> list[dict]:
             },
         },
         {
+            "name": "link_source_session",
+            "description": ("**补「来源会话」关系（显式入口）**：给知识页补 "
+                            "`- 知识来源会话（`bmm:sourceSession`）→ [[会话页 slug|标题]]`（**双链**），"
+                            "并重建 `in_links` —— 这样会话页的「被引用（入边）」能看到本次会话产出的全部知识。\n"
+                            "何时用：① 会话页与知识页**同批落库**（或知识先落、会话页后补）导致缺边；"
+                            "② 历史页补一次（`all=true`）；③ 巡检发现「知识无来源会话」。\n"
+                            "目标会话页：给 `session_no` 精确指定；未给则用**本库唯一的**会话页（分页优先；多于一页会拒，不猜）。\n"
+                            "两段式：默认 `apply=false` 只回清单。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"},
+                    "session_no": {"type": "string", "description": "WeKnora 会话编号（可选；不给我用本库唯一的会话页）"},
+                    "slugs": {"type": "array", "items": {"type": "string"},
+                              "description": "要补的页 slug 清单（可选；不给且 all=false 时=本库所有缺该行的非会话页）"},
+                    "all": {"type": "boolean", "description": "true = 本库所有缺该行的非会话页"},
+                    "apply": {"type": "boolean", "description": "false（默认）= 只出清单；true = 写库并重建 in_links"},
+                },
+                "required": ["kb_id"],
+            },
+        },
+        {
             "name": "recategorize",
             "description": ("**全量重刷目录（两段式，显式触发）**：按**当前本体 + 层级参数**重算该库所有页的 "
                             "`category_path`/`wiki_path`，再重建目录树（挂页 + prune 空目录）。\n"
@@ -3781,6 +3908,10 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "audit_plan":
         return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
                                    str(args.get("scope", "all")))
+    if name == "link_source_session":
+        return link_source_session(str(args.get("kb_id", "")), str(args.get("session_no", "")),
+                                   slugs=args.get("slugs") or None, all_pages=bool(args.get("all")),
+                                   dry_run=not bool(args.get("apply")))
     if name == "recategorize":
         return recategorize(str(args.get("kb_id", "")), dry_run=not bool(args.get("apply")),
                             depth=int(args.get("depth", 1) or 1))
@@ -4430,6 +4561,21 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json(ke_ontology.relation_types_for(params.get("page_type", "")), 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/ontology/relation-types 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path.startswith("/bodhi/session/link"):
+            # **补来源会话边（显式入口）**：给知识页补 `bmm:sourceSession` 双链 → 会话页（分页优先）。
+            # `dry_run=1`（默认）只出清单；`all=1` = 本库所有缺该行的非会话页。
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                slugs = [s for s in (params.get("slug", "") or "").split(",") if s.strip()]
+                self._json(link_source_session(params.get("kb_id", ""), params.get("session_no", ""),
+                                               slugs=slugs or None,
+                                               all_pages=params.get("all", "0") not in ("0", "false", ""),
+                                               dry_run=params.get("dry_run", "1") not in ("0", "false", "")),
+                           200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] /bodhi/session/link 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path.startswith("/bodhi/folders/recategorize"):

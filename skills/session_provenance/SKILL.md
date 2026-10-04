@@ -42,6 +42,34 @@ version: 0
 **fail-closed（2026-10-04 用户口径）**：**取不到会话的智能体名称 → 拒绝触碰知识库** —— `mode="apply"` 会直接返回 `need_session=true` + `reason`；此时**不要重试编造编号**，而是把运行时给的编号原样传入（或请用户确认会话）。
 **附带收益**：服务端还会给本次**所有页**自动挂 `bmm:sourceSession`（= `session/<会话编号>`），所以非会话页也天然带来源会话。
 
+## 0c. 需求澄清 = **必须留痕的分页**（2026-10-04 用户实测口径）
+
+> **问题**：用户在会话里做的**需求澄清/修正**（如"执行级别不是『总结』、应为『严格执行』"）当时只改进了
+> 知识页的属性，**会话页里查不到"用户说过什么"** → 溯源断在会话侧。
+> **规则**：出现**用户澄清/修正/否定**时，除了改知识页，还要**把澄清本身记进会话页**：
+> 1. **承载页**：优先**当前会话分页**（`session/<会话编号>/p<N>`，`N` = 已有分页数 + 1，从 `p2` 起）；
+>    澄清轮次本身就是**开分页的正当理由**（§1「切段原因」已含此项）；起始页只放基本信息，**不写澄清正文**。
+> 2. **落库**：把分页页**一起交给 `save_knowledge`**（`bmm:KnowledgeSession` 类型、同一 `bmm:sessionNo`/`bmm:sessionName`，
+>    `bmm:partNo=<N>`、`bmm:sessionStatus=bmm:SessionActive`），正文小节：
+>
+>    ```markdown
+>    ## 本段范围与切段原因
+>    需求澄清（用户对建模/评审结果的修正）
+>
+>    ## 需求澄清
+>    - 轮次 / 时间：轮2 · 2026-10-05 10:12（+0800）
+>    - 用户原话：「合理性评审的执行级别不应该是『总结』……手段不应是具体产物，建议改为构建技术方案评审智能体」
+>    - 影响的知识页：[[…]]（改了哪个属性/关系，从什么改成什么）
+>
+>    ## 本段产出的知识页
+>    - [[…]]
+>    ```
+> 2b. **知识页照常标注**：受影响的知识页在 `bmm:sourceLocator` 里写 `session/<会话编号>/p<N>#轮<m>/<段落>`
+>    （分页序号 + 轮次/段落，与 `sourceLocator` 的定义一致）。
+> 3. **关联由服务端自动挂**：落库后服务端会给本次所有页补 `- 知识来源会话（`bmm:sourceSession`）→ [[会话页 slug|标题]]`
+>    （**分页优先**）→ 会话分页的「被引用（入边）」能看到本条澄清**派生出的全部知识页**。
+>    ⚠️ 服务端**只做挂链**：澄清的**内容**必须由你把上面两个小节写出来（不写 = 溯源里没有"用户说过什么"）。
+
 ## 1. 三种页（**本体类型 `bmm:KnowledgeSession` + slug 约定**）
 
 > 本体已提供该类型（`bmm` 现 32 类）：字段一律 `ontology_types("bmm")` **现查**，**不要自造**。
@@ -50,7 +78,7 @@ version: 0
 | 页 | 类型 / slug 约定 | 内容 |
 |---|---|---|
 | **会话起始页** | `bmm:KnowledgeSession` @ `session/<会话编号>` | 本体属性：`bmm:sessionNo` `bmm:sessionName` `bmm:agentName` `bmm:tenantName` `bmm:initialQuestion` `bmm:startedAt` `bmm:isAuthoritative` `bmm:sessionStatus`；页级：`sessionKind` `authoritativeKb`；小节 `## 分页索引`（分页 slug + 覆盖的知识页 slug） |
-| **会话分页** | `bmm:KnowledgeSession` @ `session/<会话编号>/p<序号>` | 沿用同一 `bmm:sessionNo`/`bmm:sessionName` + `bmm:partNo`；小节 `## 本段范围与切段原因`（**上下文过长 且 一组高相关知识已确认更新完成**才切段）｜`## 本段产出的知识页`｜`## 本段结论摘要` |
+| **会话分页** | `bmm:KnowledgeSession` @ `session/<会话编号>/p<序号>`（`p<序号>` 从 `p2` 起；**起始页不带序号**） | 沿用同一 `bmm:sessionNo`/`bmm:sessionName` + `bmm:partNo`；小节 `## 本段范围与切段原因`（**上下文过长 且 一组高相关知识已确认更新完成**才切段；**或** §0c 的"需求澄清"）｜`## 需求澄清`｜`## 本段产出的知识页`｜`## 本段结论摘要` |
 | **知识页**（含结论页/建议页） | 各技能自己的约定（如 `review/<文档>-<策略>`） | `## 原文依据` 每条写：`bmm:sourceSession`（分页 slug）+ `bmm:sourceLocator`（轮次/消息序号/段落） |
 
 **跨库**：会话起始页**每库一份副本**（`bmm:isAuthoritative=false` + 页级 `authoritativeKb=<初始库>` 指回权威页）；**切换目标库必须新建会话分页**（沿用同一 `bmm:sessionNo`），不得复用别库分页。
