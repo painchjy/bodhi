@@ -221,10 +221,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:label "建议"@zh ;
     rdfs:comment "推荐遵守，但允许根据情况灵活调整"@zh .
 
-:Summary rdf:type :EnforcementLevel ;
-    rdfs:label "总结"@zh ;
-    rdfs:comment "在已有评审问题基础上进行总结（需求：『技术方案合理性评审』规则的执行级别，2026-10-01 新增第 4 档）"@zh .
-
 ### 25. 评估类型 AssessmentType（严格限定为SWOT四维度）
 :AssessmentType rdf:type owl:Class ;
     rdfs:label "评估类型"@zh ;

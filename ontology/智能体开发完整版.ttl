@@ -7,9 +7,9 @@
 @prefix bmm: <http://example.org/bmm#> .
 
 <http://example.org/agent> rdf:type owl:Ontology ;
-    rdfs:label "智能体开发本体（业务智能体 + 技能/工具开发 + 评估与改进建议）"@zh ;
+    rdfs:label "智能体开发本体（业务智能体 + 技能/工具开发 + 评测与改进建议）"@zh ;
     owl:versionIRI <http://example.org/agent/1.1> ;
-    bodhi:expertRole "智能体架构师，精通业务智能体的技能/工具设计开发与效果评估"@zh .
+    bodhi:expertRole "智能体架构师，精通业务智能体的技能/工具设计开发与效果评测"@zh .
 
 # ============================================================
 # 口径（2026-10-01 用户裁定，务必遵守）：
@@ -21,7 +21,7 @@
 #       **企业共享概念知识库**（运维智能体维护的治理产物，**其他智能体只读**）、
 #       **企业知识管理领域知识库**（承载知识提取/管理的技能与工具，暂不纳入两闭环）
 #    ② **领域知识库**：领域建模的目标库，也是业务智能体设计/开发用的库
-#       → 业务智能体、技能、工具、评估、改进建议都在**这里**定义
+#       → 业务智能体、技能、工具、评测、改进建议都在**这里**定义
 #    ③ **业务智能体的工作知识库**：业务运行时新增/留存知识的库（由所在领域的领域知识库指定范围）
 # 3) **本模型只描述业务智能体**；**领域建模智能体 / 设计开发智能体 / 运维智能体不进本体**
 #    （它们是能力/工具，由技能与工具面表达）。
@@ -121,19 +121,19 @@
     rdfs:subClassOf owl:Thing .
 
 # ============================================================
-# 四、评估与改进建议（闭环一的出口 → 闭环二的入口）
+# 四、评测与改进建议（闭环一的出口 → 闭环二的入口）
 # ============================================================
 
-### 11. 评估 Evaluation
+### 11. 评测 Evaluation
 :Evaluation rdf:type owl:Class ;
-    rdfs:label "评估"@zh ;
-    rdfs:comment "一次效果评估（闭环一的收尾）：固定指标口径、反例、结论与受限项清单，可复现；落「领域知识库」。"@zh ;
+    rdfs:label "评测"@zh ;
+    rdfs:comment "一次效果评测（闭环一的收尾）：固定指标口径、反例、结论与受限项清单，可复现；落「领域知识库」。"@zh ;
     rdfs:subClassOf owl:Thing .
 
 ### 12. 指标 Metric
 :Metric rdf:type owl:Class ;
     rdfs:label "指标"@zh ;
-    rdfs:comment "评估的固定指标（结论正确率 / 证据可回溯率 / 未知或待澄清的正确率 / 外部知识依赖数 / 单份方案耗时）。"@zh ;
+    rdfs:comment "评测的固定指标（结论正确率 / 证据可回溯率 / 未知或待澄清的正确率 / 外部知识依赖数 / 单份方案耗时）。"@zh ;
     rdfs:subClassOf owl:Thing .
 
 ### 13. 改进建议 Advice
@@ -190,7 +190,7 @@
 
 :AdviceRejected rdf:type :AdviceStatus ;
     rdfs:label "驳回"@zh ;
-    rdfs:comment "经评估不采纳（必须留痕与理由，避免反复提同一问题）"@zh .
+    rdfs:comment "经评测不采纳（必须留痕与理由，避免反复提同一问题）"@zh .
 
 # ============================================================
 # 五、对象属性（Object Properties）
@@ -281,22 +281,22 @@
     rdfs:comment "挡板 or 已投产"@zh .
 
 :evaluationOfAgent rdf:type owl:ObjectProperty ;
-    rdfs:label "评估对象智能体"@zh ;
+    rdfs:label "评测对象智能体"@zh ;
     rdfs:domain :Evaluation ;
     rdfs:range :Agent ;
-    rdfs:comment "本次评估评的是哪个业务智能体（或它的技能/工具组合）"@zh .
+    rdfs:comment "本次评测评的是哪个业务智能体（或它的技能/工具组合）"@zh .
 
 :evaluationMeasures rdf:type owl:ObjectProperty ;
-    rdfs:label "评估指标"@zh ;
+    rdfs:label "评测指标"@zh ;
     rdfs:domain :Evaluation ;
     rdfs:range :Metric ;
-    rdfs:comment "本次评估采用的指标（口径固定、可复现）"@zh .
+    rdfs:comment "本次评测采用的指标（口径固定、可复现）"@zh .
 
 :evaluationProducesAdvice rdf:type owl:ObjectProperty ;
-    rdfs:label "评估产出建议"@zh ;
+    rdfs:label "评测产出建议"@zh ;
     rdfs:domain :Evaluation ;
     rdfs:range :Advice ;
-    rdfs:comment "评估的出口物：改进建议（闭环二的入口）"@zh .
+    rdfs:comment "评测的出口物：改进建议（闭环二的入口）"@zh .
 
 :adviceHasCategory rdf:type owl:ObjectProperty ;
     rdfs:label "建议类别"@zh ;
@@ -390,7 +390,7 @@
     rdfs:range xsd:string .
 
 :runAt rdf:type owl:DatatypeProperty ;
-    rdfs:label "评估时间"@zh ;
+    rdfs:label "评测时间"@zh ;
     rdfs:domain :Evaluation ;
     rdfs:range xsd:string .
 

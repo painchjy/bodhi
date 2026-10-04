@@ -221,10 +221,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:label "建议"@zh ;
     rdfs:comment "推荐遵守，但允许根据情况灵活调整"@zh .
 
-:Summary rdf:type :EnforcementLevel ;
-    rdfs:label "总结"@zh ;
-    rdfs:comment "在已有评审问题基础上进行总结（需求：『技术方案合理性评审』规则的执行级别，2026-10-01 新增第 4 档）"@zh .
-
 ### 25. 评估类型 AssessmentType（严格限定为SWOT四维度）
 :AssessmentType rdf:type owl:Class ;
     rdfs:label "评估类型"@zh ;
@@ -657,7 +653,7 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:label "会话编号"@zh ;
     rdfs:domain :KnowledgeSession ;
     rdfs:range xsd:string ;
-    rdfs:comment "**WeKnora 会话编号（由运行时注入）**：同一会话跨天续跑**编号不变**、各分页共享同一编号。**智能体不得自编编号、也不得按日期另起新会话**（否则连续性断裂：昨天的会话今天还会新建一个会话 + 一个 p1）。"@zh .
+    rdfs:comment "会话唯一编号，如 'S-20261001-01'；同一会话的各分页共享同一编号" .
 
 :sessionName rdf:type owl:DatatypeProperty ;
     rdfs:label "会话名称"@zh ;
@@ -667,14 +663,12 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 :agentName rdf:type owl:DatatypeProperty ;
     rdfs:label "智能体名称"@zh ;
     rdfs:domain :KnowledgeSession ;
-    rdfs:range xsd:string ;
-    rdfs:comment "**由运行时注入（只读）**（MCP 侧环境变量 `BODHI_AGENT_NAME`）；不得由智能体或用户提供（身份若取自对话内容即可被伪造）。"@zh .
+    rdfs:range xsd:string .
 
 :tenantName rdf:type owl:DatatypeProperty ;
     rdfs:label "租户名称"@zh ;
     rdfs:domain :KnowledgeSession ;
-    rdfs:range xsd:string ;
-    rdfs:comment "**由落库工具按目标知识库所属租户注入（只读）**；不得由智能体或用户提供（可伪造）。当前注入值为租户标识。"@zh .
+    rdfs:range xsd:string .
 
 :initialQuestion rdf:type owl:DatatypeProperty ;
     rdfs:label "初始问题"@zh ;
@@ -715,7 +709,7 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:label "来源定位"@zh ;
     rdfs:domain owl:Thing ;
     rdfs:range xsd:string ;
-    rdfs:comment "**每条知识必填**：会话分页序号 + 轮次/消息/段落（或图坐标），用于可复核；落库工具会同时写入节点属性与「## 原文依据」来源行。与 sourceSession 成对出现。" .
+    rdfs:comment "会话内定位：分页序号 + 轮次/消息/段落（或图坐标），用于可复核" .
 
 :sessionFor rdf:type owl:ObjectProperty ;
     rdfs:label "服务方案"@zh ;
