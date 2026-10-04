@@ -3,7 +3,7 @@ id: structured_modeling
 name: 结构化数据批量建模（Excel / CSV → 本体类与关系）
 description: 读用户对表格结构的中文描述，把列对应到本体的类/数据属性、把外键列对应到关系，然后一次一个类或一条关系地批量建页
 when: 用户给出「结构化文件（Excel/CSV）」并说明「这些列是什么意思」「要建到哪个知识库」时
-models: [bmm, ea]
+models: [bmm, agent]
 default_model: bmm
 stages: [model, probe, plan, apply, verify]
 tools: [import_probe, import_plan, import_apply, import_state, ontology_types, audit_scan]

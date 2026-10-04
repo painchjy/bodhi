@@ -14,6 +14,10 @@
 | `structured_modeling` | 结构化数据批量建模 | 读用户对 **Excel/CSV 表结构**的描述 → 把列映射到本体的**类/数据属性/关系/枚举**，再一次一个类或一条关系地批量建页（**技能理解 → 工具执行**） | bmm / ea | `import_probe`、`import_plan`、`import_apply`、`import_state`、`ontology_types`、`audit_scan` |
 | `document_review` | 文档评审 | 选**文档** + 选**业务策略** → 按策略下的**业务规则逐条**评（LLM软规则交给大模型；图检索生成只读 Cypher；参考规范用 `reference_lookup` 取），**每条只在它的适用范围（一般=章节）内判断** | bmm | `rules_of_policy`、`graph_query`、`reference_lookup`、`review_apply`、`doc_outline`、`grep_chunks`、`wiki_search`、`ontology_types`、`audit_scan` |
 
+| **`skill_development`** | 设计开发 | 由**设计开发智能体**使用：把"领域建模产物 + 知识需求"变成**可运行的业务智能体与业务技能**，并交付**配置与安装指引**（依赖/安装/库与模型/工具状态表/验证步骤）、**挡板计划**（契约先行·打标·不污染·可切换）与**验证清单**；**先出设计单再落文件**；**不改本体** | bmm | `skills`、`ontology_types`、`doc_outline`、`grep_chunks`、`wiki_search`、`rules_of_policy`、`graph_query`、`review_apply`、`save_knowledge`、`audit_scan` |
+| **`session_provenance`** | 会话知识溯源 | **知识来源＝智能体会话**：把会话记成可溯源知识页（**会话起始页**只放会话编号/名称/智能体/租户/初始问题/时间；**分页**按"上下文过长且一组知识已确认更新完"切段，关联同一会话编号）；每条知识在「原文依据」里写 **分页 slug + 定位**；跨库每库一份起始页副本、**以初始库为权威**，**换库必须新建分页**；知识全过期/废弃才 `archived`；含**改进建议**分类（`adviceCategory/adviceStatus`）与总览页 `advice/board`。**不改本体** | bmm | `save_knowledge`、`wiki_search`、`wiki_read_page`、`grep_chunks`、`list_knowledge_chunks`、`link_candidates`、`resolve_link_candidate`、`audit_scan` |
+| `model_recommendation` | 建模方案推荐 | 用户问"这份材料该怎么建模""这些概念要不要建本体""该建到哪个模型/哪一层" → 判**需求种类** → 选**建模路线**（流程·EA ／ BMM ／ DDD+智能体 ／ 方案资产 ／ 结构化）→ 抽概念候选 → 判**消费关系**（被哪个技能/智能体消费）→ 出**建议单**（**推荐≠决定**） | bmm | `skills`、`ontology_types`、`doc_outline`、`wiki_search`、`link_candidates`、`save_knowledge`、`audit_scan` |
+
 > **技能只限「模型」，不限「本体类型」**（用户口径 2026-09-30）——
 > front-matter 里只写 `models:`（可加 `default_model:`），**不写 `scope.classes/relations`**：
 > 类型清单会随本体演进漂移，写死就等于额外维护一份配置。

@@ -25,6 +25,15 @@ bodhi智能体应该不需要本体信息放入提示词
 待确认知识内容以及合并或新增操作出现在了本体图谱页面中，以及本体的浏览页面中增加了待确认的目录，而没有出现在“待确认”页签
 
 
-调用 Bodhi Ontology Ontology Types 失败
-{ "error": "未知本体模型：easvc" } [Analyze the error above and try a different approach.]
-本体模型目录有中文和英文2套，是怎么产生的？
+--------------
+规则限制级别应该去除summary
+创建知识会话缺少租户信息，存在越权风险
+知识来源只有文本中存在，没有session source相关数据属性
+
+设计的产物与BMM产物没有关联，领域建模增加的技术方案评审智能体是一个手段，设计的agent技术方案呢评审，同名，但无关联，
+
+数据属性内容一般为md，应该嵌入在md的代码块中展示
+
+
+
+stub-bmm:offering

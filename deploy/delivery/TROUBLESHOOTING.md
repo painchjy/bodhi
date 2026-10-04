@@ -259,7 +259,75 @@ SELECT count(*) FROM wiki_pages WHERE knowledge_base_id='<kb>' AND deleted_at IS
 ```
 > 新导入的批次不用管：`import_apply` 现在写完会自动 `sync_folders`（回执里带 `folders`）。
 
-## 11c. 【2026-09-30】巡检显示"34 页无来源"，会不会被 `audit_purge` 删掉？
+## 11g. 【2026-10-04】闭环二新增本体类**无法编目展示**（前端类型白名单）
+
+**症状**：新本体类（例：`agent:WorkKnowledgeBase`）的页**建好了、也挂了目录**（`category_path`/`folder_id` 都对、
+`wiki_folders` 有该目录），但界面上**看不到目录与页**，**只能搜索到**。
+
+**根因**：目录树是**按类型过滤**的（`listWikiFolders(kbId, parentId, page_types)`，后端只返回"子树里有这些类型页"的目录）；
+而「本体」tab 的类型集合 = `stats.pages_by_type ∩ isOntologyType()`，`isOntologyType` 原本**只认构建期白名单**
+（`ONTOLOGY_TYPES`）→ **新类不在白名单 ⇒ 前端不会带该类型去查 ⇒ 目录不返回**。（白名单随镜像烘焙，所以以前"加一个类就要重建一次前端"。）
+
+**修法（2026-10-04，一次性 + 永久）**
+1. **结构判据**：`isOntologyType(t) = 白名单(t) || t.includes(':')`（凡 `模块:类` 都算本体类型）
+   —— 改 `frontend/ontologyTypes.ts` + `gen_frontend_types.py`（生成器，下次重放也带）。
+2. **目录按需全量重建**：MCP 新增 **`GET /bodhi/folders/refresh?kb_id=<kb>[&force=1]`**（幂等）：
+   判 `max(页.updated_at) > max(目录.updated_at)` → 有更新才全量重建（upsert 目录 + 挂页 + prune 空目录）；
+   前端在**进入 wiki tab / 切库后首次加载根目录前**调它，`refreshed=true` 时本层**强制重载**
+   （否则懒加载 + 已加载层不重取 → 新页/新目录不刷新页面就出不来）。
+   补丁在 `frontend/patch_frontend.py`（可重放）+ 构建树 `WikiBrowser.vue`。
+3. **重建一次前端**（只有这一步重）：`cd /root/fe-build && NODE_OPTIONS=--max-old-space-size=4096 npm run build`
+   → `docker build -f Dockerfile -t weknora-ui:bodhi2 .` → `bash deploy/weknora-fork/deploy_frontend.sh`。
+
+**自检（3 条）**
+```bash
+docker exec WeKnora-frontend sh -c "grep -o 'includes(\":\")' /usr/share/nginx/html/assets/*.js | wc -l"   # ≥1（结构判据在产物里）
+curl -s "http://localhost/bodhi/folders/refresh?kb_id=<kb>"                                                 # {"ok":true,...}（经前端反代）
+# 目录查询（用含 ':' 的类型集合）应返回新类所在目录：
+curl -s "http://localhost:8080/api/v1/knowledgebase/<kb>/wiki/folders?page_types=agent:WorkKnowledgeBase" -H "Authorization: Bearer <token>"
+```
+> 实测（2026-10-04）：`includes(":")` 命中 1；本体 tab 类型集合 **17 个（含 `agent:WorkKnowledgeBase`）**；
+> 顶层目录 `BMM业务动机模型(2) / 智能体开发本体(11) / 系统与规则台账(33)`；`智能体开发本体` 下一级含
+> **`工作知识库(2)`** ✅（两个新页从此可编目）。**结论：以后闭环二新增本体类，不需要再重建前端。**
+
+**踩坑提醒**：只改 `ontologyTypes.ts` 时**别从仓库副本整文件覆盖**构建树（仓库副本可能比构建树的类型表旧，
+会回退新类型）；**就地改 `isOntologyType` 一行**即可。
+
+
+
+## 11h. 【2026-10-04】前端看不到新模块的目录/页（例：`agent:*` 的「智能体开发本体」）
+
+
+**症状**：库里目录行与页都在（`wiki_folders` 有行、页 `folder_id` 非空），但界面上**某个顶层目录不出现**；
+其它模块（如 `bmm:*`）正常。
+
+**根因（实测）**：目录树是**按类型过滤**的 —— 前端 `listWikiFolders(kbId, parentId, page_types)`
+用 sidebar tab 的类型集合过滤，**后端只返回“子树里有这些类型页（或完全空）”的目录**。
+而 tab 的类型集合来自 `stats.pages_by_type` ∩ `isOntologyType()`（前端内置类型表）——
+**若容器里跑的是旧 bundle（不认识 `agent:*`）→ 该 tab 不会用 `agent:*` 去查 → 后端不返回该目录**。
+
+**定位（3 条命令）**：
+```bash
+# ① 数据面正常吗：带类型查目录（应能看到那个目录）
+curl -s -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/knowledgebase/<kb>/wiki/folders?page_types=agent:Agent,agent:Skill" | head -c 300
+# ② 库里的类型统计（应有 agent:* 键）
+curl -s -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/knowledgebase/<kb>/wiki/stats"
+# ③ 容器产物认不认识新类型（关键）
+docker exec WeKnora-frontend sh -c \
+  "grep -l 'agent:MCPService' /usr/share/nginx/html/assets/*.js | wc -l; \
+   grep -l 'ea:APIService'  /usr/share/nginx/html/assets/*.js | wc -l"   # 期望 1 / 0
+```
+
+**修法**：
+```bash
+docker build -f /root/fe-build/Dockerfile -t weknora-ui:bodhi2 .     # 镜像（dist 已是新的就秒级）
+bash deploy/weknora-fork/deploy_frontend.sh                          # ★ 关键：重建容器 + restart
+# 然后浏览器硬刷新（Ctrl+Shift+R）：主 chunk 哈希变了但 index.html 可能被缓存
+```
+> ⚠️ **教训**：`docker build` 只换镜像，**容器不重建就还是跑旧层**（`docker inspect WeKnora-frontend --format '{{.Image}}'` 与镜像 id 对不上就是这个坑）。改完 UI 源码 → `gen_frontend_types.py` → `build_frontend.sh` → **`deploy_frontend.sh`** 一步都不能少。
+
+
 
 **不会**：结构化导入页（`page_metadata.import.file_sha256`）与文档评审页（`page_metadata.review`）在
 **`check_sources`（C1）与清理计划（`no_source_pages`）里同口径豁免**（用户口径：Excel 行即原文，

@@ -5,8 +5,7 @@ description: 选定文档（知识库文档或附件）→ 选业务策略 → �
 when: 用户要"按某策略/规范评审这份文档（方案、需求、设计）"时
 models: [bmm]
 stages: [model, pick, rules, judge, report]
-tools: [rules_of_policy, graph_query, reference_lookup, review_apply, doc_outline, get_document_info,
-        list_knowledge_chunks, grep_chunks, wiki_search, wiki_read_page, ontology_types, audit_scan]
+tools: [rules_of_policy, graph_query, reference_lookup, review_apply, doc_outline, get_document_info, list_knowledge_chunks, grep_chunks, wiki_search, wiki_read_page, ontology_types, audit_scan]
 version: 2
 ---
 

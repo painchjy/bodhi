@@ -4,7 +4,7 @@ name: 领域知识建模
 description: 按切片分批、可交互续跑地把一篇文档建模成 wiki 知识页（每轮落库并回执页面名称+编号；跨上下文关联先登记候选、确认后才写入）。
 version: 0.2.0
 when: 用户要求把**某一篇文档/资料**按某个本体抽取成 wiki 知识页（说法如：领域知识建模、知识提取、按 EA/BMM 建模、把《X》抽成知识）。
-models: [ea, bmm]
+models: [bmm, agent]
 default_model: bmm
 sources: [document]
 stages: [extract]
@@ -12,7 +12,7 @@ tools: [doc_outline, extract_state, save_knowledge, link_candidates, list_link_c
 inputs:
   knowledge_id: 必填。本次要处理的那一篇（文档名或 id；<pinned_documents> 里的最准）
   budget_tokens: 可选。本轮上下文的 token 上限（会话参数；默认取 BODHI_ROUND_BUDGET_TOKENS=8000）
-guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先用向量召回再登记候选，用户确认后才写关系；不再用异步一次性抽取
+guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先用向量召回再登记候选，用户确认后才写关系；不再用异步一次性抽取；**知识来源＝智能体会话** → 落库带会话身份、每条依据带会话定位（见「来源登记」）
 ---
 
 # 领域知识建模（分批交互版）
@@ -43,6 +43,18 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
 > 以及引用它的页；若回执里有 `same_name_no_decision`（跨库同名但**没有任何裁决**），
 > **停下来先请用户裁决**（同义→挂「企业共享概念模型」里的概念页；异义→登记 ACL 映射），
 > 不要凭 slug 相同就假定同义。全库体检用 `context_scan`（只读，出建议 + ticket）。
+
+## 来源登记（**知识来源＝智能体会话**｜2026-10-01）
+
+本技能产出的**每一条知识都必须能回到会话上下文**（会话页由 `session_provenance` 技能负责建）：
+
+1. **先有会话页**：落库前确认本会话已有 `bmm:KnowledgeSession` 页（起始页 `session/<会话编号>`；上下文过长**且**一组高相关知识已确认更新完成时开分页 `session/<会话编号>/p<序号>`）。没有 → 按 `session_provenance` 建；
+2. **落库带会话身份**：`save_knowledge(..., session_no="<运行时给的会话编号>", session={knowledge_id, round_no, cursor, next_cursor, doc_title})` —— `session_no` **必传**（服务端据此取「会话选择的智能体」注 `agentName`、并把 `bmm:sourceSession` 自动挂到本次所有页）；并**把会话编号/分页序号写进页面「原文依据」小节**；
+3. **每条依据 = `source_text`（原句）+ 会话定位**（分页序号 + 轮次/段落）—— 只写原句不写定位 → `audit_scan` 的 F3 可能仍绿，但**溯源链是断的**（评审问题将追不到出处）。**定位必须落成两个地方**：
+   - **节点属性 `bmm:sourceLocator`**（`nodes[].attributes.sourceLocator`，如 `"session/S-20261003-01/p2#轮3/段5"`）→ 这样**来源是可查询的数据属性**；
+   - 页面「## 原文依据」的来源行（工具会把 locator 渲染进去）。
+   > 示例：`attributes: {"sourceLocator": "session/S-20261003-01/p2#轮3/段5"}`；`source_text` 仍必填（原句）。
+4. **同库约束**：会话分页与其产出的知识**必须在同一个知识库**；**换库必须新建分页**（不是复制）；会话起始页各库各一份、**以初始库为权威**。
 
 ## 固定动作（每轮）
 
