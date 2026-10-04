@@ -102,12 +102,126 @@ def patch_wikibrowser(fe: pathlib.Path) -> None:
         "  return tab",
         "tabPageTypes")
 
+    # ---- 2026-10-04（用户口径）：目录**按需全量重建** ----------------------
+    # 为什么：`wiki_folders` 是物化的目录表；新页落下后若不重建，前端**懒加载 + 已加载层不重取**
+    # 就永远看不到新目录/新页（用户实测："目录更新时间早于最新页面"）。
+    # 做法：进入 wiki tab / 切库后**首次**加载根目录前，先调 MCP 的 `/bodhi/folders/refresh`
+    # （服务端判 `max(页.updated_at) > max(目录.updated_at)` → 有更新才全量重建，幂等）；
+    # 若重建了 → 本层强制重载（`forceReload`），让新目录/新页立刻出现。每库只探测一次。
+    text = replace_maybe(
+        text,
+        "const PENDING_TAB = PENDING_MERGE_TYPE",
+        "const PENDING_TAB = PENDING_MERGE_TYPE\n"
+        "// 目录刷新探测记录（每知识库一次；见 loadCategoriesForType 的按需全量重建）\n"
+        "const WIKI_FOLDERS_REFRESHED = new Set<string>()",
+        "目录刷新探测记录")
+    text = replace_maybe(
+        text,
+        "  const isRoot = parentPath.length === 0",
+        "  const isRoot = parentPath.length === 0\n"
+        "  // 目录按需全量重建（2026-10-04）：有比目录更新的页 → 服务端重建本库目录树后再拉\n"
+        "  // ⚠️ 必须放在 `const isRoot` **之后**（用 const 声明前引用会触发 TDZ 报错，整棵目录/列表都空）。\n"
+        "  let forceReload = !!opts.reset\n"
+        "  if (isRoot && !WIKI_FOLDERS_REFRESHED.has(props.knowledgeBaseId)) {\n"
+        "    WIKI_FOLDERS_REFRESHED.add(props.knowledgeBaseId)\n"
+        "    try {\n"
+        "      const r: any = await fetch(`/bodhi/folders/refresh?kb_id=${encodeURIComponent(props.knowledgeBaseId)}`)\n"
+        "        .then(x => x.json())\n"
+        "      if (r && r.refreshed) forceReload = true\n"
+        "    } catch (e) {\n"
+        "      // 目录刷新接口不可用（未配 /bodhi 代理等）→ 沿用现有目录，不影响浏览\n"
+        "    }\n"
+        "  }",
+        "目录按需全量重建")
+    text = replace_maybe(
+        text,
+        "  if (!opts.reset && state && state.initialized) return // a level is loaded in a single request",
+        "  if (!forceReload && state && state.initialized) return // a level is loaded in a single request",
+        "forceReload 守卫")
+
     text = replace_once(
         text,
         "if (tab === KNOWLEDGE_TAB) return KNOWLEDGE_TYPES.reduce((sum, t) => sum + (byType[t] || 0), 0)",
         "if (tab === KNOWLEDGE_TAB) return KNOWLEDGE_TYPES.reduce((sum, t) => sum + (byType[t] || 0), 0)\n"
         "    if (tab === ONTOLOGY_TAB) return ontologyTypesInStats().reduce((sum, t) => sum + (byType[t] || 0), 0)",
         "statTotal")
+
+    # ---- 2026-10-04（用户口径）：目录全量重刷按钮 + 层级参数 --------------------
+    # 模板：在「新建页」按钮之后加 [刷新目录] + [层级 0–5]（缺省 1）；本体模型库不显示。
+    text = replace_maybe(
+        text,
+        "                      <t-icon name=\"file-add\" />\n                    </button>\n                  </t-tooltip>\n",
+        "                      <t-icon name=\"file-add\" />\n"
+        "                    </button>\n"
+        "                  </t-tooltip>\n"
+        "                  <!-- bodhi2 v11（2026-10-04 用户口径）：目录全量重刷 + 层级参数。\n"
+        "                       点击 = 按「模块短名 / 层级」规则**全量重算**本库所有页的 category_path 并重建目录；\n"
+        "                       层级 0–5（缺省 1＝模块下 1 层，界面共 2 层；0＝第一层模块下直接到最底层的类）。\n"
+        "                       weknora 自带类型固定放 weknora/<类型>（与层级无关）。\n"
+        "                       **本体模型库不适用**（它另有 ontology:* 目录）→ canRefreshFolders 隐藏。 -->\n"
+        "                  <template v-if=\"canRefreshFolders\">\n"
+        "                    <t-tooltip content=\"按当前规则全量重刷目录\" placement=\"top\">\n"
+        "                      <button type=\"button\" class=\"wiki-tab-bar-action\"\n"
+        "                        :disabled=\"folderRefreshLoading\" aria-label=\"刷新目录\"\n"
+        "                        @click.stop=\"refreshFoldersAll\">\n"
+        "                        <t-icon name=\"refresh\" />\n"
+        "                      </button>\n"
+        "                    </t-tooltip>\n"
+        "                    <input v-model.number=\"folderDepth\" type=\"number\" min=\"0\" max=\"5\" step=\"1\"\n"
+        "                      class=\"wiki-tab-bar-action\" style=\"width: 40px; text-align: center\"\n"
+        "                      :disabled=\"folderRefreshLoading\" title=\"目录层级 0–5（缺省 1）\"\n"
+        "                      @change=\"refreshFoldersAll\" />\n"
+        "                  </template>\n",
+        "目录刷新按钮 + 层级选择")
+    # 脚本：状态与函数（紧跟 PENDING_TAB 声明之后；⚠️ 用 ref/computed，函数在调用时才求值）
+    text = replace_maybe(
+        text,
+        "const PENDING_TAB = PENDING_MERGE_TYPE\n"
+        "// 目录刷新（2026-10-04 用户口径）：层级 0–5（缺省 1）；本体模型库不适用（它另有 ontology:* 目录）。\n"
+        "const folderDepth = ref<number>(1)\n"
+        "// 用户口径：层级**不用带中文的下拉框**（占地方）→ 只用一个窄的数字输入（宽 40px）。\n"
+        "const folderRefreshLoading = ref(false)\n"
+        "const isOntologyKb = ref<boolean | null>(null)\n"
+        "const canRefreshFolders = computed(() => isOntologyKb.value === false)\n"
+        "watch(\n"
+        "  () => props.knowledgeBaseId,\n"
+        "  async (kbId: string) => {\n"
+        "    if (!kbId) return\n"
+        "    try {\n"
+        "      const r: any = await fetch(`/bodhi/ontology/kb?kb_id=${encodeURIComponent(kbId)}`).then(x => x.json())\n"
+        "      isOntologyKb.value = !!(r && r.asked && r.asked.is_ontology_kb)\n"
+        "    } catch (e) {\n"
+        "      isOntologyKb.value = null   // 取不到就保守不显示\n"
+        "    }\n"
+        "  },\n"
+        "  { immediate: true },\n"
+        ")\n"
+        "async function refreshFoldersAll() {\n"
+        "  folderRefreshLoading.value = true\n"
+        "  try {\n"
+        "    const q = `kb_id=${encodeURIComponent(props.knowledgeBaseId)}&depth=${folderDepth.value}&dry_run=0`\n"
+        "    const r: any = await fetch(`/bodhi/folders/recategorize?${q}`).then(x => x.json())\n"
+        "    if (r && r.ok === false) {\n"
+        "      console.warn('[bodhi] 目录重刷被拒：' + (r.reason || ''))\n"
+        "    }\n"
+        "    await reloadDirectoryForType(activeTab.value, { preserveDirectoryState: true })\n"
+        "  } catch (e) {\n"
+        "    console.error('[bodhi] 目录重刷失败', e)\n"
+        "  } finally {\n"
+        "    folderRefreshLoading.value = false\n"
+        "  }\n"
+        "}\n",
+        "目录刷新状态 + refreshFoldersAll")
+
+    # ---- 2026-10-04 修（用户实测：层级 ≥2 时第 3 层及以上展不开）----------
+    # `reset` 时**不要清空** `folderIdByPath`：目录 id 是确定性 UUIDv5（同名同父 ⇒ 同 id，重建不变），
+    # 清掉只会让深层下钻解析不到父 id（`parentId === undefined` → 直接 return → 展不开）。
+    text = replace_maybe(
+        text,
+        "    const folderIds = opts.reset ? {} : { ...bucket.folderIdByPath }",
+        "    // 2026-10-04 修：`reset` 时不清空 folderIdByPath（否则第 3 层及以上展不开）。\n"
+        "    const folderIds = { ...bucket.folderIdByPath }",
+        "深层目录展不开修复")
 
     text = replace_once(
         text,

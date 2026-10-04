@@ -145,7 +145,13 @@ export function pageDotColor(page: any): string {
 export const PENDING_MERGE_TYPE = 'ontology:PendingMerge';
 
 export function isOntologyType(pageType: string | undefined | null): boolean {
-  return !!pageType && !!ONTOLOGY_TYPES[pageType];
+  // 2026-10-04（用户口径）：**结构判据** + 白名单兜底。
+  //   白名单（ONTOLOGY_TYPES）是**构建期**从编译产物生成的（带中文标签/颜色）；
+  //   若只认白名单，则「闭环二新增本体类」必须先重建前端才能编目展示（实测踩过：
+  //   agent:WorkKnowledgeBase 建了页、挂了目录，前端仍看不到）。
+  //   所以：凡 `模块:类` 形态（含 ':'）一律按**本体类型**处理 —— 类型集合来自
+  //   `stats.pages_by_type`（后端动态），新类自动进「本体」tab、自动编目。
+  return !!pageType && (!!ONTOLOGY_TYPES[pageType] || pageType.includes(':'));
 }
 
 export function isPendingMergeType(pageType: string | undefined | null): boolean {
