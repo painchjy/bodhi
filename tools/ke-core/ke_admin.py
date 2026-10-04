@@ -1249,6 +1249,30 @@ def replace_module_in_neo4j(module_key: str) -> dict:
     return {"statements": total, "classes": int(classes or 0)}
 
 
+def apply_projection() -> dict:
+    """把 `artifacts/neo4j/{00_constraints,10_ontology}.cypher` 灌进 Neo4j（幂等 MERGE）。
+
+    2026-10-05 恢复：该函数在 `423c482`（模块硬替换那次改动）里被**误删**，但仍有 5 处调用
+    （`ke_admin` 的 402/1121/1144/1395/1408 行）→ 上传链第⑥步直接 `NameError` 回滚。
+    行为与原实现逐字一致（全量回放投影 cypher）。
+    """
+    total = 0
+    for name in ("00_constraints.cypher", "10_ontology.cypher"):
+        path = PROJECTION_DIR / name
+        if not path.is_file():
+            raise FileNotFoundError("缺投影产物：%s（先跑 compile_artifacts）" % path)
+        text = path.read_text(encoding="utf-8")
+        stmts = [s.strip() for s in "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("//")).split(";")
+            if s.strip()]
+        for stmt in stmts:
+            ke_neo4j.query(stmt)
+        total += len(stmts)
+    classes = ke_neo4j.query("MATCH (c:BodhiOntClass) WHERE c.external IS NULL "
+                             "RETURN count(c) AS n")[0]["n"]
+    return {"statements": total, "classes": int(classes or 0)}
+
+
 def _invalidate_ontology_cache() -> dict:
     """让 ke_ontology 的编译产物缓存失效（下次调用惰性重读 ontology_index.json）。
 

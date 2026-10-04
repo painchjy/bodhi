@@ -200,52 +200,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 # 二、枚举类定义（Enumeration Classes）
 # ============================================================
 
-### 24. 执行级别 EnforcementLevel
-:EnforcementLevel rdf:type owl:Class ;
-    rdfs:label "执行级别"@zh ;
-    rdfs:comment "操作性业务规则的执行强度分类"@zh ;
-    owl:equivalentClass [
-        rdf:type owl:Class ;
-        owl:oneOf ( :Strict :Override :Advisory :Summary )
-    ] .
-
-:Strict rdf:type :EnforcementLevel ;
-    rdfs:label "严格执行"@zh ;
-    rdfs:comment "必须无条件遵守，不可偏离"@zh .
-
-:Override rdf:type :EnforcementLevel ;
-    rdfs:label "授权覆盖"@zh ;
-    rdfs:comment "在获得授权的情况下可例外处理"@zh .
-
-:Advisory rdf:type :EnforcementLevel ;
-    rdfs:label "建议"@zh ;
-    rdfs:comment "推荐遵守，但允许根据情况灵活调整"@zh .
-
-### 25. 评估类型 AssessmentType（严格限定为SWOT四维度）
-:AssessmentType rdf:type owl:Class ;
-    rdfs:label "评估类型"@zh ;
-    rdfs:comment "评估的分类方式，仅限SWOT分析中的四个具体维度：优势、劣势、机会、威胁"@zh ;
-    owl:equivalentClass [
-        rdf:type owl:Class ;
-        owl:oneOf ( :Strength :Weakness :Opportunity :Threat )
-    ] .
-
-:Strength rdf:type :AssessmentType ;
-    rdfs:label "优势"@zh ;
-    rdfs:comment "Strengths，指企业内部相较于竞争对手所拥有的有利条件或卓越能力"@en .
-
-:Weakness rdf:type :AssessmentType ;
-    rdfs:label "劣势"@zh ;
-    rdfs:comment "Weaknesses，指企业内部存在的不利于达成目标的因素或资源短板"@en .
-
-:Opportunity rdf:type :AssessmentType ;
-    rdfs:label "机会"@zh ;
-    rdfs:comment "Opportunities，指企业外部环境中可以利用的有利趋势或空间"@en .
-
-:Threat rdf:type :AssessmentType ;
-    rdfs:label "威胁"@zh ;
-    rdfs:comment "Threats，指企业外部环境中可能对企业造成损害的风险或挑战"@en .
-
 # ============================================================
 # 三、对象属性（Object Properties）
 # ============================================================
@@ -453,20 +407,19 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "一项评估必须由至少一个组织单位完成"@zh .
 
 
-### 枚举属性（执行级别、评估类型）
-:hasEnforcementLevel rdf:type owl:ObjectProperty ;
-    rdfs:label "具有执行级别"@zh ;
+### 受控取值数据属性（2026-10-05：执行级别、评估类型不再是类/个体）
+# 用户口径：**取值不得作为知识页实例**；直接写进规则/评估页的数据属性，取值逐字取自下表。
+:enforcementLevel rdf:type owl:DatatypeProperty ;
+    rdfs:label "执行级别"@zh ;
     rdfs:domain :OperativeBusinessRule ;
-    rdfs:range :EnforcementLevel ;
-    rdfs:comment "操作性业务规则具有的执行级别，取值来自枚举类 EnforcementLevel"@zh .
+    rdfs:range xsd:string ;
+    rdfs:comment "操作性业务规则的执行强度。**受控取值（逐字取用，不得自由发挥、不得另建知识页）**：严格执行｜授权覆盖｜建议。不含『总结』。"@zh .
 
-:hasAssessmentType rdf:type owl:ObjectProperty ;
-    rdfs:label "具有评估类型"@zh ;
+:assessmentType rdf:type owl:DatatypeProperty ;
+    rdfs:label "评估类型"@zh ;
     rdfs:domain :Assessment ;
-    rdfs:range :AssessmentType ;
-    rdfs:comment "评估属于哪一种SWOT维度（优势、劣势、机会、威胁）"@zh .
-
-
+    rdfs:range xsd:string ;
+    rdfs:comment "评估所属的 SWOT 维度。**受控取值（逐字取用，不得另建知识页）**：优势｜劣势｜机会｜威胁。"@zh .
 ### IT 资产 / 系统关系（2026-09-29 新增）
 :mainSystemContainsSubSystem rdf:type owl:ObjectProperty ;
     rdfs:label "包含子系统"@zh ;
@@ -605,20 +558,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 ] .
 
 
-:OperativeBusinessRule rdfs:subClassOf [
-    rdf:type owl:Restriction ;
-    owl:onProperty :hasEnforcementLevel ;
-    owl:cardinality 1 ;
-    rdfs:comment "操作性业务规则必须且只能有一个执行级别"
-] .
-
-:Assessment rdfs:subClassOf [
-    rdf:type owl:Restriction ;
-    owl:onProperty :hasAssessmentType ;
-    owl:cardinality 1 ;
-    rdfs:comment "每一项评估必须且只能属于优势、劣势、机会、威胁中的一种"
-] .
-
 # ============================================================
 # 六、知识来源：会话知识页（2026-10-01 新增 · 第一闭环）
 #   口径（用户）：知识的产生与变化都发生在与智能体的会话里 → 会话即来源；
@@ -727,3 +666,17 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 
 # 模块短名（目录名/列表名；≤16 字符，导入时校验）
 <http://example.org/bmm> bodhi:shortName "BMM业务动机模型" .
+
+:OperativeBusinessRule rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :enforcementLevel ;
+    owl:cardinality 1 ;
+    rdfs:comment "操作性业务规则必须且只能有一个执行级别（受控取值，数据属性）"
+] .
+
+:Assessment rdfs:subClassOf [
+    rdf:type owl:Restriction ;
+    owl:onProperty :assessmentType ;
+    owl:cardinality 1 ;
+    rdfs:comment "每一项评估必须且只能属于优势、劣势、机会、威胁中的一种（受控取值，数据属性）"
+] .

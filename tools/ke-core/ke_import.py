@@ -372,6 +372,26 @@ def build_enum_spec(klass: str, enums: dict, rows: list) -> tuple[dict, list, li
     spec, bad, unmapped = {}, [], []
     for column, raw in (enums or {}).items():
         conf = raw if isinstance(raw, dict) else {"relation": str(raw), "values": {}}
+        # **2A（2026-10-05）：列 → 数据属性**（受控取值，如 执行级别/评估类型）。
+        # `{"级别": {"property": "bmm:enforcementLevel", "values": {"强制": "严格执行"}}}`
+        # 与对象属性（`relation`）两条路并存：本体的枚举**取值**不再是类实例，禁止另建知识页。
+        prop = str(conf.get("property") or "").strip()
+        if prop:
+            values = {str(k).strip(): (str(v).strip() or str(k).strip())
+                      for k, v in (conf.get("values") or {}).items()}
+            attr_fn = getattr(ke_ontology, "attribute_types_for", None)
+            allowed_attrs = attr_fn(klass) if callable(attr_fn) else {}
+            if allowed_attrs and prop not in allowed_attrs:
+                bad.append({"column": column, "property": prop,
+                            "why": "%s 不是 %s 声明（含继承）的数据属性" % (prop, klass),
+                            "allowed": sorted(allowed_attrs)[:40]})
+                continue
+            seen = {str(r.get(column) or "").strip() for r in rows}
+            miss = sorted(v for v in seen if v and v not in values)
+            if miss:
+                unmapped.append({"column": column, "property": prop, "values": miss[:10]})
+            spec[column] = {"property": prop, "label": prop.split(":")[-1], "values": values}
+            continue
         rel = str(conf.get("relation") or "").strip()
         if not rel:
             bad.append({"column": column, "why": "缺 relation"})
@@ -470,9 +490,16 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
                  for column in attrs if (row.get(column) or "").strip()}
     attributes = {attrs.get(column, column): value for column, value in by_column.items()}
     # 枚举列 → 关系（`bmm:hasEnforcementLevel` → `bmm:Advisory`）：机器口径放元数据，正文另有一行（无链接）
+    # 2A（2026-10-05）：`property` 形态的列 = **数据属性**（受控取值）→ 直接进 `attributes`（不再进 enum_relations）
     enum_rel = {}
     for column, spec in (source.get("enums") or {}).items():
-        value = (spec.get("values") or {}).get((row.get(column) or "").strip())
+        raw = (row.get(column) or "").strip()
+        if spec.get("property"):
+            value = (spec.get("values") or {}).get(raw) or raw
+            if value:
+                attributes[spec["property"]] = value
+            continue
+        value = (spec.get("values") or {}).get(raw)
         if value:
             enum_rel[spec.get("relation") or column] = value
     onto = {"model": module, "class": page_type, "label": label, "name": title,

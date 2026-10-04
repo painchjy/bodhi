@@ -41,6 +41,12 @@ def _slug(text: str) -> str:
     return SLUG_SAFE.sub("-", str(text or "").strip()).strip("-")
 
 
+# 旧枚举个体 → 中文受控取值（2026-10-05 · 2A：执行级别改数据属性；迁移期双读）
+ENFORCEMENT_ALIAS = {"bmm:Strict": "严格执行", "bmm:Override": "授权覆盖", "bmm:Advisory": "建议",
+                     "Strict": "严格执行", "Override": "授权覆盖", "Advisory": "建议",
+                     "严格执行": "严格执行", "授权覆盖": "授权覆盖", "建议": "建议"}
+
+
 def _enum_rels(meta: str) -> dict:
     """取页元数据里的「枚举关系」（`bmm:hasEnforcementLevel` → `bmm:Advisory`）。"""
     import json
@@ -99,16 +105,27 @@ def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict
         % (ke_db.sql_str(kb), ke_db.sql_str("%" + pol["slug"] + "%"), int(limit or 300)))
     out = []
     for r in rows:
-        level = ""
-        enum_rel = _enum_rels(r["meta"])
-        for name, value in enum_rel.items():
-            if str(name).split(":")[-1].lower() == "hasenforcementlevel":
-                level = str(value)
-                break
+        # 执行级别读取顺序（2026-10-05 · 2A 口径：执行级别已从对象属性改**数据属性**）
+        #   ① 元数据数据属性 `enforcementLevel`（新页，机器口径）
+        #   ② 元数据枚举关系 `hasEnforcementLevel`（迁移期遗留）
+        #   ③ 正文「本体关系」旧链接行（`…hasEnforcementLevel`）→ bmm:Strict`）
+        #   ④ 正文「属性（数据属性）」新行（`- enforcementLevel = 严格执行`）
+        level = _attr(r["meta"], "enforcementLevel", "执行级别")
+        if not level:
+            enum_rel = _enum_rels(r["meta"])
+            for name, value in enum_rel.items():
+                if str(name).split(":")[-1].lower() == "hasenforcementlevel":
+                    level = str(value)
+                    break
         if not level:                                  # 老页：从正文关系行兜底（无链接形态）
             hit = re.search(r"hasEnforcementLevel`\)\s*→\s*(?P<v>[A-Za-z_]+:[A-Za-z]+)", r["content"])
             if hit:
                 level = hit.group("v")
+        if not level:                                  # 迁移后：正文数据属性行兜底
+            m2 = re.search(r"^-\s*enforcementLevel\s*=\s*(?P<v>.+?)\s*$", r["content"], re.M)
+            if m2:
+                level = m2.group("v").strip()
+        level = ENFORCEMENT_ALIAS.get(level, level)     # 旧个体 → 中文取值
         ev = re.search(r"%s\n\n> ?(.+)" % re.escape(EVIDENCE_SECTION), r["content"])
         out.append({"slug": r["slug"], "name": r["title"], "page_type": r["page_type"],
                     "level": level, "scope": _attr(r["meta"], "ruleScope", "适用范围"),
