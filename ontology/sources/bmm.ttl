@@ -409,6 +409,12 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 
 ### 受控取值数据属性（2026-10-05：执行级别、评估类型不再是类/个体）
 # 用户口径：**取值不得作为知识页实例**；直接写进规则/评估页的数据属性，取值逐字取自下表。
+:sessionStatus rdf:type owl:DatatypeProperty ;
+    rdfs:label "会话状态"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range xsd:string ;
+    rdfs:comment "会话分页的处置状态。**受控取值（逐字取用，不得另建知识页）**：进行中｜已存档。存档只改状态、不删页（保留溯源链）；驳回的改进建议也保留。"@zh .
+
 :enforcementLevel rdf:type owl:DatatypeProperty ;
     rdfs:label "执行级别"@zh ;
     rdfs:domain :OperativeBusinessRule ;
@@ -570,23 +576,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "与智能体的一次会话，是知识产生与变化的统一来源。会话起始页只保存基本信息（会话编号/名称/智能体名称/租户名称/初始问题/开始时间/权威库）；上下文过长且一组高相关知识已确认更新完成时可新开分页，各分页共享同一会话编号与名称；会话分页与其产出的知识必须在同一个知识库；跨库时会话起始页每库各一份副本，以初始库为权威。"@zh ;
     rdfs:subClassOf owl:Thing .
 
-### 32. 会话状态 SessionStatus
-:SessionStatus rdf:type owl:Class ;
-    rdfs:label "会话状态"@zh ;
-    rdfs:comment "会话分页的处置状态（存档只改状态、不删页，保留溯源链）"@zh ;
-    owl:equivalentClass [
-        rdf:type owl:Class ;
-        owl:oneOf ( :SessionActive :SessionArchived )
-    ] .
-
-:SessionActive rdf:type :SessionStatus ;
-    rdfs:label "进行中"@zh ;
-    rdfs:comment "会话仍有未过期、未废弃的知识"@zh .
-
-:SessionArchived rdf:type :SessionStatus ;
-    rdfs:label "已存档"@zh ;
-    rdfs:comment "该会话各页关联的知识均已过期或废弃 → 可存档"@zh .
-
 ### 33. 会话属性（起始页基本信息）与溯源定位
 :sessionNo rdf:type owl:DatatypeProperty ;
     rdfs:label "会话编号"@zh ;
@@ -631,12 +620,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:domain :KnowledgeSession ;
     rdfs:range xsd:boolean ;
     rdfs:comment "跨库时会话起始页每库各一份：true=权威副本（初始库），false=副本（应指向权威页）" .
-
-:sessionStatus rdf:type owl:ObjectProperty ;
-    rdfs:label "会话状态"@zh ;
-    rdfs:domain :KnowledgeSession ;
-    rdfs:range :SessionStatus ;
-    rdfs:comment "会话当前状态，取值来自枚举类 SessionStatus"@zh .
 
 :sourceSession rdf:type owl:ObjectProperty ;
     rdfs:label "知识来源会话"@zh ;

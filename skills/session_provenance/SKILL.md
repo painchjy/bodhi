@@ -50,7 +50,7 @@ version: 0
 > 1. **承载页**：优先**当前会话分页**（`session/<会话编号>/p<N>`，`N` = 已有分页数 + 1，从 `p2` 起）；
 >    澄清轮次本身就是**开分页的正当理由**（§1「切段原因」已含此项）；起始页只放基本信息，**不写澄清正文**。
 > 2. **落库**：把分页页**一起交给 `save_knowledge`**（`bmm:KnowledgeSession` 类型、同一 `bmm:sessionNo`/`bmm:sessionName`，
->    `bmm:partNo=<N>`、`bmm:sessionStatus=bmm:SessionActive`），正文小节：
+>    `bmm:partNo=<N>`、`sessionStatus=进行中`），正文小节：
 >
 >    ```markdown
 >    ## 本段范围与切段原因
@@ -83,7 +83,8 @@ version: 0
 
 **跨库**：会话起始页**每库一份副本**（`bmm:isAuthoritative=false` + 页级 `authoritativeKb=<初始库>` 指回权威页）；**切换目标库必须新建会话分页**（沿用同一 `bmm:sessionNo`），不得复用别库分页。
 
-**存档**：该会话**所有分页关联的知识页都已过期/废弃** → `bmm:sessionStatus = bmm:SessionArchived`（**只改状态，不删页**）。
+**存档**：该会话**所有分页关联的知识页都已过期/废弃** → `sessionStatus = 已存档`（**只改状态，不删页**）。
+> 取值口径（2026-10-05 S-05）：会话状态已是**数据属性**（受控取值 `进行中｜已存档`），**不再**用 `bmm:SessionActive` 这类个体值。
 
 ## 2. 主流程
 
