@@ -154,35 +154,34 @@ def patch_wikibrowser(fe: pathlib.Path) -> None:
         "                      <t-icon name=\"file-add\" />\n"
         "                    </button>\n"
         "                  </t-tooltip>\n"
-        "                  <!-- bodhi2 v11（2026-10-04 用户口径）：目录全量重刷 + 层级参数。\n"
-        "                       点击 = 按「模块短名 / 层级」规则**全量重算**本库所有页的 category_path 并重建目录；\n"
-        "                       层级 0–5（缺省 1＝模块下 1 层，界面共 2 层；0＝第一层模块下直接到最底层的类）。\n"
-        "                       weknora 自带类型固定放 weknora/<类型>（与层级无关）。\n"
-        "                       **本体模型库不适用**（它另有 ontology:* 目录）→ canRefreshFolders 隐藏。 -->\n"
+        "                  <!-- bodhi2 v12（2026-10-05 用户口径）：目录全量重刷。\n"
+        "                       普通知识库：[刷新目录] + 层级 0–5（缺省 1）——按「模块短名 / 层级」规则全量重算；\n"
+        "                       **本体模型库**：只显示 [刷新目录]（**不显示/不使用层级参数**，它的目录由本体投影维护）。 -->\n"
         "                  <template v-if=\"canRefreshFolders\">\n"
-        "                    <t-tooltip content=\"按当前规则全量重刷目录\" placement=\"top\">\n"
+        "                    <t-tooltip content=\"全量重刷目录\" placement=\"top\">\n"
         "                      <button type=\"button\" class=\"wiki-tab-bar-action\"\n"
         "                        :disabled=\"folderRefreshLoading\" aria-label=\"刷新目录\"\n"
         "                        @click.stop=\"refreshFoldersAll\">\n"
         "                        <t-icon name=\"refresh\" />\n"
         "                      </button>\n"
         "                    </t-tooltip>\n"
-        "                    <input v-model.number=\"folderDepth\" type=\"number\" min=\"0\" max=\"5\" step=\"1\"\n"
+        "                    <input v-if=\"!isOntologyKb\" v-model.number=\"folderDepth\" type=\"number\" min=\"0\" max=\"5\" step=\"1\"\n"
         "                      class=\"wiki-tab-bar-action\" style=\"width: 40px; text-align: center\"\n"
         "                      :disabled=\"folderRefreshLoading\" title=\"目录层级 0–5（缺省 1）\"\n"
         "                      @change=\"refreshFoldersAll\" />\n"
         "                  </template>\n",
-        "目录刷新按钮 + 层级选择")
+        "目录刷新按钮 + 层级选择（本体库隐藏层级）")
     # 脚本：状态与函数（紧跟 PENDING_TAB 声明之后；⚠️ 用 ref/computed，函数在调用时才求值）
     text = replace_maybe(
         text,
         "const PENDING_TAB = PENDING_MERGE_TYPE\n"
-        "// 目录刷新（2026-10-04 用户口径）：层级 0–5（缺省 1）；本体模型库不适用（它另有 ontology:* 目录）。\n"
+        "// 目录刷新（2026-10-05 用户口径）：普通库 = 层级 0–5（缺省 1）；**本体模型库也提供刷新**，\n"
+        "// 但**不显示/不使用层级参数**（它的目录由本体投影维护）→ 只调 /bodhi/folders/refresh。\n"
         "const folderDepth = ref<number>(1)\n"
         "// 用户口径：层级**不用带中文的下拉框**（占地方）→ 只用一个窄的数字输入（宽 40px）。\n"
         "const folderRefreshLoading = ref(false)\n"
         "const isOntologyKb = ref<boolean | null>(null)\n"
-        "const canRefreshFolders = computed(() => isOntologyKb.value === false)\n"
+        "const canRefreshFolders = computed(() => isOntologyKb.value === true || isOntologyKb.value === false)\n"
         "watch(\n"
         "  () => props.knowledgeBaseId,\n"
         "  async (kbId: string) => {\n"
@@ -191,7 +190,7 @@ def patch_wikibrowser(fe: pathlib.Path) -> None:
         "      const r: any = await fetch(`/bodhi/ontology/kb?kb_id=${encodeURIComponent(kbId)}`).then(x => x.json())\n"
         "      isOntologyKb.value = !!(r && r.asked && r.asked.is_ontology_kb)\n"
         "    } catch (e) {\n"
-        "      isOntologyKb.value = null   // 取不到就保守不显示\n"
+        "      isOntologyKb.value = null   // 取不到就不显示（保守）\n"
         "    }\n"
         "  },\n"
         "  { immediate: true },\n"
@@ -199,8 +198,12 @@ def patch_wikibrowser(fe: pathlib.Path) -> None:
         "async function refreshFoldersAll() {\n"
         "  folderRefreshLoading.value = true\n"
         "  try {\n"
-        "    const q = `kb_id=${encodeURIComponent(props.knowledgeBaseId)}&depth=${folderDepth.value}&dry_run=0`\n"
-        "    const r: any = await fetch(`/bodhi/folders/recategorize?${q}`).then(x => x.json())\n"
+        "    // 本体模型库：目录由本体投影维护 → 全量重建，**不带 depth**\n"
+        "    const q = isOntologyKb.value\n"
+        "      ? `kb_id=${encodeURIComponent(props.knowledgeBaseId)}&force=1`\n"
+        "      : `kb_id=${encodeURIComponent(props.knowledgeBaseId)}&depth=${folderDepth.value}&dry_run=0`\n"
+        "    const url = isOntologyKb.value ? '/bodhi/folders/refresh?' : '/bodhi/folders/recategorize?'\n"
+        "    const r: any = await fetch(url + q).then(x => x.json())\n"
         "    if (r && r.ok === false) {\n"
         "      console.warn('[bodhi] 目录重刷被拒：' + (r.reason || ''))\n"
         "    }\n"
@@ -211,7 +214,7 @@ def patch_wikibrowser(fe: pathlib.Path) -> None:
         "    folderRefreshLoading.value = false\n"
         "  }\n"
         "}\n",
-        "目录刷新状态 + refreshFoldersAll")
+        "目录刷新状态 + refreshFoldersAll（本体库走 refresh）")
 
     # ---- 2026-10-04 修（用户实测：层级 ≥2 时第 3 层及以上展不开）----------
     # `reset` 时**不要清空** `folderIdByPath`：目录 id 是确定性 UUIDv5（同名同父 ⇒ 同 id，重建不变），

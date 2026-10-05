@@ -1096,15 +1096,26 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
         #    在内存里真编译一次；**不删数据、不写产物**）。预编译不过 → 直接抛错，什么都不会删。
         #    （这里不再额外跑 `compile_artifacts`：那会提前改写产物，也不符合"只编上传的这一份"。）
 
-        # ④b **删除前备份全部真源**（用户口径）：失败时按备份整体恢复 sources/ 并重新编译
+        # ④b **删除前备份全部真源**（用户口径）：失败时按备份整体恢复 sources/ 并重新编译；
+        #     备份目录只保留**最近 5 份**（用户口径，避免无限累积）
         import shutil as _shutil
         import time as _time
-        backup_dir = SOURCES_DIR / ".backup" / _time.strftime("%Y%m%d-%H%M%S")
+        backup_root = SOURCES_DIR / ".backup"
+        backup_dir = backup_root / _time.strftime("%Y%m%d-%H%M%S")
         backup_dir.mkdir(parents=True, exist_ok=True)
         for _bp in sorted(SOURCES_DIR.glob("*.ttl")):
             _shutil.copy2(_bp, backup_dir / _bp.name)
+        pruned_backups: list = []
+        try:
+            olds = sorted((p for p in backup_root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
+            for stale in olds[5:]:
+                _shutil.rmtree(stale, ignore_errors=True)
+                pruned_backups.append(stale.name)
+        except OSError:
+            pass
         out["sources_backup"] = {"dir": str(backup_dir.relative_to(REPO)),
-                                 "files": sorted(p.name for p in backup_dir.glob("*.ttl"))}
+                                 "files": sorted(p.name for p in backup_dir.glob("*.ttl")),
+                                 "kept": 5, "pruned": pruned_backups}
 
         victims = [k for k in downstream_closure(module_key) if k != module_key]
         out["compile_scope"] = scope
