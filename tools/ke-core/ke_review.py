@@ -124,11 +124,33 @@ def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict
     if targets:
         conds.insert(0, "slug IN (%s)" % ", ".join(ke_db.sql_str(s) for s in targets))
     where = " OR ".join(conds)
+    # **2026-10-05 用户口径**：业务规则**有子类**（Operative/Structural…，将来还会有别的命名），
+    # 所以"规则目标类"必须用**图（本体 T-Box）**算子类闭包，而不是 `page_type LIKE '%BusinessRule'` 的
+    # 字符串尾巴（会漏）。⚠️ 说明：**知识页实例目前不进图库**（Neo4j 只有本体层：BodhiOntClass/Property…），
+    # 所以**页的检索仍在 PG**，但**类集合由图给**（图定义规则、PG 存实例）。
+    def _rule_class_closure() -> list:
+        try:
+            import ke_neo4j  # noqa: PLC0415
+            rows = ke_neo4j.query(
+                "MATCH (c:BodhiOntClass)-[:BODHI_SUBCLASS_OF*0..]->(r:BodhiOntClass {prefixed:$root}) "
+                "WHERE c.external IS NULL RETURN DISTINCT c.prefixed AS p", {"root": "bmm:BusinessRule"})
+            out = {str(x["p"]) for x in rows if x.get("p")}
+            out.add("bmm:BusinessRule")
+            return sorted(out)
+        except Exception:  # noqa: BLE001
+            return []
+
+    rule_classes = _rule_class_closure()
+    if rule_classes:
+        cls_cond = "page_type IN (%s)" % ", ".join(ke_db.sql_str(c) for c in rule_classes)
+    else:                                              # 图不可用 → 退回旧写法（不阻断）
+        cls_cond = "page_type LIKE 'bmm:%%BusinessRule'"
+    where = "(%s) AND (%s)" % (cls_cond, where)
     rows = ke_db.psql_csv(
         "SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(content,'') AS content, "
         "       COALESCE(page_metadata::text,'{}') AS meta "
         "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
-        "   AND page_type LIKE 'bmm:%%BusinessRule' AND (%s) "
+        "   AND (%s) "
         " ORDER BY slug LIMIT %d"
         % (ke_db.sql_str(kb), where, int(limit or 300)))
     out = []
