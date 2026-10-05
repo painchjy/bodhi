@@ -96,13 +96,41 @@ def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict
         return {"ok": False, "error": "knowledge_base 里找不到这条业务策略：%s" % policy,
                 "hint": "先确认策略页已建（page_type=bmm:BusinessPolicy），或用 slug/标题片段再试"}
     pol = pages[0]
+    # **2026-10-05 修（用户实测：某会话里 5 条策略全返回 0 条）**：
+    # `bmm:isBasisFor` 的 domain=BusinessPolicy → range=BusinessRule ⇒ 「策略→规则」的关联行**写在策略页**上；
+    # **规则页正文里没有策略 slug**（只有自动生成的「被引用」节，写的是策略**标题**）⇒
+    # 旧实现 `content LIKE '%策略 slug%'` 必然 0 条。
+    # 新口径：① 以**策略页的 `out_links`**（本体真实边）取目标规则页为准；
+    #        ② `in_links`/正文含策略 slug **或** 含策略**标题** 兜底（兼容未重建 links 的老数据）。
+    import json as _json
+
+    def _links(sql_col: str) -> list:
+        r = ke_db.psql_csv("SELECT COALESCE(%s::text,'[]') AS v FROM wiki_pages "
+                           "WHERE knowledge_base_id = %s AND slug = %s"
+                           % (sql_col, ke_db.sql_str(kb), ke_db.sql_str(pol["slug"])))
+        if not r:
+            return []
+        try:
+            out = _json.loads(r[0].get("v") or "[]")
+            return [str(x) for x in out if isinstance(x, str)]
+        except Exception:  # noqa: BLE001
+            return []
+
+    conds = ["out_links::text LIKE %s" % ke_db.sql_str("%" + pol["slug"] + "%"),
+             "in_links::text LIKE %s" % ke_db.sql_str("%" + pol["slug"] + "%"),
+             "content LIKE %s" % ke_db.sql_str("%" + pol["slug"] + "%"),
+             "content LIKE %s" % ke_db.sql_str("%" + pol["title"] + "%")]
+    targets = _links("out_links")
+    if targets:
+        conds.insert(0, "slug IN (%s)" % ", ".join(ke_db.sql_str(s) for s in targets))
+    where = " OR ".join(conds)
     rows = ke_db.psql_csv(
         "SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(content,'') AS content, "
         "       COALESCE(page_metadata::text,'{}') AS meta "
         "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
-        "   AND page_type LIKE 'bmm:%%BusinessRule' AND content LIKE %s "
+        "   AND page_type LIKE 'bmm:%%BusinessRule' AND (%s) "
         " ORDER BY slug LIMIT %d"
-        % (ke_db.sql_str(kb), ke_db.sql_str("%" + pol["slug"] + "%"), int(limit or 300)))
+        % (ke_db.sql_str(kb), where, int(limit or 300)))
     out = []
     for r in rows:
         # 执行级别读取顺序（2026-10-05 · 2A 口径：执行级别已从对象属性改**数据属性**）
@@ -121,8 +149,9 @@ def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict
             hit = re.search(r"hasEnforcementLevel`\)\s*→\s*(?P<v>[A-Za-z_]+:[A-Za-z]+)", r["content"])
             if hit:
                 level = hit.group("v")
-        if not level:                                  # 迁移后：正文数据属性行兜底
-            m2 = re.search(r"^-\s*enforcementLevel\s*=\s*(?P<v>.+?)\s*$", r["content"], re.M)
+        if not level:                                  # 迁移后：正文数据属性行兜底（兼容 `bmm:` 前缀/括号写法）
+            m2 = re.search(r"^-\s*(?:[A-Za-z_][A-Za-z0-9_]*:)?enforcementLevel\b[^\n=]*=\s*(?P<v>.+?)\s*$",
+                           r["content"], re.M)
             if m2:
                 level = m2.group("v").strip()
         level = ENFORCEMENT_ALIAS.get(level, level)     # 旧个体 → 中文取值
