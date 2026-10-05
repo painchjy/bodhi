@@ -1091,12 +1091,21 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
             raise ValueError("短名门禁未过（%s）：\n%s\n%s"
                              % (gate["message"], gate["snippet"],
                                 "修好后重新上传；**本次没有删除任何数据**（真源已回滚）。"))
-        # ④a **预编译**（不改任何数据）：编译不过就中止，绝不进入删除
-        try:
-            out["precompile"] = compile_artifacts(modules=scope)
-        except Exception as exc:  # noqa: BLE001
-            raise ValueError("预编译未通过 → **没有删除任何 wiki/图库/真源**，请修好 TTL 后重新上传：%s"
-                             % str(exc)[:300])
+        # ④a **预编译**（用户口径 2026-10-05）：只编译**本次上传的这一份 TTL**（由第②步
+        #    `preflight_compile(target, module_key)` 完成：把上传件当作该模块的定义文件、
+        #    在内存里真编译一次；**不删数据、不写产物**）。预编译不过 → 直接抛错，什么都不会删。
+        #    （这里不再额外跑 `compile_artifacts`：那会提前改写产物，也不符合"只编上传的这一份"。）
+
+        # ④b **删除前备份全部真源**（用户口径）：失败时按备份整体恢复 sources/ 并重新编译
+        import shutil as _shutil
+        import time as _time
+        backup_dir = SOURCES_DIR / ".backup" / _time.strftime("%Y%m%d-%H%M%S")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        for _bp in sorted(SOURCES_DIR.glob("*.ttl")):
+            _shutil.copy2(_bp, backup_dir / _bp.name)
+        out["sources_backup"] = {"dir": str(backup_dir.relative_to(REPO)),
+                                 "files": sorted(p.name for p in backup_dir.glob("*.ttl"))}
+
         victims = [k for k in downstream_closure(module_key) if k != module_key]
         out["compile_scope"] = scope
         out["cascade_purge"] = cascade_delete_modules(victims, keep_files=(src_path.name,))
@@ -1132,23 +1141,38 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
                 repl.append({"ok": False, "module": key, "reason": str(exc)[:200]})
         out["apply"] = {"replace": repl, "full": apply_projection()}
     except Exception as exc:  # noqa: BLE001
-        # 回滚真源与登记；**不删任何 wiki/图谱**
+        # **失败恢复（用户口径 2026-10-05）**：删除前已备份全部真源 →
+        #   ① 用备份目录**整体恢复** `sources/`（本次新增的文件删掉、原有文件按备份写回）；
+        #   ② **重新编译**一次，把产物/图谱/wiki 拉回上传前的状态（删除是硬删，靠重编译重建）。
+        restored: list = []
+        recompiled: dict = {}
         try:
-            if created_file:
-                src_path.unlink(missing_ok=True)
-            elif backup is not None:
-                src_path.write_text(backup, encoding="utf-8")
-            if entry is not None:
-                _unregister_extension(module_key)
-            if old_registry_entry is not None:
-                _register_extension(old_registry_entry)
-        except Exception:  # noqa: BLE001
-            pass
-        out["rollback"] = {"restored_source": str(src_path.relative_to(REPO)),
-                           "removed_registry_entry": bool(entry),
-                           "deleted_any_data": False}
+            if "backup_dir" in dir() and backup_dir.is_dir():
+                keep = {p.name for p in backup_dir.glob("*.ttl")}
+                for p in sorted(SOURCES_DIR.glob("*.ttl")):
+                    if p.name not in keep:
+                        p.unlink(missing_ok=True)
+                        restored.append("rm " + p.name)
+                for p in sorted(backup_dir.glob("*.ttl")):
+                    _shutil.copy2(p, SOURCES_DIR / p.name)
+                    restored.append("restore " + p.name)
+            recompiled = compile_artifacts(modules=(scope if "scope" in dir() else None))
+            if "victims" in dir() and victims:
+                for key in victims:                     # 被级联删掉的下游模块：按备份真源重建
+                    try:
+                        replace_module_in_neo4j(key)
+                    except Exception:  # noqa: BLE001
+                        pass
+            else:
+                replace_module_in_neo4j(module_key)
+        except Exception as exc2:  # noqa: BLE001
+            restored.append("恢复/重编译失败：%s" % str(exc2)[:200])
+        out["rollback"] = {"restored_from_backup": restored,
+                           "recompiled": bool(recompiled),
+                           "deleted_any_data": False,
+                           "backup_dir": (str(backup_dir.relative_to(REPO)) if "backup_dir" in dir() else "")}
         out["error"] = "upload_failed"
-        out["note"] = ("失败已回滚（真源/登记恢复原状；**没有删除任何 wiki 页或图谱节点**）：%s"
+        out["note"] = ("上传失败：**已从备份恢复 sources/ 并重新编译**（硬删的内容随重编译重建）：%s"
                        % str(exc)[:300])
         return out
 
