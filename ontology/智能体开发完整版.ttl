@@ -84,24 +84,6 @@
     rdfs:subClassOf owl:Thing .
 
 
-### 9. 挡板状态 StubStatus
-:StubStatus rdf:type owl:Class ;
-    rdfs:label "挡板状态"@zh ;
-    rdfs:comment "工具当前的实现状态"@zh ;
-    owl:equivalentClass [
-        rdf:type owl:Class ;
-        owl:oneOf ( :StubOnly :StubPromoted )
-    ] .
-
-:StubOnly rdf:type :StubStatus ;
-    rdfs:label "挡板"@zh ;
-    rdfs:comment "尚未投产：返回打标的模拟数据"@zh .
-
-:StubPromoted rdf:type :StubStatus ;
-    rdfs:label "已投产"@zh ;
-    rdfs:comment "已接真实系统；替换过程需留痕（会话页 + 工具类改进建议）"@zh .
-
-
 # ============================================================
 # 三、工作知识库（业务智能体运行时读写；技能/工具据此做「目标库范围」管控）
 #     2026-10-04 用户口径（**取消原来的「知识库角色」词表**）：
@@ -141,56 +123,6 @@
     rdfs:label "改进建议"@zh ;
     rdfs:comment "闭环一的出口物、闭环二的入口物：现象+证据+涉及对象+不确定性类型+影响面+期望改动+优先级+状态；**被驳回的也要留痕**；落「领域知识库」，可回到产生它的会话。"@zh ;
     rdfs:subClassOf owl:Thing .
-
-### 14. 建议类别 AdviceCategory
-:AdviceCategory rdf:type owl:Class ;
-    rdfs:label "建议类别"@zh ;
-    rdfs:comment "决定进入闭环二后由哪个角色处理"@zh ;
-    owl:equivalentClass [
-        rdf:type owl:Class ;
-        owl:oneOf ( :AdviceOntology :AdviceSkill :AdviceTool :AdviceKnowledge )
-    ] .
-
-:AdviceOntology rdf:type :AdviceCategory ;
-    rdfs:label "本体类"@zh ;
-    rdfs:comment "缺类/缺属性/缺词表/语义不匹配 → 交本体建模师"@zh .
-
-:AdviceSkill rdf:type :AdviceCategory ;
-    rdfs:label "技能类"@zh ;
-    rdfs:comment "技能步骤/门禁/输出契约问题 → 交技能维护"@zh .
-
-:AdviceTool rdf:type :AdviceCategory ;
-    rdfs:label "工具类"@zh ;
-    rdfs:comment "工具契约/挡板转真实/实现缺陷 → 交工具开发"@zh .
-
-:AdviceKnowledge rdf:type :AdviceCategory ;
-    rdfs:label "知识类"@zh ;
-    rdfs:comment "知识缺失/过期/来源不可用 → 交知识补充（回到闭环一）"@zh .
-
-### 15. 建议状态 AdviceStatus
-:AdviceStatus rdf:type owl:Class ;
-    rdfs:label "建议状态"@zh ;
-    rdfs:comment "改进建议的受理状态（总览页按『待受理』滚动汇总）"@zh ;
-    owl:equivalentClass [
-        rdf:type owl:Class ;
-        owl:oneOf ( :AdvicePending :AdviceAccepted :AdviceDone :AdviceRejected )
-    ] .
-
-:AdvicePending rdf:type :AdviceStatus ;
-    rdfs:label "待受理"@zh ;
-    rdfs:comment "尚未进入闭环二"@zh .
-
-:AdviceAccepted rdf:type :AdviceStatus ;
-    rdfs:label "已受理"@zh ;
-    rdfs:comment "已进入闭环二处理"@zh .
-
-:AdviceDone rdf:type :AdviceStatus ;
-    rdfs:label "已实施"@zh ;
-    rdfs:comment "改动已落地并验证"@zh .
-
-:AdviceRejected rdf:type :AdviceStatus ;
-    rdfs:label "驳回"@zh ;
-    rdfs:comment "经评测不采纳（必须留痕与理由，避免反复提同一问题）"@zh .
 
 # ============================================================
 # 五、对象属性（Object Properties）
@@ -274,12 +206,6 @@
     rdfs:range :InstallGuide ;
     rdfs:comment "工具在安装指引中的状态与影响说明（挡板/已投产）"@zh .
 
-:stubHasStatus rdf:type owl:ObjectProperty ;
-    rdfs:label "挡板状态"@zh ;
-    rdfs:domain :Stub ;
-    rdfs:range :StubStatus ;
-    rdfs:comment "挡板 or 已投产"@zh .
-
 :evaluationOfAgent rdf:type owl:ObjectProperty ;
     rdfs:label "评测对象智能体"@zh ;
     rdfs:domain :Evaluation ;
@@ -297,18 +223,6 @@
     rdfs:domain :Evaluation ;
     rdfs:range :Advice ;
     rdfs:comment "评测的出口物：改进建议（闭环二的入口）"@zh .
-
-:adviceHasCategory rdf:type owl:ObjectProperty ;
-    rdfs:label "建议类别"@zh ;
-    rdfs:domain :Advice ;
-    rdfs:range :AdviceCategory ;
-    rdfs:comment "本体类/技能类/工具类/知识类 → 决定闭环二由谁处理"@zh .
-
-:adviceHasStatus rdf:type owl:ObjectProperty ;
-    rdfs:label "建议状态"@zh ;
-    rdfs:domain :Advice ;
-    rdfs:range :AdviceStatus ;
-    rdfs:comment "待受理/已受理/已实施/驳回"@zh .
 
 :adviceTargetsTool rdf:type owl:ObjectProperty ;
     rdfs:label "建议针对工具"@zh ;
@@ -333,6 +247,24 @@
 # ============================================================
 # 六、数据属性（Datatype Properties）
 # ============================================================
+
+:stubStatus rdf:type owl:DatatypeProperty ;
+    rdfs:label "挡板状态"@zh ;
+    rdfs:domain :Stub ;
+    rdfs:range xsd:string ;
+    rdfs:comment "工具实现状态。**受控取值（逐字取用，不得另建知识页）**：挡板｜已投产。替换到真实实现要留痕（会话页 + 工具类改进建议）。"@zh .
+
+:adviceCategory rdf:type owl:DatatypeProperty ;
+    rdfs:label "建议类别"@zh ;
+    rdfs:domain :Advice ;
+    rdfs:range xsd:string ;
+    rdfs:comment "决定进入闭环二后由哪个角色处理。**受控取值（逐字取用，不得另建知识页）**：本体类（缺类/缺属性/缺词表 → 交本体建模师）｜技能类（步骤/门禁/输出契约 → 交技能维护）｜工具类（契约/挡板转真实/实现缺陷 → 交工具开发）｜知识类（缺失/过期/来源不可用 → 回到闭环一）。"@zh .
+
+:adviceStatus rdf:type owl:DatatypeProperty ;
+    rdfs:label "建议状态"@zh ;
+    rdfs:domain :Advice ;
+    rdfs:range xsd:string ;
+    rdfs:comment "改进建议的受理状态（总览页按『待受理』滚动汇总）。**受控取值（逐字取用）**：待受理｜已受理｜已实施｜驳回。被驳回必须留痕与理由（避免反复提同一问题）。"@zh .
 
 :skillId rdf:type owl:DatatypeProperty ;
     rdfs:label "技能编号"@zh ;

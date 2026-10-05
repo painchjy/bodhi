@@ -1075,22 +1075,31 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
                            "（编译+灌投影+重投影+体检）" % ("（就地覆盖）" if is_builtin else "并登记"))
             return out
 
-        # ④ **级联删除**（本模块 + 下游依赖）：图库/wiki（**真源不再删**，2026-10-05 修 S-01）
+        # ④ **级联删除**（本模块 + 下游依赖）：图库/wiki + 真源文件 + 注册信息
+        #    **2026-10-05 用户口径回退 + 加固**：
+        #    · 回退我此前擅改的"编译含下游 / 不删真源"——**下游一起删除是既定行为**（上游改类会污染下游定义，
+        #      建模师改完下游自己重新上传即可；唯一真源在**建模师本地文件**里，sources/ 只是编译输入副本）；
+        #    · 新增**预编译**：先试编译一次（编译不改任何数据）——失败就**直接中止，什么都不删**；
+        #      成功才级联删除，然后正式编译一次。这样"编译错误导致的误删"不再发生，
+        #      同时保留"上游上传即清下游"的原语义。
         from ontology_compiler.config import downstream_closure, upstream_closure  # noqa: PLC0415
-        victims = [k for k in downstream_closure(module_key) if k != module_key]
-        # 编译范围 = 本模块 + 上游 + **下游（受害者）**：旧实现"编译只到上游、级联却删下游"
-        # → 上传 bmm 会把 agent 的 wiki 删掉且不再重建（2026-10-05 用户实测：agent 页面全丢）。
-        scope = sorted(set(upstream_closure(module_key)) | {str(module_key)} | set(victims))
-        # 删除任何东西**之前**再确认一次范围内的短名都合格（含上游/下游模块）——
+        scope = upstream_closure(module_key)                    # 编译范围 = 本模块 + 上游
+        # 删除任何东西**之前**再确认一次范围内的短名都合格（含上游模块）——
         # 否则会出现"下游已删、编译才失败"，回滚也救不回被删的模块（2026-09-30）。
         gate = short_name_gate(scope)
         if gate:
             raise ValueError("短名门禁未过（%s）：\n%s\n%s"
                              % (gate["message"], gate["snippet"],
                                 "修好后重新上传；**本次没有删除任何数据**（真源已回滚）。"))
+        # ④a **预编译**（不改任何数据）：编译不过就中止，绝不进入删除
+        try:
+            out["precompile"] = compile_artifacts(modules=scope)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("预编译未通过 → **没有删除任何 wiki/图库/真源**，请修好 TTL 后重新上传：%s"
+                             % str(exc)[:300])
+        victims = [k for k in downstream_closure(module_key) if k != module_key]
         out["compile_scope"] = scope
-        out["cascade_purge"] = cascade_delete_modules(
-            victims, keep_files=tuple(sorted({p.name for p in SOURCES_DIR.glob("*.ttl")} | {src_path.name})))
+        out["cascade_purge"] = cascade_delete_modules(victims, keep_files=(src_path.name,))
 
         # ⑤ 编译（只编本次范围；不碰 wiki / 图谱）
         before, keys_before = _index_totals(), _index_module_keys()
