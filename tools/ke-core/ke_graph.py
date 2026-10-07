@@ -124,6 +124,43 @@ def rebuild_kb_graph(kb_id: str, tenant_id: int | None = None) -> dict:
     return {"ok": True, "kb_id": kb_id, "nodes": nodes, "edges": edges}
 
 
+def strip_relation_sections(content: str) -> str:
+    """删正文里「本体关系」与「被引用（入边）」两小节（它们改为从图动态渲染，不落正文）。"""
+    out: list[str] = []
+    skip = False
+    for line in (content or "").splitlines():
+        if line.startswith("## "):
+            sec = line[3:].strip()
+            skip = sec.startswith("本体关系") or sec.startswith("被引用")
+            if skip:
+                continue
+        if skip:
+            continue
+        out.append(line)
+    return "\n".join(out).rstrip() + "\n"
+
+
+def rebuild_kb_wiki(kb_id: str, dry_run: bool = False) -> dict:
+    """wiki 伴生化（2026-10-05 重构）：清掉正文里与图重复的「本体关系 / 被引用」小节，
+    并**清空出入链**（in_links/out_links = []，关系一律在图里；WeKnora 原生链不再由我们维护）。"""
+    import ke_db
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(content,'') AS content FROM wiki_pages "
+        "WHERE knowledge_base_id = %s AND deleted_at IS NULL" % ke_db.sql_str(kb_id))
+    changed = 0
+    for r in rows:
+        new = strip_relation_sections(r["content"])
+        if new != r["content"]:
+            changed += 1
+        if not dry_run:
+            ke_db.psql(
+                "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
+                "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s;"
+                % (ke_db.sql_str(new), ke_db.sql_str(kb_id), ke_db.sql_str(r["slug"])), stdin=True)
+    return {"ok": True, "kb_id": kb_id, "dry_run": bool(dry_run),
+            "pages": len(rows), "content_changed": changed}
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)
