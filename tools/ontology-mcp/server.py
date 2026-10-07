@@ -2008,33 +2008,25 @@ def link_source_session(kb_id: str = "", session_no: str = "", slugs: list | Non
         rows = psql_csv("SELECT slug, content, out_links FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
                         "AND COALESCE(page_type,'') NOT IN ('bmm:KnowledgeSession', 'index')"
                         % sql_str(kb_id))
-    changes, unchanged = [], 0
+    changes = []
     for row in rows:
-        new, touched = _upsert_source_session_line(row.get("content") or "", line)
-        # 正文已是双链、但 `out_links` 还没并入会话页 slug 的页**也要处理**（否则 in_links 不生效）
-        ol = row.get("out_links")
-        missing = slug not in (ol if isinstance(ol, list) else str(ol or ""))
-        if not touched and not missing:
-            unchanged += 1
+        if dry_run:
+            changes.append({"slug": row["slug"]})
             continue
-        changes.append({"slug": row["slug"], "line_fixed": bool(touched), "out_links_fixed": bool(missing)})
-        if not dry_run:
-            # ⚠️ 关键：`in_links` 是**从 `out_links` 字段**反算的（`ke_pages.rebuild_in_links_sql`），
-            # 而 `out_links` 只在**写入页那一刻**算过 → 事后补正文行必须**同时**把会话页 slug
-            # 并入本页 `out_links`，否则会话页「被引用（入边）」永远是空（2026-10-04 用户实测）。
-            psql("UPDATE wiki_pages SET content = %s, "
-                 "out_links = (SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb) FROM ("
-                 "  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(COALESCE(out_links, '[]'::jsonb))"
-                 "         = 'array' THEN COALESCE(out_links, '[]'::jsonb) ELSE '[]'::jsonb END) AS v"
-                 "  UNION SELECT %s::text) u), updated_at = now() "
-                 "WHERE knowledge_base_id = %s AND slug = %s;"
-                 % (sql_str(new), sql_str(slug), sql_str(kb_id), sql_str(row["slug"])), stdin=True)
-    out = {"ok": True, "kb_id": kb_id, "session_page": {"slug": slug, "title": title}, "line": line,
-           "dry_run": bool(dry_run), "changed": len(changes), "unchanged": unchanged,
-           "changes": changes[:50]}
-    if not dry_run and changes:
-        psql(sql_rebuild_in_links(kb_id), stdin=True)
-        out["in_links"] = "rebuilt"
+        try:
+            import ke_graph  # noqa: PLC0415
+            # sourceSession 改为**直写图边**（不再写正文关系行/出入链；2026-10-05 M3）
+            ke_graph._ensure_instance(kb_id, row["slug"], ke_graph._page_type(kb_id, row["slug"]))
+            ke_graph._ensure_instance(kb_id, slug, ke_graph._page_type(kb_id, slug))
+            ke_graph._run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) "
+                          "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                          "MERGE (a)-[r:`bmm:sourceSession`]->(b)",
+                          {"kb": kb_id, "s": row["slug"], "t": slug})
+            changes.append({"slug": row["slug"], "added": True})
+        except Exception as exc:  # noqa: BLE001
+            changes.append({"slug": row["slug"], "error": str(exc)[:120]})
+    out = {"ok": True, "kb_id": kb_id, "session_page": {"slug": slug, "title": title},
+           "dry_run": bool(dry_run), "changed": len(changes), "changes": changes[:50]}
     return out
 
 
@@ -2295,10 +2287,13 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
     # **实例图投影（2026-10-05 全量重构：Neo4j 为主存储）**：落库后按 PG 全量重建该库实例层
     #（幂等；节点带 kb_id 隔离、边=本体对象属性）。失败不阻断落库，但回执里必须说清。
     if mode == "apply":
+        # 2026-10-05 M3：**先图后 wiki（增量）**——不再整库 rebuild（会清掉上一轮增量写进图的边）。
+        #   新建页：从正文抽关系 → 写图 → strip 正文；合并/更新页已由 `_apply_content_update` 投影。
         try:
             import ke_graph  # noqa: PLC0415
-            summary["graph"] = ke_graph.rebuild_kb_graph(kb_id)
-            summary["wiki"] = ke_graph.rebuild_kb_wiki(kb_id, dry_run=False)   # 伴生化：去关系小节+清出入链
+            _new = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
+            summary["graph"] = [ke_graph.project_page_from_content(kb_id, s)
+                                for s in dict.fromkeys(_new)]
         except Exception as exc:  # noqa: BLE001
             summary["graph"] = {"ok": False, "reason": str(exc)[:200]}
     # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"

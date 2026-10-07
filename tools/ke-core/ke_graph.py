@@ -433,6 +433,29 @@ def project_page(kb_id: str, slug: str, edges=None) -> dict:
     return {"ok": True, "slug": slug, "attrs": len(attrs), "edges": n_edges}
 
 
+def project_page_from_content(kb_id: str, slug: str) -> dict:
+    """先图后 wiki（单页）：从该页正文抽关系 → 写图实例+边 → 正文去掉关系小节 + 清出入链。
+
+    只用于**新建页**（INSERT 未 strip 的路径）；合并/更新页已由 `_apply_content_update` 投影。
+    """
+    import ke_db, ke_pages  # noqa: PLC0415
+    row = ke_db.psql_csv(
+        "SELECT COALESCE(content,'') AS content FROM wiki_pages "
+        "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if not row:
+        return {"ok": False, "slug": slug, "reason": "页不存在"}
+    content = row[0]["content"]
+    edges = [(r["type"], r["slug"]) for r in ke_pages.parse_out_relations(content) if r.get("slug")]
+    projected = project_page(kb_id, slug, edges=edges)
+    stripped = strip_relation_sections(content)
+    ke_db.psql(
+        "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
+        "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s;"
+        % (ke_db.sql_str(stripped), ke_db.sql_str(kb_id), ke_db.sql_str(slug)), stdin=True)
+    return {"ok": True, "slug": slug, "edges": len(edges), "projected": projected.get("ok")}
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)
