@@ -2292,6 +2292,14 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 summary["source_session_link"] = {"ok": False, "reason": str(exc)[:200]}
     summary["source_session_edges"] = [e for e in (checked.get("edges") or [])
                                        if e.get("type") == "bmm:sourceSession"]
+    # **实例图投影（2026-10-05 全量重构：Neo4j 为主存储）**：落库后按 PG 全量重建该库实例层
+    #（幂等；节点带 kb_id 隔离、边=本体对象属性）。失败不阻断落库，但回执里必须说清。
+    if mode == "apply":
+        try:
+            import ke_graph  # noqa: PLC0415
+            summary["graph"] = ke_graph.rebuild_kb_graph(kb_id)
+        except Exception as exc:  # noqa: BLE001
+            summary["graph"] = {"ok": False, "reason": str(exc)[:200]}
     # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"
     summary["cross_kb_same_name"] = checked.get("cross_kb_same_name") or []
     if checked.get("cross_kb_same_name"):

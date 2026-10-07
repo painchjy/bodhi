@@ -83,6 +83,20 @@ def _attr(meta: str, key: str, hint: str = "") -> str:
     return ""
 
 
+def _bmm_rule_class_closure() -> list:
+    """`bmm:BusinessRule` 的子类闭包（含自身），从 T-Box 图取。"""
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (c:BodhiOntClass)-[:BODHI_SUBCLASS_OF*0..]->(r:BodhiOntClass {prefixed:$root}) "
+            "WHERE c.external IS NULL RETURN DISTINCT c.prefixed AS p", {"root": "bmm:BusinessRule"})
+        out = {str(x["p"]) for x in rows if x.get("p")}
+        out.add("bmm:BusinessRule")
+        return sorted(out)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict:
     """列出某业务策略下的业务规则（只读）。`policy` 可用 slug 片段 / 标题片段。"""
     kb, kb_name, _note = ke_db.resolve_kb_id(kb_id)
@@ -96,7 +110,39 @@ def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict
         return {"ok": False, "error": "knowledge_base 里找不到这条业务策略：%s" % policy,
                 "hint": "先确认策略页已建（page_type=bmm:BusinessPolicy），或用 slug/标题片段再试"}
     pol = pages[0]
-    # **2026-10-05 修（用户实测：某会话里 5 条策略全返回 0 条）**：
+    # **① 图实例检索（2026-10-05 全量重构：推理走图）**——命中即返回，PG 只补正文。
+    try:
+        import ke_neo4j as _n4  # noqa: PLC0415
+        cls = _bmm_rule_class_closure() or ["bmm:OperativeBusinessRule", "bmm:StructuralBusinessRule", "bmm:BusinessRule"]
+        g = _n4.query(
+            "MATCH (p:BodhiInstance {kb_id:$kb, slug:$ps})-[r:`bmm:isBasisFor`]->(n:BodhiInstance) "
+            "WHERE n.page_type IN $cls "
+            "RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type, n.enforcementLevel AS level "
+            "ORDER BY n.slug LIMIT $lim",
+            {"kb": kb, "ps": pol["slug"], "cls": cls, "lim": int(limit or 300)})
+        if g:
+            slugs = [x["slug"] for x in g if x.get("slug")]
+            pc = {r["slug"]: r for r in ke_db.psql_csv(
+                "SELECT slug, content, COALESCE(page_metadata::text,'{}') AS meta FROM wiki_pages "
+                "WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s)"
+                % (ke_db.sql_str(kb), ", ".join(ke_db.sql_str(s) for s in slugs)))}
+            out_g = []
+            for x in g:
+                p = pc.get(x["slug"], {})
+                lvl = ENFORCEMENT_ALIAS.get(x.get("level") or "", x.get("level") or "")
+                ev = re.search(r"%s\n\n> ?(.+)" % re.escape(EVIDENCE_SECTION), p.get("content") or "")
+                out_g.append({"slug": x["slug"], "name": x.get("name") or x["slug"],
+                              "page_type": x.get("page_type"), "level": lvl,
+                              "scope": _attr(p.get("meta"), "ruleScope", "适用范围"),
+                              "how": _attr(p.get("meta"), "ruleImplementation", "实现方式"),
+                              "reference": _attr(p.get("meta"), "ruleReference", "参考规范"),
+                              "evidence": (ev.group(1).strip()[:400] if ev else "")})
+            return {"ok": True, "kb": {"id": kb, "name": kb_name},
+                    "policy": {"slug": pol["slug"], "name": pol["title"]},
+                    "count": len(out_g), "rules": out_g, "source": "graph", "rule_classes": cls}
+    except Exception:  # noqa: BLE001  图不可用 → 退回 PG 兜底
+        pass
+    # **② PG 兜底（图不可用/无实例时）**
     # `bmm:isBasisFor` 的 domain=BusinessPolicy → range=BusinessRule ⇒ 「策略→规则」的关联行**写在策略页**上；
     # **规则页正文里没有策略 slug**（只有自动生成的「被引用」节，写的是策略**标题**）⇒
     # 旧实现 `content LIKE '%策略 slug%'` 必然 0 条。
