@@ -79,10 +79,16 @@ def _run(statement: str, params: dict) -> list[dict]:
     return ke_neo4j.query(statement, params)
 
 
+def _edge_count(kb_id: str) -> int:
+    rows = _run("MATCH (a:BodhiInstance {kb_id:$kb})-[r]->(b) RETURN count(r) AS n", {"kb": kb_id})
+    return int((rows[0].get("n") if rows else 0) or 0)
+
+
 def rebuild_kb_graph(kb_id: str, tenant_id: int | None = None) -> dict:
     """按 PG 页**幂等全量重建**该知识库的实例层（先清本库旧实例，再灌）。"""
     import ke_db
     _ensure_index()
+    edges_before = _edge_count(kb_id)                    # 回归防护：记录重建前边数
     rows = ke_db.psql_csv(
         "SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(content,'') AS content, "
         "       COALESCE(page_metadata::text,'{}') AS meta, tenant_id "
@@ -116,9 +122,18 @@ def rebuild_kb_graph(kb_id: str, tenant_id: int | None = None) -> dict:
             params["a_" + k] = v
         _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) SET %s" % ", ".join(sets), params)
         nodes += 1
-    edges = _run("MATCH (a:BodhiInstance {kb_id:$kb})-[r]->(b) RETURN count(r) AS n", {"kb": kb_id})
-    edge_n = int((edges[0].get("n") if edges else 0) or 0)
-    return {"ok": True, "kb_id": kb_id, "nodes": nodes, "edges": edge_n}
+    edges = _edge_count(kb_id)
+    edge_delta = edges - edges_before
+    # 回归防护（2026-10-05）：本函数**保留边**，只删孤儿实例。若边数下降且不是由删孤儿导致，
+    # 说明"重建清边"的回归又回来了 —— 直接抛错，绝不静默吞掉。
+    orphan_edges = _run("MATCH (n:BodhiInstance {kb_id:$kb})-[r]-() WHERE NOT n.slug IN $slugs "
+                        "RETURN count(r) AS n", {"kb": kb_id, "slugs": sorted(known)})
+    orphan_n = int((orphan_edges[0].get("n") if orphan_edges else 0) or 0)
+    if edge_delta < -orphan_n:
+        raise RuntimeError("rebuild_kb_graph 边数回归：重建前 %d → 重建后 %d（非孤儿删除丢失 %d 条边）"
+                           % (edges_before, edges, -(edge_delta + orphan_n)))
+    return {"ok": True, "kb_id": kb_id, "nodes": nodes, "edges": edges,
+            "edges_before": edges_before, "edges_delta": edge_delta}
 
 
 def strip_relation_sections(content: str) -> str:
