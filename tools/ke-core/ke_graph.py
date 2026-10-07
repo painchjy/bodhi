@@ -202,6 +202,14 @@ def _page_type(kb_id: str, slug: str) -> str:
     return (row[0].get("pt") or "") if row else ""
 
 
+def _check_domain(rel_type: str, source_type: str) -> None:
+    import ke_ontology  # noqa: PLC0415
+    allowed = ke_ontology.relation_type_map(source_type) if source_type else {}
+    if rel_type not in allowed:
+        raise ValueError("关系类型 `%s` 不适用于 %s（该类型可用：%s）"
+                         % (rel_type, source_type or "（未知类）", "、".join(sorted(allowed)[:12]) or "无"))
+
+
 def _check_range(rel_type: str, target_type: str) -> None:
     import ke_ontology  # noqa: PLC0415
     closure = ke_ontology.target_closure(rel_type)
@@ -231,17 +239,18 @@ def add_edge(kb_id: str, slug: str, rel_type: str, target_slug: str, label: str 
     tt = _page_type(kb_id, target_slug)
     if not tt:
         raise ValueError("目标页不存在：%s" % target_slug)
+    _check_domain(rel_type, _page_type(kb_id, slug))
     _check_range(rel_type, tt)
     _ensure_instance(kb_id, slug, _page_type(kb_id, slug))
     _ensure_instance(kb_id, target_slug, tt)
     dup = _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r:`%s`]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
                "RETURN count(r) AS n" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
     if dup and dup[0].get("n"):
-        return {"changed": False, "reason": "同样的关系已存在", "slug": slug,
+        return {"changed": False, "reason": "同样的关系已存在", "slug": slug, "version": 1,
                 "relations": relations_of(kb_id, slug)}
     _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
          "MERGE (a)-[r:`%s`]->(b)" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
-    return {"changed": True, "action": "add", "slug": slug,
+    return {"changed": True, "action": "add", "slug": slug, "version": 1,
             "relation": {"type": rel_type, "target_slug": target_slug}, "relations": relations_of(kb_id, slug)}
 
 
@@ -259,6 +268,7 @@ def update_edge(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
     tt = _page_type(kb_id, final_slug)
     if not tt:
         raise ValueError("目标页不存在：%s" % final_slug)
+    _check_domain(final_type, _page_type(kb_id, slug))
     _check_range(final_type, tt)
     _ensure_instance(kb_id, slug, _page_type(kb_id, slug))
     _ensure_instance(kb_id, final_slug, tt)
@@ -266,7 +276,7 @@ def update_edge(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
          {"kb": kb_id, "s": slug, "t": target_slug})
     _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
          "MERGE (a)-[r:`%s`]->(b)" % _etyp(final_type), {"kb": kb_id, "s": slug, "t": final_slug})
-    return {"changed": True, "action": "update", "slug": slug,
+    return {"changed": True, "action": "update", "slug": slug, "version": 1,
             "before": {"type": old[0]["t"], "target_slug": target_slug},
             "after": {"type": final_type, "target_slug": final_slug}, "relations": relations_of(kb_id, slug)}
 
@@ -279,7 +289,7 @@ def delete_edge(kb_id: str, slug: str, target_slug: str, rel_type: str = "") -> 
     else:
         _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(b:BodhiInstance {kb_id:$kb, slug:$t}) DELETE r",
              {"kb": kb_id, "s": slug, "t": target_slug})
-    return {"changed": True, "action": "delete", "slug": slug, "relations": relations_of(kb_id, slug)}
+    return {"changed": True, "action": "delete", "slug": slug, "version": 1, "relations": relations_of(kb_id, slug)}
 
 
 def instance_graph(kb_id: str, model: str = "", types=None, limit: int = 300) -> dict:

@@ -235,57 +235,11 @@ def _apply_content_update(kb_id: str, slug: str, content: str, tag: str,
 # ---------------------------------------------------------------------------
 # 读数：出边 + 入边
 # ---------------------------------------------------------------------------
-def page_relations(kb_id: str, slug: str) -> dict:
-    """本页的**出边**（可维护）与**入边**（只读，需去对方页面改）。"""
-    page = _load_page(kb_id, slug)
-    out_lines = parse_out_relations(page["content"])
-    meta = ke_ontology.class_meta()
-
-    out = [{"label": r["label"], "type": r["type"],
-            "type_label": (meta.get(r["type"]) or {}).get("label") or r["type"],
-            "target_slug": r["slug"], "target_title": r["target"]} for r in out_lines]
-    if out:
-        slugs = ", ".join(ke_db.sql_str(x["target_slug"]) for x in out)
-        found = {r["slug"]: r for r in ke_db.psql_csv(
-            "SELECT slug, title, page_type FROM wiki_pages WHERE knowledge_base_id = %s "
-            "AND deleted_at IS NULL AND slug IN (%s)" % (ke_db.sql_str(kb_id), slugs))}
-        for item in out:
-            hit = found.get(item["target_slug"]) or {}
-            item["target_title"] = hit.get("title") or item["target_title"]
-            item["target_type"] = hit.get("page_type") or ""
-            item["target_exists"] = bool(hit)
-            item["range_ok"] = True  # 出边已落库，历史数据可能超出当前 range，不拦
-    else:
-        pass
-
-    inbound = []
-    try:
-        import json as _json
-        links = _json.loads(page.get("in_links") or "[]")
-        if isinstance(links, list) and links:
-            cond = ", ".join(ke_db.sql_str(str(s)) for s in links)
-            for row in ke_db.psql_csv(
-                    "SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(content,'') AS content "
-                    "FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s)"
-                    % (ke_db.sql_str(kb_id), cond)):
-                for rel in parse_out_relations(row["content"]):
-                    if rel["slug"] != slug:
-                        continue
-                    inbound.append({"source_slug": row["slug"], "source_title": row["title"],
-                                    "source_type": row["page_type"], "label": rel["label"],
-                                    "type": rel["type"],
-                                    "type_label": (meta.get(rel["type"]) or {}).get("label") or rel["type"]})
-    except Exception:  # noqa: BLE001  （旧数据 in_links 为标量等）
-        inbound = []
-
-    return {"slug": slug, "title": page["title"], "page_type": page["page_type"],
-            "type_label": (meta.get(page["page_type"]) or {}).get("label") or page["page_type"],
-            "version": page["version"], "out": out, "in": inbound,
-            "ontology_source": ke_ontology.classes()["source"]}
+# 2026-10-05 M3：`page_relations` 已删（关系只存图，读走 `ke_graph.relations_of`）。
 
 
 # ---------------------------------------------------------------------------
-# 关系维护：新增 / 修改 / 删除（只动本页出边）
+# 关系维护：新增 / 修改 / 删除（2026-10-05 M3：直写图实例，见 `ke_graph`）
 # ---------------------------------------------------------------------------
 def _allowed(page_type: str) -> dict[str, dict]:
     return ke_ontology.relation_type_map(page_type)
@@ -381,71 +335,22 @@ def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS
 
 def add_relation(kb_id: str, slug: str, rel_type: str, target_slug: str,
                  label: str = "") -> dict:
-    """新增一条出边：本页 --rel_type--> target_slug。"""
-    page = _load_page(kb_id, slug)
-    info = _require_type(_allowed(page["page_type"]), rel_type, page["page_type"])
-    if target_slug == slug:
-        raise ValueError("不能把关系指向本页")
-    target = _load_page(kb_id, target_slug)
-    closure = ke_ontology.target_closure(rel_type)
-    if closure and target["page_type"] not in closure:
-        raise ValueError("目标页类型 %s 不在 `%s` 的 range 范围内（%s）"
-                         % (target["page_type"], rel_type, "、".join(closure[:10])))
-    existing = parse_out_relations(page["content"])
-    if any(r["type"] == rel_type and r["slug"] == target_slug for r in existing):
-        return {"changed": False, "reason": "同样的关系已存在", "slug": slug,
-                "version": page["version"]}
-    content = _with_line_inserted(page["content"],
-                                  rel_line(label or info["label"], rel_type, target["title"], target_slug))
-    _apply_content_update(kb_id, slug, content, TAG_REL)
-    return {"changed": True, "action": "add", "slug": slug, "relation": {
-        "label": label or info["label"], "type": rel_type,
-        "target_slug": target_slug, "target_title": target["title"]},
-        "relations": page_relations(kb_id, slug)}
+    """新增一条出边（**直写图实例**，2026-10-05 M3；委派 `ke_graph.add_edge`）。"""
+    import ke_graph  # noqa: PLC0415
+    return ke_graph.add_edge(kb_id, slug, rel_type, target_slug, label)
 
 
 def update_relation(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
                     new_target_slug: str = "", label: str = "") -> dict:
-    """修改一条出边（关系类型和/或目标页）。`target_slug` 是**原**目标页。"""
-    page = _load_page(kb_id, slug)
-    rels = parse_out_relations(page["content"])
-    hit = next((r for r in rels if r["slug"] == target_slug), None)
-    if not hit:
-        raise ValueError("本页没有指向 %s 的出边" % target_slug)
-    rel_type = new_rel_type or hit["type"]
-    info = _require_type(_allowed(page["page_type"]), rel_type, page["page_type"])
-    final_slug = new_target_slug or target_slug
-    if final_slug == slug:
-        raise ValueError("不能把关系指向本页")
-    target = _load_page(kb_id, final_slug)
-    closure = ke_ontology.target_closure(rel_type)
-    if closure and target["page_type"] not in closure:
-        raise ValueError("目标页类型 %s 不在 `%s` 的 range 范围内（%s）"
-                         % (target["page_type"], rel_type, "、".join(closure[:10])))
-    lines = page["content"].splitlines()
-    lines[hit["line_index"]] = rel_line(label or info["label"], rel_type,
-                                        target["title"], final_slug)
-    _apply_content_update(kb_id, slug, "\n".join(lines).rstrip() + "\n", TAG_REL)
-    return {"changed": True, "action": "update", "slug": slug,
-            "before": {"type": hit["type"], "target_slug": target_slug},
-            "after": {"type": rel_type, "target_slug": final_slug},
-            "relations": page_relations(kb_id, slug)}
+    """修改一条出边（**直写图实例**；委派 `ke_graph.update_edge`）。"""
+    import ke_graph  # noqa: PLC0415
+    return ke_graph.update_edge(kb_id, slug, target_slug, new_rel_type, new_target_slug, label)
 
 
 def delete_relation(kb_id: str, slug: str, target_slug: str, rel_type: str = "") -> dict:
-    """删除本页出边（可只删某一类）。**反向边不在这里删**：那是对方页面的出边。"""
-    page = _load_page(kb_id, slug)
-    rels = parse_out_relations(page["content"])
-    victims = [r for r in rels if r["slug"] == target_slug and (not rel_type or r["type"] == rel_type)]
-    if not victims:
-        raise ValueError("本页没有匹配的出边（目标 %s%s）"
-                         % (target_slug, "，类型 " + rel_type if rel_type else ""))
-    drop = {r["line_index"] for r in victims}
-    lines = [line for i, line in enumerate(page["content"].splitlines()) if i not in drop]
-    _apply_content_update(kb_id, slug, "\n".join(lines).rstrip() + "\n", TAG_REL)
-    return {"changed": True, "action": "delete", "slug": slug,
-            "removed": [{"type": r["type"], "target_slug": r["slug"]} for r in victims],
-            "relations": page_relations(kb_id, slug)}
+    """删除本页出边（**直写图实例**；委派 `ke_graph.delete_edge`）。"""
+    import ke_graph  # noqa: PLC0415
+    return ke_graph.delete_edge(kb_id, slug, target_slug, rel_type)
 
 
 # ---------------------------------------------------------------------------
@@ -997,7 +902,8 @@ if __name__ == "__main__":  # 本地自测：python3 ke_pages.py relations <kb> 
     def _main() -> int:
         args = sys.argv[1:]
         if len(args) >= 3 and args[0] == "relations":
-            print(_json2.dumps(page_relations(args[1], args[2]), ensure_ascii=False, indent=2))
+            import ke_graph  # noqa: PLC0415
+            print(_json2.dumps(ke_graph.relations_of(args[1], args[2]), ensure_ascii=False, indent=2))
             return 0
         if len(args) >= 3 and args[0] == "types":
             print(_json2.dumps(ke_ontology.relation_types_for(args[2]), ensure_ascii=False, indent=2))
