@@ -4385,18 +4385,20 @@ class MCPHandler(BaseHTTPRequestHandler):
                 parts.append("· %s" % h)
             raise ValueError("\n".join(p for p in parts if p))
 
+        import ke_graph as _ke_graph  # noqa: PLC0415  关系读写统一走图实例（2026-10-05 M2）
+
         handlers = {
             "/bodhi/relations/add":
-                lambda b: ke_pages.add_relation(b.get("kb_id", ""), b.get("slug", ""),
-                                                b.get("rel_type", ""), b.get("target_slug", ""),
-                                                b.get("label", "")),
+                lambda b: _ke_graph.add_edge(b.get("kb_id", ""), b.get("slug", ""),
+                                             b.get("rel_type", ""), b.get("target_slug", ""),
+                                             b.get("label", "")),
             "/bodhi/relations/update":
-                lambda b: ke_pages.update_relation(b.get("kb_id", ""), b.get("slug", ""),
-                                                   b.get("target_slug", ""), b.get("new_rel_type", ""),
-                                                   b.get("new_target_slug", ""), b.get("label", "")),
+                lambda b: _ke_graph.update_edge(b.get("kb_id", ""), b.get("slug", ""),
+                                                b.get("target_slug", ""), b.get("new_rel_type", ""),
+                                                b.get("new_target_slug", ""), b.get("label", "")),
             "/bodhi/relations/delete":
-                lambda b: ke_pages.delete_relation(b.get("kb_id", ""), b.get("slug", ""),
-                                                   b.get("target_slug", ""), b.get("rel_type", "")),
+                lambda b: _ke_graph.delete_edge(b.get("kb_id", ""), b.get("slug", ""),
+                                                b.get("target_slug", ""), b.get("rel_type", "")),
             "/bodhi/page/type":
                 lambda b: ke_pages.set_page_type(b.get("kb_id", ""), b.get("slug", ""),
                                                  b.get("page_type", "")),

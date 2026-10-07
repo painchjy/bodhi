@@ -194,6 +194,94 @@ def relations_of(kb_id: str, slug: str):
             "type_label": tl(node.get("pt") or ""), "out": out, "in": inbound, "source": "graph"}
 
 
+def _page_type(kb_id: str, slug: str) -> str:
+    import ke_db
+    row = ke_db.psql_csv("SELECT COALESCE(page_type,'') AS pt FROM wiki_pages "
+                         "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
+                         % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    return (row[0].get("pt") or "") if row else ""
+
+
+def _check_range(rel_type: str, target_type: str) -> None:
+    import ke_ontology  # noqa: PLC0415
+    closure = ke_ontology.target_closure(rel_type)
+    if closure and target_type and target_type not in closure:
+        raise ValueError("目标页类型 %s 不在 `%s` 的 range 范围内（%s）"
+                         % (target_type, rel_type, "、".join(closure[:10])))
+
+
+def _ensure_instance(kb_id: str, slug: str, page_type: str = "") -> None:
+    if page_type:
+        _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) SET n.page_type=$pt",
+             {"kb": kb_id, "slug": slug, "pt": page_type})
+    else:
+        _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug})", {"kb": kb_id, "slug": slug})
+
+
+def _etyp(t: str) -> str:
+    return (t or "").replace("`", "")
+
+
+def add_edge(kb_id: str, slug: str, rel_type: str, target_slug: str, label: str = "") -> dict:
+    """新增一条实例边：本页 --rel_type--> target（**直写图**，range 校验）。"""
+    if not rel_type or not target_slug:
+        raise ValueError("缺少 rel_type / target_slug")
+    if target_slug == slug:
+        raise ValueError("不能把关系指向本页")
+    tt = _page_type(kb_id, target_slug)
+    if not tt:
+        raise ValueError("目标页不存在：%s" % target_slug)
+    _check_range(rel_type, tt)
+    _ensure_instance(kb_id, slug, _page_type(kb_id, slug))
+    _ensure_instance(kb_id, target_slug, tt)
+    dup = _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r:`%s`]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
+               "RETURN count(r) AS n" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
+    if dup and dup[0].get("n"):
+        return {"changed": False, "reason": "同样的关系已存在", "slug": slug,
+                "relations": relations_of(kb_id, slug)}
+    _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+         "MERGE (a)-[r:`%s`]->(b)" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
+    return {"changed": True, "action": "add", "slug": slug,
+            "relation": {"type": rel_type, "target_slug": target_slug}, "relations": relations_of(kb_id, slug)}
+
+
+def update_edge(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
+                new_target_slug: str = "", label: str = "") -> dict:
+    """改一条出边：删旧边（src→target_slug）→ 加新边（新类型/新目标）。"""
+    old = _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
+               "RETURN type(r) AS t LIMIT 1", {"kb": kb_id, "s": slug, "t": target_slug})
+    if not old:
+        raise ValueError("本页没有指向 %s 的出边" % target_slug)
+    final_type = new_rel_type or old[0]["t"]
+    final_slug = new_target_slug or target_slug
+    if final_slug == slug:
+        raise ValueError("不能把关系指向本页")
+    tt = _page_type(kb_id, final_slug)
+    if not tt:
+        raise ValueError("目标页不存在：%s" % final_slug)
+    _check_range(final_type, tt)
+    _ensure_instance(kb_id, slug, _page_type(kb_id, slug))
+    _ensure_instance(kb_id, final_slug, tt)
+    _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(b:BodhiInstance {kb_id:$kb, slug:$t}) DELETE r",
+         {"kb": kb_id, "s": slug, "t": target_slug})
+    _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+         "MERGE (a)-[r:`%s`]->(b)" % _etyp(final_type), {"kb": kb_id, "s": slug, "t": final_slug})
+    return {"changed": True, "action": "update", "slug": slug,
+            "before": {"type": old[0]["t"], "target_slug": target_slug},
+            "after": {"type": final_type, "target_slug": final_slug}, "relations": relations_of(kb_id, slug)}
+
+
+def delete_edge(kb_id: str, slug: str, target_slug: str, rel_type: str = "") -> dict:
+    """删本页出边（可只删某类）。"""
+    if rel_type:
+        _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r:`%s`]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
+             "DELETE r" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
+    else:
+        _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(b:BodhiInstance {kb_id:$kb, slug:$t}) DELETE r",
+             {"kb": kb_id, "s": slug, "t": target_slug})
+    return {"changed": True, "action": "delete", "slug": slug, "relations": relations_of(kb_id, slug)}
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)
