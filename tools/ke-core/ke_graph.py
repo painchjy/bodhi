@@ -102,12 +102,14 @@ def rebuild_kb_graph(kb_id: str, tenant_id: int | None = None) -> dict:
         # 数据属性来源：正文属性行（md 表达）作兜底，page_metadata 机器口径优先覆盖
         attrs = _attrs_from_content(r["content"])
         attrs.update(_attrs_of(r["meta"]))
+        wc = strip_relation_sections(r["content"])     # S-10：全文入图
         params = {
             "kb": kb_id, "slug": r["slug"], "pt": r["page_type"],
             "module": _module_of(r["page_type"]), "name": r["title"],
-            "tenant": r.get("tenant_id"),
+            "tenant": r.get("tenant_id"), "wc": wc,
         }
-        sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name", "n.tenant_id=$tenant"]
+        sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name", "n.tenant_id=$tenant",
+                "n.wiki_content=$wc"]
         for k, v in attrs.items():
             sets.append("n.%s=$%s" % (k, "a_" + k))
             params["a_" + k] = v
@@ -141,22 +143,27 @@ def strip_relation_sections(content: str) -> str:
 
 
 def rebuild_kb_wiki(kb_id: str, dry_run: bool = False) -> dict:
-    """wiki 伴生化（2026-10-05 重构）：清掉正文里与图重复的「本体关系 / 被引用」小节，
-    并**清空出入链**（in_links/out_links = []，关系一律在图里；WeKnora 原生链不再由我们维护）。"""
+    """**图→wiki 全量重建**（S-10）：按图节点 `wiki_content` 重建 PG `wiki_pages.content`，
+    并清空出入链（关系只在图里）。图节点无 `wiki_content` 的页（如 index/原生页）不动。"""
     import ke_db
+    insts = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN n.slug AS slug, n.wiki_content AS wc",
+                 {"kb": kb_id})
+    wc_map = {r["slug"]: (r.get("wc") or "") for r in insts}
     rows = ke_db.psql_csv(
         "SELECT slug, COALESCE(content,'') AS content FROM wiki_pages "
         "WHERE knowledge_base_id = %s AND deleted_at IS NULL" % ke_db.sql_str(kb_id))
     changed = 0
     for r in rows:
-        new = strip_relation_sections(r["content"])
-        if new != r["content"]:
+        wc = wc_map.get(r["slug"])
+        if wc is None:
+            continue
+        if wc != r["content"]:
             changed += 1
         if not dry_run:
             ke_db.psql(
                 "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
                 "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s;"
-                % (ke_db.sql_str(new), ke_db.sql_str(kb_id), ke_db.sql_str(r["slug"])), stdin=True)
+                % (ke_db.sql_str(wc), ke_db.sql_str(kb_id), ke_db.sql_str(r["slug"])), stdin=True)
     return {"ok": True, "kb_id": kb_id, "dry_run": bool(dry_run),
             "pages": len(rows), "content_changed": changed}
 
@@ -352,18 +359,23 @@ def audit_kb(kb_id: str, fix: bool = False) -> dict:
     """
     import ke_db  # noqa: PLC0415
     pages = ke_db.psql_csv(
-        "SELECT slug, COALESCE(page_type,'') AS pt FROM wiki_pages "
+        "SELECT slug, COALESCE(page_type,'') AS pt, COALESCE(content,'') AS content FROM wiki_pages "
         "WHERE knowledge_base_id=%s AND deleted_at IS NULL "
         "AND COALESCE(page_type,'') NOT IN ('index','summary')" % ke_db.sql_str(kb_id))
     page_map = {r["slug"]: r["pt"] for r in pages}
-    insts = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN n.slug AS slug, n.page_type AS pt", {"kb": kb_id})
+    insts = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN n.slug AS slug, n.page_type AS pt, "
+                 "n.wiki_content AS wc", {"kb": kb_id})
     inst_map = {r["slug"]: (r.get("pt") or "") for r in insts}
+    wc_map = {r["slug"]: (r.get("wc") or "") for r in insts}
     out = {
         "kb_id": kb_id, "pages": len(page_map), "instances": len(inst_map),
         "missing_instance": sorted(set(page_map) - set(inst_map)),
         "orphan_instance": sorted(set(inst_map) - set(page_map)),
         "type_mismatch": [s for s in sorted(set(page_map) & set(inst_map))
                           if page_map.get(s) and inst_map.get(s) and page_map[s] != inst_map[s]],
+        "content_mismatch": sorted({r["slug"] for r in pages
+                                    if r["slug"] in wc_map
+                                    and wc_map[r["slug"]] != strip_relation_sections(r["content"])}),
         "invalid_class": [], "invalid_edge_types": [],
     }
     try:
@@ -383,7 +395,7 @@ def audit_kb(kb_id: str, fix: bool = False) -> dict:
     except Exception:  # noqa: BLE001
         pass
     out["ok"] = not (out["missing_instance"] or out["orphan_instance"] or out["type_mismatch"]
-                     or out["invalid_class"] or out["invalid_edge_types"])
+                     or out["content_mismatch"] or out["invalid_class"] or out["invalid_edge_types"])
     if fix and not out["ok"]:
         # 一致性修复 = 按 PG 全量重建该库实例层（删孤儿 + 补缺失 + 重灌边，幂等）
         out["reconcile"] = rebuild_kb_graph(kb_id)
@@ -408,9 +420,11 @@ def project_page(kb_id: str, slug: str, edges=None) -> dict:
     r = row[0]
     attrs = _attrs_from_content(r["content"])
     attrs.update(_attrs_of(r["meta"]))
+    wc = strip_relation_sections(r["content"])     # S-10：全文入图（去关系小节），供图→wiki 重建
     params = {"kb": kb_id, "slug": slug, "pt": r["pt"], "module": _module_of(r["pt"]),
-              "name": r["title"], "tenant": r.get("tenant_id")}
-    sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name", "n.tenant_id=$tenant"]
+              "name": r["title"], "tenant": r.get("tenant_id"), "wc": wc}
+    sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name", "n.tenant_id=$tenant",
+            "n.wiki_content=$wc"]
     for k, v in attrs.items():
         if k in ("kb", "slug", "pt", "module", "name", "tenant"):
             continue
