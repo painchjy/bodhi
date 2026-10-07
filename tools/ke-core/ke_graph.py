@@ -282,6 +282,50 @@ def delete_edge(kb_id: str, slug: str, target_slug: str, rel_type: str = "") -> 
     return {"changed": True, "action": "delete", "slug": slug, "relations": relations_of(kb_id, slug)}
 
 
+def instance_graph(kb_id: str, model: str = "", types=None, limit: int = 300) -> dict:
+    """普通知识库图谱（**读图实例**）：节点=BodhiInstance，边=本体实例边（带类型/中文名）。"""
+    import ke_ontology  # noqa: PLC0415
+    colors = ke_ontology.class_meta()
+    conds = ["n.kb_id=$kb"]
+    params = {"kb": kb_id, "lim": max(1, min(int(limit), 2000))}
+    if model:
+        conds.append("n.module=$m")
+        params["m"] = model
+    if types:
+        conds.append("n.page_type IN $types")
+        params["types"] = [str(t) for t in types]
+    where = " AND ".join(conds)
+    nrows = _run("MATCH (n:BodhiInstance) WHERE %s "
+                 "RETURN n.slug AS slug, n.name AS name, n.page_type AS pt, n.module AS module "
+                 "ORDER BY n.page_type, n.name LIMIT $lim" % where, params)
+    nodes, known = [], set()
+    for r in nrows:
+        cls = colors.get(r["pt"], {})
+        pt = r["pt"] or ""
+        module = r.get("module") or (pt.split(":", 1)[0] if ":" in pt else "")
+        label = cls.get("label") or pt
+        nodes.append({"slug": r["slug"], "title": r.get("name") or r["slug"], "page_type": pt,
+                      "class_label": label, "module": module, "module_label": label,
+                      "group": pt, "group_label": label, "color": cls.get("color") or "#94a3b8",
+                      "version": 1, "summary": "", "source_refs": []})
+        known.add(r["slug"])
+    erows = _run("MATCH (a:BodhiInstance {kb_id:$kb})-[r]->(b:BodhiInstance {kb_id:$kb}) "
+                 "RETURN a.slug AS s, type(r) AS t, b.slug AS d", {"kb": kb_id})
+    edges = []
+    for r in erows:
+        if r["s"] in known and r["d"] in known:
+            edges.append({"source": r["s"], "target": r["d"], "type": r["t"],
+                          "label": (colors.get(r["t"]) or {}).get("label") or r["t"]})
+    groups = {}
+    for n in nodes:
+        g = groups.setdefault(n["group"], {"label": n["group_label"], "color": n["color"], "count": 0})
+        g["count"] += 1
+    return {"kb_id": kb_id, "model": model, "view": "graph", "nodes": nodes, "edges": edges,
+            "meta": {"node_count": len(nodes), "edge_count": len(edges),
+                     "groups": [dict(key=k, **v) for k, v in sorted(groups.items())],
+                     "relation_types": sorted({e["type"] for e in edges})}}
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)

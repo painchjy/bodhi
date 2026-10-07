@@ -5123,6 +5123,14 @@ def bodhi_graph(kb_id: str, model: str = "", types: str = "", limit: int = 300) 
 
     节点带 `group` / `color`（**按模块配色**，用户 2026-09-19 口径：图要简单，颜色 = 模块差异）。
     """
+    # 2026-10-05 M3：普通知识库图谱**读图实例**（关系只在图里）；图有实例才走这里，否则退下面 PG 逻辑
+    try:
+        import ke_graph as _kg  # noqa: PLC0415
+        if kb_id and _kg.instance_count(kb_id):
+            return _kg.instance_graph(kb_id, model,
+                                      [t.strip() for t in types.split(",") if t.strip()], limit)
+    except Exception:  # noqa: BLE001
+        pass
     wanted = [t.strip() for t in types.split(",") if t.strip()]
     colors = _class_meta(model)
     sql = ("SELECT slug, title, COALESCE(page_type,'') AS page_type, COALESCE(summary,'') AS summary, "
