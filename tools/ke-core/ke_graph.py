@@ -161,6 +161,39 @@ def rebuild_kb_wiki(kb_id: str, dry_run: bool = False) -> dict:
             "pages": len(rows), "content_changed": changed}
 
 
+def relations_of(kb_id: str, slug: str):
+    """读图实例的**出边/入边**（页面底部「本体关系」面板动态渲染用）。
+
+    图里没有该实例、或图不可用 → 返回 `None`（调用方退 PG 兜底）。
+    """
+    import ke_ontology  # noqa: PLC0415
+    rows = _run("MATCH (n:BodhiInstance {kb_id:$kb, slug:$slug}) "
+                "RETURN n.name AS name, n.page_type AS pt", {"kb": kb_id, "slug": slug})
+    if not rows:
+        return None
+    node = rows[0]
+    meta = ke_ontology.class_meta()
+
+    def tl(t: str) -> str:
+        return (meta.get(t) or {}).get("label") or t
+
+    out_r = _run("MATCH (n:BodhiInstance {kb_id:$kb, slug:$slug})-[r]->(m:BodhiInstance) "
+                 "RETURN type(r) AS t, m.slug AS s, m.name AS nm, m.page_type AS pt ORDER BY t, s",
+                 {"kb": kb_id, "slug": slug})
+    out = [{"label": tl(x["t"]), "type": x["t"], "type_label": tl(x["t"]),
+            "target_slug": x["s"], "target_title": x.get("nm") or x["s"],
+            "target_type": x.get("pt") or "", "target_exists": True, "range_ok": True}
+           for x in out_r]
+    in_r = _run("MATCH (m:BodhiInstance)-[r]->(n:BodhiInstance {kb_id:$kb, slug:$slug}) "
+                "RETURN type(r) AS t, m.slug AS s, m.name AS nm, m.page_type AS pt ORDER BY t, s",
+                {"kb": kb_id, "slug": slug})
+    inbound = [{"source_slug": x["s"], "source_title": x.get("nm") or x["s"],
+                "source_type": x.get("pt") or "", "label": tl(x["t"]), "type": x["t"],
+                "type_label": tl(x["t"])} for x in in_r]
+    return {"slug": slug, "title": node.get("name") or slug, "page_type": node.get("pt") or "",
+            "type_label": tl(node.get("pt") or ""), "out": out, "in": inbound, "source": "graph"}
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)

@@ -4789,7 +4789,15 @@ class MCPHandler(BaseHTTPRequestHandler):
             try:
                 kb = params.get("kb_id", "") or ""
                 slug = params.get("slug", "") or ""
-                data = ke_pages.page_relations(kb, slug)
+                # 2026-10-05 M2：本体关系面板**改读图实例**（关系只在图里）；图无该实例/不可用 → 退 PG 兜底
+                data = None
+                try:
+                    import ke_graph  # noqa: PLC0415
+                    data = ke_graph.relations_of(kb, slug)
+                except Exception:  # noqa: BLE001
+                    data = None
+                if data is None:
+                    data = ke_pages.page_relations(kb, slug)
                 self._json(data, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/relations 失败：%s" % exc)
