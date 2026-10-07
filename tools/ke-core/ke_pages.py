@@ -315,15 +315,22 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
         cat = []
     cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
             "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path")
-    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 1, %s, %s::jsonb, %d, %s"
+    # 2026-10-05 M3：统一写路径——INSERT 也「先图后 wiki」（抽关系→去正文关系小节→出入链置空→投影图）
+    import ke_graph as _kg
+    edges = [(r["type"], r["slug"]) for r in parse_out_relations(content) if r.get("slug")]
+    content = _kg.strip_relation_sections(content)
+    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, %s, %s::jsonb, %d, %s"
             % (int(kb[0]["tenant_id"] or 0), ke_db.sql_str(kb_id), ke_db.sql_str(slug),
                ke_db.sql_str(title), ke_db.sql_str(page_type), ke_db.sql_str(content),
-               ke_db.sql_str(summary), ke_db.sql_json(out_links_of(content)), ke_db.sql_json(metadata or {}),
+               ke_db.sql_str(summary), ke_db.sql_json(metadata or {}),
                ke_db.sql_str(tag), ke_db.sql_json(cat), len(cat),
                ke_db.sql_str("/".join([str(x) for x in cat] + [title]))))
-    ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\n%s\nCOMMIT;\n"
-               % (cols, vals, rebuild_in_links_sql(kb_id)), stdin=True)
+    ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\nCOMMIT;\n" % (cols, vals), stdin=True)
     _sync_folders(kb_id)
+    try:
+        _kg.project_page(kb_id, slug, edges=edges)
+    except Exception:  # noqa: BLE001
+        pass
     return {"slug": slug, "created": True, "before_version": 0, "after_version": 1,
             "category_path": cat}
 
