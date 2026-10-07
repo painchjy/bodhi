@@ -3352,12 +3352,15 @@ def tool_definitions() -> list[dict]:
         },
         {
             "name": "audit_kb",
-            "description": ("知识库**实例图谱一致性巡检**（只读）：① PG 页 ↔ 图实例 比对（页无实例 / 实例无页 / 类型不一致）；"
-                            "② T-Box 越界扫描（实例 page_type 已不在本体、实例边类型已不在本体对象属性）。"
-                            "返回 `ok` + 各类违规清单（missing_instance/orphan_instance/type_mismatch/invalid_class/invalid_edge_types）。"),
+            "description": ("知识库**实例图谱一致性巡检 + 修复**（`fix=false` 只读；`fix=true` 时按 PG 全量重建该库实例层，"
+                            "删孤儿实例、补缺失实例、重灌边）。返回 `ok` + 各类违规清单"
+                            "（missing_instance/orphan_instance/type_mismatch/invalid_class/invalid_edge_types）。"),
             "inputSchema": {
                 "type": "object",
-                "properties": {"kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"}},
+                "properties": {
+                    "kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"},
+                    "fix": {"type": "boolean", "description": "true = 一并修复（rebuild_kb_graph 全量重灌，幂等）"},
+                },
                 "required": ["kb_id"],
             },
         },
@@ -3934,7 +3937,7 @@ def call_tool(name: str, args: dict) -> dict:
                                    dry_run=not bool(args.get("apply")))
     if name == "audit_kb":
         import ke_graph  # noqa: PLC0415
-        return ke_graph.audit_kb(str(args.get("kb_id", "")))
+        return ke_graph.audit_kb(str(args.get("kb_id", "")), fix=bool(args.get("fix")))
     if name == "recategorize":
         return recategorize(str(args.get("kb_id", "")), dry_run=not bool(args.get("apply")),
                             depth=int(args.get("depth", 1) or 1))

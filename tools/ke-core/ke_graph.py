@@ -336,7 +336,14 @@ def instance_graph(kb_id: str, model: str = "", types=None, limit: int = 300) ->
                      "relation_types": sorted({e["type"] for e in edges})}}
 
 
-def audit_kb(kb_id: str) -> dict:
+def delete_page(kb_id: str, slug: str) -> dict:
+    """删该库该页的实例节点及其边（**kb_id 作用域**，防跨库误删）。"""
+    rows = _run("MATCH (n:BodhiInstance {kb_id:$kb, slug:$slug}) WITH n, count(*) AS c "
+                "DETACH DELETE n RETURN count(*) AS n", {"kb": kb_id, "slug": slug})
+    return {"ok": True, "slug": slug, "deleted": int((rows[0].get("n") if rows else 0) or 0)}
+
+
+def audit_kb(kb_id: str, fix: bool = False) -> dict:
     """一致性巡检（2026-10-05 M3）：PG 页 ↔ 图实例 比对 + T-Box 越界扫描。
 
     - 页无实例 / 实例无页 / 类型不一致 → 报出；
@@ -377,6 +384,10 @@ def audit_kb(kb_id: str) -> dict:
         pass
     out["ok"] = not (out["missing_instance"] or out["orphan_instance"] or out["type_mismatch"]
                      or out["invalid_class"] or out["invalid_edge_types"])
+    if fix and not out["ok"]:
+        # 一致性修复 = 按 PG 全量重建该库实例层（删孤儿 + 补缺失 + 重灌边，幂等）
+        out["reconcile"] = rebuild_kb_graph(kb_id)
+        return audit_kb(kb_id)
     return out
 
 

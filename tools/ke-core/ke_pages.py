@@ -866,18 +866,13 @@ def delete_pages(kb_id: str, slugs: list[str], dry_run: bool = False,
     ]
     ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)
 
-    # 3) 图库（Neo4j）：页面若在投影里留了 slug 记录就同删（当前投影按 iri 存本体，
-    #    通常是空操作；保留这个钩子是为了以后实例层也进 Neo4j 时行为一致）
+    # 3) 图库（Neo4j）：删该库对应实例（**kb_id 作用域**，防跨库误删）
     neo4j_deleted = 0
     try:
-        import ke_ontology  # noqa: F401  仅为了确认 ke-core 可用
-        from ke_neo4j import query as _cypher  # type: ignore
+        import ke_graph  # noqa: PLC0415
         for slug in slugs_all:
             try:
-                rows = _cypher("MATCH (n) WHERE n.slug = $s RETURN count(n) AS c", {"s": slug})
-                if rows and int(rows[0].get("c") or 0) > 0:
-                    _cypher("MATCH (n) WHERE n.slug = $s DETACH DELETE n", {"s": slug})
-                    neo4j_deleted += 1
+                neo4j_deleted += int(ke_graph.delete_page(kb_id, slug).get("deleted") or 0)
             except Exception:  # noqa: BLE001
                 break
     except Exception:  # noqa: BLE001
