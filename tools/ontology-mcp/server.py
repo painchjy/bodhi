@@ -2287,13 +2287,29 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
     # **实例图投影（2026-10-05 全量重构：Neo4j 为主存储）**：落库后按 PG 全量重建该库实例层
     #（幂等；节点带 kb_id 隔离、边=本体对象属性）。失败不阻断落库，但回执里必须说清。
     if mode == "apply":
-        # 2026-10-05 M3：**先图后 wiki（增量）**——不再整库 rebuild（会清掉上一轮增量写进图的边）。
-        #   新建页：从正文抽关系 → 写图 → strip 正文；合并/更新页已由 `_apply_content_update` 投影。
+        # 2026-10-05 M3（图主补全）：① 关系**直写图边**（正文不再承载关系）；② 正文只 strip（不动图边）。
         try:
             import ke_graph  # noqa: PLC0415
-            _new = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
-            summary["graph"] = [ke_graph.project_page_from_content(kb_id, s)
-                                for s in dict.fromkeys(_new)]
+            _slug_by_name = {p["name"]: p["slug"] for p in payloads if p.get("slug")}
+            _n_edges = 0
+            for e in (checked.get("edges") or []):
+                src = _slug_by_name.get(e.get("source")) or e.get("source")
+                dst = e.get("target")
+                t = e.get("type")
+                if src and dst and t and ":" in str(src):
+                    try:
+                        ke_graph.add_edge(kb_id, src, t, dst)
+                        _n_edges += 1
+                    except Exception:  # noqa: BLE001
+                        pass
+            _all = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
+            _all += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
+            for s in dict.fromkeys(_all):
+                try:
+                    ke_graph.strip_wiki_page(kb_id, s)
+                except Exception:  # noqa: BLE001
+                    pass
+            summary["graph"] = {"edges_written": _n_edges}
         except Exception as exc:  # noqa: BLE001
             summary["graph"] = {"ok": False, "reason": str(exc)[:200]}
     # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"
