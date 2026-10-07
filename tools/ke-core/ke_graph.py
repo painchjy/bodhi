@@ -94,10 +94,11 @@ def rebuild_kb_graph(kb_id: str, tenant_id: int | None = None) -> dict:
         _run("MATCH (n:BodhiInstance {kb_id:$kb}) DETACH DELETE n", {"kb": kb_id})
         return {"ok": True, "kb_id": kb_id, "nodes": 0, "edges": 0, "cleared": True}
 
-    # 先清本库旧实例（幂等重灌）
-    _run("MATCH (n:BodhiInstance {kb_id:$kb}) DETACH DELETE n", {"kb": kb_id})
+    # S-10 修：重建**节点/属性**，**保留边**（边是图本态，由增量写 add_edge 维护；
+    # **不再从正文派生**——正文已无关系）。只删"孤儿实例"（无对应活页的实例）。
+    _run("MATCH (n:BodhiInstance {kb_id:$kb}) WHERE NOT n.slug IN $slugs DETACH DELETE n",
+         {"kb": kb_id, "slugs": sorted(known)})
     nodes = 0
-    edges = 0
     for r in rows:
         # 数据属性来源：正文属性行（md 表达）作兜底，page_metadata 机器口径优先覆盖
         attrs = _attrs_from_content(r["content"])
@@ -115,15 +116,9 @@ def rebuild_kb_graph(kb_id: str, tenant_id: int | None = None) -> dict:
             params["a_" + k] = v
         _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) SET %s" % ", ".join(sets), params)
         nodes += 1
-    # 边（先建节点，再连边，避免顺序问题）
-    for r in rows:
-        for rel_type, tgt in _edges_of(r["content"], known):
-            _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$src}) "
-                 "MATCH (b:BodhiInstance {kb_id:$kb, slug:$tgt}) "
-                 "MERGE (a)-[e:`%s`]->(b)" % rel_type.replace("`", ""),
-                 {"kb": kb_id, "src": r["slug"], "tgt": tgt})
-            edges += 1
-    return {"ok": True, "kb_id": kb_id, "nodes": nodes, "edges": edges}
+    edges = _run("MATCH (a:BodhiInstance {kb_id:$kb})-[r]->(b) RETURN count(r) AS n", {"kb": kb_id})
+    edge_n = int((edges[0].get("n") if edges else 0) or 0)
+    return {"ok": True, "kb_id": kb_id, "nodes": nodes, "edges": edge_n}
 
 
 def strip_relation_sections(content: str) -> str:
