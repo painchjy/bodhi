@@ -2045,30 +2045,30 @@ def _attrs_with_identity(node: dict, kb_id: str, injected: dict) -> dict:
     is_session_node = (node.get("type") or "").strip() == IDENTITY_CLASS
 
     if is_session_node:
-        attrs.pop("tenantName", None)          # 租户一律服务端注入（防伪造）
-        attrs.pop("sessionNo", None)           # 会话编号一律以会话身份为准（防编造）
-        attrs.pop("agentName", None)           # 智能体名一律取“会话选择的智能体”
+        # 键统一 prefixed（2026-10-05 B1）：清两套键，服务端只注入 prefixed 权威值
+        for k in ("tenantName", "bmm:tenantName", "sessionNo", "bmm:sessionNo",
+                  "agentName", "bmm:agentName"):
+            attrs.pop(k, None)
         tenant = get_kb_tenant(kb_id)
         if tenant not in (None, ""):
-            attrs["tenantName"] = _tenant_name(tenant)
-            injected["tenantName"] = attrs["tenantName"]
+            attrs["bmm:tenantName"] = _tenant_name(tenant)
+            injected["bmm:tenantName"] = attrs["bmm:tenantName"]
         if ident.get("ok"):
-            attrs["sessionNo"] = ident["session_no"]
-            attrs["agentName"] = ident["agent_name"]
-            injected["sessionNo"] = ident["session_no"]
-            injected["agentName"] = ident["agent_name"]
+            attrs["bmm:sessionNo"] = ident["session_no"]
+            attrs["bmm:agentName"] = ident["agent_name"]
+            injected["bmm:sessionNo"] = ident["session_no"]
+            injected["bmm:agentName"] = ident["agent_name"]
         return attrs
 
-    # 非会话节点：**只自动补「来源定位」数据属性**（`bmm:sourceLocator`）。
-    # `bmm:sourceSession` 是**对象属性（关系）** ⇒ 由 `design_elements` 统一补关系边，
-    # **不再写进数据属性**（2026-10-04 用户实测：写成属性 ⇒ 正文出现裸键、本体关系里没有边、
-    # 也没连到会话分页；用户口径「本体关系要与会话有关系，定位要对应到知识分页」）。
+    # 非会话节点：只自动补「会话片段定位」数据属性 `bmm:sourceLocator`（B1：统一 prefixed）。
+    # `bmm:sourceSession` 是对象属性（关系）⇒ 由 `design_elements`/`link_source_session` 补边。
+    attrs.pop("sourceLocator", None)            # 清无前缀旧键（去重）
     if ident.get("ok"):
-        if not (attrs.get("sourceLocator") or "").strip():
-            part = _session_part_no(kb_id, ident["session_no"])
-            attrs["sourceLocator"] = ("session/%s/p%s" % (ident["session_no"], part)) if part \
-                else ("session/%s" % ident["session_no"])
-        injected.setdefault("sourceLocator", attrs["sourceLocator"])
+        part = _session_part_no(kb_id, ident["session_no"])
+        loc = ("session/%s/p%s" % (ident["session_no"], part)) if part \
+            else ("session/%s" % ident["session_no"])
+        attrs["bmm:sourceLocator"] = loc         # 覆盖抽取可能传的“文档章节”值（B1：sourceLocator=会话片段定位）
+        injected["bmm:sourceLocator"] = loc
     return attrs
 
 
