@@ -336,6 +336,50 @@ def instance_graph(kb_id: str, model: str = "", types=None, limit: int = 300) ->
                      "relation_types": sorted({e["type"] for e in edges})}}
 
 
+def audit_kb(kb_id: str) -> dict:
+    """一致性巡检（2026-10-05 M3）：PG 页 ↔ 图实例 比对 + T-Box 越界扫描。
+
+    - 页无实例 / 实例无页 / 类型不一致 → 报出；
+    - 实例的 `page_type` 已不在本体（T-Box 类被删/改名）→ `invalid_class`；
+    - 实例边类型已不在本体（对象属性被删/改名）→ `invalid_edge_types`。
+    """
+    import ke_db  # noqa: PLC0415
+    pages = ke_db.psql_csv(
+        "SELECT slug, COALESCE(page_type,'') AS pt FROM wiki_pages "
+        "WHERE knowledge_base_id=%s AND deleted_at IS NULL "
+        "AND COALESCE(page_type,'') NOT IN ('index','summary')" % ke_db.sql_str(kb_id))
+    page_map = {r["slug"]: r["pt"] for r in pages}
+    insts = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN n.slug AS slug, n.page_type AS pt", {"kb": kb_id})
+    inst_map = {r["slug"]: (r.get("pt") or "") for r in insts}
+    out = {
+        "kb_id": kb_id, "pages": len(page_map), "instances": len(inst_map),
+        "missing_instance": sorted(set(page_map) - set(inst_map)),
+        "orphan_instance": sorted(set(inst_map) - set(page_map)),
+        "type_mismatch": [s for s in sorted(set(page_map) & set(inst_map))
+                          if page_map.get(s) and inst_map.get(s) and page_map[s] != inst_map[s]],
+        "invalid_class": [], "invalid_edge_types": [],
+    }
+    try:
+        valid_cls = {r["p"] for r in _run(
+            "MATCH (c:BodhiOntClass) WHERE c.external IS NULL RETURN c.prefixed AS p") if r.get("p")}
+        if valid_cls:
+            out["invalid_class"] = sorted({s for s, pt in inst_map.items() if pt and pt not in valid_cls})
+    except Exception:  # noqa: BLE001
+        valid_cls = set()
+    try:
+        valid_props = {r["p"] for r in _run(
+            "MATCH (p:BodhiOntProperty {property_kind:'object'}) RETURN p.prefixed AS p") if r.get("p")}
+        if valid_props:
+            bad = _run("MATCH (a:BodhiInstance {kb_id:$kb})-[r]->(b) WITH type(r) AS t, count(*) AS n "
+                       "WHERE NOT t IN $props RETURN t, n", {"kb": kb_id, "props": sorted(valid_props)})
+            out["invalid_edge_types"] = sorted({r["t"]: r["n"] for r in bad}.items())
+    except Exception:  # noqa: BLE001
+        pass
+    out["ok"] = not (out["missing_instance"] or out["orphan_instance"] or out["type_mismatch"]
+                     or out["invalid_class"] or out["invalid_edge_types"])
+    return out
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)

@@ -3350,6 +3350,17 @@ def tool_definitions() -> list[dict]:
             },
         },
         {
+            "name": "audit_kb",
+            "description": ("知识库**实例图谱一致性巡检**（只读）：① PG 页 ↔ 图实例 比对（页无实例 / 实例无页 / 类型不一致）；"
+                            "② T-Box 越界扫描（实例 page_type 已不在本体、实例边类型已不在本体对象属性）。"
+                            "返回 `ok` + 各类违规清单（missing_instance/orphan_instance/type_mismatch/invalid_class/invalid_edge_types）。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"}},
+                "required": ["kb_id"],
+            },
+        },
+        {
             "name": "recategorize",
             "description": ("**全量重刷目录（两段式，显式触发）**：按**当前本体 + 层级参数**重算该库所有页的 "
                             "`category_path`/`wiki_path`，再重建目录树（挂页 + prune 空目录）。\n"
@@ -3920,6 +3931,9 @@ def call_tool(name: str, args: dict) -> dict:
         return link_source_session(str(args.get("kb_id", "")), str(args.get("session_no", "")),
                                    slugs=args.get("slugs") or None, all_pages=bool(args.get("all")),
                                    dry_run=not bool(args.get("apply")))
+    if name == "audit_kb":
+        import ke_graph  # noqa: PLC0415
+        return ke_graph.audit_kb(str(args.get("kb_id", "")))
     if name == "recategorize":
         return recategorize(str(args.get("kb_id", "")), dry_run=not bool(args.get("apply")),
                             depth=int(args.get("depth", 1) or 1))
