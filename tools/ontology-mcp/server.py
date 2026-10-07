@@ -2298,6 +2298,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         try:
             import ke_graph  # noqa: PLC0415
             summary["graph"] = ke_graph.rebuild_kb_graph(kb_id)
+            summary["wiki"] = ke_graph.rebuild_kb_wiki(kb_id, dry_run=False)   # 伴生化：去关系小节+清出入链
         except Exception as exc:  # noqa: BLE001
             summary["graph"] = {"ok": False, "reason": str(exc)[:200]}
     # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"

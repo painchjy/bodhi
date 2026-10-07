@@ -380,6 +380,48 @@ def audit_kb(kb_id: str) -> dict:
     return out
 
 
+def project_page(kb_id: str, slug: str, edges=None) -> dict:
+    """单页图投影（**先图后 wiki** 的"图"侧，2026-10-05 M3 统一写路径）。
+
+    - MERGE 实例节点 + 数据属性（正文属性行兜底、metadata 优先）；
+    - 删本页旧出边，再按 `edges`（[(关系类型, 目标 slug), …]）MERGE 新边。
+    """
+    import ke_db  # noqa: PLC0415
+    row = ke_db.psql_csv(
+        "SELECT COALESCE(title,'') AS title, COALESCE(page_type,'') AS pt, COALESCE(content,'') AS content, "
+        "COALESCE(page_metadata::text,'{}') AS meta, tenant_id FROM wiki_pages "
+        "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if not row:
+        return {"ok": False, "slug": slug, "reason": "页不存在"}
+    r = row[0]
+    attrs = _attrs_from_content(r["content"])
+    attrs.update(_attrs_of(r["meta"]))
+    params = {"kb": kb_id, "slug": slug, "pt": r["pt"], "module": _module_of(r["pt"]),
+              "name": r["title"], "tenant": r.get("tenant_id")}
+    sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name", "n.tenant_id=$tenant"]
+    for k, v in attrs.items():
+        if k in ("kb", "slug", "pt", "module", "name", "tenant"):
+            continue
+        sets.append("n.%s=$a_%s" % (k, k))
+        params["a_" + k] = v
+    _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) SET %s" % ", ".join(sets), params)
+    _run("MATCH (n:BodhiInstance {kb_id:$kb, slug:$slug})-[r]->() DELETE r", {"kb": kb_id, "slug": slug})
+    n_edges = 0
+    if edges:
+        known = {x["slug"] for x in ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id=%s AND deleted_at IS NULL"
+            % ke_db.sql_str(kb_id))}
+        for rel_type, tgt in edges:
+            if tgt not in known:
+                continue
+            _ensure_instance(kb_id, tgt, _page_type(kb_id, tgt))
+            _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                 "MERGE (a)-[e:`%s`]->(b)" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": tgt})
+            n_edges += 1
+    return {"ok": True, "slug": slug, "attrs": len(attrs), "edges": n_edges}
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)

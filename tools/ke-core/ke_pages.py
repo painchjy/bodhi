@@ -218,17 +218,23 @@ def _snapshot_stmt(kb_id: str, slug: str, tag: str) -> str:
 
 def _apply_content_update(kb_id: str, slug: str, content: str, tag: str,
                           extra_set: str = "") -> str:
-    """快照 + 更新正文/out_links/version+1 + 重算 in_links，返回一条可执行 SQL 批。"""
+    """快照 + 更新正文（**先图后 wiki**，2026-10-05 M3 统一写路径）：
+    ① 先抽取正文里的本体关系；② 正文去掉「本体关系/被引用」小节；③ 出入链置空（不再维护）；
+    ④ 落库后把关系投影到图实例（失败不阻断写库）。"""
     replica_guard(kb_id, slug, tag)      # 副本页禁止本地修改（pull 通道除外）
+    import ke_graph  # noqa: PLC0415  懒导入避免 ke_pages ↔ ke_graph 环
+    edges = [(r["type"], r["slug"]) for r in parse_out_relations(content) if r.get("slug")]
+    content = ke_graph.strip_relation_sections(content)
     stmts = [_snapshot_stmt(kb_id, slug, tag),
-             "UPDATE wiki_pages SET content = %s, out_links = %s::jsonb, "
+             "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
              "version = version + 1, updated_at = now(), last_edit_source = '%s'%s "
              "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
-             % (ke_db.sql_str(content),
-                ke_db.sql_json(out_links_of(content)), tag, extra_set,
-                ke_db.sql_str(kb_id), ke_db.sql_str(slug)),
-             rebuild_in_links_sql(kb_id)]
+             % (ke_db.sql_str(content), tag, extra_set, ke_db.sql_str(kb_id), ke_db.sql_str(slug))]
     ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)
+    try:
+        ke_graph.project_page(kb_id, slug, edges=edges)
+    except Exception:  # noqa: BLE001  图投影失败不阻断写库（巡检/回填兜底）
+        pass
     return content
 
 
