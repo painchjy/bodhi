@@ -198,16 +198,17 @@ def relations_of(kb_id: str, slug: str):
                  "RETURN type(r) AS t, m.slug AS s, m.name AS nm, m.page_type AS pt ORDER BY t, s",
                  {"kb": kb_id, "slug": slug})
     out = [{"label": tl(x["t"]), "type": x["t"], "type_label": tl(x["t"]),
-            "target_slug": x["s"], "target_title": x.get("nm") or x["s"],
+            "target_slug": x["s"], "target_title": x.get("nm") or (x["s"] or "").rsplit("/", 1)[-1],
             "target_type": x.get("pt") or "", "target_exists": True, "range_ok": True}
            for x in out_r]
     in_r = _run("MATCH (m:BodhiInstance)-[r]->(n:BodhiInstance {kb_id:$kb, slug:$slug}) "
                 "RETURN type(r) AS t, m.slug AS s, m.name AS nm, m.page_type AS pt ORDER BY t, s",
                 {"kb": kb_id, "slug": slug})
-    inbound = [{"source_slug": x["s"], "source_title": x.get("nm") or x["s"],
+    inbound = [{"source_slug": x["s"], "source_title": x.get("nm") or (x["s"] or "").rsplit("/", 1)[-1],
                 "source_type": x.get("pt") or "", "label": tl(x["t"]), "type": x["t"],
                 "type_label": tl(x["t"])} for x in in_r]
-    return {"slug": slug, "title": node.get("name") or slug, "page_type": node.get("pt") or "",
+    return {"slug": slug, "title": node.get("name") or (slug or "").rsplit("/", 1)[-1],
+            "page_type": node.get("pt") or "",
             "type_label": tl(node.get("pt") or ""), "out": out, "in": inbound, "source": "graph"}
 
 
@@ -236,11 +237,24 @@ def _check_range(rel_type: str, target_type: str) -> None:
 
 
 def _ensure_instance(kb_id: str, slug: str, page_type: str = "") -> None:
-    if page_type:
-        _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) SET n.page_type=$pt",
-             {"kb": kb_id, "slug": slug, "pt": page_type})
-    else:
-        _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug})", {"kb": kb_id, "slug": slug})
+    """确保实例节点存在（**增量写**路径：`add_edge` / `link_source_session` 等）。
+
+    2026-10-05 修：**必须带 `name`** —— 前端图谱（`instance_graph`）读 `n.name`，缺失就回落
+    到完整 slug（显示成 `bmm/类/知识名`）。旧实现只写 `page_type` → M3 增量建的节点没名字。
+    顺带补 `module`/`tenant_id`，与 `rebuild_kb_graph`/`project_page` 口径一致。
+    """
+    import ke_db  # noqa: PLC0415
+    row = ke_db.psql_csv(
+        "SELECT COALESCE(title,'') AS title, COALESCE(page_type,'') AS pt, tenant_id "
+        "FROM wiki_pages WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    r = row[0] if row else {}
+    pt = page_type or (r.get("pt") or "")
+    name = (r.get("title") or "").strip() or (slug or "").rsplit("/", 1)[-1]
+    _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) "
+         "SET n.page_type=$pt, n.module=$module, n.name=$name, n.tenant_id=$tenant",
+         {"kb": kb_id, "slug": slug, "pt": pt, "module": _module_of(pt), "name": name,
+          "tenant": r.get("tenant_id")})
 
 
 def _etyp(t: str) -> str:
@@ -331,7 +345,8 @@ def instance_graph(kb_id: str, model: str = "", types=None, limit: int = 300) ->
         pt = r["pt"] or ""
         module = r.get("module") or (pt.split(":", 1)[0] if ":" in pt else "")
         label = cls.get("label") or pt
-        nodes.append({"slug": r["slug"], "title": r.get("name") or r["slug"], "page_type": pt,
+        nodes.append({"slug": r["slug"],
+                      "title": r.get("name") or (r["slug"] or "").rsplit("/", 1)[-1], "page_type": pt,
                       "class_label": label, "module": module, "module_label": label,
                       "group": pt, "group_label": label, "color": cls.get("color") or "#94a3b8",
                       "version": 1, "summary": "", "source_refs": []})
