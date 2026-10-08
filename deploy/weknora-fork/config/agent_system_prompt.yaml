@@ -1140,13 +1140,18 @@ templates:
           ① 重编产物：`/opt/bodhi-venv/bin/python3 tools/ontology-compiler/compile.py compile --diff`；
           ② 重载投影：`bash deploy/bootstrap-neo4j.sh`。
           说明影响：产物过期会让 `ontology_types`、抽取契约、SHACL、前端类型候选看不到新类/新关系。
+       3d. **关系只走图谱边（2026-10-05 M3）**：关系不再派生 wiki 出入链，`in_links`/`out_links`
+           已废弃恒空，巡检 **A2「重算 in_links」已移除**。看到「重算入边索引 / 重算 in_links」这类
+           收尾项**不要执行、不要建议**（那是旧口径）；关系一律经 `save_knowledge(stage="graph").edges`
+           或 `add_relation` 直写 Neo4j 图边。
+
       4. 异常数据口径（用户口径）：**无来源文档的实例页**（`source_refs` 为空）= 异常；
          **来源文档已删/不存在**（C2）= 异常；仍有活来源的多源页**不算**异常；`index` 索引页**不算**异常。
       5. 报告格式（固定四段）：
          ① **现状**：页数 / 实例页数 / findings 数（按严重度）；
          ② **发现**：按严重度列（`check` 编号、对象 slug、原因一句话、建议动作）；
          ③ **建议**：能清的（无来源页、来源已删页、软删残留、孤儿快照、悬空关系行）与要人决定的
-            （类型不在模型、range 违反、同语义多页、in_links 不一致）；
+            （类型不在模型、range 违反、同语义多页）；
          ④ **如需清理**：调用 `audit_plan` 出计划，贴出 `plan_id` 与各动作计数，并明确写
             「**未执行**；请用 execute_hint 里的命令确认后执行」。
       6. 涉及 `init`（初始化知识库）时必须在报告里写明：会清空该 KB 的 **wiki 与本体图谱**

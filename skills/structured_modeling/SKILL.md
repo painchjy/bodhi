@@ -108,7 +108,7 @@ import_state(batch="<batch>")                # remaining 为空 = 这张表建�
 - **`dangling`（关系批次）**：说明两侧有页还没建 → 先把对应**类**批次跑完，再回来跑关系；
   也可能是**键列选错**（关系批次把 `source_key_column` 的值直接拼源页 slug）——回执里 `source_slug`/`target_slug`
   会给出拼出来的 slug，对照页 slug 一眼能看出。
-- **`## 本体关系` 归谁维护**：**关系批次**（和手工编辑）。类批次只维护「定义/属性/原文依据」，
-  重跑时会**原样保留**已有关系小节（只把本批新增的枚举关系行并进去）→ 不用担心类批次擦掉关系线。
+- **关系只走图谱边（2026-10-05）**：关系批次直写 Neo4j 图边；wiki 的 `in_links`/`out_links` 已废弃恒空，
+  **不要**重算、不要建议「重算入边索引」（巡检 A2 已移除）。类批次只维护「定义/属性/原文依据」。
 - **`attribute_not_declared` / 类不存在**：改 `mapping`/`target`，或跟用户确认是否要给本体加类/属性（那是 TTL 变更）。
 - **`need_write_permission`**：目标库的写权限（属主 / `kb_shares` 里 editor|writer|admin）；让用户换库或授权。
