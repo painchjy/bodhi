@@ -73,8 +73,9 @@ doc_outline(kb_id, knowledge_id, budget_tokens=…)      # 按章节/切片取�
 `found=false` → 结论里标「参考规范不可得（仅按规则原文判定）」，**不要编造规范内容**。
 
 ### 第 5 步：写评审结论（一页报告）
-`review_apply(kb_id="…", doc="<文档名>", policy="<策略>", findings=[{rule, verdict, severity, scope, evidence, how, cypher, suggestion}])`
+`review_apply(kb_id="…", doc="<文档名>", policy="<策略>", session_no="<本次会话编号>", findings=[{rule, verdict, severity, scope, evidence, how, cypher, suggestion}])`
 工具会写成**一页**（版本化可回退）：正文 = 逐条结论表 + 每条证据 + 汇总。
+> **`session_no` 必传**（本次 WeKnora 会话编号，uuid，与 `save_knowledge` 同一个）：服务端据此把结论页连回会话页（`bmm:sourceSession`，对象属性→图边）。**不传 → 结论页没有会话溯源**（回执会 `warn`「无会话溯源」）。
 
 ### 第 5.5 步：收尾门禁（任一不满足不出报告）
 - 问题清单**非空**（即使全部符合，也要显式给出"无问题"结论并列出所评规则）；

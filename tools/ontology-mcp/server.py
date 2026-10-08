@@ -1959,20 +1959,24 @@ def _upsert_source_session_line(content: str, line: str) -> tuple[str, bool]:
     return "\n".join(lines) + ("\n" if content.endswith("\n") else ""), True
 
 
-def _resolve_session_for(kb_id: str) -> tuple[str, str]:
-    """会话身份 → `(session_no, session_slug)`；解析不到返回空串（**不阻断写**，由内核给 warn）。"""
-    try:
+def _resolve_session_for(kb_id: str, session_no: str = "") -> tuple[str, str]:
+    """`session_no`（WeKnora 会话 id，缺省取本线程已解析的会话身份）→ `(session_no, session_slug)`。
+
+    解析不到 → 返回空串（**不阻断写**，由内核给 warn）。`session_no` 显式传入时优先
+    （供 `review_apply` 等非 `save_knowledge` 路径——它们的会话身份**不由** `_IDENT` 承载）。
+    """
+    sno = str(session_no or "").strip()
+    if not sno:
         se = _session_ident()
-        if not se.get("ok"):
-            return "", ""
-        sno = str(se.get("session_no") or "")
-        if not sno or not kb_id:
-            return sno, ""
+        sno = str(se.get("session_no") or "") if se.get("ok") else ""
+    if not sno or not kb_id:
+        return sno, ""
+    try:
         kid, _ = resolve_kb_id(kb_id)
         _title, slug = _session_page_ref(kid, sno)
         return sno, (slug or "")
     except Exception:  # noqa: BLE001
-        return "", ""
+        return sno, ""
 
 
 def link_source_session(kb_id: str = "", session_no: str = "", slugs: list | None = None,
@@ -3566,7 +3570,8 @@ def tool_definitions() -> list[dict]:
             "description": ("**文档评审·写结论（写）**：把**逐条**评审结论写成**一页报告**（`slug=review/<文档>-<策略>`，"
                             "版本化可回退）：正文=结论汇总 + 逐条结论表 + 每条明细（含**原文依据**逐字证据 / 图检索语句 / 建议）。"
                             "`findings[]` 每条：{rule, verdict(符合|不符合|不适用|无法判定), severity, scope, evidence, how, cypher, suggestion}。"
-                            "写权限同其它写路径；`policy_slug` 给了会加一条 `bmm:promotesDirective` 关系指向策略页。"),
+                            "写权限同其它写路径；`policy_slug` 给了会加一条 `bmm:promotesDirective` 关系指向策略页。"
+                            "**务必带 `session_no`**（会话溯源：否则结论页没有 `bmm:sourceSession`）。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
                 "doc": {"type": "string", "description": "被评审的文档名/知识 id"},
@@ -3574,7 +3579,9 @@ def tool_definitions() -> list[dict]:
                 "policy_slug": {"type": "string"},
                 "findings": {"type": "array", "items": {"type": "object"}},
                 "page_type": {"type": "string", "description": "结论页的页类型（默认 bmm:Assessment）"},
-                "actor": {"type": "string"}},
+                "actor": {"type": "string"},
+                "session_no": {"type": "string",
+                               "description": "本次会话编号（WeKnora 会话 id，uuid）→ 结论页连回会话页（bmm:sourceSession）。建议与 save_knowledge 传同一个"}},
                 "required": ["kb_id", "doc", "policy", "findings"]},
         },
         {
@@ -4034,7 +4041,8 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "graph_query":
         return ke_review.graph_query(str(args.get("cypher", "")), int(args.get("limit", 200) or 200))
     if name == "review_apply":
-        _rv_sno, _rv_sslug = _resolve_session_for(str(args.get("kb_id", "")))
+        _rv_sno, _rv_sslug = _resolve_session_for(str(args.get("kb_id", "")),
+                                                  str(args.get("session_no", "")))
         return ke_review.review_apply(kb_id=str(args.get("kb_id", "")), doc=str(args.get("doc", "")),
                                       policy=str(args.get("policy", "")),
                                       policy_slug=str(args.get("policy_slug", "")),
@@ -4579,8 +4587,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                     findings=b.get("findings") or [],
                     page_type=str(b.get("page_type", "") or "bmm:Assessment"),
                     actor=str(b.get("actor", "http:review")),
-                    session_no=_resolve_session_for(str(b.get("kb_id", "")))[0],
-                    session_slug=_resolve_session_for(str(b.get("kb_id", "")))[1]),
+                    session_no=_resolve_session_for(str(b.get("kb_id", "")), str(b.get("session_no", "")))[0],
+                    session_slug=_resolve_session_for(str(b.get("kb_id", "")), str(b.get("session_no", "")))[1]),
             "/bodhi/context/ensure-marks":
                 lambda b: ke_context.ensure_marks(),
             "/bodhi/docs/purge":
