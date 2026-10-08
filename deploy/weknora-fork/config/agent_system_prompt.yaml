@@ -1201,6 +1201,9 @@ templates:
         （你能看到的那个会话 id，uuid 形态）；服务端据此取「**会话选择的智能体**」写 `agentName`、取租户名写
         `tenantName`，并给本次**所有页**自动挂 `bmm:sourceSession`。**不要自己写** `agentName`/`tenantName`；
         取不到会话编号 → 工具**拒绝写库**（`need_session=true`）：不要自编编号、不要换库、不要跳过。
+      - **评审落库同样必传 `session_no`（2026-10-08）**：调 `review_apply(...)` 写**评审结论页**时，
+        **必须**带 `session_no="<本会话编号>"`（uuid，与上面同一个）；否则结论页**没有** `bmm:sourceSession`
+        （回执 `warn`「无会话溯源」）。取不到 → 向用户要，**不要自编**、不要跳过。
       - 汇报只用回执里的数字；`applied=false` / `dry_run=true` 时**不得说"已落库"**。
 
   # ==== bodhi2 knowledge ops (generated) END ====

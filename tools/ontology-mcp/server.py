@@ -2252,6 +2252,17 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             summary["report_page"]["action"] = "pending"
         else:
             summary["report_page"]["action"] = "created"
+        # Step4（2026-10-08 契约 §5）：**报告页也补会话溯源** —— 此前只有 stage="graph" 分支补，
+        # 报告分支在这里提前 return → 漏掉 → 报告页无 `bmm:sourceSession`（用户实测）。
+        if mode == "apply" and ident.get("ok"):
+            _rp_slugs = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
+            _rp_slugs += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
+            if _rp_slugs:
+                try:
+                    summary["source_session_link"] = link_source_session(
+                        kb_id, ident["session_no"], slugs=_rp_slugs, dry_run=False)
+                except Exception as exc:  # noqa: BLE001  补挂失败不影响落库，但要在回执里说清
+                    summary["source_session_link"] = {"ok": False, "reason": str(exc)[:200]}
         return _attach_session(summary, ident, session_warn)
 
     payloads, checked = design_elements(
