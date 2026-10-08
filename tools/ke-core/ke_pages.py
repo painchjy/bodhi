@@ -327,6 +327,202 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
             "category_path": cat}
 
 
+# ---------------------------------------------------------------------------
+# 知识写入契约内核（2026-10-08 · docs/knowledge-write-contract.md）
+#   三种展示模式：document（报告/文档）| entity（一般本体知识）| raw（存量兼容）
+#   统一溯源：L1 session(对象属性,图边) / L2 locator(数据属性) / L3 文档(原文依据) / L4 页面(溯源)
+#   图本优先：① 图节点/属性 → ② 图边 → ③ PG 页 → ④ 溯源
+# ---------------------------------------------------------------------------
+CONTRACT_MODES = ("document", "entity", "raw")
+ATTR_RENDER_LIMIT = 150                      # §4.2：属性值渲进正文的字数上限
+TAG_CONTRACT = "bodhi-write"                 # 11 字符（≤16）
+EVIDENCE_SECTION = "## 原文依据"
+
+
+def _derive_slug(page_type: str, title: str) -> str:
+    mod, _, cls = (page_type or "").partition(":")
+    cls = (cls or page_type or "item").lower()
+    safe = re.sub(r"[\\/\s]+", "-", str(title or "").strip()).strip("-") or "untitled"
+    return "%s/%s/%s" % (mod or "kb", cls, safe)
+
+
+def _attr_meta(page_type: str, key: str) -> dict:
+    """取数据属性的本体元数据（兼容 keys 带/不带模块前缀两种口径）。"""
+    try:
+        props = ke_ontology.data_properties_for(page_type) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    raw = str(key)
+    local = raw.split(":")[-1]
+    for cand in (raw, local):
+        if cand in props:
+            return props[cand] or {}
+    for k, v in props.items():
+        if str(k).split(":")[-1] == local:
+            return v or {}
+    return {}
+
+
+def render_attributes_section(page_type: str, attributes: dict, skip_keys=()) -> list[str]:
+    """§4：数据属性 → `## 属性（数据属性）` + `### 名称（prefixed，range）`\\n<值>；值 >150 字截断。"""
+    skip = {str(k).split(":")[-1] for k in (skip_keys or [])}
+    rows: list[str] = []
+    for key, value in (attributes or {}).items():
+        short = str(key).split(":")[-1]
+        if short in skip:
+            continue
+        val = str(value if value is not None else "").strip()
+        if not val:
+            continue
+        meta = _attr_meta(page_type, key)
+        label = meta.get("label") or ""
+        rng = ke_ontology.short_iri(str(meta.get("range_literal")
+                                        or (meta.get("ranges") or [""])[0] or "")) if meta else ""
+        title = ("%s（%s%s）" % (label, key, ("，%s" % rng) if rng else "")).strip() if label else str(key)
+        if len(val) > ATTR_RENDER_LIMIT:
+            val = val[:ATTR_RENDER_LIMIT].rstrip() + "……（完整内容见「数据属性」面板）"
+        rows += ["### %s" % title, "", val, ""]
+    return (["## 属性（数据属性）", ""] + rows) if rows else []
+
+
+def _contract_head(spec: dict) -> list[str]:
+    """统一页头（标题 + 本体类型/来源/会话 引用块）。"""
+    title, pt = spec["title"], spec["page_type"]
+    src = dict(spec.get("source") or {})
+    lines = ["# %s（`%s`）" % (title, pt), "",
+             "> **本体类型**：%s（`%s`）  " % (spec.get("type_label") or pt, pt)]
+    if src.get("doc_title") or src.get("doc_refs"):
+        lines.append("> **来源**：《%s》  " % (src.get("doc_title") or "（来源文档）"))
+    elif spec.get("generated_by"):
+        lines.append("> **生成方式**：%s  " % spec["generated_by"])
+    if src.get("session_no"):
+        lines.append("> **来源会话**：%s  " % src["session_no"])
+    lines.append("> **首个版本生成**：%s" % ke_db.now_text())
+    lines.append("")
+    return lines
+
+
+def render_entity_content(kb_id: str, spec: dict) -> str:
+    """M-entity：由数据属性**自动生成**正文（首段=定义属性；属性段不重复该键）。"""
+    attrs = dict(spec.get("attributes") or {})
+    dkey = spec.get("definition_key", "definition")
+    first = spec.get("first_paragraph_from", dkey)
+    first_text = ""
+    if first:
+        fshort = str(first).split(":")[-1]
+        for k, v in attrs.items():
+            if str(k).split(":")[-1] == fshort:
+                first_text = str(v or "").strip()
+                break
+    lines = _contract_head(spec)
+    if first_text:
+        lines += [first_text, ""]
+    lines += render_attributes_section(spec["page_type"], attrs, skip_keys=[dkey] if first_text else [])
+    src = dict(spec.get("source") or {})
+    lines += [EVIDENCE_SECTION, "",
+              "- %s%s" % (src.get("source_text") or "（未提供逐字原文）",
+                          ("；定位：%s" % src["locator"]) if src.get("locator") else ""), ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
+                    strict_source: bool = True) -> dict:
+    """**知识写入统一内核**（契约 §1/§2/§8）。所有写入器都应薄封装本函数。
+
+    `spec` 见 docs/knowledge-write-contract.md §2。`strict_source=True`（默认）时，
+    缺「会话 / 文档」溯源 → **拒写**（fail-closed）。
+    """
+    import ke_graph as _kg  # noqa: PLC0415  懒导入避免环
+    spec = dict(spec or {})
+    title = (spec.get("title") or "").strip()
+    page_type = (spec.get("page_type") or "").strip()
+    mode = (spec.get("mode") or "").strip().lower()
+    if not title or not page_type:
+        raise ValueError("write_knowledge 需要 title 与 page_type")
+    if mode not in CONTRACT_MODES:
+        raise ValueError("mode 只能是 %s" % "/".join(CONTRACT_MODES))
+    src = dict(spec.get("source") or {})
+    has_session = bool(src.get("session_slug") or src.get("session_no"))
+    has_doc = bool(src.get("doc_refs") or src.get("source_text") or src.get("chunk_refs"))
+    if strict_source and not (has_session or has_doc):
+        raise ValueError("严格溯源（契约 §5）：source 需含会话(session_no/session_slug)或"
+                         "文档(doc_refs/source_text/chunk_refs) 其一；否则拒写")
+    slug = (spec.get("slug") or "").strip() or _derive_slug(page_type, title)
+    attrs = dict(spec.get("attributes") or {})
+    dkey = spec.get("definition_key", "definition")
+    render_attrs = spec.get("render_attributes")
+    if render_attrs is None:
+        render_attrs = (mode == "entity")
+    if mode == "entity":
+        content = render_entity_content(kb_id, {**spec, "slug": slug, "attributes": attrs})
+    else:
+        content = spec.get("wiki_content")
+        if not content:
+            raise ValueError("mode=%s 需要 wiki_content" % mode)
+        if mode == "document":
+            content = "\n".join(_contract_head({**spec, "slug": slug})) + "\n" + content.lstrip()
+        if render_attrs:
+            content = content.rstrip() + "\n\n" + "\n".join(
+                render_attributes_section(page_type, attrs, skip_keys=[dkey])) + "\n"
+    if src.get("locator") and "sourceLocator" not in {str(k).split(":")[-1] for k in attrs}:
+        attrs["bmm:sourceLocator"] = src["locator"]     # L2：片段定位（数据属性）
+    metadata = {"ontology": {"model": page_type.split(":", 1)[0], "class": page_type,
+                             "name": title, "attributes": attrs, "generator": TAG_CONTRACT}}
+    if src.get("derived_from"):
+        metadata["design"] = {"derived_from": [s for s in src["derived_from"] if s],
+                              "generator": TAG_CONTRACT}
+    warnings: list[str] = []
+    if not has_session:
+        warnings.append("无会话溯源（source.session_no/session_slug 缺）：报告/文档类建议补会话页")
+    graph = {"ok": True, "edges_written": 0, "edge_errors": []}
+    if not dry_run:
+        try:
+            _kg.upsert_node(kb_id, slug, title, page_type, attributes=attrs, wiki_content=content)
+            for rel in (spec.get("relations") or []):
+                rt, ts = rel.get("type"), rel.get("target_slug")
+                if not (rt and ts):
+                    continue
+                try:
+                    _kg.add_edge(kb_id, slug, rt, ts)
+                    graph["edges_written"] += 1
+                except Exception as exc:  # noqa: BLE001
+                    graph["edge_errors"].append({"type": rt, "target_slug": ts, "error": str(exc)[:160]})
+            if src.get("session_slug"):
+                _kg._ensure_instance(kb_id, slug, page_type)
+                _kg._ensure_instance(kb_id, src["session_slug"], _kg._page_type(kb_id, src["session_slug"]))
+                _kg._run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) "
+                         "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                         "MERGE (a)-[r:`bmm:sourceSession`]->(b)",
+                         {"kb": kb_id, "s": slug, "t": src["session_slug"]})
+        except Exception as exc:  # noqa: BLE001
+            graph = {"ok": False, "reason": str(exc)[:200], "edges_written": 0, "edge_errors": []}
+    else:
+        graph["dry_run"] = True
+    if dry_run:
+        return {"applied": False, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
+                "graph": graph, "warnings": warnings, "content_preview": content[:600]}
+    res = upsert_page(kb_id, slug, title, page_type, content,
+                      summary=(spec.get("summary") or "").strip()[:500], tag=TAG_CONTRACT,
+                      metadata=metadata)
+    return {"applied": True, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
+            "created": res.get("created"), "version": res.get("after_version"),
+            "graph": graph, "warnings": warnings}
+
+
+def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
+                          strict_source: bool = True) -> dict:
+    """**批量写入**（契约 §7）：逐条走 `write_knowledge`；返回汇总（结构化导入/批量建模用）。"""
+    pages, errors = [], []
+    for spec in (specs or []):
+        try:
+            pages.append(write_knowledge(kb_id, spec, dry_run=dry_run, strict_source=strict_source))
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"title": (spec or {}).get("title"), "error": str(exc)[:200]})
+    edges = sum((p.get("graph") or {}).get("edges_written", 0) for p in pages)
+    return {"applied": not dry_run, "kb_id": kb_id, "pages": pages, "errors": errors,
+            "count": len(pages), "edges_written": edges}
+
+
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:
     """按给定正文**重写一页**：快照旧版 → 更新 content/version+1。
 

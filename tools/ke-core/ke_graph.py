@@ -34,18 +34,45 @@ def _module_of(page_type: str) -> str:
 
 
 def _attrs_from_content(content: str) -> dict[str, str]:
-    """正文「## 属性（数据属性）」小节的属性行 → {键去前缀: 值}（md 表达 = 数据属性的伴生）。"""
+    """正文「## 属性（数据属性）」小节 → {键去前缀: 值}（md 表达 = 数据属性的伴生）。
+
+    双读（2026-10-08 契约 §4.3）：新格式 `### 名称（prefixed，range）` + 后续行（可多行 markdown）；
+    旧格式 `- 名称… = 值`（兼容存量）。
+    """
     out: dict[str, str] = {}
     sec = ""
-    for line in (content or "").splitlines():
+    cur_key: str | None = None
+    buf: list[str] = []
+
+    def _flush() -> None:
+        nonlocal cur_key, buf
+        if cur_key and buf:
+            out[cur_key] = "\n".join(buf).strip()
+        cur_key, buf = None, []
+
+    for raw in (content or "").splitlines():
+        line = raw.rstrip()
         if line.startswith("## "):
+            _flush()
             sec = line[3:].strip()
             continue
         if sec not in ("属性（数据属性）", "属性"):
             continue
-        m = re.match(r"^-\s*([A-Za-z_][\w:]*)\b[^\n=]*=\s*(.+?)\s*$", line.strip())
-        if m:
-            out[m.group(1).split(":")[-1]] = m.group(2).strip()
+        s = line.strip()
+        if s.startswith("### "):
+            _flush()
+            head = s[4:].strip()
+            m = re.search(r"[`(（]([A-Za-z_][\w]*:[A-Za-z_][\w]*)[`）)]", head)
+            cur_key = (m.group(1) if m else head).split(":")[-1]
+            continue
+        mo = re.match(r"^-\s*([A-Za-z_][\w:]*)\b[^\n=]*=\s*(.+?)\s*$", s)
+        if mo:
+            _flush()
+            out[mo.group(1).split(":")[-1]] = mo.group(2).strip()
+            continue
+        if cur_key is not None:
+            buf.append(line)
+    _flush()
     return out
 
 
@@ -259,6 +286,31 @@ def _ensure_instance(kb_id: str, slug: str, page_type: str = "") -> None:
 
 def _etyp(t: str) -> str:
     return (t or "").replace("`", "")
+
+
+def upsert_node(kb_id: str, slug: str, title: str, page_type: str,
+                attributes: dict | None = None, wiki_content: str | None = None) -> dict:
+    """**直写/更新图节点**（2026-10-08 契约 §8「图本优先」）。
+
+    与 `project_page` 的区别：本函数**不读 PG**（供内核先图后 PG 调用）；
+    属性键按「去前缀」存（与 `project_page` 口径一致）。
+    """
+    pt = (page_type or "").strip() or _page_type(kb_id, slug)
+    params = {"kb": kb_id, "slug": slug, "pt": pt, "module": _module_of(pt),
+              "name": (title or "").strip() or (slug or "").rsplit("/", 1)[-1]}
+    sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name"]
+    if wiki_content is not None:
+        sets.append("n.wiki_content=$wc")
+        params["wc"] = wiki_content
+    for k, v in (attributes or {}).items():
+        key = str(k).split(":")[-1]
+        if not key or key in ("kb", "slug", "pt", "module", "name", "wc"):
+            continue
+        sets.append("n.%s=$a_%s" % (key, key))
+        params["a_" + key] = (v if isinstance(v, (str, int, float, bool))
+                              else json.dumps(v, ensure_ascii=False))
+    _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) SET %s" % ", ".join(sets), params)
+    return {"ok": True, "slug": slug}
 
 
 def add_edge(kb_id: str, slug: str, rel_type: str, target_slug: str, label: str = "") -> dict:

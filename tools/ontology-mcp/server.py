@@ -1959,6 +1959,22 @@ def _upsert_source_session_line(content: str, line: str) -> tuple[str, bool]:
     return "\n".join(lines) + ("\n" if content.endswith("\n") else ""), True
 
 
+def _resolve_session_for(kb_id: str) -> tuple[str, str]:
+    """会话身份 → `(session_no, session_slug)`；解析不到返回空串（**不阻断写**，由内核给 warn）。"""
+    try:
+        se = _session_ident()
+        if not se.get("ok"):
+            return "", ""
+        sno = str(se.get("session_no") or "")
+        if not sno or not kb_id:
+            return sno, ""
+        kid, _ = resolve_kb_id(kb_id)
+        _title, slug = _session_page_ref(kid, sno)
+        return sno, (slug or "")
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+
 def link_source_session(kb_id: str = "", session_no: str = "", slugs: list | None = None,
                         all_pages: bool = False, dry_run: bool = True) -> dict:
     """给知识页补 `bmm:sourceSession`（**双链**）→ **会话页（分页优先）**，并重建 `in_links`。
@@ -2617,17 +2633,38 @@ def _page_row(kb_id: str, slug: str) -> dict | None:
 
 
 def detail_attributes(page_content: str) -> dict:
-    """解析页里 `## 属性（数据属性）` 小节 → {prefixed: 值}（如 `easvc:keyRole` = PK）。"""
+    """解析页里 `## 属性（数据属性）` 小节 → {prefixed: 值}（如 `easvc:keyRole` = PK）。
+
+    双读（2026-10-08 契约 §4.3）：新 `### 名称（prefixed，range）` + 后续行（可多行）；旧 `- 名… = 值`。
+    """
     lines = (page_content or "").splitlines()
     start = next((i for i, line in enumerate(lines) if line.strip() == "## 属性（数据属性）"), -1)
     if start < 0:
         return {}
     end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    out = {}
+    out, cur, buf = {}, None, []
+
+    def _flush():
+        nonlocal cur, buf
+        if cur and buf:
+            out[cur] = "\n".join(buf).strip()
+        cur, buf = None, []
+
     for idx in range(start + 1, end):
-        hit = _ATTR_VALUE.match(lines[idx].strip())
+        s = lines[idx].strip()
+        if s.startswith("### "):
+            _flush()
+            m = re.search(r"[A-Za-z_]\w*:[A-Za-z_]\w*", s[4:])
+            cur = m.group(0) if m else s[4:].strip()
+            continue
+        hit = _ATTR_VALUE.match(s)
         if hit:
+            _flush()
             out[hit.group("name").strip()] = hit.group("value").strip()
+            continue
+        if cur is not None:
+            buf.append(lines[idx].rstrip())
+    _flush()
     return out
 
 
@@ -3997,12 +4034,14 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "graph_query":
         return ke_review.graph_query(str(args.get("cypher", "")), int(args.get("limit", 200) or 200))
     if name == "review_apply":
+        _rv_sno, _rv_sslug = _resolve_session_for(str(args.get("kb_id", "")))
         return ke_review.review_apply(kb_id=str(args.get("kb_id", "")), doc=str(args.get("doc", "")),
                                       policy=str(args.get("policy", "")),
                                       policy_slug=str(args.get("policy_slug", "")),
                                       findings=args.get("findings") or [],
                                       page_type=str(args.get("page_type", "") or "bmm:Assessment"),
-                                      actor=str(args.get("actor", "agent:document_review")))
+                                      actor=str(args.get("actor", "agent:document_review")),
+                                      session_no=_rv_sno, session_slug=_rv_sslug)
     if name == "doc_outline":
         return doc_outline(str(args["kb_id"]), str(args.get("knowledge_id", "")),
                            int(args.get("budget_tokens", 0) or 0), int(args.get("cursor", 0) or 0),
@@ -4534,12 +4573,14 @@ class MCPHandler(BaseHTTPRequestHandler):
                                          b.get("slugs") or None, None, bool(b.get("dry_run", False))),
             # 文档评审
             "/bodhi/review/apply":
-                lambda b: ke_review.review_apply(kb_id=str(b.get("kb_id", "")), doc=str(b.get("doc", "")),
-                                                 policy=str(b.get("policy", "")),
-                                                 policy_slug=str(b.get("policy_slug", "")),
-                                                 findings=b.get("findings") or [],
-                                                 page_type=str(b.get("page_type", "") or "bmm:Assessment"),
-                                                 actor=str(b.get("actor", "http:review"))),
+                lambda b: ke_review.review_apply(
+                    kb_id=str(b.get("kb_id", "")), doc=str(b.get("doc", "")),
+                    policy=str(b.get("policy", "")), policy_slug=str(b.get("policy_slug", "")),
+                    findings=b.get("findings") or [],
+                    page_type=str(b.get("page_type", "") or "bmm:Assessment"),
+                    actor=str(b.get("actor", "http:review")),
+                    session_no=_resolve_session_for(str(b.get("kb_id", "")))[0],
+                    session_slug=_resolve_session_for(str(b.get("kb_id", "")))[1]),
             "/bodhi/context/ensure-marks":
                 lambda b: ke_context.ensure_marks(),
             "/bodhi/docs/purge":

@@ -388,11 +388,29 @@ def check_coupling(ctx: dict, rep: Report) -> None:
         if start < 0:
             return {}
         end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-        vals = {}
+        vals, cur, buf = {}, None, []
+
+        def _flush():
+            nonlocal cur, buf
+            if cur and buf:
+                vals[cur] = "\n".join(buf).strip()
+            cur, buf = None, []
+
         for idx in range(start + 1, end):
-            hit = re.match(r"^- (?P<k>[^（=]+?)(?:（[^）]*）)?\s*=\s*(?P<v>.+?)\s*$", lines[idx].strip())
+            s = lines[idx].strip()
+            if s.startswith("### "):
+                _flush()
+                m = re.search(r"[A-Za-z_]\w*:[A-Za-z_]\w*", s[4:])
+                cur = m.group(0) if m else s[4:].strip()
+                continue
+            hit = re.match(r"^- (?P<k>[^（=]+?)(?:（[^）]*）)?\s*=\s*(?P<v>.+?)\s*$", s)
             if hit:
+                _flush()
                 vals[hit.group("k").strip()] = hit.group("v").strip()
+                continue
+            if cur is not None:
+                buf.append(lines[idx].rstrip())
+        _flush()
         return vals
 
     for page in pages.values():

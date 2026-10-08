@@ -340,10 +340,13 @@ def reference_lookup(kb_id: str = "", reference: str = "", allow_fetch: bool = F
 
 def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: list | None = None,
                  page_type: str = REPORT_TYPE, actor: str = "agent:document_review",
-                 policy_slug: str = "", tenant: int | None = None) -> dict:
+                 policy_slug: str = "", tenant: int | None = None,
+                 session_no: str = "", session_slug: str = "") -> dict:
     """把逐条评审结论写成**一页**（`slug=review/<doc>-<policy>`；版本化可回退）。
 
     `findings[]`：{rule, verdict(符合|不符合|不适用|无法判定), severity, scope, evidence, how, cypher, suggestion}
+    2026-10-08 契约：走统一内核 `ke_pages.write_knowledge(mode="document")`——正文=报告体，
+    关系→图边，**补齐会话溯源**（`session_no`/`session_slug` 由服务端解析后传入）。
     """
     kb, kb_name, _note = ke_db.resolve_kb_id(kb_id)
     acl = ke_db.assert_can_write(kb, tenant if tenant is not None else ke_db.caller_tenant())
@@ -365,57 +368,51 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
         verdicts[str(f.get("verdict") or "无法判定")] = verdicts.get(str(f.get("verdict") or "无法判定"), 0) + 1
     slug = "review/%s-%s" % (_slug(doc), _slug(policy))
     title = "评审报告：%s × %s" % (doc, policy)
-    lines = ["# %s" % title, "",
-             "> **本体类型**：评估（`%s`）  " % page_type,
-             "> **生成方式**：文档评审技能（`%s`，按策略 `%s`）  " % (REVIEW_TAG, policy),
-             "> **文档**：%s  ｜ **策略**：%s  ｜ **规则数**：%d" % (doc, policy, len(items)), "",
-             "## 结论汇总", "",
-             "| 结论 | 条数 |", "|---|---|"]
+    body = ["## 结论汇总", "", "| 结论 | 条数 |", "|---|---|"]
     for key in ("不符合", "符合", "不适用", "无法判定"):
         if verdicts.get(key):
-            lines.append("| %s | %d |" % (key, verdicts[key]))
+            body.append("| %s | %d |" % (key, verdicts[key]))
     for key, value in verdicts.items():
         if key not in ("不符合", "符合", "不适用", "无法判定"):
-            lines.append("| %s | %d |" % (key, value))
-    lines += ["", "## 逐条结论", "", "| 规则 | 结论 | 严重度 | 范围 | 方式 |", "|---|---|---|---|---|"]
+            body.append("| %s | %d |" % (key, value))
+    body += ["", "## 逐条结论", "", "| 规则 | 结论 | 严重度 | 范围 | 方式 |", "|---|---|---|---|---|"]
     for f in items:
-        lines.append("| %s | %s | %s | %s | %s |"
-                     % (f.get("rule") or "", f.get("verdict") or "", f.get("severity") or "",
-                        f.get("scope") or "", f.get("how") or ""))
-    lines += ["", "## 结论明细", ""]
+        body.append("| %s | %s | %s | %s | %s |"
+                    % (f.get("rule") or "", f.get("verdict") or "", f.get("severity") or "",
+                       f.get("scope") or "", f.get("how") or ""))
+    body += ["", "## 结论明细", ""]
     for f in items:
-        lines.append("### %s" % (f.get("rule") or "（未命名规则）"))
-        lines.append("")
-        lines.append("- 结论：**%s**（严重度 %s；方式 %s；范围 %s）"
-                     % (f.get("verdict") or "", f.get("severity") or "-", f.get("how") or "-",
-                        f.get("scope") or "-"))
+        body += ["### %s" % (f.get("rule") or "（未命名规则）"), "",
+                 "- 结论：**%s**（严重度 %s；方式 %s；范围 %s）"
+                 % (f.get("verdict") or "", f.get("severity") or "-", f.get("how") or "-",
+                    f.get("scope") or "-")]
         if f.get("cypher"):
-            lines.append("- 图检索语句：`%s`" % str(f["cypher"]).replace("`", "'")[:400])
+            body.append("- 图检索语句：`%s`" % str(f["cypher"]).replace("`", "'")[:400])
         if f.get("suggestion"):
-            lines.append("- 建议：%s" % f["suggestion"])
+            body.append("- 建议：%s" % f["suggestion"])
         quote = str(f.get("evidence") or "").strip() or "（该条未给逐字证据）"
-        lines += ["", "#### 证据（逐字）", "", "> %s" % quote.replace("\n", "\n> "), ""]
-    # 页级「## 原文依据」：汇总各条证据（巡检 F3 按此小节判定"是否有逐字摘录"）
+        body += ["", "#### 证据（逐字）", "", "> %s" % quote.replace("\n", "\n> "), ""]
     quotes = [str(f.get("evidence") or "").strip() for f in items if str(f.get("evidence") or "").strip()]
-    lines += [EVIDENCE_SECTION, ""] + (["> %s" % q.replace("\n", "\n> ") for q in quotes]
-                                       or ["> （本次评审未附逐字证据）"]) + [""]
-    if policy_slug:
-        lines += [REL_SECTION, "",
-                  "- 促进指导规范（`bmm:promotesDirective`）→ [[%s|%s]]" % (policy_slug, policy), ""]
-    content = "\n".join(lines)
-    written = ke_pages.upsert_page(kb, slug, title, page_type, content,
-                                   summary="按「%s」评审「%s」：%s" % (policy, doc,
-                                                                  "、".join("%s%d条" % (k, v)
-                                                                          for k, v in verdicts.items())),
-                                   tag=REVIEW_TAG,
-                                   metadata={"ontology": {"model": "bmm", "class": page_type, "label": "评估",
-                                                          "name": title, "generator": REVIEW_TAG},
-                                             "review": {"doc": doc, "policy": policy,
-                                                        "policy_slug": policy_slug,
-                                                        "rules": len(items), "verdicts": verdicts,
-                                                        "generator": REVIEW_TAG}})
+    body += [EVIDENCE_SECTION, ""] + (["> %s" % q.replace("\n", "\n> ") for q in quotes]
+                                      or ["> （本次评审未附逐字证据）"]) + [""]
+    # 统一内核（契约 §1/§2 · M-document）：正文=报告体；关系→图边；**补齐会话溯源**。
+    rels = ([{"type": "bmm:promotesDirective", "target_slug": policy_slug}] if policy_slug else [])
+    spec = {
+        "mode": "document", "slug": slug, "title": title, "page_type": page_type,
+        "type_label": "评估", "generated_by": "文档评审技能（%s，按策略 %s）" % (REVIEW_TAG, policy),
+        "wiki_content": "\n".join(body),
+        "attributes": {"rules": len(items), "verdicts": verdicts},
+        "relations": rels,
+        "summary": "按「%s」评审「%s」：%s" % (policy, doc,
+                                            "、".join("%s%d条" % (k, v) for k, v in verdicts.items())),
+        "source": {"doc_title": doc, "doc_refs": [doc],
+                   "source_text": (quotes[0] if quotes else "（本次评审未附逐字证据）"),
+                   "session_no": session_no, "session_slug": session_slug},
+    }
+    written = ke_pages.write_knowledge(kb, spec, strict_source=True)
     return {"ok": True, "kb": {"id": kb, "name": kb_name}, "slug": slug, "title": title,
-            "rules": len(items), "verdicts": verdicts, "version": written.get("after_version"),
+            "rules": len(items), "verdicts": verdicts, "version": written.get("version"),
+            "graph": written.get("graph"), "warnings": written.get("warnings"),
             "policy_slug": policy_slug, "permission": acl.get("mode"),
             "next": "跑 audit_scan 让结论页也满足 F3（本页已带原文依据）"}
 
