@@ -157,22 +157,14 @@ def parse_out_relations(content: str) -> list[dict]:
 
 
 def out_links_of(content: str) -> list[str]:
+    """【已废弃 2026-10-05 M3】关系只走 Neo4j 图，不再从正文派生 out_links。"""
     return sorted({r["slug"] for r in parse_out_relations(content) if r["slug"]})
 
 
 def rebuild_in_links_sql(kb_id: str) -> str:
-    """按 out_links 重算 in_links（wiki 图谱的反向边；上游页面可能写标量 → 守卫）。"""
-    arr = "(CASE WHEN jsonb_typeof(s.out_links) = 'array' THEN s.out_links ELSE '[]'::jsonb END)"
+    """【已废弃 2026-10-05 M3】in_links/out_links 两列恒空，无需重算。仅保留兼容旧引用。"""
     return ("UPDATE wiki_pages SET in_links = '[]'::jsonb "
-            " WHERE knowledge_base_id = %s AND deleted_at IS NULL; "
-            "WITH edges AS (SELECT s.slug AS src, t.value AS dst FROM wiki_pages s "
-            "CROSS JOIN LATERAL jsonb_array_elements_text(%s) t "
-            "WHERE s.knowledge_base_id = %s AND s.deleted_at IS NULL), "
-            "inbound AS (SELECT dst, jsonb_agg(DISTINCT src) AS arr FROM edges GROUP BY dst) "
-            "UPDATE wiki_pages p SET in_links = COALESCE(i.arr, '[]'::jsonb) "
-            "FROM wiki_pages x LEFT JOIN inbound i ON i.dst = x.slug "
-            "WHERE p.knowledge_base_id = %s AND p.slug = x.slug AND p.deleted_at IS NULL;\n"
-            % (ke_db.sql_str(kb_id), arr, ke_db.sql_str(kb_id), ke_db.sql_str(kb_id)))
+            " WHERE knowledge_base_id = %s AND deleted_at IS NULL;\n" % ke_db.sql_str(kb_id))
 
 
 # ---------------------------------------------------------------------------
@@ -282,9 +274,9 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                 metadata: dict | None = None) -> dict:
     """**建或改**一页（概念页/映射页专用；2026-09-28）。
 
-    - 已存在 → 走 `_apply_content_update`（快照旧版 → content/out_links/version+1 → 重算 in_links），
+    - 已存在 → 走 `_apply_content_update`（快照旧版 → content/version+1），
       并把 `title/summary/page_type/page_metadata` 一起更新（可回退到旧版本）；
-    - 不存在 → INSERT（`id` 用 `gen_random_uuid()`；`tenant_id` 取该 KB 的），随后重算 in_links + 建目录树；
+    - 不存在 → INSERT（`id` 用 `gen_random_uuid()`；`tenant_id` 取该 KB 的），随后建目录树；
     - 只用于**我们自己的治理页**（「企业共享概念模型」里的概念页/映射页）；领域业务页禁止走这里。
     """
     if len(tag) > 16:
@@ -336,7 +328,7 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
 
 
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:
-    """按给定正文**重写一页**：快照旧版 → 更新 content/out_links/version+1 → 重算 in_links。
+    """按给定正文**重写一页**：快照旧版 → 更新 content/version+1。
 
     供「一致性巡检」的**显式修复**用（删悬空关系行 / 去重复关系行）。只 UPDATE 不 INSERT；
     `tag` 会写进 `last_edit_source`（≤16 字符）。
@@ -695,7 +687,6 @@ def retag_apply(kb_id: str, slug: str, new_type: str, ticket: str = "",
                            "out_links": page["out_links"], "page_metadata": page["meta"],
                            "kind": "target"}]
     rewritten = _rewrite_refs(kb_id, slug, new_slug, pages, stmts, before)
-    stmts.append(rebuild_in_links_sql(kb_id))
     ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)
     session_rewritten = _rewrite_session_state(kb_id, slug, new_slug)
     folders = _sync_folders(kb_id)
@@ -829,7 +820,6 @@ def retag_rollback(kb_id: str, ticket: str) -> dict:
                             ke_db.sql_json(_json_safe(item["out_links"])),
                             ke_db.sql_json(_json_safe(item["page_metadata"], default={})),
                             RETAG_TAG, ke_db.sql_str(kb_id), ke_db.sql_str(item["slug"])))
-    stmts.append(rebuild_in_links_sql(kb_id))
     ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)
     sessions = _rewrite_session_state(kb_id, data["new_slug"], data["slug"])
     return {"ok": True, "ticket": ticket, "restored_pages": len(data.get("before") or []),
@@ -862,7 +852,6 @@ def delete_pages(kb_id: str, slugs: list[str], dry_run: bool = False,
         "DELETE FROM wiki_page_revisions WHERE knowledge_base_id = %s AND slug IN (%s);"
         % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(s) for s in slugs_all)),
         "DELETE FROM wiki_pages WHERE %s;" % cond,
-        rebuild_in_links_sql(kb_id),
     ]
     ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)
 

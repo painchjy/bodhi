@@ -213,23 +213,8 @@ def check_wiki_graph(ctx: dict, rep: Report) -> None:
             rep.add("A1", "high", page["slug"],
                     "悬空出边 %d 条 → %s" % (len(missing), "、".join(missing[:5])),
                     "删正文对应关系行（或补建缺失页）后再重算 in_links")
-    # A2 反向边不一致：期望的 in_links 由所有页的出边推导
-    expected: dict = {}
-    for page in pages:
-        rels = ke_pages.parse_out_relations(page["content"])
-        targets = {r["slug"] for r in rels if r["slug"]}
-        targets |= {s for s in _json_list(page["out_links"]) if isinstance(s, str)}
-        for target in targets:
-            expected.setdefault(target, set()).add(page["slug"])
-    for page in pages:
-        have = {s for s in _json_list(page["in_links"]) if isinstance(s, str)}
-        want = expected.get(page["slug"], set())
-        if have != want:
-            rep.add("A2", "medium", page["slug"],
-                    "in_links 不一致：缺 %d（%s）／多 %d（%s）"
-                    % (len(want - have), "、".join(sorted(want - have)[:3]) or "-",
-                       len(have - want), "、".join(sorted(have - want)[:3]) or "-"),
-                    "重算 in_links（ke_pages.rebuild_in_links_sql，幂等）")
+    # A2 已废弃（2026-10-05 M3）：关系只走 Neo4j 图，wiki in_links/out_links 两列恒空，
+    # 不再校验反向边、也没有「重算 in_links」修复项（防设计智能体再跑残留的出入链重建）。
     # A3 类型自相矛盾：page_type vs page_metadata.ontology.class/type
     for page in pages:
         if not _is_instance(page["page_type"]):
@@ -1300,7 +1285,7 @@ def check_governance_rest(ctx: dict, rep: Report, mine: list) -> None:
 # ---------------------------------------------------------------------------
 PURGE_KINDS = ("no_source_pages", "deleted_source_pages", "mixed_source_refs",
                "soft_deleted_rows", "orphan_revisions")
-FIX_KINDS = ("dangling_edges", "dup_edges", "in_links")
+FIX_KINDS = ("dangling_edges", "dup_edges")
 INIT_KINDS = ("init_wiki", "init_graph")
 ALL_KINDS = INIT_KINDS + PURGE_KINDS + FIX_KINDS
 KIND_HELP = {
@@ -1313,7 +1298,6 @@ KIND_HELP = {
     "orphan_revisions": "孤儿版本快照（D3，没有对应页）→ 删",
     "dangling_edges": "悬空关系行（A1）→ 删该行（快照+版本+1）",
     "dup_edges": "重复/自环关系行（A5）→ 去重（快照+版本+1）",
-    "in_links": "重算 in_links（A2，幂等，无内容改动）",
 }
 PLAN_DIR = HERE.parents[1] / "logs" / "audit"
 
@@ -1377,8 +1361,6 @@ def _hard_delete_wiki(kb_id: str) -> dict:
         out["folders_synced"] = bool(ke_pages.sync_folders(kb_id))
     except Exception as exc:  # noqa: BLE001
         out["folders_synced"] = "failed: %s" % exc
-    ke_db.psql(ke_pages.rebuild_in_links_sql(kb_id), stdin=True)
-    out["in_links_rebuilt"] = True
     return out
 
 
@@ -1428,11 +1410,6 @@ def _apply_edge_edits(kb_id: str, page: dict, drop_lines: list) -> dict:
     new_content = "\n".join(lines).rstrip() + "\n"
     res = ke_pages.rewrite_page_content(kb_id, page["slug"], new_content)
     return {"slug": page["slug"], "removed_lines": len(drop), "version": res["after_version"]}
-
-
-def _rebuild_in_links(kb_id: str) -> dict:
-    ke_db.psql(ke_pages.rebuild_in_links_sql(kb_id), stdin=True)
-    return {"rebuilt": True}
 
 
 def _normalize_kinds(kinds) -> list:
@@ -1679,9 +1656,6 @@ def apply_plan(kb_id: str, plan_id: str, confirm: bool = False, page_limit: int 
         applied["edges"] = {"pages": len(done),
                             "lines": sum(len(v) for v in drop_by_slug.values()),
                             "detail": done[:20]}
-    if "in_links" in kinds:
-        applied["in_links"] = _rebuild_in_links(kb_id)
-
     result = {"kb_id": kb_id, "plan_id": plan_id, "kinds": kinds, "applied": applied,
               "executed_at": ke_db.now_text(),
               "after": audit(kb_id, scope="all", max_findings=1)["summary"]}
@@ -1771,7 +1745,7 @@ def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 
           slugs: list | None = None, tenant: int | None = None, dry_run: bool = False) -> dict:
     """**一步硬删**（用户口径 2026-09-29）：只要调用者对该库**有写权限**就执行，不再走后台 plan/confirm。
 
-    - `slugs` 给了 → 只硬删这些页（含快照/关系行清理 + 重算 in_links）；
+    - `slugs` 给了 → 只硬删这些页（含快照/关系行清理）；
     - 否则按 `kinds`（见 `KIND_HELP`）生成清理计划**并立即执行**；
     - `dry_run=True` 只回影响面，不写库。
     写权限口径与其它写路径一致：属主 / `kb_shares` 的 editor|writer|admin；身份缺失 fail-closed。

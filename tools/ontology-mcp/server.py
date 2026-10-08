@@ -1191,10 +1191,7 @@ def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
                     chunk_refs: list, metadata: dict) -> str:
     """合并 = 更新：先快照旧版本到 revisions（version 用旧值），再 version+1。
 
-    2026-09-21 补 **`out_links` 重算**（用户实测：设计节点把关系行追加进正文后，前端本体关系面板
-    与「入边」区都看不到，因为它按 `in_links` 渲染，而 `in_links` 是按别的页 `out_links` 反推的）：
-    旧实现只有 `sql_insert_page`（新建页）写 `out_links`，走合并的页（第二次跑、追加关系）
-    一直是空数组 → 反向边整片缺失。正文里关系行的解析与 ke_pages 完全同源（`out_links_of`）。
+    2026-10-05 M3：关系只走 Neo4j 图，`out_links`/`in_links` 两列恒空，不再从正文解析出边。
     """
     return ("INSERT INTO wiki_page_revisions (id, tenant_id, knowledge_base_id, page_id, slug, version, "
             "       title, page_type, status, content, summary, aliases, edit_source, editor_id, "
@@ -1203,13 +1200,13 @@ def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
             "       title, page_type, status, content, summary, aliases, '%s', "
             "       COALESCE(last_editor_id,''), now(), now()\n"
             "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;\n"
-            "UPDATE wiki_pages SET content = %s, out_links = %s::jsonb, summary = %s, "
+            "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, summary = %s, "
             "       source_refs = %s, chunk_refs = %s, "
             "       page_metadata = %s, version = version + 1, updated_at = now(), "
             "       last_edit_source = '%s' "
             " WHERE knowledge_base_id = %s AND slug = %s;\n"
             % (TOOL_TAG, sql_str(page["knowledge_base_id"]), sql_str(page["slug"]),
-               sql_str(content), sql_json(ke_pages.out_links_of(content)), sql_str(summary),
+               sql_str(content), sql_str(summary),
                sql_json(source_refs), sql_json(chunk_refs),
                sql_json(metadata), TOOL_TAG, sql_str(page["knowledge_base_id"]),
                sql_str(page["slug"])))
@@ -1322,15 +1319,6 @@ def build_pending_page(model: dict, element: dict, candidate: dict, similarity: 
             "generator": TOOL_TAG, "created_at": now_text(),
         }},
     }
-
-
-def sql_rebuild_in_links(kb_id: str) -> str:
-    """按 out_links 重算 in_links（wiki 图谱的反向边）。实现见 ke_pages。
-
-    注意：上游自己的页面（如根 index 页）可能把 out_links 写成**标量**，
-    ke_pages 里已用 jsonb_typeof 守卫（保持此前的崩溃修复）。
-    """
-    return ke_pages.rebuild_in_links_sql(kb_id)
 
 
 def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_meta: dict,
@@ -1507,7 +1495,6 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                           "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
 
     if not dry_run and statements:
-        statements.append(sql_rebuild_in_links(kb_id))
         psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
         # 写后对账（2026-09-24）：回执里的每个 slug 必须**在本库**查得到 ——
         # 否则就是"回执成功、库里没有"（历史 bug：页 id 只按 slug 派生 → upsert 更新了别库那一行）。
@@ -2532,7 +2519,6 @@ def resolve_pending_merge(kb_id: str, pending_slug: str, action: str,
 
     statements.append("DELETE FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s;"
                       % (sql_str(kb_id), sql_str(pending_slug)))
-    statements.append(sql_rebuild_in_links(kb_id))
     psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
     if id_strats:
         result["id_strategy"] = id_strats
@@ -3446,7 +3432,7 @@ def tool_definitions() -> list[dict]:
             "name": "import_apply",
             "description": ("**结构化批量建模·执行（写）**：按 `import_plan` 给的 `ticket` 落库，**只写那一个目标**；"
                             "内部按 500 行/事务分批；幂等（内容没变的页**零写入**，变化走快照 + version+1）；"
-                            "关系批次把关系行写进 **domain 侧页**的「## 本体关系」并重算 in_links。"
+                            "关系批次把关系行写进 **domain 侧页**的「## 本体关系」（关系走 Neo4j 图，出入链已废弃）。"
                             "写权限：对该库有写权限（属主 / kb_shares 的 editor|writer|admin）。"),
             "inputSchema": {"type": "object", "properties": {
                 "ticket": {"type": "string"},
@@ -3478,7 +3464,7 @@ def tool_definitions() -> list[dict]:
         {
             "name": "audit_purge",
             "description": ("**巡检清理·一步硬删（写）**：只要调用者对该知识库**有写权限**就执行，不需要后台 plan/confirm。"
-                            "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理 + 重算 in_links）；"
+                            "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理）；"
                             "② 不给 → 按 `kinds`（all=清理异常+修问题；也可 no_source_pages/deleted_source_pages/"
                             "mixed_source_refs/soft_deleted_rows/orphan_revisions 等）生成计划并立即执行。"
                             "`dry_run=true` 只看影响面。**删除不可逆**，删前先 `audit_scan` 把 target 念给用户确认。"),
@@ -3642,7 +3628,7 @@ def tool_definitions() -> list[dict]:
         {
             "name": "retag_apply",
             "description": ("**改本体类型 · 第二步（执行）**：迁移 slug + 改写所有引用（关系行 / out_links / "
-                            "正文 / 溯源 / 元数据）+ 重算 in_links + 改写建模会话状态；页 id 不变，可回滚。"
+                            "正文 / 溯源 / 元数据）+ 改写建模会话状态；页 id 不变，可回滚。"
                             "**必须**带 `ticket`（来自同一影响面的 `retag_preview`）与 `acknowledge_risks`"
                             "（与 preview 返回的 `required_risks` 完全一致）—— 缺一即拒；ticket 不匹配"
                             "（例如引用变了）也会被拒，需要重新 preview。调用前必须已获得用户明确同意。"),

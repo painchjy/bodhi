@@ -224,10 +224,9 @@ def write_page(kb_id: str, kind: str, title: str, *, content: str = "",
                  "  version = version + 1, updated_at = now(), last_edit_source = '%s' "
                  "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
                  % (ke_db.sql_str(title), ke_db.sql_str(body), ke_db.sql_str(summary),
-                    ke_db.sql_str(page_type), ke_db.sql_json(ke_pages.out_links_of(body)),
+                    ke_db.sql_str(page_type), ke_db.sql_json([]),
                     ke_db.sql_json(meta), ke_db.sql_json(aliases or []), TAG_DESIGN,
-                    ke_db.sql_str(kb_id), ke_db.sql_str(slug)),
-                 ke_pages.rebuild_in_links_sql(kb_id)]
+                    ke_db.sql_str(kb_id), ke_db.sql_str(slug))]
         action, before_version = "update", int(existing[0]["version"] or 1)
     else:
         kb = _kb_row(kb_id)
@@ -241,9 +240,8 @@ def write_page(kb_id: str, kind: str, title: str, *, content: str = "",
                  % (page_id(kb_id, slug), kb["tenant_id"], ke_db.sql_str(kb_id),
                     slug.replace("'", "''"), ke_db.sql_str(title), ke_db.sql_str(page_type),
                     ke_db.sql_str(body), ke_db.sql_str(summary), path, slug.replace("'", "''"),
-                    ke_db.sql_json(ke_pages.out_links_of(body)), ke_db.sql_json(meta),
-                    ke_db.sql_json(aliases or []), TAG_DESIGN),
-                 ke_pages.rebuild_in_links_sql(kb_id)]
+                    ke_db.sql_json([]), ke_db.sql_json(meta),
+                    ke_db.sql_json(aliases or []), TAG_DESIGN)]
         action, before_version = "insert", 0
 
     ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)

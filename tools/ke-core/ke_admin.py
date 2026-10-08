@@ -464,8 +464,8 @@ def purge_model(model: str, kb_id: str = "") -> dict:
         ke_db.psql("BEGIN;\n"
                    "DELETE FROM wiki_page_revisions WHERE knowledge_base_id = %s AND slug IN (%s);\n"
                    "DELETE FROM wiki_pages WHERE %s;\n"
-                   "%s\nCOMMIT;\n"
-                   % (ke_db.sql_str(kb), lst, where, ke_pages.rebuild_in_links_sql(kb)), stdin=True)
+                   "COMMIT;\n"
+                   % (ke_db.sql_str(kb), lst, where), stdin=True)
     return {"model": model, "kb_id": kb, "neo4j_nodes_deleted": neo_deleted,
             "wiki_pages_deleted": len(slugs), "pages": slugs[:10]}
 

@@ -11,7 +11,7 @@
 --------
     probe(file)                     只读：sheet / 表头 / 行数 / 抽样 / 重复表头 / 列前缀（复用 ke_sheet）
     plan(kind, target, file, kb_id, …)  只读：校验本体面 + 影响面 + 风险 + ticket（写进账本）
-    apply(ticket, ack, …)           写：**只写这一个 target**（500 行/事务；幂等；末了重算 in_links）
+    apply(ticket, ack, …)           写：**只写这一个 target**（500 行/事务；幂等）
     state(batch)                    账本：每个 target 的状态与 remaining（智能体靠它循环到收敛）
 
 关键不变量
@@ -521,7 +521,7 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
             # `wiki_path` 供**前端目录树显示**：口径与 `ke_pages.upsert_page` 一致（目录路径/标题），
             # 派生自 category_path；**不能**写 slug（否则目录里显示不出来 —— 2026-09-30 用户实测"目录缺失"）。
             "wiki_path": "/".join([str(x) for x in category_path] + [title]),
-            "last_edit_source": tag, "out_links": ke_pages.out_links_of(content)}
+            "last_edit_source": tag, "out_links": []}
 
 
 PAGE_COLUMNS = ("id, tenant_id, knowledge_base_id, slug, title, page_type, status, content, summary, "
@@ -691,7 +691,6 @@ def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
                            % (ke_db.sql_str(kb), "','".join(victims)))
                 pruned = len(victims)
         if created or updated or pruned:
-            ke_db.psql(ke_pages.rebuild_in_links_sql(kb))
             # 目录树：`wiki_folders` + 页 `folder_id`（与 `ke_pages.upsert_page` 同口径；
             # 否则前端目录里看不到这批页 —— 2026-09-30 用户实测"目录缺失"）
             folders = ke_pages.sync_folders(kb)
@@ -745,13 +744,11 @@ def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
                 stmts.append("UPDATE wiki_pages SET content = %s, out_links = %s::jsonb, "
                              "version = version + 1, updated_at = now(), last_edit_source = '%s' "
                              " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
-                             % (ke_db.sql_str(new_text), ke_db.sql_json(ke_pages.out_links_of(new_text)),
+                             % (ke_db.sql_str(new_text), ke_db.sql_json([]),
                                 tag, ke_db.sql_str(kb), ke_db.sql_str(slug)))
             if stmts:
                 ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;")
                 pages_written += len(updates[offset:offset + CHUNK])
-        if pages_written:
-            ke_db.psql(ke_pages.rebuild_in_links_sql(kb))
         result.update({"pages_written": pages_written, "edges": edges, "dangling": dangling,
                        "pairs": sum(len(v) for v in per_source.values()),
                        "next": "import_state 看 remaining；为空即整个文件建完"})
