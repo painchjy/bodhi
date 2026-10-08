@@ -477,36 +477,43 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     warnings: list[str] = []
     if not has_session:
         warnings.append("无会话溯源（source.session_no/session_slug 缺）：报告/文档类建议补会话页")
-    graph = {"ok": True, "edges_written": 0, "edge_errors": []}
-    if not dry_run:
-        try:
-            _kg.upsert_node(kb_id, slug, title, page_type, attributes=attrs, wiki_content=content)
-            for rel in (spec.get("relations") or []):
-                rt, ts = rel.get("type"), rel.get("target_slug")
-                if not (rt and ts):
-                    continue
-                try:
-                    _kg.add_edge(kb_id, slug, rt, ts)
-                    graph["edges_written"] += 1
-                except Exception as exc:  # noqa: BLE001
-                    graph["edge_errors"].append({"type": rt, "target_slug": ts, "error": str(exc)[:160]})
-            if src.get("session_slug"):
-                _kg._ensure_instance(kb_id, slug, page_type)
-                _kg._ensure_instance(kb_id, src["session_slug"], _kg._page_type(kb_id, src["session_slug"]))
-                _kg._run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) "
-                         "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
-                         "MERGE (a)-[r:`bmm:sourceSession`]->(b)",
-                         {"kb": kb_id, "s": slug, "t": src["session_slug"]})
-        except Exception as exc:  # noqa: BLE001
-            graph = {"ok": False, "reason": str(exc)[:200], "edges_written": 0, "edge_errors": []}
-    else:
-        graph["dry_run"] = True
     if dry_run:
         return {"applied": False, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
-                "graph": graph, "warnings": warnings, "content_preview": content[:600]}
+                "graph": {"dry_run": True, "edges_written": 0, "edge_errors": []},
+                "warnings": warnings, "content_preview": content[:600]}
+    graph = {"ok": True, "edges_written": 0, "edge_errors": []}
+    # ① 节点先入图（图本优先，契约 §8）
+    try:
+        _kg.upsert_node(kb_id, slug, title, page_type, attributes=attrs, wiki_content=content)
+    except Exception as exc:  # noqa: BLE001
+        graph["ok"] = False
+        graph["reason"] = "图节点写入失败：%s" % str(exc)[:180]
+    # ② 节点落 PG（建/合并页）—— **关系校验（domain/range、目标页存在）要读 PG 的 `page_type`**，
+    #    所以必须在建边之前完成：否则源/目标页未落库 → add_edge 报「目标页不存在」（2026-10-09 修）。
     res = upsert_page(kb_id, slug, title, page_type, content,
                       summary=(spec.get("summary") or "").strip()[:500], tag=TAG_CONTRACT,
                       metadata=metadata)
+    # ③ 关系（节点已就绪）
+    for rel in (spec.get("relations") or []):
+        rt, ts = rel.get("type"), rel.get("target_slug")
+        if not (rt and ts):
+            continue
+        try:
+            _kg.add_edge(kb_id, slug, rt, ts)
+            graph["edges_written"] += 1
+        except Exception as exc:  # noqa: BLE001
+            graph["edge_errors"].append({"type": rt, "target_slug": ts, "error": str(exc)[:160]})
+    # ④ 会话溯源边（L1）—— 会话页必须**已存在**（`session_provenance`/`save_knowledge` 建），否则挂不上
+    if src.get("session_slug"):
+        try:
+            _kg._ensure_instance(kb_id, slug, page_type)
+            _kg._ensure_instance(kb_id, src["session_slug"], _kg._page_type(kb_id, src["session_slug"]))
+            _kg._run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) "
+                     "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                     "MERGE (a)-[r:`bmm:sourceSession`]->(b)",
+                     {"kb": kb_id, "s": slug, "t": src["session_slug"]})
+        except Exception as exc:  # noqa: BLE001
+            warnings.append("会话溯源边写入失败：%s" % str(exc)[:160])
     return {"applied": True, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
             "created": res.get("created"), "version": res.get("after_version"),
             "graph": graph, "warnings": warnings}
@@ -514,16 +521,41 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
 
 def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
                           strict_source: bool = True) -> dict:
-    """**批量写入**（契约 §7）：逐条走 `write_knowledge`；返回汇总（结构化导入/批量建模用）。"""
-    pages, errors = [], []
+    """**批量写入**（契约 §7）：**两遍** —— ① 先建/合**全部节点**（PG 页）② 再**统一建关系**。
+
+    为什么两遍：`add_edge` 的 domain/range 与「目标页存在」都读 **PG 的 `page_type`**，
+    同批内 A→B 的边若在 B 落库前建 → 报「目标页不存在」（2026-10-09 修）。
+    """
+    import ke_graph as _kg  # noqa: PLC0415
+    pages, errors, prepared = [], [], []
     for spec in (specs or []):
+        s = dict(spec or {})
+        rels = s.pop("relations", None) or []
         try:
-            pages.append(write_knowledge(kb_id, spec, dry_run=dry_run, strict_source=strict_source))
+            r = write_knowledge(kb_id, s, dry_run=dry_run, strict_source=strict_source)
+            pages.append(r)
+            prepared.append((r, rels))
         except Exception as exc:  # noqa: BLE001
-            errors.append({"title": (spec or {}).get("title"), "error": str(exc)[:200]})
-    edges = sum((p.get("graph") or {}).get("edges_written", 0) for p in pages)
+            errors.append({"title": s.get("title"), "error": str(exc)[:200]})
+    edges_written = 0
+    if not dry_run:
+        for r, rels in prepared:                     # ② 节点已全部落库 → 统一建关系
+            g = r.get("graph") or {}
+            for rel in rels:
+                rt, ts = rel.get("type"), rel.get("target_slug")
+                if not (rt and ts):
+                    continue
+                try:
+                    _kg.add_edge(kb_id, r["slug"], rt, ts)
+                    edges_written += 1
+                    g["edges_written"] = g.get("edges_written", 0) + 1
+                except Exception as exc:  # noqa: BLE001
+                    g.setdefault("edge_errors", []).append(
+                        {"type": rt, "target_slug": ts, "error": str(exc)[:160]})
+    else:
+        edges_written = sum((p.get("graph") or {}).get("edges_written", 0) for p in pages)
     return {"applied": not dry_run, "kb_id": kb_id, "pages": pages, "errors": errors,
-            "count": len(pages), "edges_written": edges}
+            "count": len(pages), "edges_written": edges_written}
 
 
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:

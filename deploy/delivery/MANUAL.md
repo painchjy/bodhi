@@ -117,6 +117,7 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 | 8 | **结构化批量建模**（`structured_modeling` 技能）| 给一张 Excel + 中文说明：`import_probe` → 逐目标 `import_plan`/`import_apply` → `import_state` 的 `remaining` 为空；页有「定义/属性/原文依据」；**前端目录里能看到这批页**（`wiki_path`=目录路径/标题、`folder_id` 非空）|
 | 9 | **文档评审**（`document_review` 技能）| 选文档 + 选策略：`rules_of_policy` 出规则清单（级别/范围/实现方式）→ 逐条判（LLM软规则 / `graph_query`）→ `review_apply` 写出 `review/<文档>-<策略>` 页（逐条结论 + 逐字证据 + `promotesDirective → 策略页`）；**图里信息**（部署图/技术栈截图）先 `image_extract` 取文档内嵌图 → 多模态读图（`multimodal_extraction` 技能）|
 | 10 | 巡检清理 | `audit_purge(kb_id, dry_run=true)` 先看 `per_kind` 清单（导入页/评审页应被**豁免**）→ 确认后再执行（**一步硬删**，不可逆）|
+| 11 | **图像识别**（`multimodal_extraction` 技能 + `image_extract` 工具）| `tools/list` 含 `image_extract`；对**含内嵌图**的文档调 `image_extract(kb_id, knowledge_id)` → `images_found ≥ 1` 且带 `resource://` 引用（样例1 应=4）；识别结果按**契约 v0**（`nodes/edges/annotations/ambiguity/knowledgeGaps/todo`，每条带 `bbox/evidence`+`confidence`）与**门禁 1–4** 输出；图像识别挡板页 `stubStatus=已下线`（工具页无 `toolHasStub` 边）|
 
 ## 5. 日常运维
 
