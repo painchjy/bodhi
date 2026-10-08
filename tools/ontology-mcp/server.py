@@ -1979,6 +1979,43 @@ def _resolve_session_for(kb_id: str, session_no: str = "") -> tuple[str, str]:
         return sno, ""
 
 
+_IMG_REF_RE = re.compile(r"!\[([^\]]*)\]\((resource://[^)]+)\)")
+
+
+def image_extract(kb_id: str = "", knowledge_id: str = "", figure_no: int = 0) -> dict:
+    """**取文档内嵌图（只读）**（2026-10-08）。
+
+    WeKnora 把 docx/pptx 的**内嵌图**抽成正文里的 markdown 引用 `![alt](resource://<id>)`
+    （存于 `chunks.content`，`chunk_type` 没有 `image`）。本工具把图引用取出来交给
+    **会话多模态模型**看；识别按技能 `multimodal_extraction` 的**契约 v0 + 门禁 1–4** 输出。
+    """
+    kb = (kb_id or "").strip()
+    kid = (knowledge_id or "").strip()
+    where = ["deleted_at IS NULL"]
+    if kb:
+        where.append("knowledge_base_id = %s" % sql_str(kb))
+    if kid:
+        where.append("(knowledge_id = %s OR knowledge_id IN (SELECT id FROM knowledges "
+                     "WHERE title LIKE %s AND deleted_at IS NULL))"
+                     % (sql_str(kid), sql_str("%" + kid + "%")))
+    rows = psql_csv("SELECT knowledge_id, chunk_index, COALESCE(content,'') AS content FROM chunks "
+                    "WHERE %s ORDER BY knowledge_id, chunk_index" % " AND ".join(where))
+    imgs, by_doc = [], {}
+    for r in rows:
+        for m in _IMG_REF_RE.finditer(r["content"]):
+            imgs.append({"no": len(imgs) + 1, "alt": m.group(1), "image_ref": m.group(2),
+                         "markdown": m.group(0), "knowledge_id": r["knowledge_id"],
+                         "chunk_index": r["chunk_index"]})
+            by_doc[r["knowledge_id"]] = by_doc.get(r["knowledge_id"], 0) + 1
+    picked = [x for x in imgs if x["no"] == int(figure_no)] if figure_no else imgs
+    return {"ok": True, "kb_id": kb, "knowledge_id": kid, "images_found": len(imgs),
+            "by_document": by_doc, "images": picked or imgs,
+            "how": ("把 `markdown`（`![alt](resource://id)`）放进你的推理上下文 → 由**会话多模态模型**"
+                    "看图；识别结果按 `multimodal_extraction` 技能的契约 v0（nodes/edges/annotations/"
+                    "ambiguity/knowledgeGaps/todo，每条带 bbox/evidence+confidence）与门禁 1–4 输出，"
+                    "再经 `save_knowledge` 落库（务必带 session_no）")}
+
+
 def link_source_session(kb_id: str = "", session_no: str = "", slugs: list | None = None,
                         all_pages: bool = False, dry_run: bool = True) -> dict:
     """给知识页补 `bmm:sourceSession`（**双链**）→ **会话页（分页优先）**，并重建 `in_links`。
@@ -3577,6 +3614,18 @@ def tool_definitions() -> list[dict]:
                 "required": ["reference"]},
         },
         {
+            "name": "image_extract",
+            "description": ("**多模态识别·取图（只读）**：取文档**内嵌图**——WeKnora 把 docx/pptx 的图抽成正文里的 "
+                            "markdown 引用 `![alt](resource://id)`（存于 `chunks.content`）。本工具把它取出来交给"
+                            "**会话多模态模型**识别；识别按技能 `multimodal_extraction` 的**契约 v0 + 门禁 1–4** 输出"
+                            "（nodes/edges/annotations/ambiguity/knowledgeGaps/todo，每条带 bbox/evidence+confidence），"
+                            "再经 `save_knowledge` 落库（务必带 session_no）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "knowledge_id": {"type": "string", "description": "文档 id 或标题（含匹配）"},
+                "figure_no": {"type": "integer", "description": "只要第几张图（缺省全部）"}}},
+        },
+        {
             "name": "review_apply",
             "description": ("**文档评审·写结论（写）**：把**逐条**评审结论写成**一页报告**（`slug=review/<文档>-<策略>`，"
                             "版本化可回退）：正文=结论汇总 + 逐条结论表 + 每条明细（含**原文依据**逐字证据 / 图检索语句 / 建议）。"
@@ -4046,6 +4095,9 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "audit_purge":
         return ke_audit.purge(str(args.get("kb_id", "")), str(args.get("kinds", "all")), "all", 5000,
                               args.get("slugs") or None, None, bool(args.get("dry_run", False)))
+    if name == "image_extract":
+        return image_extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
+                             int(args.get("figure_no", 0) or 0))
     if name == "rules_of_policy":
         return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
                                          int(args.get("limit", 300) or 300))
