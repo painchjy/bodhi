@@ -2277,18 +2277,26 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         # 2026-10-05 M3（图主补全）：① 关系**直写图边**（正文不再承载关系）；② 正文只 strip（不动图边）。
         try:
             import ke_graph  # noqa: PLC0415
-            _slug_by_name = {p["name"]: p["slug"] for p in payloads if p.get("slug")}
             _n_edges = 0
-            for e in (checked.get("edges") or []):
-                src = _slug_by_name.get(e.get("source")) or e.get("source")
-                dst = e.get("target")
-                t = e.get("type")
-                if src and dst and t and ":" in str(src):
+            _edge_errors = []
+            _planned = 0
+            # 2026-10-05 M3 修（回归缺陷）：边一律用 `design_elements` **已解析好的**
+            # `payload.relations[].target_slug`（覆盖"本批节点"与"本库既有页"两种目标）；
+            # 旧实现遍历 `checked["edges"]` 的**裸节点名**、且用 `":" in src` 判错变量（src 是 slug/名，
+            # 恒无冒号 → 条件恒假）→ 知识间边一条都没写。这里同时**不再静默失败**，回执给 `edge_errors`。
+            for _p in payloads:
+                _src = _p.get("slug")
+                for _r in (_p.get("relations") or []):
+                    _t, _dst = _r.get("type"), _r.get("target_slug")
+                    if not (_src and _dst and _t):
+                        continue
+                    _planned += 1
                     try:
-                        ke_graph.add_edge(kb_id, src, t, dst)
+                        ke_graph.add_edge(kb_id, _src, _t, _dst)
                         _n_edges += 1
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as exc:  # noqa: BLE001
+                        _edge_errors.append({"source": _src, "type": _t,
+                                             "target_slug": _dst, "error": str(exc)[:160]})
             _all = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
             _all += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
             for s in dict.fromkeys(_all):
@@ -2296,7 +2304,13 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                     ke_graph.strip_wiki_page(kb_id, s)
                 except Exception:  # noqa: BLE001
                     pass
-            summary["graph"] = {"edges_written": _n_edges}
+            summary["graph"] = {"edges_written": _n_edges, "edges_planned": _planned,
+                                "edge_errors": _edge_errors[:20],
+                                "edge_errors_total": len(_edge_errors)}
+            # C 回归防护：声明了边却一条都没落图 → 显式告警（防"循环静默失效"回归）
+            if _planned and _n_edges == 0:
+                summary["graph"]["warn"] = (
+                    "声明了 %d 条关系，但一条都没写入图（检查关系解析/图连接）" % _planned)
         except Exception as exc:  # noqa: BLE001
             summary["graph"] = {"ok": False, "reason": str(exc)[:200]}
     # 跨库同名（只读回报）：目标不在本库、但同名页在别的知识库 → 让用户/智能体一眼看到"没跨库合并"
@@ -2545,38 +2559,35 @@ def _page_slug_by_title(kb_id: str, title: str) -> str:
 
 
 def retract_relations(kb_id: str, items: list) -> dict:
-    """撤回关系：删掉源页里指向目标的 `## 本体关系` 行 + 同键的 `## 关系限定（边属性）` 行。
+    """撤回关系（**2026-10-05 M3：关系是图本态**）——删 **Neo4j 图边**（`ke_graph.delete_edge`）。
 
     为什么需要：`save_knowledge` 的语义是"只追加/合并"，改设计（例如把某个写方收口）时必须能**减边**；
-    否则旧边永远留在页面上，巡检（E1 写耦合等）也跟着失真。
-    版本快照 + `out_links`/`in_links` 重算由 `ke_pages.rewrite_page_content` 负责。
+    否则旧边永远留在图里，巡检（E1 写耦合等）也跟着失真。
+    旧实现删的是正文 `## 本体关系` 行——M3 后正文已不承载关系 → 删不掉任何边；这里改为删图边。
     """
+    import ke_graph  # noqa: PLC0415
     done, missed = [], []
     for item in (items or []):
-        src_slug = _page_slug_by_title(kb_id, item.get("source") or "") or \
-                   _page_slug_by_title(kb_id, item.get("source_slug") or "")
+        src_slug = (item.get("source_slug")
+                    or _page_slug_by_title(kb_id, item.get("source") or "")
+                    or _page_slug_by_title(kb_id, item.get("source_slug") or ""))
         if not src_slug:
             missed.append({**item, "why": "源页不存在"})
             continue
-        page = _page_row(kb_id, src_slug)
-        if not page:
-            missed.append({**item, "why": "源页已删"})
-            continue
         rel_type = item.get("type") or ""
-        target_slug = item.get("slug") or ""
-        keep, removed = [], 0
-        for line in (page["content"] or "").splitlines():
-            text = line.strip()
-            if text.startswith("- ") and ("（`%s`）" % rel_type) in text \
-                    and (not target_slug or target_slug in text):
-                removed += 1
-                continue
-            keep.append(line)
-        if removed:
-            ke_pages.rewrite_page_content(kb_id, src_slug, "\n".join(keep).rstrip() + "\n")
-            done.append({**item, "source_slug": src_slug, "removed_lines": removed})
-        else:
-            missed.append({**item, "why": "没找到该关系行（可能已删）", "source_slug": src_slug})
+        target_slug = item.get("slug") or _graph_target_slug(kb_id, str(item.get("target") or ""))
+        if not target_slug:
+            missed.append({**item, "why": "目标解析不到 slug", "source_slug": src_slug})
+            continue
+        # 先确认图里确有这条出边（否则回报 missed，语义与旧实现一致）
+        rels = ke_graph.relations_of(kb_id, src_slug) or {}
+        hit = any((o.get("target_slug") == target_slug) and (not rel_type or o.get("type") == rel_type)
+                  for o in (rels.get("out") or []))
+        if not hit:
+            missed.append({**item, "why": "图里没有这条出边（可能已删）", "source_slug": src_slug})
+            continue
+        ke_graph.delete_edge(kb_id, src_slug, target_slug, rel_type)
+        done.append({**item, "source_slug": src_slug, "target_slug": target_slug})
     return {"retracted": done, "missed": missed}
 
 
