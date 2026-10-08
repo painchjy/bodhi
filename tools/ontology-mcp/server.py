@@ -4212,7 +4212,8 @@ def _log_tool_call(name: str, args: dict, result, ms: float) -> None:
         summary = result if isinstance(result, dict) else {}
         keys = ("applied", "created", "merged", "pending", "violations", "unmatched", "retract",
                 "retract_planned", "crud_matrix", "report_page", "page_versions", "count",
-                "catalog", "id", "name", "error", "how_to_use", "source", "note")
+                "catalog", "id", "name", "error", "how_to_use", "source", "note",
+                "images_found", "images", "by_document")
         picked = {}
         for key in keys:
             if key in summary:
