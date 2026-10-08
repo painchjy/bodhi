@@ -408,6 +408,9 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
         "source": {"doc_title": doc, "doc_refs": [doc],
                    "source_text": (quotes[0] if quotes else "（本次评审未附逐字证据）"),
                    "session_no": session_no, "session_slug": session_slug},
+        "metadata_extra": {"review": {"doc": doc, "policy": policy, "policy_slug": policy_slug,
+                                      "rules": len(items), "verdicts": verdicts,
+                                      "generator": REVIEW_TAG}},
     }
     written = ke_pages.write_knowledge(kb, spec, strict_source=True)
     return {"ok": True, "kb": {"id": kb, "name": kb_name}, "slug": slug, "title": title,

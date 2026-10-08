@@ -468,6 +468,9 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
         attrs["bmm:sourceLocator"] = src["locator"]     # L2：片段定位（数据属性）
     metadata = {"ontology": {"model": page_type.split(":", 1)[0], "class": page_type,
                              "name": title, "attributes": attrs, "generator": TAG_CONTRACT}}
+    for k, v in (spec.get("metadata_extra") or {}).items():     # 如 review 页的 `page_metadata.review`
+        if k != "ontology":
+            metadata[k] = v
     if src.get("derived_from"):
         metadata["design"] = {"derived_from": [s for s in src["derived_from"] if s],
                               "generator": TAG_CONTRACT}
