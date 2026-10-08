@@ -425,6 +425,100 @@ def render_entity_content(kb_id: str, spec: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+SESSION_CLASS = "bmm:KnowledgeSession"
+
+
+def ensure_session_page(kb_id: str, session_no: str, *, session_name: str = "",
+                        agent_name: str = "", role: str = "", initial_question: str = "",
+                        tenant_id: int | None = None) -> dict:
+    """**核心会话页机制**（契约 §5.1 · 2026-10-09）：确保「会话页」存在；**智能体/角色切换 → 新建分页**。
+
+    规则（用户口径）：
+    - 会话页**没有** → **创建**（起始页 `partNo=1`）；
+    - 会话页**已有**、且**场景指纹**（agent+role）与某分页一致 → **复用**该分页；
+    - 场景变了（**换智能体 / 换角色**）→ 建**新分页** `session/<no>/p<n>`，并在起始页「## 分页索引」登记。
+
+    这些都在**核心**做；外围智能体只要把 `session_no` + 场景（agent/role）传进来。
+    返回 `{slug, part_no, created, paginated}`（供内核写 `bmm:sourceSession` 边）。
+    """
+    import json  # noqa: PLC0415
+    sno = str(session_no or "").strip()
+    if not sno:
+        return {"slug": "", "created": False, "paginated": False, "reason": "缺 session_no"}
+    fp = "|".join([str(agent_name or "").strip(), str(role or "").strip()]).strip("|")
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(page_metadata::text,'{}') AS md FROM wiki_pages "
+        "WHERE knowledge_base_id=%s AND page_type=%s AND deleted_at IS NULL "
+        "AND (content LIKE %s OR slug LIKE %s) ORDER BY length(slug) ASC"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(SESSION_CLASS),
+           ke_db.sql_str("%" + sno + "%"), ke_db.sql_str("session/" + sno + "%")))
+
+    def _fp_of(md_text):
+        try:
+            attrs = ((json.loads(md_text or "{}").get("ontology") or {}).get("attributes") or {})
+        except Exception:  # noqa: BLE001
+            attrs = {}
+        return "|".join([str(attrs.get("agentName") or attrs.get("bmm:agentName") or "").strip(),
+                         str(attrs.get("role") or attrs.get("bmm:role") or "").strip()]).strip("|")
+
+    base = rows[0]["slug"] if rows else ""          # 最短 = 起始页
+    for r in rows:
+        if _fp_of(r["md"]) == fp:
+            return {"slug": r["slug"], "part_no": _part_no(r["slug"]), "created": False,
+                    "paginated": False}
+    # 需要新建：起始页（没有）或新分页（场景变了）
+    part_no = 1 if not base else (max([_part_no(x["slug"]) for x in rows] or [1]) + 1)
+    slug = ("session/%s" % sno) if part_no == 1 else ("session/%s/p%d" % (sno, part_no))
+    title = (session_name.strip() if (part_no == 1 and session_name) else
+             ("会话分页 p%d · %s" % (part_no, session_name or sno)))
+    attrs = {"bmm:sessionNo": sno, "bmm:sessionName": session_name or title,
+             "bmm:sessionStatus": "进行中", "bmm:isAuthoritative": True,
+             "bmm:partNo": str(part_no), "bmm:startedAt": ke_db.now_text()}
+    if agent_name:
+        attrs["bmm:agentName"] = agent_name
+    if role:
+        attrs["bmm:role"] = role
+    if initial_question:
+        attrs["bmm:initialQuestion"] = initial_question
+    head = ["# %s（`%s`）" % (title, SESSION_CLASS), "",
+            "> **本体类型**：知识会话（`%s`）  " % SESSION_CLASS,
+            "> **来源会话**：%s  " % sno, ""]
+    if part_no == 1 and initial_question:
+        head += ["%s" % initial_question, ""]
+    head += render_attributes_section(SESSION_CLASS, attrs)
+    if part_no > 1 and base:                     # 起始页登记分页索引
+        _register_session_part(kb_id, base, slug, title)
+    upsert_page(kb_id, slug, title, SESSION_CLASS, "\n".join(head).rstrip() + "\n",
+                summary=(initial_question or title)[:200], tag=TAG_CONTRACT,
+                metadata={"ontology": {"model": "bmm", "class": SESSION_CLASS, "name": title,
+                                       "attributes": attrs, "generator": TAG_CONTRACT}})
+    return {"slug": slug, "part_no": part_no, "created": (part_no == 1), "paginated": (part_no > 1)}
+
+
+def _part_no(slug: str) -> int:
+    m = re.search(r"/p(\d+)$", slug or "")
+    return int(m.group(1)) if m else 1
+
+
+def _register_session_part(kb_id: str, base_slug: str, part_slug: str, part_title: str) -> None:
+    """在会话起始页的「## 分页索引」追加一条（幂等）。"""
+    row = ke_db.psql_csv("SELECT COALESCE(content,'') AS c FROM wiki_pages WHERE knowledge_base_id=%s "
+                         "AND slug=%s AND deleted_at IS NULL" % (ke_db.sql_str(kb_id), ke_db.sql_str(base_slug)))
+    if not row:
+        return
+    c = row[0]["c"]
+    if part_slug in c:
+        return
+    line = "- %s · %s" % (part_slug, part_title)
+    if "## 分页索引" in c:
+        c = c.rstrip() + "\n" + line + "\n"
+    else:
+        c = c.rstrip() + "\n\n## 分页索引\n" + line + "\n"
+    ke_db.psql("UPDATE wiki_pages SET content=%s, version=version+1, updated_at=now() "
+               "WHERE knowledge_base_id=%s AND slug=%s;"
+               % (ke_db.sql_str(c), ke_db.sql_str(kb_id), ke_db.sql_str(base_slug)), stdin=True)
+
+
 def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                     strict_source: bool = True) -> dict:
     """**知识写入统一内核**（契约 §1/§2/§8）。所有写入器都应薄封装本函数。
@@ -503,15 +597,30 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
             graph["edges_written"] += 1
         except Exception as exc:  # noqa: BLE001
             graph["edge_errors"].append({"type": rt, "target_slug": ts, "error": str(exc)[:160]})
-    # ④ 会话溯源边（L1）—— 会话页必须**已存在**（`session_provenance`/`save_knowledge` 建），否则挂不上
-    if src.get("session_slug"):
+    # ④ 会话溯源边（L1）—— **核心自动确保会话页**（没有则建；换智能体/角色→新建分页）。
+    #    外围只需传 `source.session_no` + 场景（session_name/agent_name/role）。
+    session_slug = (src.get("session_slug") or "").strip()
+    if not session_slug and src.get("session_no"):
+        try:
+            _sp = ensure_session_page(kb_id, src["session_no"],
+                                      session_name=src.get("session_name", ""),
+                                      agent_name=src.get("agent_name", ""),
+                                      role=src.get("role", ""),
+                                      initial_question=src.get("initial_question", ""))
+            session_slug = (_sp.get("slug") or "")
+            if _sp.get("created") or _sp.get("paginated"):
+                graph["session_page"] = {"slug": session_slug, "part_no": _sp.get("part_no"),
+                                         "created": _sp.get("created"), "paginated": _sp.get("paginated")}
+        except Exception as exc:  # noqa: BLE001
+            warnings.append("会话页确保失败：%s" % str(exc)[:160])
+    if session_slug:
         try:
             _kg._ensure_instance(kb_id, slug, page_type)
-            _kg._ensure_instance(kb_id, src["session_slug"], _kg._page_type(kb_id, src["session_slug"]))
+            _kg._ensure_instance(kb_id, session_slug, _kg._page_type(kb_id, session_slug))
             _kg._run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) "
                      "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
                      "MERGE (a)-[r:`bmm:sourceSession`]->(b)",
-                     {"kb": kb_id, "s": slug, "t": src["session_slug"]})
+                     {"kb": kb_id, "s": slug, "t": session_slug})
         except Exception as exc:  # noqa: BLE001
             warnings.append("会话溯源边写入失败：%s" % str(exc)[:160])
     return {"applied": True, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
