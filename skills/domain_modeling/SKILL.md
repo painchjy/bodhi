@@ -8,7 +8,7 @@ models: [bmm, agent]
 default_model: bmm
 sources: [document]
 stages: [extract]
-tools: [doc_outline, extract_state, save_knowledge, link_candidates, list_link_candidates, resolve_link_candidate, ontology_types, skills, wiki_search, wiki_read_page, get_document_info, grep_chunks, list_knowledge_chunks]
+tools: [doc_outline, extract_state, save_knowledge, link_candidates, list_link_candidates, resolve_link_candidate, image_extract, ontology_types, skills, wiki_search, wiki_read_page, get_document_info, grep_chunks, list_knowledge_chunks]
 inputs:
   knowledge_id: 必填。本次要处理的那一篇（文档名或 id；<pinned_documents> 里的最准）
   budget_tokens: 可选。本轮上下文的 token 上限（会话参数；默认取 BODHI_ROUND_BUDGET_TOKENS=8000）
@@ -98,6 +98,9 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
 - 一轮一批：**不要**在一次回答里连读多批再拼大表 —— 用户看不见进度、也没法中途改阈值。
 - **关系只走图谱边（2026-10-05）**：`save_knowledge(stage="graph")` 的 `edges` 直落 Neo4j 图边；
   wiki 的 `in_links`/`out_links` 已废弃恒空，**不要**重算、不要建议「重算入边索引」（巡检 A2 已移除）。
+- **图里才有信息 → 先 `image_extract`（2026-10-08）**：`doc_outline` 的「图/表位置」里若是**图**（部署图/拓扑/截图），
+  先 `image_extract(kb_id, knowledge_id, figure_no?)` 取文档内嵌图，由你的**多模态能力**按 `multimodal_extraction`
+  技能契约读图（契约 v0 + 门禁 1–4）；图里才有的知识**不得凭文字臆断**。
 
 ## 汇报（每轮）
 

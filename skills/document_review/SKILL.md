@@ -6,7 +6,7 @@ when: 用户要"按某策略/规范评审这份文档（方案、需求、设计
 models: [bmm]
 default_model: bmm
 stages: [model, pick, rules, judge, report]
-tools: [rules_of_policy, graph_query, reference_lookup, review_apply, doc_outline, get_document_info, list_knowledge_chunks, grep_chunks, wiki_search, wiki_read_page, ontology_types, audit_scan]
+tools: [rules_of_policy, graph_query, reference_lookup, review_apply, image_extract, doc_outline, get_document_info, list_knowledge_chunks, grep_chunks, wiki_search, wiki_read_page, ontology_types, audit_scan]
 version: 0.3.0
 ---
 
@@ -46,6 +46,7 @@ doc_outline(kb_id, knowledge_id, budget_tokens=…)      # 按章节/切片取�
 # 或 list_knowledge_chunks / grep_chunks 精确找某一节
 ```
 > **只取该范围内的章节**；范围缺失时（`ruleScope` 为空）才退化为全文找关键词，并在结论里注明"范围未标注"。
+> **范围里有图**（部署架构图 / 拓扑图 / 技术栈勾选表截图）→ 先 `image_extract(kb_id, knowledge_id, figure_no?)` 取**文档内嵌图**（WeKnora 把图抽成正文里的 `![alt](resource://id)`），用你的**多模态能力**按 `multimodal_extraction` 技能**契约 v0 + 门禁 1–4** 读图；**图里才有的信息**（如"部署方式/灾备方式"）不得凭文字硬判。
 
 ### 第 3 步：按**实现方式**分流判定
 

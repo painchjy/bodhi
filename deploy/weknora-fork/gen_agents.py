@@ -81,12 +81,14 @@ OPS_TOOLS = [
     "mcp_bodhi_ontology_audit_purge",
     "mcp_bodhi_ontology_rules_of_policy", "mcp_bodhi_ontology_graph_query",
     "mcp_bodhi_ontology_reference_lookup",
+    "mcp_bodhi_ontology_image_extract",     # 文档内嵌图识别（只读，2026-10-08）
 ]
 # 「EA 概要设计」智能体：只读 wiki + 看本体类型 + **设计落库工具**（不给原生写页、不给抽取）
 DESIGN_TOOLS = [
     "grep_chunks", "list_knowledge_chunks", "get_document_info",
     "wiki_search", "wiki_read_page",
     "mcp_bodhi_ontology_ontology_types", "mcp_bodhi_ontology_save_knowledge",
+    "mcp_bodhi_ontology_image_extract",     # 文档内嵌图识别（只读，2026-10-08）
 ]
 # 「本体建模与设计（技能驱动）」：**合并智能体**（= 抽取 + 概要设计 + 详细设计，差异全在技能里）。
 # 工具是上面几套的并集 + `skills`（技能目录/指令）+ `audit_scan/audit_plan`（详设后念巡检结论）。
@@ -122,6 +124,7 @@ MODELER_TOOLS = [
     # 文档评审（2026-09-29）：按策略下规则逐条评（LLM软规则 / 图检索 / 参考规范）
     "mcp_bodhi_ontology_rules_of_policy", "mcp_bodhi_ontology_graph_query",
     "mcp_bodhi_ontology_reference_lookup", "mcp_bodhi_ontology_review_apply",
+    "mcp_bodhi_ontology_image_extract",     # 文档内嵌图识别（只读，2026-10-08）
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
                   "design": DESIGN_TOOLS, "modeler": MODELER_TOOLS, "dev": MODELER_TOOLS}
