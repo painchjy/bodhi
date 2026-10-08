@@ -83,10 +83,10 @@ version: 1
 ### 3.3 `import_apply(ticket, acknowledge_risks, prune?, actor?)` — 写（**一次一个目标**）
 ```
 输出: {ok, batch: "imp-20260929-01", target, created: 1998, updated: 3, pruned: 0,
-       pages: […前 10…], relations_written: 2001, in_links_rebuilt: true,
+       pages: […前 10…], relations_written: 2001,
        ledger: "state/import/imp-20260929-01.json", duration_ms: 4210}
 ```
-实现要点：按 500 行/事务多值 `INSERT`；`out_links` 随正文写；结束时 `ke_pages.rebuild_in_links_sql(kb)` 全库重算一次；
+实现要点：按 500 行/事务多值 `INSERT`；关系直写 Neo4j 图边（`out_links`/`in_links` 已废弃恒空，不再派生/重算）；
 `sync_folders --link-pages`（目录树）；不触发相似度/待确认合并（那是 `save_knowledge` 的活）。
 
 ### 3.4 `import_state(batch?)` — 只读
@@ -161,7 +161,7 @@ version: 1
 | 批 | 内容 | 验收断言 |
 |---|---|---|
 | **P0** | `ke_sheet.py`（零依赖 xlsx/csv 读）+ `import_probe` + `import_plan/apply/state`（`kind=class`）+ 技能 `structured_modeling` | 2001 行主系统一次 apply：页数=行数、0 重复 slug、`## 原文依据` 全有、巡检 C1/F3/B1 全绿、耗时 < 60s、重跑 0 写入 |
-| **P1** | `kind=relation`（外键列 → `## 本体关系` + `out_links` + 全库 `in_links` 重算） | 2001 条边；`import_state.remaining=[]`；图谱里能看到"主系统 → 子系统" |
+| **P1** | `kind=relation`（外键列 → 直写 Neo4j 图边） | 2001 条边；`import_state.remaining=[]`；图谱里能看到"主系统 → 子系统" |
 | **P2** | Word/MD 条目式（业务规则）→ `bmm:OperativeBusinessRule` + `hasEnforcementLevel(Strict/Advisory)` + 策略页 | 规则页=条目数；执行级别边=条目数；解析不出的片段进"待人工清单 CSV" |
 | **P3** | 前端"上传 xlsx → 预检表 → 一键导入"面板（调 HTTP 端点）+ `import_state` 进度条 | 上传到出页 ≤ 1 次点击；进度可见 |
 

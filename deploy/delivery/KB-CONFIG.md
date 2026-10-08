@@ -87,7 +87,7 @@ UPDATE knowledge_bases SET extract_config = '{"enabled": false}'::jsonb, updated
 |---|---|
 | `page_type` 用**前缀:类名** | 如 `ea:Service`、`ea:Step`、`easvc:ServiceOperation`；必须是本体模型库里有声明的类（否则巡检 B1）|
 | slug 规则 | `<模块>/<类小写>/<标题>`，例如 `ea/mcpservice/签约账户选择服务`；同标题重复会导致 D1 |
-| 关系写进正文 `## 本体关系` | MCP 落库时自动写；人工不要手改（`## CRUD 矩阵` 等派生小节会被服务端重算覆盖）|
+| 关系只走图谱边 | 关系经 `save_knowledge(stage="graph").edges` / `add_relation` 直写 Neo4j 图；wiki `in_links`/`out_links` 已废弃恒空 |
 | `source_refs` 溯源 | 实例页必须有来源文档；设计生成的页从"服务页/报告页"继承。**空来源**会被巡检判 C1（high）|
 | 类型/关系只能取本体面 | `ontology_types(model, focus?)`；`nodes[].attributes` / `edges[].properties` 的键必须是该类声明过的数据属性 |
 

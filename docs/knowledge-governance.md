@@ -19,8 +19,7 @@
 |---|---|
 | 本页 `slug` / `wiki_path` / `category_path` / `page_metadata.ontology.{class,class_label,model}` | 一次 UPDATE（先快照 + `version+1`） |
 | 其他页正文 `## 本体关系` 行（`[[slug\|标题]]`、`wiki:slug`） | 按旧 slug → 新 slug 精确替换（逐页快照） |
-| 其他页 `out_links` jsonb | 数组元素替换（jsonb 层） |
-| 本页/其他页 `in_links` | 落库后 `ke_pages.rebuild_in_links_sql()` 重算（不用手改） |
+| 关系（Neo4j 图边） | `out_links`/`in_links` 已废弃恒空；图边随页迁移（`retag` 已直写图，不派生出入链） |
 | 设计页 `## 溯源` 的「上游页面：\`<slug>\`」与 `page_metadata.design.upstream` | 同上替换 |
 | 待确认页 `page_metadata.ontology.candidate_slug` | 替换 |
 | 会话状态 `state/domain_sessions/<kb>/*.json` 的 `pages[].slug` | 替换（否则智能体续跑按旧 slug 找不到页） |

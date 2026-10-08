@@ -18,7 +18,7 @@
 | 跨库同名**回报** | `save_knowledge` → `cross_kb_same_name` | 目标只存在于别库 → **不合并**、只在回执里提示 |
 | 跨库**关系候选** | `link_candidates` → `resolve_link_candidate` | 先登记候选、用户确认后写本库关系（**不跨库建边**） |
 | 类型迁移**两段式** | `ke_pages.retag_preview/apply/rollback`（HTTP/CLI/MCP 三入口） | ticket=影响面指纹；缺确认即拒；可回滚 |
-| 页面引用**改写引擎** | `ke_pages.find_slug_refs` / `_rewrite_refs` / `_rewrite_session_state` / `rebuild_in_links_sql` | 迁移/改名时复用 |
+| 页面引用**改写引擎** | `ke_pages.find_slug_refs` / `_rewrite_refs` / `_rewrite_session_state` | 迁移/改名时复用 |
 
 | 缺的（本方案要补的） | 说明 |
 |---|---|
@@ -535,7 +535,7 @@ draft（自动摘取/智能体起草，默认）
 - **权限**：`ke_db.assert_can_write(kb_id, tenant)` —— 属主 / `kb_shares`（经 `organization_tenant_members`）写权限白名单
   / **身份缺失 fail-closed**。调用者租户来自 **MCP 请求头 `X-Bodhi-Tenant`**（`mcp_services.headers` 已配 `10000`），
   回落 env `BODHI_TENANT_ID`。**只有对企业共享概念模型库有写权限的租户**才能 apply ✓（决策 6 落地）。
-- 新增页面写助手 `ke_pages.upsert_page()`（概念页/映射页专用：新建 → INSERT + 重算 in_links + 建目录树；
+- 新增页面写助手 `ke_pages.upsert_page()`（概念页/映射页专用：新建 → INSERT + 建目录树；
   已存在 → 快照 + `version+1` + 元数据合并，可回退）。
 
 **4. 实测（2026-09-28 22:xx）**

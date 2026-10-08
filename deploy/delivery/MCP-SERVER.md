@@ -41,7 +41,7 @@ HTTP：`GET /bodhi/review/{rules,graph,reference}`、`POST /bodhi/review/apply`�
 ## 0. 它到底怎么工作（先理解，再部署）
 
 **本体类型迁移是两段式（2026-09-27 新增）**：改本体类型 = **迁移 slug（`模块/类/名称`）+ 联动引用**
-（关系行 / `out_links` / 正文引用 / `## 溯源` / `page_metadata` / **建模会话状态**），
+（正文引用 / `## 溯源` / `page_metadata` / **建模会话状态**；关系走 Neo4j 图，`out_links`/`in_links` 已废弃），
 必须"先 preview、用户确认后 apply"，缺确认一律拒绝：
 
 ```bash

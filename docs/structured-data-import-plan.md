@@ -141,7 +141,7 @@
   - **源里删掉的行**：`--prune` 时本批软删（不删别的批次/别人手工建的页）；
   - **回滚**：`state/import/<batch>.json` 台账 + 快照，一条命令回到导入前。
 - **性能**：4.5k 页按 500 行/事务 → **单事务多值 `INSERT`**，总耗时秒级~十几秒；
-  关系（`out_links`）随正文一起写，**入边一条 SQL 全库重算**（`ke_pages.rebuild_in_links_sql`）。
+  关系直写 Neo4j 图边（`out_links`/`in_links` 已废弃恒空，不再派生/重算）。
 - **不走 `save_knowledge`**：那条路有"相似度匹配 → 合并/待确认"逻辑，4k 行会产生大量"待确认"，
   正好违背"不要反复确认"。
 - 导入后固定三件事：① 重算 `in_links`；② `sync_folders.py --kb-id <kb> --link-pages`（目录树）；

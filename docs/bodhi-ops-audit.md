@@ -37,13 +37,13 @@
 
 ## 2. 检查项与判定口径（P1 已实现）
 
-数据源：PG `wiki_pages`（`page_type` / 正文 `## 本体关系` / `out_links` / `in_links` /
-`page_metadata.ontology` / `source_refs` / `deleted_at`）、PG `knowledges`、Neo4j 本体投影（经 `ke_ontology`）。
+数据源：PG `wiki_pages`（`page_type` / `page_metadata.ontology` / `source_refs` / `deleted_at`）、PG `knowledges`、Neo4j 图（`BodhiInstance` 节点/边）与本体投影（经 `ke_ontology`）。
+
+> **2026-10-05 M3**：关系只走 Neo4j 图，wiki `out_links` / `in_links` 两列已**废弃恒空**，巡检不再读它们；原 **A2「反向边 in_links 不一致」已移除**（下表不再列 A2）。
 
 | # | 检查 | 判定 | 严重度 | P2 可自动修 |
 |---|---|---|---|---|
-| A1 | 悬空出边 | 正文关系行/`out_links` 指向的 slug 在本 KB 活页里不存在 | high | ✅ 删该关系行 + 重算 in_links |
-| A2 | 反向边不一致 | 期望 `in_links`（由所有页出边推导）≠ 实际值 | medium | ✅ 重算（幂等） |
+| A1 | 悬空出边 | 正文关系行指向的 slug 在本 KB 活页里不存在 | high | ✅ 删该关系行 |
 | A3 | 类型自相矛盾 | `page_type` ≠ `page_metadata.ontology.class/type`（补前缀后比较） | medium | ❌ 需人确认以谁为准 |
 | A4 | 关系 domain 非法 | 关系类型不在 `ke_ontology.relation_type_map(page_type)`（**含父类继承**）里 | high | ❌ 需人/模型层决定 |
 | A5 | 重复/自环关系行 | 同页出现相同 `(关系, 目标)` 多次；或目标 = 自己 | low | ✅ 去重该行 |
@@ -110,9 +110,8 @@ ke_audit.py apply <kb_id> --plan-id <id> --confirm  # 执行（缺 --confirm 直
 | `mixed_source_refs` | 多源页摘掉已删文档的引用（页保留） |
 | `soft_deleted_rows` | 软删旧行（D2）→ 硬删（含其快照） |
 | `orphan_revisions` | 孤儿版本快照（D3）→ 删 |
-| `dangling_edges` | 悬空关系行（A1）→ 删该行（快照 + 版本+1 + 重算 out/in_links） |
+| `dangling_edges` | 悬空关系行（A1）→ 删该行（快照 + 版本+1） |
 | `dup_edges` | 重复/自环关系行（A5）→ 去重（同上） |
-| `in_links` | 重算 in_links（A2，幂等，无内容改动） |
 
 **删节点 = 连关系一起删（级联）** —— 计划里以 `actions.cascade_edges` 提前报出「会顺带删掉多少页上的多少行关系」：
 - 被删页**自己的出边**随页消失（页没了，正文也没了）；
@@ -144,7 +143,7 @@ ke_audit.py apply <kb_id> --plan-id <id> --confirm  # 执行（缺 --confirm 直
 ## 5. 误报/边界记录
 
 - `ontology/index`（总览页，`page_type=ontology:Module`）不算 B4 的"多余页" → 已豁免；
-- A2 只比"出边推导 vs `in_links` 列"，不判断"谁对"——`in_links` 由 `ke_pages.rebuild_in_links_sql` 生成，重建即幂等；
+- A2（反向边 `in_links` 不一致）已于 **2026-10-05 M3 移除**：关系只走 Neo4j 图，`in_links`/`out_links` 废弃恒空，不再校验、也不再重算；
 - A1 的两种成因（目标页从未创建 / 目标页被删）在报告里都表现为"页不存在"，需人看 `detail` 里的 slug 决定删边还是补页；
 - 页面数量超过 `page_limit`（默认 5000）时 `summary.truncated=true`，报告只覆盖前 N 页。
 
@@ -160,10 +159,10 @@ ke_audit.py apply <kb_id> --plan-id <id> --confirm  # 执行（缺 --confirm 直
 | 拒绝：数据变了再 apply 旧 plan（防漂移） | 出计划 → 人为再加一页 → `apply(旧 plan_id)` → `数据已变化（plan_id 不匹配）——请重新 plan 并再次确认`；沙箱数据**未被改动** ✅ |
 | `init_wiki` | 沙箱 2 页/2 快照/1 目录 → **全删**，四张表归 0；之后 `audit` findings=0 ✅ |
 | `dangling_edges` | 悬空关系行被删；`version 5→6`、`last_edit_source=bodhi-ops-edit`、**生成新版本快照** ✅；重跑 `audit` 该 A1 消失 |
-| `in_links` | 重算执行成功（幂等） ✅ |
+| ~~`in_links`~~（已移除） | 2026-10-05 M3：关系走图，无此修复项 ✅ |
 | `soft_deleted_rows` / `orphan_revisions` | 计划计数正确（在 `init` 之后被执行时已为 0，属预期：init 已一并清掉） ✅ |
 | `cascade_edges`（删页连带删边） | 沙箱：B 页有 `[[A]]` 出边、A 被判为"无来源"→ 计划报 `cascade_edges{pages:1, lines:1}`；执行后 **A 已删、B 正文里的指向行消失**、B `version+1` 且 `last_edit_source=bodhi-ops-edit` ✅ |
-| `init_wiki` 保留索引页 | 沙箱 init 执行后**只剩 `('index','index')`**；目录已重建、in_links 已重算、复检 findings=0 ✅ |
+| `init_wiki` 保留索引页 | 沙箱 init 执行后**只剩 `('index','index')`**；目录已重建、复检 findings=0 ✅ |
 | 业务库未被波及 | 全程 `pages=53`（沙箱用独立 KB id，用完即删） ✅ |
 | MCP `audit_plan` | `tools/list` 有该工具；调用返回 `plan_id` 与 actions（**不执行**） ✅ |
 | HTTP `/bodhi/audit/apply` 无 confirm | `400 {"error":"拒绝执行：必须显式确认…"}` ✅ |
