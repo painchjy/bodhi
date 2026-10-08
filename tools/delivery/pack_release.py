@@ -93,7 +93,7 @@ def copy_tree(src: pathlib.Path, dst: pathlib.Path, ignore_pycache: bool = True,
         out = []
         cur = pathlib.Path(dir_path)
         for n in names:
-            if n == "archive" or n in skip_names or n in skip_files:
+            if n in ("archive", ".backup") or n in skip_names or n in skip_files:
                 out.append(n)
             elif n.startswith("~$"):          # Excel/Office 临时锁文件（0 字节，内容相同会撞去重断言）
                 out.append(n)
@@ -167,7 +167,7 @@ def check_no_duplicates(stage: pathlib.Path) -> dict:
             else:
                 seen[h] = (pkg.name, rel)
     if dups:
-        lines = "\n".join("   %s/%s  ==  %s/%s" % (a[0], a[1], b[0], b[1]) for a, b, _ in dups)
+        lines = "\n".join("   %s  ==  %s" % (d[1], d[2]) for d in dups)
         raise SystemExit("!! 发现重复内容（每个文件只能属于一个路径/一个包）：\n%s" % lines)
     return {"unique_files": len(seen), "per_package": dict(per_pkg)}
 

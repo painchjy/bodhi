@@ -1,14 +1,26 @@
 [
   {
+    "skill": "document_review",
+    "name": "文档评审（按业务策略下的业务规则逐条评）",
+    "version": "0.3.0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 8185,
+    "bundle": "document_review-0.3.0.zip",
+    "sha256": "e024ec9c38cee8252c1787aa9a3b0a0aed9e286e1229cc6153a7899c6af85f26",
+    "problems": []
+  },
+  {
     "skill": "domain_modeling",
     "name": "领域知识建模",
     "version": "0.2.0",
     "files": [
       "SKILL.md"
     ],
-    "bytes": 6739,
+    "bytes": 9823,
     "bundle": "domain_modeling-0.2.0.zip",
-    "sha256": "01753677dc1fcc50cf92a38108a01dd5156de0746fee5aaf13921d7059521993",
+    "sha256": "845472c58505a8b7a906e77a6a4a9aacbdf1f8b0a8c74bb1b91cff52ffc072fb",
     "problems": []
   },
   {
@@ -24,6 +36,42 @@
     "problems": []
   },
   {
+    "skill": "model_recommendation",
+    "name": "建模方案推荐（判需求种类 → 选建模路线 → 给建议单）",
+    "version": "0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 10629,
+    "bundle": "model_recommendation-0.zip",
+    "sha256": "1b79a81097f5b865fd90882b3f200e101ab40490794ac34649c36da549b3fda0",
+    "problems": []
+  },
+  {
+    "skill": "multimodal_extraction",
+    "name": "多模态识别（文档内嵌图 → 结构/语义 + 证据 + 置信度）",
+    "version": "0.1.0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 5296,
+    "bundle": "multimodal_extraction-0.1.0.zip",
+    "sha256": "862cd30da4fc578dfbf2141dc8ac9a85431937a57bee929757b466d4eb83f81a",
+    "problems": []
+  },
+  {
+    "skill": "revision_trace",
+    "name": "评审轮次比对与问题溯源",
+    "version": "0.2.0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 3093,
+    "bundle": "revision_trace-0.2.0.zip",
+    "sha256": "e58af2f088e071f42cd9a8960910f26bf21743736f3b56c0d5b337d213371118",
+    "problems": []
+  },
+  {
     "skill": "service_detailed_design",
     "name": "服务详细设计",
     "version": "0.1.1",
@@ -36,6 +84,54 @@
     "bytes": 48752,
     "bundle": "service_detailed_design-0.1.1.zip",
     "sha256": "84dbf667c2c6cf7d002a0696d4182a3f0d3c684a4c59ac2b9adef50a601aee1d",
+    "problems": []
+  },
+  {
+    "skill": "session_provenance",
+    "name": "会话知识溯源（知识来源＝智能体会话）",
+    "version": "0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 11585,
+    "bundle": "session_provenance-0.zip",
+    "sha256": "b4e6e2ab4262e44ee2546234794b4ca416a06636345b7a16abdb4a7a440f0275",
+    "problems": []
+  },
+  {
+    "skill": "skill_development",
+    "name": "设计开发（业务智能体 / 业务技能的设计、开发、配置安装与模拟验证）",
+    "version": "0",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 6663,
+    "bundle": "skill_development-0.zip",
+    "sha256": "eb4fbf54ac72d9e76cdec824c2bd66b478c5918040861863f03986c8c386a15c",
+    "problems": []
+  },
+  {
+    "skill": "structured_modeling",
+    "name": "结构化数据批量建模（Excel / CSV → 本体类与关系）",
+    "version": "2",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 9348,
+    "bundle": "structured_modeling-2.zip",
+    "sha256": "79a6bdcb477dd7d0e2f540abdde146c96f63ca2374b1da727ce7063c4ca36567",
+    "problems": []
+  },
+  {
+    "skill": "tech_review_extraction",
+    "name": "技术方案知识提取（重点规则推理前的知识提取）",
+    "version": "0.2.1",
+    "files": [
+      "SKILL.md"
+    ],
+    "bytes": 5004,
+    "bundle": "tech_review_extraction-0.2.1.zip",
+    "sha256": "3a18bcae099a54b661e12ae5dd4be553c0173b992ae23f86da31d530eec0f5d7",
     "problems": []
   }
 ]
