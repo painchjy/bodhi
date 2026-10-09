@@ -278,13 +278,26 @@ SYNTAX_OK
 ④ CONTRACT_MODES = ('entity','document') | 别名 = {'raw':'document'}
 ```
 
-### 10.4 待办
-- **本体声明**（用户确认类清单后）：给"文档类"加数据属性 `bmm:wikiContent`（**必须带 `rdfs:domain`**）：
-  候选 —— `bmm:Assesment`（评估）、`agent:Evaluation`（评测）、`agent:DesignSpec`（设计单）、
-  `agent:Advice`（建议）、`agent:InstallGuide`（安装指南）… **待用户圈定**；
-  （顺带：`bmm:Assesment` 拼写疑似漏了 s，应为 `Assessment`）
-- **清理存量**：`page_type='summary'` 的报告页归到本体的文档类（走现成 `retag` 两段式），
-  前端为 `summary` 做的那些适配（`CONTENT_TABS` / `graphFilterTypes`）可一并收敛。
-- 之后 `write_knowledge` **完全按本体**决定渲染，业务代码里不再有 `summary`/`design` 这类自造模式。
+### 10.4 落地状态（2026-10-09）
+**已完成**：
+- 本体 `ontology/sources/bmm.ttl` 新增数据属性 **`:wikiContent`（`rdfs:domain :Assessment`）**，
+  并写明"**必须带 domain**，否则全库变 document"；
+- 重编译（校验通过）+ **重投影到 Neo4j**（`00_constraints` 11 条 + `10_ontology` 536 条，ok=bad=0）；
+- 实测：`bmm:Assessment → document`、`bmm:Goal / bmm:BusinessProcess / bmm:KnowledgeSession → entity`、
+  `wikiContent 声明 = {'bmm:wikiContent': ['bmm:Assessment']}`。
+
+**更正**：上轮我说 `bmm:Assesment` 拼写漏了 s —— **是我读乱码日志看错了**，
+本体里的类名是 **`bmm:Assessment`**（正确）。评审报告页归到它就对了。
+
+**待你决定（agent 侧文档类）**：`agent:Evaluation / DesignSpec / Advice / InstallGuide` 要不要也变 document？
+编译器**禁止跨模块同名属性**（实测 `[ERROR E3] wikiContent … 定义在 agent:wikiContent … bmm:wikiContent`，
+提示里有 `allow-name-collisions` 开关），所以有三条路：
+1. **在 `agent.ttl` 里另起名**（如 `agent:docContent`）—— 但语义上不统一，不推荐；
+2. **让 `bmm:wikiContent` 的 `rdfs:domain` 跨模块**（需在 `bmm.ttl` 声明 `@prefix agent:`，
+   且 `agent:*` 类要能被 `BODHI_DOMAIN` 边引用）—— 语义最干净：**一个属性管全部文档类**；
+3. 用编译器的 `allow-name-collisions` 放开（各模块各声一份）—— 最省事，但放宽了全局校验。
+
+**仍待办**：把存量 `page_type='summary'` 的报告页归到 `bmm:Assessment`（走现成 `retag` 两段式），
+前端为 `summary` 做的适配（`CONTENT_TABS` / `graphFilterTypes`）可一并收敛。
 
 
