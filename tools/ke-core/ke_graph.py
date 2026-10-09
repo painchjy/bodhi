@@ -471,6 +471,53 @@ def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
             "types": len(by_type), "total": len(triples or [])}
 
 
+def upsert_nodes_batch(kb_id: str, rows: list) -> int:
+    """**批量 upsert 图节点（P3-0b，2026-10-10）**：`rows=[{slug,name,page_type,tenant_id,
+    wiki_content,attrs}]` → **一条 `UNWIND`** 完成（旧路径是每节点 1 次 Neo4j）。
+
+    · 动态属性键（数据属性名不固定）用 **`SET n += row.attrs`**（map 合并，Cypher 允许动态键，
+      而 `SET n.某键=` 不能参数化）；
+    · `wiki_content` 用 `CASE` 保护：**传 null 表示"不改"**（不覆盖图上的正文）；
+    · `coalesce` 保护：缺字段不清空既有值；`MERGE` 幂等（重跑即续作）。
+    返回处理行数。**不读 PG**（供批量写路径先图后库用）。
+    """
+    payload = []
+    for r in (rows or []):
+        d = dict(r or {})
+        slug = str(d.get("slug") or "").strip()
+        if not slug:
+            continue
+        pt = str(d.get("page_type") or "")
+        attrs = {}
+        for k, v in (d.get("attrs") or {}).items():
+            key = str(k).split(":")[-1]
+            if not key or key in ("kb", "slug", "pt", "module", "name", "wc", "tenant"):
+                continue
+            attrs[key] = (v if isinstance(v, (str, int, float, bool))
+                          else json.dumps(v, ensure_ascii=False))
+        payload.append({
+            "slug": slug, "pt": pt or None, "module": _module_of(pt) or None,
+            "name": str(d.get("name") or "").strip() or None,
+            "tenant": d.get("tenant_id"),
+            "wc": d.get("wiki_content"),
+            "attrs": attrs,
+        })
+    if not payload:
+        return 0
+    _ensure_index()
+    _run("UNWIND $rows AS row "
+         "MERGE (n:BodhiInstance {kb_id:$kb, slug:row.slug}) "
+         "SET n.page_type = coalesce(row.pt, n.page_type), "
+         "    n.module = coalesce(row.module, n.module), "
+         "    n.name = coalesce(row.name, n.name), "
+         "    n.tenant_id = coalesce(n.tenant_id, row.tenant), "
+         "    n.wiki_content = CASE WHEN row.wc IS NULL THEN n.wiki_content ELSE row.wc END "
+         "SET n += row.attrs "
+         "RETURN count(n) AS n",
+         {"kb": kb_id, "rows": payload})
+    return len(payload)
+
+
 def update_edge(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
                 new_target_slug: str = "", label: str = "") -> dict:
     """改一条出边：删旧边（src→target_slug）→ 加新边（新类型/新目标）。"""
