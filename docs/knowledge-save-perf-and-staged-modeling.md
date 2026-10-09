@@ -289,13 +289,23 @@ SYNTAX_OK
 **更正**：上轮我说 `bmm:Assesment` 拼写漏了 s —— **是我读乱码日志看错了**，
 本体里的类名是 **`bmm:Assessment`**（正确）。评审报告页归到它就对了。
 
-**待你决定（agent 侧文档类）**：`agent:Evaluation / DesignSpec / Advice / InstallGuide` 要不要也变 document？
-编译器**禁止跨模块同名属性**（实测 `[ERROR E3] wikiContent … 定义在 agent:wikiContent … bmm:wikiContent`，
-提示里有 `allow-name-collisions` 开关），所以有三条路：
-1. **在 `agent.ttl` 里另起名**（如 `agent:docContent`）—— 但语义上不统一，不推荐；
-2. **让 `bmm:wikiContent` 的 `rdfs:domain` 跨模块**（需在 `bmm.ttl` 声明 `@prefix agent:`，
-   且 `agent:*` 类要能被 `BODHI_DOMAIN` 边引用）—— 语义最干净：**一个属性管全部文档类**；
-3. 用编译器的 `allow-name-collisions` 放开（各模块各声一份）—— 最省事，但放宽了全局校验。
+**agent 侧文档类（已解决，2026-10-09）**：你提的"agent import bmm 后直接用 `bmm:wikiContent`"**可行且更干净** —— 已验证代码依据：
+`loader.extract_properties`（`loader.py:468-492`）里**属性只在声明它的模块被抽出**（`module_graph.subjects(...)`），
+但 **`rdfs:domain` 是从合并图 `combined` 读的**（`combined.objects(subject, RDFS_DOMAIN)`）。
+所以在 `agent.ttl` 里**追加 domain** 即可，**bmm 模块不用动，也不用新属性、不撞 E3 同名限制**：
+
+```turtle
+@prefix bmm: <http://example.org/bmm#> .
+bmm:wikiContent rdfs:domain :Advice ;
+    rdfs:domain :DesignSpec ;
+    rdfs:domain :Evaluation ;
+    rdfs:domain :InstallGuide .
+```
+
+**实测**：重编译通过 → 重投影 **540 条 ok=540 bad=0**（比上次多 4 条 `BODHI_DOMAIN` 边）→
+`wikiContent 声明 = {'bmm:wikiContent': [agent:InstallGuide, agent:DesignSpec, agent:Advice, agent:Evaluation, bmm:Assessment]}`，
+判定：`bmm:Assessment / agent:Evaluation / agent:DesignSpec / agent:Advice / agent:InstallGuide → document`；
+`agent:Skill / agent:Agent / bmm:Goal / bmm:KnowledgeSession / bmm:BusinessProcess → entity`（**不误伤**）。
 
 **仍待办**：把存量 `page_type='summary'` 的报告页归到 `bmm:Assessment`（走现成 `retag` 两段式），
 前端为 `summary` 做的适配（`CONTENT_TABS` / `graphFilterTypes`）可一并收敛。
