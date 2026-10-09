@@ -140,6 +140,22 @@ save_knowledge 形参未变                    -> ['kb_id','stage','model','repo
 |---|---|---|
 | ~~P0-b~~ ✅ | **已完成**（见 §5.5）：热路径瘦身（目录/CRUD 可延迟）+ 关系**批量写进图** | §5.5 验收已过 |
 | **P0-c** | `save_knowledge` **写入段接新内核**：payload → spec 适配器 + **设计页正文渲染对齐**（服务页 `purpose/inputs/outputs/assertions/## 溯源`）+ 回执形状兼容 | 页面内容**不回归**；40 节点 < 90 s（内网）|
+| ~~P3-0~~ ✅ | 图侧批量建边：`add_edges_batch`（按关系类型 UNWIND）—— `3339401` | 40 边 → ≈关系类型数 次 |
+| ~~P3-0b~~ ✅ | `upsert_nodes_batch`（一条 UNWIND 批量 upsert 图节点）—— `7ee3b0d` | 40 节点 → 1 次 |
+| ~~P3-0c~~ ✅ | `preloaded`：免掉每页 2 次 psql（存在性 + 租户；`page_info_map` 补 `version`）—— `21bb271` | 40 节点 psql 120 → 40 |
+| ~~P3-0d~~ ✅ | 图节点批量**接线**（`skip_graph` + 循环后一条 UNWIND）—— `c036ebd` | 实测：逐节点 0 次 / 批量 1 次 / 建边 1 次 / failed=0 |
+| ~~P3-0e~~ ✅ | **`_bulk_write_pages` 原语**（多行 INSERT + 快照 + `UPDATE..FROM(VALUES)`）—— `584691d` | 3 页仅 2 次 psql；**默认未接线** |
+| **P3-0f** | **build/write 拆分 + 接 `_bulk_write_pages` + 真实库 diff** | psql 40 → ~3；总计 **≈ 8 次往返 / 2-3 s** |
+
+### 6.0 为什么 P3-0f 必须与 P0-c 一起做（2026-10-10 判断）
+- `_bulk_write_pages` 只在**多页批量**时有收益，而**当前唯一在产的多页路径是 `stage="graph"`**；
+  报告分支是**单页**（`write_knowledge` 调一次）→ 批量化对它**零收益**。
+- 接线必须先做 **build/write 拆分**（`_build_node` 只构建不落库），那会**改到生产热路径**
+  （报告分支正在用 `write_knowledge`）→ 必须与 **P0-c** 一次做完并在**真实库**上 diff
+  （比 `version / content / page_metadata / source_refs / wiki_page_revisions`），
+  否则等于"动热路径 + 零收益 + 无验证"。
+- P0-c 的 graph 分支**本来就需要**只构建不落库的能力（把设计页正文渲染出来交给 `wiki_content`），
+  所以拆分放在 P0-c 是**顺路**，不是额外成本。
 | **P1** | 观测性：`_log_tool_call` 改**两段写**（进入即写工具+完整 args 落 `logs/args/*.json`，返回补 result）+ 写库进度行 | ✅ **已完成**（见 §8）|
 | **P2** | 阶段表共享知识页（S0-S4 × 允许类 × 范围）+ `knowledge_save` **阶段白名单硬门禁** | 传越界类 → `violation` + 可选类清单 |
 | **P3** | 属性名规范化（去前缀/别名表/下划线-斜杠归一）+ 未知键进 `violations` + 回执「已纠正」清单 | 传 `under_score`/`a/b` → 自动规范 |
