@@ -100,7 +100,7 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 |---|---|---|---|
 | L1 会话 | `bmm:sourceSession` | **对象属性（图边）** | → `bmm:KnowledgeSession` 页；**有会话身份自动补**（幂等）；报告类无会话身份 → 回执 `warn` |
 | L2 片段 | `bmm:sourceLocator` | **数据属性** | 来源的**会话片段定位**（如 `session/S-20261008-01/p1#轮3/段5`）；进 `attributes` → 图属性 + 属性面板 |
-| L3 文档 | `source_refs` / `chunk_refs` + `## 原文依据` | 列 + 正文小节 | 逐字原文 + 定位（文档级/片段级） |
+| L3 文档 | `source_refs` / `chunk_refs` + `## 原文依据` | 列 + 正文小节 | 逐字原文 + 定位（文档级/片段级）。**2026-10-09 起降级为「有就写」的兼容字段**（WeKnora 内建列）：溯源**主口径 = L1 会话边 + 正文依据**，巡检 C1/C3 判「**会话边 或 source_refs 任一**」 |
 | L4 页面 | `page_metadata.design.derived_from` + `## 溯源` | 元数据 + 正文小节 | 上游 page slug 链 |
 
 `source` 入参：`{session_no?, part_no?, doc_refs?, chunk_refs?, derived_from?, source_text?}`。

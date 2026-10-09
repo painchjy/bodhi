@@ -237,10 +237,15 @@ connect() failed (111: Connection refused) while connecting to upstream:
 3. `out_links` 只在**新建页**时写 → 更新路径漏更 → 关系面板/巡检对不上（已修）；
 4. 关系**减不掉** → 用 `save_knowledge(..., retract: true)` 撤（会删关系行 + 同键的关系限定行，并留版本快照）。
 
-## 5. 巡检报 C1「无来源实例页」（high）
-**根因**：设计/生成出来的页没有 `source_refs`。设计页的来源按方案 C **继承自"服务页 + 报告页"**，
-所以 `save_knowledge(stage="graph")` 的 `report.upstream` **必须**带这两类页；新建的应用/系统页要带 `source_document_id`。
-**修法**：把上游页 slug 填进 `report.upstream` 重跑；或用运维脚本修（`docs/bodhi-ops-audit.md` P2 的 `plan → apply --confirm`）。
+## 5. 巡检报 C1「无溯源实例页」（high）
+**判分（2026-10-09 起）**：实例页 **`source_refs` 为空 且 图上没有 `bmm:sourceSession` 会话边** → 才算 C1。
+（此前只看 `source_refs`，所以"挂了会话边但没文档"的页会被误报。）
+**根因**：该页既没挂会话（`save_knowledge` 未传 `session_no`），也没继承到文档来源。
+**修法**：① 优先——用带**真实会话编号**的会话重跑落库（内核自动挂 `bmm:sourceSession`）；
+② 或让 `save_knowledge(stage="graph")` 的 `report.upstream` 带「服务页/报告页」以继承来源文档；
+③ 存量页可用 `link_source_session` 按 slug 批量补会话边。
+**核对**：`logs/mcp_calls_*.log` 有没有 `applied=true`；或 `curl "<mcp>/bodhi/audit?kb_id=…"` 里
+`data.session_traced`（本库已挂会话边的页数）是否在涨。
 
 ## 6. 智能体说"已落库"但其实没写（`applied=false`）
 **根因**：`save_knowledge` 默认是 **dry_run**（只出清单）。回执里 `dry_run=true` / `applied=false`。

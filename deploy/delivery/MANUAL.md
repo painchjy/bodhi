@@ -110,7 +110,7 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 | 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（38 个）` + `skills() OK（3 个）` |
 | 2 | 智能体一轮只读任务 | `logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录（模型侧工具数见 `AGENTS-SQL.md`） |
 | 3 | 本体模型库 | **178 页**（类 50 / 本体关系 83 / **数据属性 36** / 模块 6 / 轻量版 2 / 索引 1）；目录每模块下只有「数据属性」「本体关系」；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
-| 4 | 业务库上传+抽取 | 页面类型都在本体里，`source_refs` 非空（无 C1）|
+| 4 | 业务库上传+抽取 | 页面类型都在本体里，且**有溯源**（`source_refs` 非空 **或** 图上已挂 `bmm:sourceSession` 会话边）|
 | 5 | `curl <mcp>/bodhi/audit?kb_id=<业务库>` | 无 **C1/C3** 类"无来源"发现；A1/A2 若有，按提示修 |
 | 6 | 前端 | 登录正常；本体图谱 tab 出图；关系面板出边可改；类型下拉含 `easvc:*` |
 | 7 | 设计流程 | **设计类技能（概要/详细设计）重构中，本版不含** —— `service_overview` 等工具仍在；重构完成前由用户在对话里直接说明步骤 |

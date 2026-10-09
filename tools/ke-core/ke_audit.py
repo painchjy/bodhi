@@ -625,22 +625,45 @@ def _import_source(page: dict) -> str:
     return str(imp.get("file_sha256") or "")
 
 
+def _session_slugs(kb_id: str) -> set:
+    """本库**已挂会话溯源**的页 slug 集合（图上有 `bmm:sourceSession` 出边）。
+
+    2026-10-09 用户口径（方案 ①）：**溯源主口径 = L1 会话边 + 正文 `## 原文依据`**；
+    `source_refs` / `chunk_refs` **降级为「有就写」的兼容字段**（WeKnora 内建列，不删、不删也不判违规）。
+    于是 C1/C3 的判分改为「**会话边 或 source_refs 任一**」——先看会话，再看文档。
+    图不可用时返回空集 → 行为退回旧版（只看 `source_refs`），不会误放行。
+    """
+    try:
+        rows = ke_neo4j.query(
+            "MATCH (a:BodhiInstance {kb_id:$kb})-[:`bmm:sourceSession`]->(:BodhiInstance) "
+            "RETURN DISTINCT a.slug AS slug", {"kb": kb_id})
+        return {str(r.get("slug")) for r in rows if r.get("slug")}
+    except Exception:  # noqa: BLE001
+        # 静默退回：会话集合为空 ⇒ C1/C3 只看 source_refs（与旧版一致，绝不误放行）；
+        # 这里**不打印**：本函数被 HTTP `/bodhi/audit` 复用，stdout 要留给结构化输出。
+        return set()
+
+
 def check_sources(ctx: dict, rep: Report) -> None:
     pages = ctx["pages"]
     structured = 0
+    traced = _session_slugs(ctx["kb_id"])          # ← 方案 ①：会话边也算溯源
+    ctx["data"]["session_traced"] = len(traced)
     for page in pages:
         refs = _json_list(page["refs"])
+        has_session = page["slug"] in traced
         claims = bool(re.search(r"（来源[:：]", page["content"] or "")) or "<sources>" in (page["content"] or "")
-        if _is_instance(page["page_type"]) and not refs:
+        if _is_instance(page["page_type"]) and not refs and not has_session:
             if _import_source(page):
                 structured += 1                     # 结构化导入页：来源=文件 sha256，C1 豁免
                 continue
             rep.add("C1", "high", page["slug"],
-                    "实例页无来源文档（source_refs 为空）%s" % ("；正文却有来源标记" if claims else ""),
+                    "实例页无溯源（`source_refs` 为空**且图上无 `bmm:sourceSession` 会话边**）%s"
+                    % ("；正文却有来源标记" if claims else ""),
                     "确认后清理（P2）：删该页并重算 in_links；误判可先 --strip-only")
-        elif not refs and claims and not _is_instance(page["page_type"]):
+        elif not refs and not has_session and claims and not _is_instance(page["page_type"]):
             rep.add("C3", "low", page["slug"],
-                    "正文有来源标记但 source_refs 为空（非实例页，上游维护）",
+                    "正文有来源标记但既无 `source_refs`、图上也无会话边（非实例页，上游维护）",
                     "上游页不在本工具清理范围；如需纳入请先确认口径")
     ctx["data"]["structured_imports"] = structured
 
