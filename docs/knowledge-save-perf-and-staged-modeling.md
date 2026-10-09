@@ -253,20 +253,38 @@ ls -t logs/args/ | head                            # 拿完整入参（可重放
 3. **渲染模式由本体决定，只有两种**：`entity`（知识单元，正文由数据属性渲染）/
    `document`（文档类，调用方给整篇正文）。
 
-### 10.2 已实现（本次提交）
+### 10.2 实现方式（**不引入新注解** —— 用户 2026-10-09 口径）
+> `bodhi:shortName` / `bodhi:expertRole` 是**模块级**的，而渲染方式是**类级**的；
+> 与其新加一个 `bodhi:renderMode` 注解（要改 loader/model/两个 emitter），不如**复用已有的数据属性机制**：
+> **谁声明了 `wikiContent` 数据属性，谁就按 `document` 渲染；其余一律 `entity`。**
+> —— 数据属性本来就被编进 `ontology_index.json` 并投影成 `BodhiOntProperty`，**编译器零改动**；
+> 而"这个类带一篇长正文"本身就是"文档类"的定义，语义自洽。
+
 | 位置 | 改动 |
 |---|---|
 | `ke_ontology.RENDER_MODES` | `("entity", "document")` —— 唯一合法取值 |
-| `ke_ontology.render_mode(type_name)` | 读本体声明的渲染模式；**声明来源**：编译产物 `ontology_index.json` 的 `render` 或 Neo4j `BodhiOntClass.render_mode`；都取不到 → 默认 `entity` |
-| `ke_ontology.class_meta()` | 每个类新增 `render` 字段（json 来源 + Neo4j 补录来源**两条路径都带上**）|
+| **`ke_ontology.render_mode(type_name)`** | 判定 = 该类**或其祖先**是否在 `wikiContent` 数据属性的 `domains` 里（用 `ancestors()` 链 + `data_properties()`）；是 → `document`，否则 `entity` |
+| ⚠️ 判定只看 **`domains` 显式命中** | 不认 `data_properties_for()` 的"全局可用"兜底 —— 否则只要有人把 `wikiContent` **不写 domain**，全库所有类都会变 `document`（已验证会规避） |
 | `ke_pages.CONTRACT_MODES` | 收敛为 `("entity", "document")`；`raw` 降级为**旧别名**（`MODE_ALIASES={"raw":"document"}`）|
 | `ke_pages.write_knowledge` | `spec.mode` **可省略** → 自动取 `ke_ontology.render_mode(page_type)`；调用方不再自己选模式 |
+| `ke_ontology.class_meta()` | **不加** `render` 字段（派生值会让每个类都打一次 Neo4j；判定统一走 `render_mode()`）|
 
-### 10.3 待办（P2 的一部分，需要动本体 TTL + 编译器）
-- **TTL 声明**：给文档类加 `bodhi:renderMode "document"`（评估 / 评测 / 设计单 / 报告 …）；
-- **编译器**：把 `bodhi:renderMode` 编进 `artifacts/weknora/ontology_index.json` 的 `render` 字段，
-  并**投影**成 Neo4j `BodhiOntClass.render_mode`（当前实测：41 个类**均未声明** → 全部默认 `entity`）；
-- **清理存量**：把 `page_type='summary'` 的报告页归到本体的文档类（可走 `retag` 两段式）；
-- 之后 `write_knowledge` 就能**完全按本体**决定渲染，无需调用方传 `mode`。
+### 10.3 验收（已跑）
+```
+SYNTAX_OK
+① 本体未声明 wikiContent： bmm:Assesment / bmm:Goal / bmm:KnowledgeSession → 全 entity
+② 模拟 wikiContent domain=[bmm:Assesment]： bmm:Assesment → document ✅， bmm:Goal → entity ✅（不误伤）
+③ 模拟 wikiContent 无 domain（全局）： bmm:Goal → entity ✅（坑已规避）
+④ CONTRACT_MODES = ('entity','document') | 别名 = {'raw':'document'}
+```
+
+### 10.4 待办
+- **本体声明**（用户确认类清单后）：给"文档类"加数据属性 `bmm:wikiContent`（**必须带 `rdfs:domain`**）：
+  候选 —— `bmm:Assesment`（评估）、`agent:Evaluation`（评测）、`agent:DesignSpec`（设计单）、
+  `agent:Advice`（建议）、`agent:InstallGuide`（安装指南）… **待用户圈定**；
+  （顺带：`bmm:Assesment` 拼写疑似漏了 s，应为 `Assessment`）
+- **清理存量**：`page_type='summary'` 的报告页归到本体的文档类（走现成 `retag` 两段式），
+  前端为 `summary` 做的那些适配（`CONTENT_TABS` / `graphFilterTypes`）可一并收敛。
+- 之后 `write_knowledge` **完全按本体**决定渲染，业务代码里不再有 `summary`/`design` 这类自造模式。
 
 
