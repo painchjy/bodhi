@@ -226,7 +226,9 @@ def class_meta() -> dict[str, dict]:
                      "module": meta["module"], "module_label": meta["module_label"],
                      "module_short": meta.get("module_short") or meta["module_label"],
                      "parents": list(meta["parents"]), "is_enum": meta["is_enum"],
-                     "order": meta["order"]}
+                     "order": meta["order"],
+                     # 知识**渲染模式**（2026-10-09 用户口径：只有 entity / document 两种）
+                     "render": str(meta.get("render") or "").strip()}
     # 补录"不在编译产物里的类" —— **上传导入的模块不产 json**（见 docs/session-handoff.md §3.4bis）。
     # 类清单的真源是 Neo4j 投影，这里把 json 里没有的类补进来（label/模块取 Neo4j，父类由下面的循环补）。
     # 实测：不补录的话 relation-types?page_type=<上传模块的类> 会回 unknown-class、改类型也会被判"未知本体类型"。
@@ -236,7 +238,8 @@ def class_meta() -> dict[str, dict]:
                     "MATCH (c:BodhiOntClass) WHERE c.bodhi_projection = 'ontology' "
                     "AND coalesce(c.external, false) = false AND c.prefixed IS NOT NULL "
                     "RETURN c.prefixed AS prefixed, coalesce(c.label,'') AS label, "
-                    "       coalesce(c.module,'') AS module"):
+                    "       coalesce(c.module,'') AS module, "
+                    "       coalesce(c.render_mode,'') AS render"):
                 name = row.get("prefixed")
                 if not name or name in out:
                     continue
@@ -245,7 +248,8 @@ def class_meta() -> dict[str, dict]:
                              "color": module_color(mod), "module": mod,
                              "module_label": module_label(mod) or mod,
                              "module_short": module_short(mod) or mod,
-                             "parents": list(), "is_enum": False, "order": 999999}
+                             "parents": list(), "is_enum": False, "order": 999999,
+                             "render": str(row.get("render") or "").strip()}
     except Exception:  # noqa: BLE001  （补录失败不影响 json 版结果）
         pass
     try:
@@ -260,6 +264,29 @@ def class_meta() -> dict[str, dict]:
     except Exception:  # noqa: BLE001  （父类继续用 JSON 版本，够用）
         pass
     return out
+
+
+# 知识**渲染模式**（2026-10-09 用户口径：**只有两种** —— 由本体决定，调用方不自己选）
+RENDER_MODES = ("entity", "document")
+
+
+def render_mode(type_name: str, meta: dict[str, dict] | None = None) -> str:
+    """该类知识的渲染模式：`entity`（默认）或 `document`。
+
+    · `entity`  —— **知识单元**：正文由数据属性自动渲染（属性进「数据属性」面板 + 图节点）；
+    · `document`—— **文档类**：调用方给整篇正文（报告 / 评估 / 设计单 / 评测 等）。
+
+    **真源在本体**，取值顺序：本体声明（Neo4j `BodhiOntClass.render_mode` /
+    编译产物 `ontology_index.json` 的 `render`）→ 默认 `entity`。
+    即：要某类按文档渲染，就在 TTL 里给它声明 `bodhi:renderMode "document"`，
+    **不要在各业务代码里硬编码类型清单**（旧实现把报告页写成 WeKnora 内建的 `summary` 类型，
+    那不是本体类，正是"不合理的模式"）。
+    """
+    key = (type_name or "").strip()
+    if not key:
+        return "entity"
+    got = str(((meta or class_meta()).get(key) or {}).get("render") or "").strip().lower()
+    return got if got in RENDER_MODES else "entity"
 
 
 def ancestors(type_name: str, meta: dict[str, dict] | None = None) -> list[str]:

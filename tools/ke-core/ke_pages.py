@@ -339,7 +339,10 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
 #   统一溯源：L1 session(对象属性,图边) / L2 locator(数据属性) / L3 文档(原文依据) / L4 页面(溯源)
 #   图本优先：① 图节点/属性 → ② 图边 → ③ PG 页 → ④ 溯源
 # ---------------------------------------------------------------------------
-CONTRACT_MODES = ("document", "entity", "raw")
+# 渲染模式**只有两种**（2026-10-09 用户口径）：由**本体**决定（见 `ke_ontology.render_mode`），
+# 调用方不必自己选。`raw` 只作 `document` 的**旧别名**保留（存量调用兼容），不再出现在清单里。
+CONTRACT_MODES = ("entity", "document")
+MODE_ALIASES = {"raw": "document"}
 # 属性值渲进正文的**字数上限**：`0` = 不截断（2026-10-09 用户口径：正文里属性值不再限 150 字，
 # 完整内容本来就落在「数据属性」面板 + 图节点属性里，正文再截断只会让模型/人看到半句话）。
 ATTR_RENDER_LIMIT = 0
@@ -543,8 +546,14 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     mode = (spec.get("mode") or "").strip().lower()
     if not title or not page_type:
         raise ValueError("write_knowledge 需要 title 与 page_type")
+    if not mode:
+        # 2026-10-09 用户口径：**渲染模式由本体决定**（只有 entity / document 两种），
+        # 调用方不自己选 —— 要按文档渲染就在 TTL 给该类声明 `bodhi:renderMode "document"`。
+        mode = ke_ontology.render_mode(page_type)
+    mode = MODE_ALIASES.get(mode, mode)          # `raw` 旧别名 → document
     if mode not in CONTRACT_MODES:
-        raise ValueError("mode 只能是 %s" % "/".join(CONTRACT_MODES))
+        raise ValueError("mode 只能是 %s（旧别名 %s 也接受）"
+                         % ("/".join(CONTRACT_MODES), "/".join(MODE_ALIASES)))
     src = dict(spec.get("source") or {})
     has_session = bool(src.get("session_slug") or src.get("session_no"))
     has_doc = bool(src.get("doc_refs") or src.get("source_text") or src.get("chunk_refs"))

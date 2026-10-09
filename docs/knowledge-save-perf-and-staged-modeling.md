@@ -240,4 +240,33 @@ ls -t logs/args/ | head                            # 拿完整入参（可重放
 | **P3-a** | 用 P1 的 `io=` 统计**在内网实测**一次真实 payload | 拿到 PG/Neo4j 的真实占比，决定要不要异步 |
 | **P3-b** | 若 PG 占比 > 60% → 上异步派生（§9.1 的 `bodhi_derive_jobs` + §9.2 四问）| 落库只写图，PG 派生可查、可重放 |
 
+---
+
+## 10. 渲染模式收敛（用户口径 2026-10-09）
+
+### 10.1 结论
+1. **不需要 `mode="design"`** —— 复用已有 `mode="document"`（= 调用方给整篇正文 + 统一页头 + 可选属性段）。
+   原 P0-c 设想的"新增 design 渲染器"是多做的，改为：**复用 document + 保内容不回归**。
+2. **不存 `summary` 这类"摘要知识"** —— `summary` / `index` 是 WeKnora **内建 wiki 页类型**，
+   **不是本体类** → 报告页写成 `type="summary"`（`server.py:2295`）是"不合理的模式"，
+   应改为**本体里的文档类**（bmm 已有 **评估类** `bmm:Assesment`；agent 侧有 **评测 / 设计单** 等）。
+3. **渲染模式由本体决定，只有两种**：`entity`（知识单元，正文由数据属性渲染）/
+   `document`（文档类，调用方给整篇正文）。
+
+### 10.2 已实现（本次提交）
+| 位置 | 改动 |
+|---|---|
+| `ke_ontology.RENDER_MODES` | `("entity", "document")` —— 唯一合法取值 |
+| `ke_ontology.render_mode(type_name)` | 读本体声明的渲染模式；**声明来源**：编译产物 `ontology_index.json` 的 `render` 或 Neo4j `BodhiOntClass.render_mode`；都取不到 → 默认 `entity` |
+| `ke_ontology.class_meta()` | 每个类新增 `render` 字段（json 来源 + Neo4j 补录来源**两条路径都带上**）|
+| `ke_pages.CONTRACT_MODES` | 收敛为 `("entity", "document")`；`raw` 降级为**旧别名**（`MODE_ALIASES={"raw":"document"}`）|
+| `ke_pages.write_knowledge` | `spec.mode` **可省略** → 自动取 `ke_ontology.render_mode(page_type)`；调用方不再自己选模式 |
+
+### 10.3 待办（P2 的一部分，需要动本体 TTL + 编译器）
+- **TTL 声明**：给文档类加 `bodhi:renderMode "document"`（评估 / 评测 / 设计单 / 报告 …）；
+- **编译器**：把 `bodhi:renderMode` 编进 `artifacts/weknora/ontology_index.json` 的 `render` 字段，
+  并**投影**成 Neo4j `BodhiOntClass.render_mode`（当前实测：41 个类**均未声明** → 全部默认 `entity`）；
+- **清理存量**：把 `page_type='summary'` 的报告页归到本体的文档类（可走 `retag` 两段式）；
+- 之后 `write_knowledge` 就能**完全按本体**决定渲染，无需调用方传 `mode`。
+
 
