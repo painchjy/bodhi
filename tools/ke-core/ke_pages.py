@@ -716,6 +716,74 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
             "content": res.get("content"), "attrs": res.get("attrs")}
 
 
+def _bulk_write_pages(kb_id: str, items: list, tenant_id, tag: str) -> dict:
+    """**PG 批量写（P3-0e，2026-10-10）**：替掉"每页 1 个事务"（40 页 ≈ 40×272ms ≈ 11 s）。
+
+    三个语句、**两次往返**（新建一条事务；更新一条事务）：
+      ① **新建**：**一条多行 `INSERT INTO wiki_pages … VALUES (…),(…)`**（`version=1`、`out_links='[]'`）；
+      ② **更新**：`BEGIN;` → **一条快照 `INSERT INTO wiki_page_revisions … SELECT … FROM wiki_pages
+         WHERE slug IN (…)`**（保留"每页留一份旧版"语义）→ **一条
+         `UPDATE wiki_pages SET … FROM (VALUES …) AS v(…) WHERE p.slug = v.slug`**
+         （`version = version+1`、`page_metadata` 用 `||` 合并、来源列走**并集去重**）→ `COMMIT;`。
+
+    `items` 每项：`{slug,title,page_type,content,summary,metadata,category_path,wiki_path,
+    source_refs,chunk_refs,exists}`；`exists` 由 `page_info_map` 一次预读给出（**不再逐页查**）。
+    与逐页 `upsert_page` **语义对齐**；区别：**不投影图**（图由批量路径自己写）、不做副本写保护
+    （`replica_guard`，逐页版才有）—— 因此本函数默认**关闭**，待 P0-c 接真实库做 diff 后再开。
+    """
+    news = [x for x in items if not x.get("exists")]
+    olds = [x for x in items if x.get("exists")]
+    out = {"inserted": 0, "updated": 0}
+    if news:
+        cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
+                "out_links, page_metadata, version, last_edit_source, category_path, depth, "
+                "wiki_path, source_refs, chunk_refs")
+        rows = ", ".join(
+            "(gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, "
+            "%s, %s::jsonb, %d, %s, %s::jsonb, %s::jsonb)"
+            % (int(tenant_id or 0), ke_db.sql_str(kb_id), ke_db.sql_str(x["slug"]),
+               ke_db.sql_str(x["title"]), ke_db.sql_str(x["page_type"]), ke_db.sql_str(x["content"]),
+               ke_db.sql_str(x.get("summary") or ""), ke_db.sql_json(x.get("metadata") or {}),
+               ke_db.sql_str(tag), ke_db.sql_json(x.get("category_path") or []),
+               len(x.get("category_path") or []), ke_db.sql_str(x.get("wiki_path") or ""),
+               ke_db.sql_json(_uniq_str(x.get("source_refs"))),
+               ke_db.sql_json(_uniq_str(x.get("chunk_refs")))) for x in news)
+        ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES %s;\nCOMMIT;\n" % (cols, rows),
+                   stdin=True)
+        out["inserted"] = len(news)
+    if olds:
+        # 快照：逐条 `_snapshot_stmt` 拼（与单页版**逐字一致**）；与下面的 UPDATE 同一事务
+        snap = "\n".join(_snapshot_stmt(kb_id, x["slug"], tag) for x in olds)
+        vals = ", ".join(
+            "(%s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %d, %s, %s::jsonb, %s::jsonb)"
+            % (ke_db.sql_str(x["slug"]), ke_db.sql_str(x["content"]),
+               ke_db.sql_str(x["title"]), ke_db.sql_str(x.get("summary") or ""),
+               ke_db.sql_json(x.get("metadata") or {}), ke_db.sql_str(tag),
+               ke_db.sql_json(x.get("category_path") or []), len(x.get("category_path") or []),
+               ke_db.sql_str(x.get("wiki_path") or ""),
+               ke_db.sql_json(_uniq_str(x.get("source_refs"))),
+               ke_db.sql_json(_uniq_str(x.get("chunk_refs")))) for x in olds)
+        upd = (
+            "UPDATE wiki_pages p SET content = v.content, title = v.title, summary = v.summary, "
+            "page_metadata = COALESCE(p.page_metadata, '{}'::jsonb) || v.metadata::jsonb, "
+            "out_links = '[]'::jsonb, in_links = '[]'::jsonb, version = p.version + 1, "
+            "updated_at = now(), last_edit_source = v.tag, category_path = v.cat::jsonb, "
+            "depth = v.depth, wiki_path = v.wp, "
+            "source_refs = COALESCE((SELECT jsonb_agg(DISTINCT e) FROM "
+            "  jsonb_array_elements_text(COALESCE(p.source_refs,'[]'::jsonb) || v.refs::jsonb) AS t(e)), "
+            "  '[]'::jsonb), "
+            "chunk_refs = COALESCE((SELECT jsonb_agg(DISTINCT e) FROM "
+            "  jsonb_array_elements_text(COALESCE(p.chunk_refs,'[]'::jsonb) || v.cr::jsonb) AS t(e)), "
+            "  '[]'::jsonb) "
+            "FROM (VALUES %s) AS v(slug, content, title, summary, metadata, tag, cat, depth, wp, "
+            "refs, cr) "
+            "WHERE p.knowledge_base_id = %s AND p.slug = v.slug AND p.deleted_at IS NULL;"
+            % (vals, ke_db.sql_str(kb_id)))
+        ke_db.psql("BEGIN;\n%s\n%s\nCOMMIT;\n" % (snap, upd), stdin=True)
+        out["updated"] = len(olds)
+    return out
+
+
 def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
                           strict_source: bool = True, sync_folders: bool = True) -> dict:
     """**批量写入**（契约 §7；2026-10-09 P0 性能改造）。
