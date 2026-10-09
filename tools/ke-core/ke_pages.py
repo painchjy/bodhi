@@ -271,13 +271,17 @@ def sync_folders(kb_id: str) -> dict:
 
 def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                 summary: str = "", tag: str = "bodhi-cxt-edit",
-                metadata: dict | None = None) -> dict:
+                metadata: dict | None = None, sync_folders: bool = True) -> dict:
     """**建或改**一页（概念页/映射页专用；2026-09-28）。
 
     - 已存在 → 走 `_apply_content_update`（快照旧版 → content/version+1），
       并把 `title/summary/page_type/page_metadata` 一起更新（可回退到旧版本）；
     - 不存在 → INSERT（`id` 用 `gen_random_uuid()`；`tenant_id` 取该 KB 的），随后建目录树；
     - 只用于**我们自己的治理页**（「企业共享概念模型」里的概念页/映射页）；领域业务页禁止走这里。
+    - `sync_folders=False`（2026-10-09 P0）：**不在本页尾部重建目录树** —— 旧实现**每页**都
+      全量重建（还起子进程 `sync_folders.py`），批量写 40 页 = 40 次全库目录重建，
+      是 knowledge_save 2 分钟超时的最大块开销。批量写路径由调用方**整批做一次**
+      （或交给前端 `/bodhi/folders/refresh` 按需刷新）。
     """
     if len(tag) > 16:
         raise ValueError("tag 超过 last_edit_source 的 varchar(16)：%s" % tag)
@@ -292,7 +296,8 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     if existing:
         before = int(existing[0]["version"] or 1)
         _apply_content_update(kb_id, slug, content, tag, extra_set=extra)
-        _sync_folders(kb_id)
+        if sync_folders:
+            _sync_folders(kb_id)
         return {"slug": slug, "created": False, "before_version": before, "after_version": before + 1}
     kb = ke_db.psql_csv("SELECT COALESCE(tenant_id,0) AS tenant_id FROM knowledge_bases WHERE id = %s"
                         % ke_db.sql_str(kb_id))
@@ -318,7 +323,8 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                ke_db.sql_str(tag), ke_db.sql_json(cat), len(cat),
                ke_db.sql_str("/".join([str(x) for x in cat] + [title]))))
     ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\nCOMMIT;\n" % (cols, vals), stdin=True)
-    _sync_folders(kb_id)
+    if sync_folders:
+        _sync_folders(kb_id)
     try:
         _kg.project_page(kb_id, slug, edges=edges)
     except Exception:  # noqa: BLE001
@@ -334,7 +340,9 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
 #   图本优先：① 图节点/属性 → ② 图边 → ③ PG 页 → ④ 溯源
 # ---------------------------------------------------------------------------
 CONTRACT_MODES = ("document", "entity", "raw")
-ATTR_RENDER_LIMIT = 150                      # §4.2：属性值渲进正文的字数上限
+# 属性值渲进正文的**字数上限**：`0` = 不截断（2026-10-09 用户口径：正文里属性值不再限 150 字，
+# 完整内容本来就落在「数据属性」面板 + 图节点属性里，正文再截断只会让模型/人看到半句话）。
+ATTR_RENDER_LIMIT = 0
 TAG_CONTRACT = "bodhi-write"                 # 11 字符（≤16）
 EVIDENCE_SECTION = "## 原文依据"
 
@@ -379,7 +387,7 @@ def render_attributes_section(page_type: str, attributes: dict, skip_keys=()) ->
         rng = ke_ontology.short_iri(str(meta.get("range_literal")
                                         or (meta.get("ranges") or [""])[0] or "")) if meta else ""
         title = ("%s（%s%s）" % (label, key, ("，%s" % rng) if rng else "")).strip() if label else str(key)
-        if len(val) > ATTR_RENDER_LIMIT:
+        if ATTR_RENDER_LIMIT and len(val) > ATTR_RENDER_LIMIT:
             val = val[:ATTR_RENDER_LIMIT].rstrip() + "……（完整内容见「数据属性」面板）"
         rows += ["### %s" % title, "", val, ""]
     return (["## 属性（数据属性）", ""] + rows) if rows else []
@@ -520,11 +528,13 @@ def _register_session_part(kb_id: str, base_slug: str, part_slug: str, part_titl
 
 
 def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
-                    strict_source: bool = True) -> dict:
+                    strict_source: bool = True, sync_folders: bool = True) -> dict:
     """**知识写入统一内核**（契约 §1/§2/§8）。所有写入器都应薄封装本函数。
 
     `spec` 见 docs/knowledge-write-contract.md §2。`strict_source=True`（默认）时，
     缺「会话 / 文档」溯源 → **拒写**（fail-closed）。
+    `sync_folders=False`（2026-10-09 P0）：本页写完后**不重建整库目录树**（批量路径用，
+    避免「每页一次全量重建」把批量写拖成分钟级）。**单个**知识写入保持默认 `True`。
     """
     import ke_graph as _kg  # noqa: PLC0415  懒导入避免环
     spec = dict(spec or {})
@@ -586,7 +596,7 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     #    所以必须在建边之前完成：否则源/目标页未落库 → add_edge 报「目标页不存在」（2026-10-09 修）。
     res = upsert_page(kb_id, slug, title, page_type, content,
                       summary=(spec.get("summary") or "").strip()[:500], tag=TAG_CONTRACT,
-                      metadata=metadata)
+                      metadata=metadata, sync_folders=sync_folders)
     # ③ 关系（节点已就绪）
     for rel in (spec.get("relations") or []):
         rt, ts = rel.get("type"), rel.get("target_slug")
@@ -629,42 +639,86 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
 
 
 def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
-                          strict_source: bool = True) -> dict:
-    """**批量写入**（契约 §7）：**两遍** —— ① 先建/合**全部节点**（PG 页）② 再**统一建关系**。
+                          strict_source: bool = True, sync_folders: bool = True) -> dict:
+    """**批量写入**（契约 §7；2026-10-09 P0 性能改造）。
 
-    为什么两遍：`add_edge` 的 domain/range 与「目标页存在」都读 **PG 的 `page_type`**，
-    同批内 A→B 的边若在 B 落库前建 → 报「目标页不存在」（2026-10-09 修）。
+    三遍（**逐条小事务、失败可续作**）：
+      ① **批量预读**：全批涉及的 slug（含关系目标）→ `{slug:{pt,title,tenant}}`（**1 次 psql**）；
+      ② **节点**：逐个 `write_knowledge(..., sync_folders=False)` —— 每页各自一个事务；
+         **不再逐页重建目录树**（旧实现每页一次全量重建 + 起子进程，是 2 分钟超时的最大块）；
+      ③ **关系**：先 `ensure_instances()` **一次** UNWIND 批量确保节点，
+         再逐条 `add_edge(ctx=…)` → **每条边 1 次 Neo4j**（旧实现 4 次 PG + 5 次 Neo4j ≈ 1.46 s）。
+
+    实测基线（2026-10-09，本机）：1 次 psql 往返 ≈ 272 ms、1 次 Neo4j ≈ 74 ms。
+    40 节点 + 40 关系：旧路径 ~150-250 次往返（>2 分钟，被客户端超时切断且无日志）；
+    本实现 ≈ 40 次节点往返 + 40 次边往返 ≈ **15-25 s**，且失败只丢**当前那一条**。
+
+    返回额外带 `applied_count / failed / resume_hint`（幂等：同 payload 重跑即续作）。
     """
     import ke_graph as _kg  # noqa: PLC0415
+    specs = [dict(s or {}) for s in (specs or [])]
     pages, errors, prepared = [], [], []
-    for spec in (specs or []):
-        s = dict(spec or {})
-        rels = s.pop("relations", None) or []
+    # ① 批量预读（本批 slug + 关系目标）——一次往返拿全 page_type，供 ③ 的 domain/range 校验
+    want = [(s.get("slug") or "").strip() for s in specs]
+    want += [(r.get("target_slug") or "").strip()
+             for s in specs for r in (s.get("relations") or [])]
+    info = _kg.page_info_map(kb_id, [x for x in want if x])
+    # ② 节点：逐个事务（各自 fail-closed，互不牵连）
+    for spec in specs:
+        rels = spec.pop("relations", None) or []
         try:
-            r = write_knowledge(kb_id, s, dry_run=dry_run, strict_source=strict_source)
+            r = write_knowledge(kb_id, spec, dry_run=dry_run, strict_source=strict_source,
+                                sync_folders=False)
             pages.append(r)
             prepared.append((r, rels))
+            slug = str(r.get("slug") or "")
+            if slug:
+                info.setdefault(slug, {"pt": (spec.get("page_type") or ""),
+                                       "title": (spec.get("title") or ""), "tenant": None})
         except Exception as exc:  # noqa: BLE001
-            errors.append({"title": s.get("title"), "error": str(exc)[:200]})
-    edges_written = 0
+            errors.append({"title": spec.get("title"), "error": str(exc)[:200]})
+    edges_written, edge_errors = 0, []
     if not dry_run:
-        for r, rels in prepared:                     # ② 节点已全部落库 → 统一建关系
-            g = r.get("graph") or {}
+        # ③-1 一次 UNWIND：把全批节点（本批新建 + 关系目标）批量确保在图里
+        if info:
+            try:
+                _kg.ensure_instances(kb_id, [
+                    {"slug": k, "name": (v or {}).get("title") or k.rsplit("/", 1)[-1],
+                     "page_type": (v or {}).get("pt") or "", "tenant_id": (v or {}).get("tenant")}
+                    for k, v in info.items()])
+            except Exception as exc:  # noqa: BLE001
+                edge_errors.append({"scope": "ensure_instances", "error": str(exc)[:160]})
+        # ③-2 逐条关系（各自 1 次 Neo4j；幂等，重跑只补缺的）
+        ctx = {"info": info, "nodes_ensured": True, "skip_relations": True}
+        for r, rels in prepared:
+            g = r.get("graph") if isinstance(r.get("graph"), dict) else {}
             for rel in rels:
                 rt, ts = rel.get("type"), rel.get("target_slug")
                 if not (rt and ts):
                     continue
                 try:
-                    _kg.add_edge(kb_id, r["slug"], rt, ts)
+                    _kg.add_edge(kb_id, r["slug"], rt, ts, ctx=ctx)
                     edges_written += 1
                     g["edges_written"] = g.get("edges_written", 0) + 1
                 except Exception as exc:  # noqa: BLE001
-                    g.setdefault("edge_errors", []).append(
-                        {"type": rt, "target_slug": ts, "error": str(exc)[:160]})
+                    one = {"type": rt, "target_slug": ts, "error": str(exc)[:160]}
+                    g.setdefault("edge_errors", []).append(one)
+                    edge_errors.append(dict(one, source=r.get("slug")))
     else:
         edges_written = sum((p.get("graph") or {}).get("edges_written", 0) for p in pages)
+    # ④ 目录树：**整批一次**（或交给前端 `/bodhi/folders/refresh` 按需刷新）
+    folders = None
+    if sync_folders and not dry_run and pages:
+        try:
+            folders = _sync_folders(kb_id)
+        except Exception as exc:  # noqa: BLE001
+            folders = {"ok": False, "error": str(exc)[:160]}
     return {"applied": not dry_run, "kb_id": kb_id, "pages": pages, "errors": errors,
-            "count": len(pages), "edges_written": edges_written}
+            "count": len(pages), "edges_written": edges_written, "edge_errors": edge_errors,
+            "applied_count": len(pages), "failed": errors,
+            "folders": folders,
+            "resume_hint": ("同 payload 重跑即可续作（节点按 (kb,slug)、关系按 (kb,源,类型,目标) 幂等；"
+                            "已成功的会被判为 merged/已存在，不会重复建）。")}
 
 
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:

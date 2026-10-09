@@ -2053,22 +2053,29 @@ def link_source_session(kb_id: str = "", session_no: str = "", slugs: list | Non
                         "AND COALESCE(page_type,'') NOT IN ('bmm:KnowledgeSession', 'index')"
                         % sql_str(kb_id))
     changes = []
-    for row in rows:
-        if dry_run:
-            changes.append({"slug": row["slug"]})
-            continue
+    if dry_run:
+        changes = [{"slug": row["slug"]} for row in rows]
+    elif rows:
         try:
             import ke_graph  # noqa: PLC0415
-            # sourceSession 改为**直写图边**（不再写正文关系行/出入链；2026-10-05 M3）
-            ke_graph._ensure_instance(kb_id, row["slug"], ke_graph._page_type(kb_id, row["slug"]))
-            ke_graph._ensure_instance(kb_id, slug, ke_graph._page_type(kb_id, slug))
-            ke_graph._run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) "
-                          "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
-                          "MERGE (a)-[r:`bmm:sourceSession`]->(b)",
-                          {"kb": kb_id, "s": row["slug"], "t": slug})
-            changes.append({"slug": row["slug"], "added": True})
+            # 2026-10-09 P0：**批量**（旧实现每页 2 次 PG + 2 次 Neo4j；40 页 = ~160 次往返）：
+            #   ① 一次预读页信息 ② 一次 UNWIND 确保节点 ③ 一次 UNWIND 建全部 sourceSession 边
+            targets = [str(row["slug"]) for row in rows]
+            info = ke_graph.page_info_map(kb_id, targets + [slug])
+            if slug not in info:
+                info[slug] = {"pt": ke_graph._page_type(kb_id, slug), "title": title, "tenant": None}
+            ke_graph.ensure_instances(kb_id, [
+                {"slug": k, "name": (v or {}).get("title") or k.rsplit("/", 1)[-1],
+                 "page_type": (v or {}).get("pt") or "", "tenant_id": (v or {}).get("tenant")}
+                for k, v in info.items()])
+            ke_graph._run(
+                "UNWIND $slugs AS s MATCH (a:BodhiInstance {kb_id:$kb, slug:s}) "
+                "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                "MERGE (a)-[r:`bmm:sourceSession`]->(b) RETURN count(r) AS n",
+                {"kb": kb_id, "slugs": targets, "t": slug})
+            changes = [{"slug": t, "added": True} for t in targets]
         except Exception as exc:  # noqa: BLE001
-            changes.append({"slug": row["slug"], "error": str(exc)[:120]})
+            changes = [{"slug": str(row["slug"]), "error": str(exc)[:120]} for row in rows]
     out = {"ok": True, "kb_id": kb_id, "session_page": {"slug": slug, "title": title},
            "dry_run": bool(dry_run), "changed": len(changes), "changes": changes[:50]}
     return out

@@ -17,7 +17,18 @@ import ke_pages
 INSTANCE_LABEL = "BodhiInstance"
 
 
+_INDEX_READY = False
+
+
 def _ensure_index() -> None:
+    """确保 `(kb_id, slug)` 索引存在（**进程内只跑一次**；2026-10-09 P0）。
+
+    为什么必须：`MERGE (n:BodhiInstance {kb_id, slug})` / `UNWIND … MERGE` 没有索引时
+    退化为**标签全扫** —— 实测批量 `ensure_instances` 4 行要 **3.2 s**，建索引后降到几十 ms。
+    """
+    global _INDEX_READY
+    if _INDEX_READY:
+        return
     try:
         ke_neo4j.query(
             "CREATE INDEX bodhi_instance_idx IF NOT EXISTS "
@@ -27,6 +38,7 @@ def _ensure_index() -> None:
             ke_neo4j.query("CREATE INDEX ON :BodhiInstance(kb_id, slug)")
         except Exception:  # noqa: BLE001  已存在等
             pass
+    _INDEX_READY = True
 
 
 def _module_of(page_type: str) -> str:
@@ -284,6 +296,59 @@ def _ensure_instance(kb_id: str, slug: str, page_type: str = "") -> None:
           "tenant": r.get("tenant_id")})
 
 
+def page_info_map(kb_id: str, slugs) -> dict:
+    """**一次**取多个 slug 的 `{slug: {pt,title,tenant}}`（批量预读，替代逐条 `_page_type`）。
+
+    为什么需要（2026-10-09 P0）：`add_edge` 每条边要读 2 次 `_page_type`；40 条边 =
+    80 次 psql 往返，而**实测 1 次 psql 往返 ≈ 272ms** → 这是 2 分钟超时的主因之一。
+    批量后整批只要 1 次往返。
+    """
+    import ke_db  # noqa: PLC0415
+    want = [str(s).strip() for s in (slugs or []) if str(s).strip()]
+    if not want:
+        return {}
+    out: dict = {}
+    step = 200                                   # 分批，避免超长 SQL / 参数上限
+    for i in range(0, len(want), step):
+        chunk = want[i:i + step]
+        rows = ke_db.psql_csv(
+            "SELECT slug, COALESCE(page_type,'') AS pt, COALESCE(title,'') AS title, "
+            "       tenant_id FROM wiki_pages "
+            " WHERE knowledge_base_id=%s AND deleted_at IS NULL AND slug IN (%s)"
+            % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(s) for s in chunk)))
+        for r in rows:
+            out[str(r.get("slug"))] = {"pt": r.get("pt") or "", "title": r.get("title") or "",
+                                       "tenant": r.get("tenant_id")}
+    return out
+
+
+def ensure_instances(kb_id: str, rows) -> int:
+    """**一次** UNWIND 批量「确保实例节点存在」（替代逐节点 `_ensure_instance`）。
+
+    `rows` = `[{slug, name, page_type, tenant_id}]`（一般来自 `page_info_map`）。
+    返回处理行数。旧实现每条边 2 次 `_ensure_instance`（各含 1 次 PG + 1 次 Neo4j）。
+    """
+    payload = []
+    for r in (rows or []):
+        d = dict(r or {})
+        slug = str(d.get("slug") or "").strip()
+        if not slug:
+            continue
+        pt = str(d.get("page_type") or "")
+        payload.append({"slug": slug, "pt": pt, "module": _module_of(pt),
+                        "name": str(d.get("name") or "").strip() or slug.rsplit("/", 1)[-1],
+                        "tenant": d.get("tenant_id")})
+    if not payload:
+        return 0
+    _ensure_index()                      # 批量 MERGE 前先确保索引（否则标签全扫，慢 50-100 倍）
+    _run("UNWIND $rows AS row MERGE (n:BodhiInstance {kb_id:$kb, slug:row.slug}) "
+         "SET n.page_type = row.pt, n.module = row.module, n.name = row.name, "
+         "    n.tenant_id = coalesce(n.tenant_id, row.tenant) "
+         "RETURN count(n) AS n",
+         {"kb": kb_id, "rows": payload})
+    return len(payload)
+
+
 def _etyp(t: str) -> str:
     return (t or "").replace("`", "")
 
@@ -313,28 +378,48 @@ def upsert_node(kb_id: str, slug: str, title: str, page_type: str,
     return {"ok": True, "slug": slug}
 
 
-def add_edge(kb_id: str, slug: str, rel_type: str, target_slug: str, label: str = "") -> dict:
-    """新增一条实例边：本页 --rel_type--> target（**直写图**，range 校验）。"""
+def add_edge(kb_id: str, slug: str, rel_type: str, target_slug: str, label: str = "",
+             ctx: dict | None = None) -> dict:
+    """新增一条实例边：本页 --rel_type--> target（**直写图**，range 校验）。
+
+    `ctx` = **批量写路径的上下文**（2026-10-09 P0，可选）：
+      `{"info": {slug: {pt,title,tenant}}, "nodes_ensured": True, "skip_relations": True}`
+      · `info` 由 `page_info_map()` **一次**预读 → 免掉每条边 2 次 `_page_type`；
+      · `nodes_ensured` → 节点已由 `ensure_instances()` 批量 MERGE 过 → 免掉 2 次 `_ensure_instance`；
+      · `skip_relations` → 不回传全量关系（省 1 次 Neo4j；批量回执只要计数）。
+    净效果：每条边从「4 次 PG + 5 次 Neo4j」（≈1.46 s）降到「1 次 Neo4j」（≈74 ms）。
+    不传 `ctx` 时行为与旧版**逐字一致**（兼容既有调用）。
+    """
     if not rel_type or not target_slug:
         raise ValueError("缺少 rel_type / target_slug")
     if target_slug == slug:
         raise ValueError("不能把关系指向本页")
-    tt = _page_type(kb_id, target_slug)
+    info = (ctx or {}).get("info") or {}
+    if ctx is not None:
+        tt = str(((info.get(target_slug) or {}).get("pt")) or "")
+        st = str(((info.get(slug) or {}).get("pt")) or "")
+    else:
+        tt = _page_type(kb_id, target_slug)
+        st = _page_type(kb_id, slug)
     if not tt:
         raise ValueError("目标页不存在：%s" % target_slug)
-    _check_domain(rel_type, _page_type(kb_id, slug))
+    _check_domain(rel_type, st)
     _check_range(rel_type, tt)
-    _ensure_instance(kb_id, slug, _page_type(kb_id, slug))
-    _ensure_instance(kb_id, target_slug, tt)
+    if not (ctx or {}).get("nodes_ensured"):
+        _ensure_instance(kb_id, slug, st)
+        _ensure_instance(kb_id, target_slug, tt)
     dup = _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r:`%s`]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
                "RETURN count(r) AS n" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
-    if dup and dup[0].get("n"):
-        return {"changed": False, "reason": "同样的关系已存在", "slug": slug, "version": 1,
-                "relations": relations_of(kb_id, slug)}
-    _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
-         "MERGE (a)-[r:`%s`]->(b)" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
-    return {"changed": True, "action": "add", "slug": slug, "version": 1,
-            "relation": {"type": rel_type, "target_slug": target_slug}, "relations": relations_of(kb_id, slug)}
+    ret = ({"changed": False, "reason": "同样的关系已存在", "slug": slug, "version": 1}
+           if (dup and dup[0].get("n")) else None)
+    if ret is None:
+        _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
+             "MERGE (a)-[r:`%s`]->(b)" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
+        ret = {"changed": True, "action": "add", "slug": slug, "version": 1,
+               "relation": {"type": rel_type, "target_slug": target_slug}}
+    if not (ctx or {}).get("skip_relations"):
+        ret["relations"] = relations_of(kb_id, slug)
+    return ret
 
 
 def update_edge(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
