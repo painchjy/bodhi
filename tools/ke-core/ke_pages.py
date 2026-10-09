@@ -739,22 +739,29 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
                     for k, v in info.items()])
             except Exception as exc:  # noqa: BLE001
                 edge_errors.append({"scope": "ensure_instances", "error": str(exc)[:160]})
-        # ③-2 逐条关系（各自 1 次 Neo4j；幂等，重跑只补缺的）
+        # ③-2 **一次性批量建边**（P3-0）：全批汇总 → 按关系类型分组的 UNWIND
+        #      （旧实现"每条边 1 次 Neo4j"：40 条边 = 40 次往返；现在 ≈ 关系类型数 次）
         ctx = {"info": info, "nodes_ensured": True, "skip_relations": True}
+        triples = []
         for r, rels in prepared:
-            g = r.get("graph") if isinstance(r.get("graph"), dict) else {}
             for rel in rels:
                 rt, ts = rel.get("type"), rel.get("target_slug")
-                if not (rt and ts):
-                    continue
-                try:
-                    _kg.add_edge(kb_id, r["slug"], rt, ts, ctx=ctx)
-                    edges_written += 1
-                    g["edges_written"] = g.get("edges_written", 0) + 1
-                except Exception as exc:  # noqa: BLE001
-                    one = {"type": rt, "target_slug": ts, "error": str(exc)[:160]}
-                    g.setdefault("edge_errors", []).append(one)
-                    edge_errors.append(dict(one, source=r.get("slug")))
+                if rt and ts:
+                    triples.append((r["slug"], rt, ts))
+        if triples:
+            out = _kg.add_edges_batch(kb_id, triples, ctx=ctx)
+            edges_written = int(out.get("written") or 0)
+            _errs = out.get("errors") or []
+            edge_errors.extend(_errs)
+            for r, rels in prepared:
+                g = r.get("graph") if isinstance(r.get("graph"), dict) else {}
+                _mine = [x for x in _errs if x.get("source") == r.get("slug")]
+                _valid = len([1 for rel in rels if rel.get("type") and rel.get("target_slug")])
+                g["edges_written"] = max(0, _valid - len(_mine))
+                if _mine:
+                    g.setdefault("edge_errors", []).extend(
+                        [{"type": x.get("type"), "target_slug": x.get("target_slug"),
+                          "error": x.get("error")} for x in _mine])
     else:
         edges_written = sum((p.get("graph") or {}).get("edges_written", 0) for p in pages)
     # ④ 目录树：**整批一次**（或交给前端 `/bodhi/folders/refresh` 按需刷新）
@@ -801,15 +808,10 @@ def write_relations_batch(kb_id: str, pairs: list) -> dict:
         return {"ok": False, "written": 0, "total": len(rows),
                 "errors": [{"scope": "ensure_instances", "error": str(exc)[:160]}]}
     ctx = {"info": info, "nodes_ensured": True, "skip_relations": True}
-    written, errors = 0, []
-    for r in rows:
-        try:
-            _kg.add_edge(kb_id, r["source"], r["type"], r["target"], ctx=ctx)
-            written += 1
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"source": r["source"], "type": r["type"], "target_slug": r["target"],
-                           "error": str(exc)[:160]})
-    return {"ok": True, "written": written, "total": len(rows), "errors": errors}
+    # P3-0（2026-10-10）：改成**按关系类型分组的 UNWIND 批量**（N 条边 → 去重后类型数次往返）
+    out = _kg.add_edges_batch(kb_id, [(r["source"], r["type"], r["target"]) for r in rows], ctx=ctx)
+    return {"ok": bool(out.get("ok")), "written": int(out.get("written") or 0), "total": len(rows),
+            "types": out.get("types"), "errors": out.get("errors") or []}
 
 
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:

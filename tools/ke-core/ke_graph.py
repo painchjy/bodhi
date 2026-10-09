@@ -422,6 +422,55 @@ def add_edge(kb_id: str, slug: str, rel_type: str, target_slug: str, label: str 
     return ret
 
 
+def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
+    """**批量建边（P3-0，2026-10-10）**：`triples=[(源slug, 关系类型, 目标slug)]`。
+
+    与逐条 `add_edge` 的区别：
+      · domain/range 仍在**内存**逐条校验（非法项逐条回报，不打断其余）；
+      · **MERGE 按关系类型分组，每类一条 `UNWIND`** → N 条边从 **N 次** Neo4j 往返降到
+        「去重后的关系类型数」次（例：40 条边 / 8 种关系 ≈ **8 次**）。
+    幂等：`MERGE` 保证同一 (源,类型,目标) 只建一条 → 重跑即续作、不会重复。
+
+    实测基线：1 次 Neo4j ≈ 74 ms（本机）；内网更高。返回 `{written, errors, types, total}`。
+    """
+    info = (ctx or {}).get("info") or {}
+    by_type: dict = {}
+    errors: list = []
+    for row in (triples or []):
+        src, rel, tgt = (str(row[0]).strip(), str(row[1]).strip(), str(row[2]).strip())
+        if not (src and rel and tgt):
+            continue
+        if src == tgt:
+            errors.append({"source": src, "type": rel, "target_slug": tgt,
+                           "error": "不能把关系指向本页"})
+            continue
+        st = str(((info.get(src) or {}).get("pt")) or "") or (None if ctx is not None else _page_type(kb_id, src))
+        tt = str(((info.get(tgt) or {}).get("pt")) or "") or (None if ctx is not None else _page_type(kb_id, tgt))
+        try:
+            if not tt and ctx is None:
+                tt = _page_type(kb_id, tgt)
+            if not tt:
+                raise ValueError("目标页不存在：%s" % tgt)
+            if st is None:
+                st = _page_type(kb_id, src)
+            _check_domain(rel, st or "")
+            _check_range(rel, tt)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"source": src, "type": rel, "target_slug": tgt,
+                           "error": str(exc)[:160]})
+            continue
+        by_type.setdefault(rel, []).append({"s": src, "t": tgt})
+    written = 0
+    for rel, rows in by_type.items():
+        res = _run("UNWIND $rows AS row MATCH (a:BodhiInstance {kb_id:$kb, slug:row.s}) "
+                   "MATCH (b:BodhiInstance {kb_id:$kb, slug:row.t}) "
+                   "MERGE (a)-[r:`%s`]->(b) RETURN count(r) AS n" % _etyp(rel),
+                   {"kb": kb_id, "rows": rows})
+        written += int((res[0].get("n") if res else 0) or 0)
+    return {"ok": True, "written": written, "errors": errors,
+            "types": len(by_type), "total": len(triples or [])}
+
+
 def update_edge(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
                 new_target_slug: str = "", label: str = "") -> dict:
     """改一条出边：删旧边（src→target_slug）→ 加新边（新类型/新目标）。"""
