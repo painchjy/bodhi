@@ -2299,7 +2299,27 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         #   · **会话溯源边由内核自动挂**（`source.session_no` → `ensure_session_page` + `bmm:sourceSession`），
         #     所以本分支不再手工调 `link_source_session`；
         #   · 溯源列 `source_refs`（L3 兼容字段）与正文「## 原文依据」由内核写。
-        _ptype = ((report or {}).get("page_type") or "").strip() or "bmm:Assessment"
+        _ptype_raw = ((report or {}).get("page_type") or "").strip() or "bmm:Assessment"
+        # **硬约束（2026-10-10，用户实测修正）**：报告页类型只能取**本体类**。
+        # 实测：领域建模智能体在 `report.page_type` 里顺手传了 WeKnora 内建的 `summary`
+        # （不在本体里、正是要退役的"不合理模式"）→ 页面就落成了摘要类型。
+        # 既然"渲染/类型由本体决定"，就不该让调用方把非本体类型带进来 —— 这里直接改写，
+        # 并在回执里给 `page_type_adjusted` 说明（可核对、可追溯）。
+        _ptype, _ptype_note = _ptype_raw, None
+        try:
+            _known_classes = ke_ontology.class_meta()
+        except Exception:  # noqa: BLE001  本体读不到 → 保持原值（不强行改，避免误伤）
+            _known_classes = {}
+        if _known_classes and _ptype_raw not in _known_classes:
+            _fallback = "bmm:Assessment" if "bmm:Assessment" in _known_classes else _ptype_raw
+            if _fallback != _ptype_raw:
+                _ptype = _fallback
+                _ptype_note = {
+                    "from": _ptype_raw, "to": _fallback,
+                    "why": ("`%s` 不是本体类（WeKnora 内建 wiki 类型）→ 报告属**文档类**，"
+                            "已按本体改写为 `%s`（要固定其它类型请传本体类名）"
+                            % (_ptype_raw, _fallback)),
+                }
         _upstream = [s for s in ((report or {}).get("upstream") or []) if s]
         spec = {
             "slug": slug,                    # 复用既有报告页时由上面的幂等查询给出；空则由内核派生
@@ -2355,6 +2375,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                             "verified": 1 if mode == "apply" else 0,
                             "note": "落库由内核完成（按 (kb,slug) 幂等、逐条小事务）"},
         }
+        if _ptype_note:
+            summary["page_type_adjusted"] = _ptype_note
         if mode != "apply":
             summary["write_note"] = ("**未写库**（dry_run）：本回执只是预览。要真正落库请用**同一份载荷**、"
                                      "`mode=\"apply\"` 重跑。")
