@@ -30,7 +30,20 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
+
+try:                                     # IO 统计（P1 观测性；同目录，缺失则退化为"不统计"）
+    import ke_stats as _stats
+except Exception:  # noqa: BLE001
+    class _stats:                        # type: ignore[no-redef]
+        @staticmethod
+        def enabled() -> bool:
+            return False
+
+        @staticmethod
+        def record(kind: str, ms: float, ok: bool = True) -> None:
+            pass
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -176,24 +189,36 @@ def _psql_prefix() -> list[str]:
 
 
 def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
+    """跑一次 psql（**每次 = 一个子进程 + 一次往返**）。
+
+    P1（2026-10-09）：整段会计入 `ke_stats`（kind=`pg`）——**子进程启动时间也算**，
+    因为实测 1 次往返 ≈ 272 ms 就是这块成本；超时时能看出"PG 打了多少次、花了多少"。
+    """
     if not DB_PASSWORD:
         raise RuntimeError(
             "未设置数据库口令：请设 `BODHI_DB_PASSWORD`（**进程环境变量**，或服务目录 `.env` 里写一行，"
             "或设 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录）；代码里不再内置任何默认口令。%s"
             % _searched_hint())
-    cmd = _psql_prefix()
-    env = dict(os.environ, PGPASSWORD=DB_PASSWORD) if DB_HOST else None
-    if stdin:
-        cmd += ["-v", "ON_ERROR_STOP=1", "-q", "-f", "-"]
-        done = subprocess.run(cmd, input=sql, text=True, encoding="utf-8",
-                              capture_output=True, check=False, env=env)
-    else:
-        cmd += (["--csv", "-c", sql] if csv else ["-t", "-A", "-c", sql])
-        done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True,
-                              check=False, env=env)
-    if done.returncode != 0:
-        raise RuntimeError("psql 失败：%s" % (done.stderr or done.stdout)[:600])
-    return done.stdout
+    _t0 = time.perf_counter()
+    _ok = True
+    try:
+        cmd = _psql_prefix()
+        env = dict(os.environ, PGPASSWORD=DB_PASSWORD) if DB_HOST else None
+        if stdin:
+            cmd += ["-v", "ON_ERROR_STOP=1", "-q", "-f", "-"]
+            done = subprocess.run(cmd, input=sql, text=True, encoding="utf-8",
+                                  capture_output=True, check=False, env=env)
+        else:
+            cmd += (["--csv", "-c", sql] if csv else ["-t", "-A", "-c", sql])
+            done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True,
+                                  check=False, env=env)
+        if done.returncode != 0:
+            _ok = False
+            raise RuntimeError("psql 失败：%s" % (done.stderr or done.stdout)[:600])
+        return done.stdout
+    finally:
+        if _stats.enabled():
+            _stats.record("pg", (time.perf_counter() - _t0) * 1000.0, _ok)
 
 
 def psql_csv(sql: str) -> list[dict]:

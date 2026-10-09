@@ -58,6 +58,7 @@ from urllib import request as urlrequest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 LOG_DIR = REPO / "logs"
+ARGS_DIR = LOG_DIR / "args"          # P1：每次工具调用的**完整入参**落盘（主日志只留摘要+文件名）
 INDEX_PATH = REPO / "artifacts" / "weknora" / "ontology_index.json"
 # 注意：wiki_pages.last_edit_source / wiki_page_revisions.edit_source 是 varchar(16)，
 # 生成器标签**不能超过 16 个字符**（曾用 bodhi-ontology-mcp 导致写入整批回滚）。
@@ -93,6 +94,7 @@ from ke_db import (  # noqa: E402,F401  （psql/sql_* 由同目录脚本 server.
     DB_CONTAINER, DB_NAME, DB_PASSWORD, DB_USER,
     now_text as _now_text, psql, psql_csv, sql_json, sql_str,
 )
+import ke_stats as ke_io_stats  # noqa: E402  P1：PG/Neo4j 的 IO 次数与时长统计
 import ke_ontology  # noqa: E402
 import ke_db  # noqa: E402  （模块级引用：resolve_kb_id 等）
 import ke_admin  # noqa: E402
@@ -4244,25 +4246,72 @@ def tool_result(payload: dict, is_error: bool = False) -> dict:
     }
 
 
-def _log_tool_call(name: str, args: dict, result, ms: float) -> None:
-    """把每次工具调用落一条可核对的行（观测用）。
+def _log_brief(value, limit=60):
+    """入参/结果摘要（日志用；不追求无损）。"""
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[:limit] + "…"
+    if isinstance(value, list):
+        return [_log_brief(v, 24) for v in value[:4]] \
+            + (["…共%d项" % len(value)] if len(value) > 4 else [])
+    if isinstance(value, dict):
+        return {k: _log_brief(v, 40) for k, v in list(value.items())[:6]}
+    return str(value)[:limit]
 
-    为什么需要：智能体"是否先看技能目录、是否照技能做、是否真的落库"必须**可核对**，
-    否则只能听它自述。日志 `logs/mcp_calls_YYYYMMDD.log` 一行一次调用：
-    时间 / 工具 / 耗时 / 入参摘要 / 结果摘要。
+
+def _log_line(text: str) -> None:
+    """主日志追加一行（`logs/mcp_calls_YYYYMMDD.log`）。"""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    path = LOG_DIR / ("mcp_calls_%s.log" % datetime.now().strftime("%Y%m%d"))
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(text + "\n")
+
+
+def _dump_args(name: str, args: dict) -> str:
+    """把**完整入参**落盘 `logs/args/<时间>-<工具>.json`（P1，2026-10-09）。
+
+    为什么：主日志里 args 一直按 `[:300]` 截断 → 超时/异常时**无法还原当时到底传了什么**
+    （用户实测：一次超时的 `knowledge_save` 连 nodes/edges 都看不全，无法重放/续作）。
+    这里落一份完整 JSON，主日志只留摘要 + 文件名。
     """
     try:
-        def brief(value, limit=60):
-            if isinstance(value, (int, float, bool)) or value is None:
-                return value
-            if isinstance(value, str):
-                return value if len(value) <= limit else value[:limit] + "…"
-            if isinstance(value, list):
-                return [brief(v, 24) for v in value[:4]] + (["…共%d项" % len(value)] if len(value) > 4 else [])
-            if isinstance(value, dict):
-                return {k: brief(v, 40) for k, v in list(value.items())[:6]}
-            return str(value)[:limit]
+        ARGS_DIR.mkdir(parents=True, exist_ok=True)
+        fname = "%s-%s.json" % (datetime.now().strftime("%Y%m%d-%H%M%S-%f"),
+                                re.sub(r"[^\w.-]", "_", name or "tool"))
+        (ARGS_DIR / fname).write_text(json.dumps(args, ensure_ascii=False, indent=2),
+                                      encoding="utf-8")
+        return "args/" + fname
+    except Exception:  # noqa: BLE001
+        return ""
 
+
+def _log_tool_begin(name: str, args: dict) -> str:
+    """**两段写日志的"开始"段**（P1）：进入工具**之前**就落一行，返回 args 文件名。
+
+    为什么必须两段：旧实现只在 `call_tool` **返回后**写日志 → 被客户端超时切断的调用
+    **一行记录都没有**（这正是内网 `knowledge_save` 超 2 分钟时的观测盲区：
+    连"调没调、传了什么、卡在哪"都无法判断）。现在超时也能看到 `BEGIN` 行 + 完整入参文件。
+    """
+    args_file = _dump_args(name, args)
+    try:
+        _log_line("%s\t%-26s\t  BEGIN\targs_file=%s\targs=%s"
+                  % (now_text(), name, args_file or "(未落盘)",
+                     json.dumps(_log_brief(args), ensure_ascii=False)[:300]))
+    except Exception:  # noqa: BLE001  日志失败绝不影响工具执行
+        pass
+    return args_file
+
+
+def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = None,
+                   args_file: str = "", phase: str = "DONE") -> None:
+    """**两段写日志的"结束"段**：时间 / 工具 / 耗时 / **IO 统计** / 结果摘要。
+
+    `io` = `ke_stats.snapshot()` —— **PG / Neo4j 各自的往返次数与时长**。
+    从此"这 2 分钟到底花在 PG 还是 Neo4j、打了多少次往返"可以直接从日志读出来，
+    不必再靠推算（实测基线：1 次 psql ≈ 272 ms、1 次 Neo4j ≈ 74 ms）。
+    """
+    try:
         summary = result if isinstance(result, dict) else {}
         keys = ("applied", "created", "merged", "pending", "violations", "unmatched", "retract",
                 "retract_planned", "crud_matrix", "report_page", "page_versions", "count",
@@ -4275,17 +4324,28 @@ def _log_tool_call(name: str, args: dict, result, ms: float) -> None:
             if key in summary:
                 value = summary[key]
                 if isinstance(value, list):
-                    value = "len=%d %s" % (len(value), json.dumps(brief(value), ensure_ascii=False)[:120])
+                    value = "len=%d %s" % (len(value),
+                                           json.dumps(_log_brief(value), ensure_ascii=False)[:120])
                 elif isinstance(value, dict) and len(json.dumps(value, ensure_ascii=False)) > 160:
-                    value = json.dumps(brief(value), ensure_ascii=False)[:160] + "…"
+                    value = json.dumps(_log_brief(value), ensure_ascii=False)[:160] + "…"
                 picked[key] = value
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        path = LOG_DIR / ("mcp_calls_%s.log" % datetime.now().strftime("%Y%m%d"))
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write("%s\t%-26s\t%7.0fms\targs=%s\tresult=%s\n"
-                     % (now_text(), name, ms,
-                        json.dumps(brief(args), ensure_ascii=False)[:300],
-                        json.dumps(picked, ensure_ascii=False)[:500]))
+        io_txt = "-"
+        if isinstance(io, dict):
+            d = io.get("detail") or {}
+            parts = []
+            for kind in ("pg", "neo4j"):
+                cell = d.get(kind) or {}
+                parts.append("%s:%s次/%.0fms%s" % (kind, cell.get("n", 0), cell.get("ms", 0),
+                                                   ("/错%s" % cell["err"]) if cell.get("err") else ""))
+            io_txt = ("io=%s |合计%s次/%.0fms |墙钟%.0fms"
+                      % ("，".join(parts), io.get("calls", 0), io.get("ms", 0),
+                         io.get("wall_ms", 0)))
+            marks = io.get("marks") or []
+            if marks:
+                io_txt += " |阶段:%s" % "；".join("%sms:%s" % (m[0], m[1]) for m in marks[-4:])
+        _log_line("%s\t%-26s\t%7.0fms\t%s\t%s\targs_file=%s\tresult=%s"
+                  % (now_text(), name, ms, phase, io_txt, args_file or "-",
+                     json.dumps(picked, ensure_ascii=False)[:500]))
     except Exception:  # noqa: BLE001  日志失败绝不影响工具结果
         pass
 
@@ -4511,17 +4571,25 @@ class MCPHandler(BaseHTTPRequestHandler):
             print("[mcp] tools/call %s %s" % (name, json.dumps(arguments, ensure_ascii=False)))
             try:
                 _started = time.time()
+                # P1（2026-10-09）**两段写日志**：进入工具前先落 BEGIN 行 + 完整入参文件，
+                # 再开 IO 统计桶；这样被客户端超时切断的调用**也有痕迹**（旧实现一行都没有）。
+                _args_file = _log_tool_begin(name, arguments)
+                ke_io_stats.begin()
                 payload = call_tool(name, arguments)
                 result = tool_result(payload)
-                _log_tool_call(name, arguments, payload, ms=(time.time() - _started) * 1000.0)
+                _log_tool_call(name, arguments, payload, ms=(time.time() - _started) * 1000.0,
+                               io=ke_io_stats.snapshot(), args_file=_args_file)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] 工具失败：%s" % exc)
                 result = tool_result({"error": str(exc)}, is_error=True)
                 try:
                     _log_tool_call(name, arguments, {"error": str(exc)},
-                                   ms=(time.time() - _started) * 1000.0)
+                                   ms=(time.time() - _started) * 1000.0,
+                                   io=ke_io_stats.snapshot(), args_file=_args_file, phase="ERR")
                 except Exception:  # noqa: BLE001
                     pass
+            finally:
+                ke_io_stats.reset()
         else:
             self._json({"jsonrpc": "2.0", "id": rid,
                         "error": {"code": -32601, "message": "未实现的方法：%s" % method}}, 200, extra)
