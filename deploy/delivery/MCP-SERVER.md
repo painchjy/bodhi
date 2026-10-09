@@ -113,7 +113,7 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 | `BODHI_DB_HOST` | 空 | **设了就直连 TCP**（容器/远端部署推荐）；不设则 `docker exec <容器> psql`（本机开发）|
 | `BODHI_DB_PORT` | `5432` | |
 | `BODHI_DB_USER` | `postgres` | |
-| `BODHI_DB_PASSWORD` | 空 | **必填**（或让 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录）—— 代码里**不再内置任何默认口令**：env → WeKnora `.env` 的 `DB_PASSWORD`/`POSTGRES_PASSWORD` → 都取不到则报错退出 |
+| `BODHI_DB_PASSWORD` | 空 | **必填**。可放**进程环境变量**，也可**直接写在本服务目录的 `.env` 里**（2026-10-04 起同等生效）—— 代码里**不再内置任何默认口令**：`BODHI_DB_PASSWORD` → WeKnora `.env` 的 `BODHI_DB_PASSWORD`/`DB_PASSWORD`/`POSTGRES_PASSWORD` → 都取不到则**报错**（启动日志 `ensure-marks 跳过：未设置数据库口令…`，且**所有 DB 类工具会一起失败**）|
 | `BODHI_WEKNORA_DIR` | 空 | WeKnora 部署目录（读它的 `.env` 取口令）；容器部署不需要，直接用 `BODHI_DB_PASSWORD` |
 | `BODHI_DB_NAME` | `WeKnora` | |
 | `BODHI_DB_CONTAINER` | `WeKnora-postgres` | 仅 docker-exec 模式用 |
@@ -149,13 +149,15 @@ sudo systemctl daemon-reload && sudo systemctl restart bodhi2-mcp
 cd /opt/bodhi2 && python3 tools/ke-core/ke_context.py contexts --print 400
 ```
 
-**凭据不在业务 `.env` 里，按下面的链自动找**（所以我们不把口令写进任何配置文件）：
+**所有 `BODHI_*` 变量口径统一（2026-10-04）**：**进程环境变量优先，其次 `.env` 文件**
+（`BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`）——
+所以「`.env` 里只配三个库参数 + `BODHI_DB_PASSWORD`」也能跑起来（修复前 DB 那半张配置会被静默忽略）。
 
 | 要连的 | 读取顺序 |
 |---|---|
-| Postgres 口令 | `BODHI_DB_PASSWORD`（env）→ `BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`（键名 `DB_PASSWORD` / `POSTGRES_PASSWORD`）|
-| Postgres 位置 | `BODHI_DB_HOST/PORT/USER/NAME`（env）→ 默认 `docker exec <BODHI_DB_CONTAINER> psql -U postgres -d WeKnora` |
-| Neo4j | `BODHI_NEO4J_HTTP` / `BODHI_NEO4J_DB`（默认 `http://127.0.0.1:7474` / `neo4j`）+ `NEO4J_USERNAME` / `NEO4J_PASSWORD` |
+| Postgres 口令 | `.env` 或进程 env 的 `BODHI_DB_PASSWORD` → 同名 `.env` 的 `DB_PASSWORD` / `POSTGRES_PASSWORD`（WeKnora 的写法）|
+| Postgres 位置 | `BODHI_DB_HOST/PORT/USER/NAME/CONTAINER`（**env 或 `.env` 均可**）→ 未设 host 则 `docker exec <BODHI_DB_CONTAINER> psql -U postgres -d WeKnora` |
+| Neo4j | `BODHI_NEO4J_HTTP` / `BODHI_NEO4J_DB`（默认 `http://127.0.0.1:7474` / `neo4j`）+ `NEO4J_USERNAME` / `NEO4J_PASSWORD`（**env 或 `.env` 均可**）|
 
 > **不需要**在本服务里配任何 LLM / 嵌入 / 本体编译参数：MCP **不调用大模型**，模型与向量能力都由 WeKnora 提供。
 

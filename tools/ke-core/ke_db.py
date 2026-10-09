@@ -39,10 +39,9 @@ for _stream in (sys.stdout, sys.stderr):
         except Exception:  # noqa: BLE001
             pass
 
-DB_CONTAINER = os.environ.get("BODHI_DB_CONTAINER", "WeKnora-postgres")
-DB_USER = os.environ.get("BODHI_DB_USER", "postgres")
-DB_NAME = os.environ.get("BODHI_DB_NAME", "WeKnora")
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+# DB_CONTAINER / DB_USER / DB_NAME / DB_PASSWORD / DB_HOST / DB_PORT 的取值见文件末尾
+# 「统一取值口径」一段（**必须定义在 `env_value()` 之后**）。
 
 
 def _env_file_candidates() -> list[pathlib.Path]:
@@ -52,7 +51,12 @@ def _env_file_candidates() -> list[pathlib.Path]:
         candidates.append(pathlib.Path(os.environ["BODHI_WEKNORA_DIR"]) / ".env")
     candidates += [pathlib.Path("/mnt/c/Users/PHJY/source/WeKnora/.env"),
                    REPO_ROOT.parent / "WeKnora" / ".env", REPO_ROOT / ".env"]
-    return candidates
+    # 去重（`BODHI_WEKNORA_DIR` 与兜底路径可能指向同一份；报错文案里列两遍很吵）
+    uniq: list[pathlib.Path] = []
+    for p in candidates:
+        if p not in uniq:
+            uniq.append(p)
+    return uniq
 
 
 def env_value(key: str, default: str = "") -> str:
@@ -84,10 +88,11 @@ def env_value(key: str, default: str = "") -> str:
 def _password_from_env_file() -> str:
     """从 WeKnora 部署的 `.env` 取数据库口令 —— **口令绝不写进代码/仓库**。
 
-    查找顺序见 `_env_file_candidates()`；键名兼容 `DB_PASSWORD` / `POSTGRES_PASSWORD`。
+    查找顺序见 `_env_file_candidates()`；键名兼容 `BODHI_DB_PASSWORD`（本仓库 / 交付 `.env` 的写法）
+    / `DB_PASSWORD` / `POSTGRES_PASSWORD`（WeKnora `.env` 的写法）。
     """
     for path in _env_file_candidates():
-        for key in ("DB_PASSWORD", "POSTGRES_PASSWORD"):
+        for key in ("BODHI_DB_PASSWORD", "DB_PASSWORD", "POSTGRES_PASSWORD"):
             val = ""
             try:
                 if not path.is_file():
@@ -107,11 +112,30 @@ def _password_from_env_file() -> str:
     return ""
 
 
-DB_PASSWORD = os.environ.get("BODHI_DB_PASSWORD") or _password_from_env_file()
+# ── 统一取值口径（2026-10-04 修）────────────────────────────────────────────────────────
+# 为什么改：交付 `.env.example` / `MCP-SERVER.md` 都写 `BODHI_DB_PASSWORD`，但旧实现只
+# `os.environ.get()`（**写在 `.env` 里的一律读不到**），且口令只认 `DB_PASSWORD` /
+# `POSTGRES_PASSWORD` 两个键 → 客户「按 `.env` 只配 KB 参数 + `BODHI_DB_PASSWORD`」时，
+# DB 那半张配置被**静默忽略**，表现为启动日志
+# `[mcp] ensure-marks 跳过：未设置数据库口令...`（KB 参数走 `env_value()` 能读到，DB 读不到）。
+# 现在 DB / Neo4j 全部走 `env_value()`，与 KB 参数**同一口径**：
+#   进程环境变量 → `BODHI_WEKNORA_DIR/.env` → `…/source/WeKnora/.env` → 仓库根 `.env`
+DB_CONTAINER = env_value("BODHI_DB_CONTAINER", "WeKnora-postgres")
+DB_USER = env_value("BODHI_DB_USER", "postgres")
+DB_NAME = env_value("BODHI_DB_NAME", "WeKnora")
+# 口令：env/.env 的 `BODHI_DB_PASSWORD` 优先；再退化到 WeKnora `.env` 的 DB_PASSWORD/POSTGRES_PASSWORD。
+DB_PASSWORD = env_value("BODHI_DB_PASSWORD") or _password_from_env_file()
 # 容器化/远端部署：设了 BODHI_DB_HOST 就**直连 TCP**（用本机 psql 客户端），
 # 不再 `docker exec`（容器里没有 docker CLI；也不该给 MCP 容器 docker 权限）。
-DB_HOST = os.environ.get("BODHI_DB_HOST", "").strip()
-DB_PORT = os.environ.get("BODHI_DB_PORT", "5432").strip()
+DB_HOST = env_value("BODHI_DB_HOST").strip()
+DB_PORT = env_value("BODHI_DB_PORT", "5432").strip()
+
+
+def _searched_hint() -> str:
+    """口令排查提示：把「找过哪些地方、认哪些键名」列全（用户自助排错，免来回问）。"""
+    return ("已查找：环境变量 / `.env` 的 `BODHI_DB_PASSWORD`，以及这些 `.env` 里的 "
+            "`BODHI_DB_PASSWORD` / `DB_PASSWORD` / `POSTGRES_PASSWORD`：%s"
+            % "、".join(str(p) for p in _env_file_candidates()))
 
 
 def now_text() -> str:
@@ -154,8 +178,9 @@ def _psql_prefix() -> list[str]:
 def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
     if not DB_PASSWORD:
         raise RuntimeError(
-            "未设置数据库口令：请设 `BODHI_DB_PASSWORD`，或设 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录"
-            "（代码里不再内置任何默认口令）")
+            "未设置数据库口令：请设 `BODHI_DB_PASSWORD`（**进程环境变量**，或服务目录 `.env` 里写一行，"
+            "或设 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录）；代码里不再内置任何默认口令。%s"
+            % _searched_hint())
     cmd = _psql_prefix()
     env = dict(os.environ, PGPASSWORD=DB_PASSWORD) if DB_HOST else None
     if stdin:

@@ -28,10 +28,19 @@ import time
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
-HTTP_URL = os.environ.get("BODHI_NEO4J_HTTP", "http://127.0.0.1:7474").rstrip("/")
-USER = os.environ.get("NEO4J_USERNAME", "neo4j")
-PASSWORD = os.environ.get("NEO4J_PASSWORD", "password")
-DATABASE = os.environ.get("BODHI_NEO4J_DB", "neo4j")
+# 取值与 `ke_db` 同口径（**进程 env 优先，其次 `.env` 文件**）：交付 `.env` 里配的
+# `BODHI_NEO4J_HTTP` / `NEO4J_PASSWORD` 也必须生效（2026-10-04 修，与 ke_db 同因：旧实现只读
+# `os.environ`，写在 `.env` 里的一律读不到）。
+try:
+    from ke_db import env_value as _env_value            # 同目录；ke_db 不反向依赖本模块
+except Exception:                                        # noqa: BLE001  独立运行时退化为仅 env
+    def _env_value(key: str, default: str = "") -> str:
+        return os.environ.get(key, default)
+
+HTTP_URL = _env_value("BODHI_NEO4J_HTTP", "http://127.0.0.1:7474").rstrip("/")
+USER = _env_value("NEO4J_USERNAME", "neo4j")
+PASSWORD = _env_value("NEO4J_PASSWORD", "password")
+DATABASE = _env_value("BODHI_NEO4J_DB", "neo4j")
 
 # 探测结果缓存（避免每次请求都打一次探针；服务是长驻进程）
 _PROBE: dict[str, float | bool] = {"ok": False, "at": 0.0}

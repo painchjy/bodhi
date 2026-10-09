@@ -132,6 +132,6 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 
 ## 6. 排错
 
-先看 `TROUBLESHOOTING.md`（12 条，都是我们真实踩过的：SSRF 白名单、nginx 上游解析、工具 EOF、`applied=false`、
+先看 `TROUBLESHOOTING.md`（都是我们真实踩过的：SSRF 白名单、nginx 上游解析、工具 EOF、`applied=false`、
 C1 无来源、A5 重复关系行、violations、沙箱等）。若还没解决，把三样东西发我们：
 ① `docker logs <mcp 容器> --tail 200`；② WeKnora app 日志里 `tools_ready` 那一行；③ `logs/mcp_calls_*.log` 最后几行。

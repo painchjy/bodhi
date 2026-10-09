@@ -2,6 +2,48 @@
 
 > 都是 2026-09 这轮真实故障，含"现象 / 日志特征 / 根因 / 修法 / 验证"。
 
+## MCP 启动日志报 `ensure-marks 跳过：未设置数据库口令…`
+
+**症状**（2026-10-04）：按 `.env` 只配了三个特殊库参数（本体模型 / 共享概念 / 知识管理领域），
+MCP 启动打出这一行：
+
+```
+[mcp] ensure-marks 跳过（非致命，但…）：未设置数据库口令：请设 `BODHI_DB_PASSWORD`，
+或设 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录…
+```
+
+**根因（代码 bug，已修）**：`ke_db` 解析「DB 位置 / 口令」时**只读进程环境变量、不读 `.env`**；
+而 KB 参数（`BODHI_ONTOLOGY_KB_ID` 等）走 `env_value()` → **会读 `.env`**。
+于是同一份 `.env` 出现「KB 参数生效、DB 参数被静默忽略」；加上口令从前只认
+`DB_PASSWORD` / `POSTGRES_PASSWORD` 两个键（**不认交付模板里写的 `BODHI_DB_PASSWORD`**），
+所以怎么写都读不到 → 报「未设置数据库口令」。
+
+> 这一行本身**非致命**（`ensure-marks` 只是补齐 `wiki_config` 兜底标记，配了 env 就不需要它）；
+> 但它等于宣告 **DB 连不上 → 所有落库类工具都会失败**，必须修。
+
+**修法**：升级到含 2026-10-04 修复的版本。`ke_db` / `ke_neo4j` 现在**统一走 `env_value()`**：
+进程环境变量 → `BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`，
+键名兼容 `BODHI_DB_PASSWORD` / `DB_PASSWORD` / `POSTGRES_PASSWORD`。之后**任选一种**：
+
+```bash
+# ① 服务目录 .env 里写一行（最省事；systemd drop-in 的 EnvironmentFile 与容器 env_file 都读它）
+BODHI_DB_PASSWORD=<你们 postgres 的口令>
+
+# ② 让 MCP 自己去 WeKnora 部署目录的 .env 里找（该文件里有 DB_PASSWORD=…）
+BODHI_WEKNORA_DIR=/opt/WeKnora
+```
+
+**自查**：
+
+```bash
+cd /opt/bodhi2
+python3 -c "import sys;sys.path.insert(0,'tools/ke-core');import ke_db;print(bool(ke_db.DB_PASSWORD), ke_db.DB_HOST or '(docker exec)')"
+python3 tools/ke-core/ke_context.py ensure-marks     # 期望打印 marks，不再报口令缺失
+```
+
+口令仍取不到时，报错正文会**列出查过哪些路径、认哪些键名**，照着补即可。
+
+
 ## Windows 上 `git.exe` 被「应用程序控制策略 / Device Guard」阻止（无法 push）
 
 **症状**（2026-10-01）：Windows 侧 git 突然全废 —— PowerShell / cmd 里执行

@@ -5079,7 +5079,9 @@ def main() -> int:
         marks = ke_context.ensure_marks()
         print("[mcp] ensure-marks：%s" % json.dumps(marks.get("marks"), ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001
-        print("[mcp] ensure-marks 跳过：%s" % exc)
+        # **非致命**：ensure-marks 只是把 wiki_config 标记补齐（配了 env 就按 env 走，标记是兜底）。
+        # 但若这里报「未设置数据库口令」，说明 DB 访问整体不可用 → 所有落库工具会一起失败，必须修。
+        print("[mcp] ensure-marks 跳过（非致命，但若因「未设置数据库口令」则 DB 类工具会全部失败）：%s" % exc)
     parser = argparse.ArgumentParser(description="本体知识保存工具（MCP over Streamable HTTP）")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
