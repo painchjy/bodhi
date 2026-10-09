@@ -307,7 +307,21 @@ bmm:wikiContent rdfs:domain :Advice ;
 判定：`bmm:Assessment / agent:Evaluation / agent:DesignSpec / agent:Advice / agent:InstallGuide → document`；
 `agent:Skill / agent:Agent / bmm:Goal / bmm:KnowledgeSession / bmm:BusinessProcess → entity`（**不误伤**）。
 
-**仍待办**：把存量 `page_type='summary'` 的报告页归到 `bmm:Assessment`（走现成 `retag` 两段式），
-前端为 `summary` 做的适配（`CONTENT_TABS` / `graphFilterTypes`）可一并收敛。
+**存量归位（2026-10-09，已做 4/5）**：`page_type='summary'` 的活页共 **5 个**（跨 3 个库），
+走现成两段式 `retag_preview → retag_apply` 归到 `bmm:Assessment`：
+
+| 页 | refs | 处置 |
+|---|---|---|
+| `bmm/summary/…`（结算平台库） | 0 | ✅ 已 retag → `bmm/assessment/…` |
+| `agent/summary/…`（智能体开发库） | 0 | ✅ 已 retag |
+| `ea/summary/…`（522d5f81） | 0 | ✅ 已 retag |
+| `ea/summary/it…`（dbc2528f） | 0 | ✅ 已 retag |
+| `ea/summary/…`（dbc2528f，另 1 页） | **156** | ⏸ **停手待确认**（风险 `url_break + refs_rewrite`：会重写 156 处引用）|
+
+`retag_apply(kb_id, slug, new_type, ticket, acknowledge_risks)`；风险 `url_break` = 旧 slug 链接失效。
+
+**仍待办**：① 上面那 1 页 156 引用的归位（需你确认是否接受引用重写）；
+② 前端为 `summary` 做的适配（`CONTENT_TABS` / `graphFilterTypes`）可随存量清理收敛；
+③ `save_knowledge` 报告分支改走内核 `document` 模式（P0-c 的第一小步，见 §6）。
 
 
