@@ -721,6 +721,46 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
                             "已成功的会被判为 merged/已存在，不会重复建）。")}
 
 
+def write_relations_batch(kb_id: str, pairs: list) -> dict:
+    """**批量建关系**（2026-10-09 P0-b）：`pairs=[{"source","type","target"}]`（**均传 slug**）。
+
+    为什么需要：`save_knowledge` 的设计/建模路径旧实现只把关系**渲染进页面正文**、**不写图**，
+    于是出现「索引列表先出现、本体图谱要等一段时间才出现」（要等事后投影）。
+    这里补上批量写图：① 一次 `page_info_map` 预读 ② 一次 `ensure_instances`
+    ③ 逐条 `add_edge(ctx)` —— 每条边 **1-2 次 Neo4j**（旧 `add_edge` 是 4 次 PG + 5 次 Neo4j）。
+
+    幂等：重复关系会被 `add_edge` 判为「已存在」→ 不报错、不重复建，所以**可安全重跑/续作**。
+    """
+    import ke_graph as _kg  # noqa: PLC0415
+    rows = [{"source": str((p or {}).get("source") or "").strip(),
+             "type": str((p or {}).get("type") or "").strip(),
+             "target": str((p or {}).get("target_slug") or (p or {}).get("target") or "").strip()}
+            for p in (pairs or [])]
+    rows = [r for r in rows if r["source"] and r["type"] and r["target"]]
+    if not rows:
+        return {"ok": True, "written": 0, "total": 0, "errors": []}
+    need = sorted({r["source"] for r in rows} | {r["target"] for r in rows})
+    info = _kg.page_info_map(kb_id, need)
+    try:
+        _kg.ensure_instances(kb_id, [
+            {"slug": k, "name": (v or {}).get("title") or k.rsplit("/", 1)[-1],
+             "page_type": (v or {}).get("pt") or "", "tenant_id": (v or {}).get("tenant")}
+            for k, v in info.items()])
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "written": 0, "total": len(rows),
+                "errors": [{"scope": "ensure_instances", "error": str(exc)[:160]}]}
+    ctx = {"info": info, "nodes_ensured": True, "skip_relations": True}
+    written, errors = 0, []
+    for r in rows:
+        try:
+            _kg.add_edge(kb_id, r["source"], r["type"], r["target"], ctx=ctx)
+            written += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"source": r["source"], "type": r["type"], "target_slug": r["target"],
+                           "error": str(exc)[:160]})
+    return {"ok": True, "written": written, "total": len(rows), "errors": errors}
+
+
 def rewrite_page_content(kb_id: str, slug: str, content: str, tag: str = TAG_OPS) -> dict:
     """按给定正文**重写一页**：快照旧版 → 更新 content/version+1。
 

@@ -1324,8 +1324,13 @@ def build_pending_page(model: dict, element: dict, candidate: dict, similarity: 
 def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_meta: dict,
                   *, high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW, dry_run: bool = False,
                   tenant_id: int | None = None, resolved_note: str = "", knowledge_id: str = "",
-                  extra: dict | None = None, engine=None, same_type_only: bool = False) -> dict:
+                  extra: dict | None = None, engine=None, same_type_only: bool = False,
+                  skip_folders: bool = False, skip_crud: bool = False) -> dict:
     """**落库半段**（抽取路径与设计路径共用）：相似度匹配 → 合并/新增/待确认 → 写页 → 重算 links。
+
+    `skip_folders` / `skip_crud`（2026-10-09 P0-b）：把**重型维护**移出热路径 ——
+    目录树全量重建（`sync_folders.sync_kb`）与 CRUD 矩阵刷新在大库上要 10-60 s，
+    而前端进 wiki 时会调 `/bodhi/folders/refresh`（接口已存在）→ 落库不必同步等它。
 
     这段逻辑原先内联在**已退役的整篇抽取工具**里（2026-09-20 原样抽出，行为逐字保留；
     抽取工具 2026-09-22 退役，本函数现由设计/建模路径 `save_knowledge` 使用）：
@@ -1533,13 +1538,18 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         # 落库后**自动重建该知识库的目录树**（用户 2026-09-19 口径）：
         # 不重建的话前端树是平铺的（老问题）。目录 id 是 UUIDv5 确定性生成、逻辑幂等，
         # 所以每次落库后同步一遍是安全的；同步失败不影响本次结果（只记录状态）。
-        try:
-            import sync_folders  # 延迟导入：sync_folders 反过来 import server
-            sync_folders.sync_kb(kb_id, dry_run=False, link_pages=True, prune=False)
-            summary["folders_synced"] = True
-        except Exception as exc:  # noqa: BLE001
-            print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
-            summary["folders_synced"] = "failed: %s" % exc
+        if skip_folders:
+            # P0-b：落库不再同步等"全库目录重建"（大库 10-60 s）；前端进 wiki 会调
+            # `/bodhi/folders/refresh` 按需刷新（该接口就是为"目录更新早于最新页面"加的）。
+            summary["folders_synced"] = "deferred（按需刷新：前端调 /bodhi/folders/refresh）"
+        else:
+            try:
+                import sync_folders  # 延迟导入：sync_folders 反过来 import server
+                sync_folders.sync_kb(kb_id, dry_run=False, link_pages=True, prune=False)
+                summary["folders_synced"] = True
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] 目录同步失败（不影响本次抽取）：%s" % exc)
+                summary["folders_synced"] = "failed: %s" % exc
         # 关系撤回（retract）：设计变更要能"减边"，否则旧边留在页面上、巡检跟着失真
         try:
             retract_list = checked.get("retract_edges") or []
@@ -1548,17 +1558,21 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         except Exception as exc:  # noqa: BLE001
             summary["retract"] = {"retracted": [], "missed": [], "error": str(exc)[:160]}
         # 服务详细设计：刷新「服务页的 CRUD 矩阵」（跨页聚合，必须**写库之后**再读才拿得到）
-        try:
-            svc_types = service_types()
-            targets = []
-            for entry in summary["created"] + summary["merged"]:
-                slug = entry.get("slug") or entry.get("into")
-                if slug and entry.get("type") in svc_types:
-                    targets.append(slug)
-            if targets:
-                summary["crud_matrix"] = refresh_crud_matrix(kb_id, targets)
-        except Exception as exc:  # noqa: BLE001
-            summary["crud_matrix"] = "failed: %s" % exc
+        # P0-b：`skip_crud` 时跳过（每服务页 5-8 次往返；按需用 `/bodhi/crud/refresh` 或下次落库补）。
+        if skip_crud:
+            summary["crud_matrix"] = "deferred（按需刷新）"
+        else:
+            try:
+                svc_types = service_types()
+                targets = []
+                for entry in summary["created"] + summary["merged"]:
+                    slug = entry.get("slug") or entry.get("into")
+                    if slug and entry.get("type") in svc_types:
+                        targets.append(slug)
+                if targets:
+                    summary["crud_matrix"] = refresh_crud_matrix(kb_id, targets)
+            except Exception as exc:  # noqa: BLE001
+                summary["crud_matrix"] = "failed: %s" % exc
     # 类型变更：不再是"已改好"，而是"需要两段式确认"（2026-09-27 用户口径）
     summary["retag_required"] = retagged or [dict(x, ok=None, note="dry_run 未执行")
                                              for x in retag_queue]
@@ -2239,6 +2253,12 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                     doc_meta["title"] = doc_meta["title"] or "（继承自上游页/报告页的来源文档）"
                     break
 
+    # P0-b（2026-10-09）：把**重型维护**移出落库热路径（全库目录重建 / CRUD 矩阵刷新）。
+    # 默认延迟 —— 前端进 wiki tab 时会调 `/bodhi/folders/refresh`（接口已存在，就是为
+    # "目录更新早于最新页面"加的）；要同步等可以用 BODHI_DEFER_MAINTENANCE=0 关掉。
+    defer_maintenance = str(os.environ.get("BODHI_DEFER_MAINTENANCE", "1")).lower() \
+        not in ("0", "false", "no")
+
     if stage == "report":
         title = ((report or {}).get("title") or "").strip()
         body = ((report or {}).get("content_md") or "").strip()
@@ -2283,7 +2303,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         checked = {"edges": [], "violations": [], "unmatched": []}
         summary = save_elements(kb_id, model_obj, checked, [element], doc_meta, high=high, low=low,
                                 dry_run=(mode != "apply"), tenant_id=tenant_id,
-                                resolved_note=kb_note, engine=engine, same_type_only=True)
+                                resolved_note=kb_note, engine=engine, same_type_only=True,
+                                skip_folders=defer_maintenance, skip_crud=defer_maintenance)
         summary["stage"] = "report"
         summary["context"] = ctx["id"]
         summary["report_page"] = {"slug": slug, "title": title, "chars": len(body),
@@ -2327,10 +2348,36 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             allowed.append(payload)
     summary = save_elements(kb_id, model_obj, checked, allowed, doc_meta, high=high, low=low,
                             dry_run=(mode != "apply"), tenant_id=tenant_id,
-                            resolved_note=kb_note, engine=engine, same_type_only=True)
+                            resolved_note=kb_note, engine=engine, same_type_only=True,
+                            skip_folders=defer_maintenance, skip_crud=defer_maintenance)
     summary["stage"] = "graph"
     summary["pending_confirmation"] = blocked
     summary["context"] = ctx["id"]
+    summary["maintenance"] = ("deferred" if defer_maintenance else "inline")
+    # P0-b（2026-10-09）：**把关系真正写进图** —— 旧实现只把关系渲染进页面正文、不写图，
+    # 所以出现「索引列表先出现、本体图谱要等一段时间」。批量写：一次预读 + 一次
+    # `ensure_instances` + 逐条 `add_edge(ctx)`（每条边 1-2 次 Neo4j），幂等可重跑。
+    if mode == "apply":
+        _slug_of = {}
+        for _e in (summary.get("created") or []):
+            if _e.get("name") and _e.get("slug"):
+                _slug_of[_e["name"]] = _e["slug"]
+        for _e in (summary.get("merged") or []):
+            if _e.get("name") and _e.get("into"):
+                _slug_of[_e["name"]] = _e["into"]
+        _pairs = []
+        for _p in allowed:
+            _src = _slug_of.get(_p.get("name")) or _p.get("slug")
+            for _rel in (_p.get("relations") or []):
+                if _src and _rel.get("type") and _rel.get("target_slug"):
+                    _pairs.append({"source": _src, "type": _rel["type"],
+                                   "target_slug": _rel["target_slug"]})
+        if _pairs:
+            try:
+                summary["graph_edges"] = ke_pages.write_relations_batch(kb_id, _pairs)
+            except Exception as exc:  # noqa: BLE001  写边失败不影响页面落库，但必须回报
+                summary["graph_edges"] = {"ok": False, "total": len(_pairs),
+                                          "written": 0, "errors": [{"error": str(exc)[:200]}]}
     # 来源会话边回执（2026-10-04）：服务端自动补的 `bmm:sourceSession`（对象属性）——
     # 让调用方能一眼确认"本次每条知识都连回了会话页"（用户口径）。
     # 写入后**按 slug 补**来源会话边（双链）→ 会话页「被引用」可见；回执给明细（2026-10-04 修正）
@@ -4220,7 +4267,9 @@ def _log_tool_call(name: str, args: dict, result, ms: float) -> None:
         keys = ("applied", "created", "merged", "pending", "violations", "unmatched", "retract",
                 "retract_planned", "crud_matrix", "report_page", "page_versions", "count",
                 "catalog", "id", "name", "error", "how_to_use", "source", "note",
-                "images_found", "images", "by_document")
+                "images_found", "images", "by_document",
+                # P0/P0-b：落库性能与写图结果（便于内网自证"边有没有真的写进图"）
+                "graph_edges", "edge_errors", "folders_synced", "maintenance", "resume_hint")
         picked = {}
         for key in keys:
             if key in summary:
