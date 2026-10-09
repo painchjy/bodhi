@@ -546,7 +546,12 @@ def relation_types_for(page_type: str) -> dict:
 
 
 def relation_type_map(page_type: str) -> dict[str, dict]:
-    return {r["prefixed"]: r for r in relation_types_for(page_type)["relation_types"]}
+    """某类可用的对象属性（**进程级缓存**，P3-0g：每条边做 domain 校验都会调它）。"""
+    hit = _memo_get(("relmap", page_type))
+    if hit is None:
+        hit = _memo_put(("relmap", page_type),
+                        {r["prefixed"]: r for r in relation_types_for(page_type)["relation_types"]})
+    return dict(hit)
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +646,16 @@ def data_properties_for(type_name: str) -> dict[str, dict]:
 
 
 def target_closure(rel_type: str, meta: dict[str, dict] | None = None) -> list[str]:
-    """某对象属性的 range 闭包（range 类 + 其所有子类）——「能连到哪些类」。"""
+    """某对象属性的 range 闭包（**进程级缓存**，P3-0g：每条边做 range 校验都会调它）。"""
+    if meta is not None:                      # 显式传入视图 → 不缓存
+        return _target_closure_uncached(rel_type, meta)
+    hit = _memo_get(("closure", rel_type))
+    if hit is None:
+        hit = _memo_put(("closure", rel_type), _target_closure_uncached(rel_type, None))
+    return list(hit)
+
+
+def _target_closure_uncached(rel_type: str, meta: dict[str, dict] | None = None) -> list[str]:
     meta = meta or class_meta()
     ranges: list[str] = []
     try:
