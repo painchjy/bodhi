@@ -313,12 +313,13 @@ def page_info_map(kb_id: str, slugs) -> dict:
         chunk = want[i:i + step]
         rows = ke_db.psql_csv(
             "SELECT slug, COALESCE(page_type,'') AS pt, COALESCE(title,'') AS title, "
-            "       tenant_id FROM wiki_pages "
+            "       COALESCE(version,1) AS v, tenant_id FROM wiki_pages "
             " WHERE knowledge_base_id=%s AND deleted_at IS NULL AND slug IN (%s)"
             % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(s) for s in chunk)))
         for r in rows:
             out[str(r.get("slug"))] = {"pt": r.get("pt") or "", "title": r.get("title") or "",
-                                       "tenant": r.get("tenant_id")}
+                                       "tenant": r.get("tenant_id"),
+                                       "version": int(r.get("v") or 1)}
     return out
 
 

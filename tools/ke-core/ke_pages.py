@@ -284,7 +284,8 @@ def _uniq_str(seq) -> list:
 def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                 summary: str = "", tag: str = "bodhi-cxt-edit",
                 metadata: dict | None = None, sync_folders: bool = True,
-                source_refs: list | None = None, chunk_refs: list | None = None) -> dict:
+                source_refs: list | None = None, chunk_refs: list | None = None,
+                preloaded: dict | None = None) -> dict:
     """**建或改**一页（概念页/映射页专用；2026-09-28）。
 
     - 已存在 → 走 `_apply_content_update`（快照旧版 → content/version+1），
@@ -302,10 +303,16 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     """
     if len(tag) > 16:
         raise ValueError("tag 超过 last_edit_source 的 varchar(16)：%s" % tag)
-    existing = ke_db.psql_csv(
-        "SELECT COALESCE(version,1) AS version FROM wiki_pages "
-        " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
-        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if preloaded is not None:
+        # 批量路径（2026-10-10 P3-0c）：调用方已用 `page_info_map` **一次**预读全批，
+        # 这里免掉"每页 1 次存在性查询"（40 页 ≈ 40×272ms ≈ 11s，本机）。
+        existing = ([{"version": int(preloaded.get("version") or 1)}]
+                    if preloaded.get("exists") else [])
+    else:
+        existing = ke_db.psql_csv(
+            "SELECT COALESCE(version,1) AS version FROM wiki_pages "
+            " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+            % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
     extra = (", title = %s, summary = %s, page_type = %s, "
              "page_metadata = COALESCE(page_metadata, '{}'::jsonb) || %s::jsonb"
              % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
@@ -325,8 +332,12 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
         if sync_folders:
             _sync_folders(kb_id)
         return {"slug": slug, "created": False, "before_version": before, "after_version": before + 1}
-    kb = ke_db.psql_csv("SELECT COALESCE(tenant_id,0) AS tenant_id FROM knowledge_bases WHERE id = %s"
-                        % ke_db.sql_str(kb_id))
+    if preloaded is not None and preloaded.get("tenant_id") is not None:
+        # 批量路径：租户也来自预读（免掉"每新建页 1 次 knowledge_bases 查询"）
+        kb = [{"tenant_id": preloaded["tenant_id"]}]
+    else:
+        kb = ke_db.psql_csv("SELECT COALESCE(tenant_id,0) AS tenant_id FROM knowledge_bases WHERE id = %s"
+                            % ke_db.sql_str(kb_id))
     if not kb:
         raise ValueError("知识库不存在：%s" % kb_id)
     # 本体分类目录（2026-09-29 用户口径：概念库也要「和领域模型一样有本体分类目录」）：
@@ -561,7 +572,8 @@ def _register_session_part(kb_id: str, base_slug: str, part_slug: str, part_titl
 
 
 def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
-                    strict_source: bool = True, sync_folders: bool = True) -> dict:
+                    strict_source: bool = True, sync_folders: bool = True,
+                    preloaded: dict | None = None) -> dict:
     """**知识写入统一内核**（契约 §1/§2/§8）。所有写入器都应薄封装本函数。
 
     `spec` 见 docs/knowledge-write-contract.md §2。`strict_source=True`（默认）时，
@@ -647,7 +659,7 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     res = upsert_page(kb_id, slug, title, page_type, content,
                       summary=(spec.get("summary") or "").strip()[:500], tag=TAG_CONTRACT,
                       metadata=metadata, sync_folders=sync_folders,
-                      source_refs=_doc_refs, chunk_refs=_chunk_refs)
+                      source_refs=_doc_refs, chunk_refs=_chunk_refs, preloaded=preloaded)
     # ③ 关系（节点已就绪）
     for rel in (spec.get("relations") or []):
         rt, ts = rel.get("type"), rel.get("target_slug")
@@ -715,11 +727,24 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
              for s in specs for r in (s.get("relations") or [])]
     info = _kg.page_info_map(kb_id, [x for x in want if x])
     # ② 节点：逐个事务（各自 fail-closed，互不牵连）
+    #    P3-0c（2026-10-10）：全批已由 ① 预读 → 传 `preloaded` **免掉每页 2 次 psql**
+    #    （存在性查询 + 新建页的租户查询；40 页 ≈ 80×272ms ≈ 21s，本机）。
+    _kb_tenant = None
+    if not dry_run:
+        _t = ke_db.psql_csv("SELECT COALESCE(tenant_id,0) AS t FROM knowledge_bases WHERE id=%s"
+                            % ke_db.sql_str(kb_id))
+        _kb_tenant = (_t[0]["t"] if _t else None)
     for spec in specs:
         rels = spec.pop("relations", None) or []
+        _slug = (spec.get("slug") or "").strip() or _derive_slug(spec.get("page_type") or "",
+                                                                spec.get("title") or "")
+        _hit = info.get(_slug)
+        _pre = {"exists": bool(_hit), "version": int((_hit or {}).get("version") or 1),
+                "tenant_id": _kb_tenant if _kb_tenant is not None
+                else ((_hit or {}).get("tenant") if _hit else None)}
         try:
             r = write_knowledge(kb_id, spec, dry_run=dry_run, strict_source=strict_source,
-                                sync_folders=False)
+                                sync_folders=False, preloaded=_pre)
             pages.append(r)
             prepared.append((r, rels))
             slug = str(r.get("slug") or "")
