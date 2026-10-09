@@ -303,6 +303,12 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     """
     if len(tag) > 16:
         raise ValueError("tag 超过 last_edit_source 的 varchar(16)：%s" % tag)
+    # P3-0d（2026-10-10）：把这页"已构建好"的正文与数据属性**回传**给调用方，
+    # 供批量路径用**一条 UNWIND**（`ke_graph.upsert_nodes_batch`）统一写图节点，
+    # 替掉"每节点 1 次 Neo4j"（40 节点 ≈ 3 s）。`_wiki_content_for_graph` 用**剥离关系小节前**的原文，
+    # 与旧 `_kg.upsert_node(wiki_content=…)` 逐字一致。
+    _wiki_content_for_graph = content
+    _attrs_for_graph = dict((metadata or {}).get("ontology", {}).get("attributes") or {})
     if preloaded is not None:
         # 批量路径（2026-10-10 P3-0c）：调用方已用 `page_info_map` **一次**预读全批，
         # 这里免掉"每页 1 次存在性查询"（40 页 ≈ 40×272ms ≈ 11s，本机）。
@@ -331,7 +337,8 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
         _apply_content_update(kb_id, slug, content, tag, extra_set=extra)
         if sync_folders:
             _sync_folders(kb_id)
-        return {"slug": slug, "created": False, "before_version": before, "after_version": before + 1}
+        return {"slug": slug, "created": False, "before_version": before, "after_version": before + 1,
+                "content": _wiki_content_for_graph, "attrs": _attrs_for_graph}
     if preloaded is not None and preloaded.get("tenant_id") is not None:
         # 批量路径：租户也来自预读（免掉"每新建页 1 次 knowledge_bases 查询"）
         kb = [{"tenant_id": preloaded["tenant_id"]}]
@@ -371,7 +378,8 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     except Exception:  # noqa: BLE001
         pass
     return {"slug": slug, "created": True, "before_version": 0, "after_version": 1,
-            "category_path": cat}
+            "category_path": cat,
+            "content": _wiki_content_for_graph, "attrs": _attrs_for_graph}
 
 
 # ---------------------------------------------------------------------------
@@ -573,7 +581,7 @@ def _register_session_part(kb_id: str, base_slug: str, part_slug: str, part_titl
 
 def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                     strict_source: bool = True, sync_folders: bool = True,
-                    preloaded: dict | None = None) -> dict:
+                    preloaded: dict | None = None, skip_graph: bool = False) -> dict:
     """**知识写入统一内核**（契约 §1/§2/§8）。所有写入器都应薄封装本函数。
 
     `spec` 见 docs/knowledge-write-contract.md §2。`strict_source=True`（默认）时，
@@ -638,11 +646,16 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                 "warnings": warnings, "content_preview": content[:600]}
     graph = {"ok": True, "edges_written": 0, "edge_errors": []}
     # ① 节点先入图（图本优先，契约 §8）
-    try:
-        _kg.upsert_node(kb_id, slug, title, page_type, attributes=attrs, wiki_content=content)
-    except Exception as exc:  # noqa: BLE001
-        graph["ok"] = False
-        graph["reason"] = "图节点写入失败：%s" % str(exc)[:180]
+    #    `skip_graph=True`（批量路径 P3-0d，2026-10-10）：图节点由调用方用**一条 UNWIND**
+    #    （`ke_graph.upsert_nodes_batch`）统一写 —— 免掉"每节点 1 次 Neo4j"（40 节点 ≈ 3 s）。
+    if skip_graph:
+        graph["deferred"] = True
+    else:
+        try:
+            _kg.upsert_node(kb_id, slug, title, page_type, attributes=attrs, wiki_content=content)
+        except Exception as exc:  # noqa: BLE001
+            graph["ok"] = False
+            graph["reason"] = "图节点写入失败：%s" % str(exc)[:180]
     # ② 节点落 PG（建/合并页）—— **关系校验（domain/range、目标页存在）要读 PG 的 `page_type`**，
     #    所以必须在建边之前完成：否则源/目标页未落库 → add_edge 报「目标页不存在」（2026-10-09 修）。
     # 溯源列（契约 §5，2026-10-09 补内核缺口）：文档来源 → `source_refs`；片段/分块 → `chunk_refs`。
@@ -698,7 +711,9 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
             warnings.append("会话溯源边写入失败：%s" % str(exc)[:160])
     return {"applied": True, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
             "created": res.get("created"), "version": res.get("after_version"),
-            "graph": graph, "warnings": warnings}
+            "graph": graph, "warnings": warnings,
+            # P3-0d：回传"已构建好的"正文/属性，供批量路径一条 UNWIND 写图节点
+            "content": res.get("content"), "attrs": res.get("attrs")}
 
 
 def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
@@ -734,6 +749,7 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
         _t = ke_db.psql_csv("SELECT COALESCE(tenant_id,0) AS t FROM knowledge_bases WHERE id=%s"
                             % ke_db.sql_str(kb_id))
         _kb_tenant = (_t[0]["t"] if _t else None)
+    _node_rows = []                      # P3-0d：收集"已构建好"的图节点载荷
     for spec in specs:
         rels = spec.pop("relations", None) or []
         _slug = (spec.get("slug") or "").strip() or _derive_slug(spec.get("page_type") or "",
@@ -744,16 +760,28 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
                 else ((_hit or {}).get("tenant") if _hit else None)}
         try:
             r = write_knowledge(kb_id, spec, dry_run=dry_run, strict_source=strict_source,
-                                sync_folders=False, preloaded=_pre)
+                                sync_folders=False, preloaded=_pre, skip_graph=not dry_run)
             pages.append(r)
             prepared.append((r, rels))
             slug = str(r.get("slug") or "")
             if slug:
                 info.setdefault(slug, {"pt": (spec.get("page_type") or ""),
-                                       "title": (spec.get("title") or ""), "tenant": None})
+                                       "title": (spec.get("title") or ""), "tenant": _kb_tenant})
+                if r.get("content") is not None:
+                    _node_rows.append({"slug": slug, "name": (spec.get("title") or ""),
+                                       "page_type": (spec.get("page_type") or ""),
+                                       "tenant_id": _kb_tenant,
+                                       "wiki_content": r.get("content"),
+                                       "attrs": r.get("attrs") or {}})
         except Exception as exc:  # noqa: BLE001
             errors.append({"title": spec.get("title"), "error": str(exc)[:200]})
     edges_written, edge_errors = 0, []
+    # ③-0 图节点：**一条 UNWIND** 统一写（P3-0d）——旧路径每节点 1 次 Neo4j（40 节点 ≈ 3 s）
+    if not dry_run and _node_rows:
+        try:
+            _kg.upsert_nodes_batch(kb_id, _node_rows)
+        except Exception as exc:  # noqa: BLE001
+            edge_errors.append({"scope": "upsert_nodes_batch", "error": str(exc)[:160]})
     if not dry_run:
         # ③-1 一次 UNWIND：把全批节点（本批新建 + 关系目标）批量确保在图里
         if info:
