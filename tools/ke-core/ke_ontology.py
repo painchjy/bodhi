@@ -218,7 +218,40 @@ def classes(include_external: bool = False) -> dict:
     return {"source": source, "classes": out}
 
 
+# ---------------------------------------------------------------------------
+# 进程级元数据 memo（2026-10-10，P3-0g）
+# 实测：本体元数据查询**每次都打 Neo4j**（relation_type_map=4 / target_closure=3 /
+# category_path=3 / class_meta=3 / data_properties_for=2 / ancestors=1），而它们在
+# per-node / per-edge 循环里被反复调用 —— 一次 15 节点/14 边的落库就产生 **621 次**
+# Neo4j 往返（批次②23/16 → 1748 次）。这里按 `index_stamp()`（本体产物指纹）失效，
+# 与 `data_properties()` **同一模式**：产物一变整片失效，不会读到旧本体。
+_META_MEMO: dict = {}
+_META_STAMP = None
+
+
+def _memo_get(key):
+    global _META_STAMP
+    stamp = index_stamp()
+    if stamp != _META_STAMP:
+        _META_MEMO.clear()
+        _META_STAMP = stamp
+    return _META_MEMO.get(key)
+
+
+def _memo_put(key, value):
+    _META_MEMO[key] = value
+    return value
+
+
 def class_meta() -> dict[str, dict]:
+    """{prefixed: 类元信息}（**进程级缓存**，按本体产物指纹失效；见 `_memo_get`）。"""
+    hit = _memo_get("class_meta")
+    if hit is None:
+        hit = _memo_put("class_meta", _class_meta_uncached())
+    return dict(hit)
+
+
+def _class_meta_uncached() -> dict[str, dict]:
     """{prefixed: 类元信息} —— 供分组/分类路径/标签使用（含父类）。"""
     out: dict[str, dict] = {}
     for name, meta in _index_classes().items():
@@ -300,7 +333,19 @@ def render_mode(type_name: str, meta: dict[str, dict] | None = None) -> str:
 
 
 def ancestors(type_name: str, meta: dict[str, dict] | None = None) -> list[str]:
-    """类的祖先闭包（含自身，由近及远）。Neo4j 优先。"""
+    """类的祖先闭包（含自身，由近及远）。Neo4j 优先（**进程级缓存**）。"""
+    if not type_name:
+        return []
+    if meta is not None:                    # 显式传入视图 → 不缓存（调用方在自定义 meta 上算）
+        return _ancestors_uncached(type_name, meta)
+    key = ("ancestors", type_name)
+    hit = _memo_get(key)
+    if hit is None:
+        hit = _memo_put(key, _ancestors_uncached(type_name, None))
+    return list(hit)
+
+
+def _ancestors_uncached(type_name: str, meta: dict[str, dict] | None = None) -> list[str]:
     if not type_name:
         return []
     try:
@@ -324,7 +369,19 @@ def ancestors(type_name: str, meta: dict[str, dict] | None = None) -> list[str]:
 
 
 def descendants(type_name: str, meta: dict[str, dict] | None = None) -> list[str]:
-    """类的后代闭包（含自身）—— range 的实际可连范围。"""
+    """类的后代闭包（含自身）—— range 的实际可连范围（**进程级缓存**）。"""
+    if not type_name:
+        return []
+    if meta is not None:
+        return _descendants_uncached(type_name, meta)
+    key = ("descendants", type_name)
+    hit = _memo_get(key)
+    if hit is None:
+        hit = _memo_put(key, _descendants_uncached(type_name, None))
+    return list(hit)
+
+
+def _descendants_uncached(type_name: str, meta: dict[str, dict] | None = None) -> list[str]:
     if not type_name:
         return []
     try:
