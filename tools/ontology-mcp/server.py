@@ -2292,44 +2292,76 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                     "ORDER BY updated_at DESC LIMIT 1" % (sql_str(kb_id), sql_str(title)))
                 if rows:
                     slug = rows[0]["slug"]
-        element = {"name": title, "type": (report or {}).get("page_type") or "summary",
-                   "type_label": ctx["report_label"], "module": model, "slug": slug,
-                   "category_path": (report or {}).get("category_path") or [ctx["report_category"]],
-                   "definition": body, "description": "",
-                   "source_text": ctx["report_source"],
-                   "chunk_id": "", "chunk_index": -1, "relations": [],
-                   "upstream": [s for s in ((report or {}).get("upstream") or []) if s],
-                   "aliases": (report or {}).get("aliases") or [],
-                   # 报告页复用时**正文整体替换**（改版后正文更短也必须换掉旧版，别走"取更长"启发式）
-                   "replace_body": True}
-        checked = {"edges": [], "violations": [], "unmatched": []}
-        summary = save_elements(kb_id, model_obj, checked, [element], doc_meta, high=high, low=low,
-                                dry_run=(mode != "apply"), tenant_id=tenant_id,
-                                resolved_note=kb_note, engine=engine, same_type_only=True,
-                                skip_folders=defer_maintenance, skip_crud=defer_maintenance)
-        summary["stage"] = "report"
-        summary["context"] = ctx["id"]
-        summary["report_page"] = {"slug": slug, "title": title, "chars": len(body),
-                                  "type_label": ctx["report_label"],
-                                  "category_path": (element.get("category_path")
-                                                    or [ctx["report_category"]])}
-        if summary.get("merged"):
-            summary["report_page"]["action"] = "updated"
-        elif summary.get("pending"):
-            summary["report_page"]["action"] = "pending"
-        else:
-            summary["report_page"]["action"] = "created"
-        # Step4（2026-10-08 契约 §5）：**报告页也补会话溯源** —— 此前只有 stage="graph" 分支补，
-        # 报告分支在这里提前 return → 漏掉 → 报告页无 `bmm:sourceSession`（用户实测）。
-        if mode == "apply" and ident.get("ok"):
-            _rp_slugs = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
-            _rp_slugs += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
-            if _rp_slugs:
-                try:
-                    summary["source_session_link"] = link_source_session(
-                        kb_id, ident["session_no"], slugs=_rp_slugs, dry_run=False)
-                except Exception as exc:  # noqa: BLE001  补挂失败不影响落库，但要在回执里说清
-                    summary["source_session_link"] = {"ok": False, "reason": str(exc)[:200]}
+        # P0-c（2026-10-09）：**报告分支改走内核** `write_knowledge(mode="document")`。
+        # 报告就是「文档类」：调用方给整篇正文（`wiki_content`）。相比 legacy `save_elements`：
+        #   · 不再做相似度合并/待确认（用户口径：按 slug 幂等 upsert）；
+        #   · 不再"整批一个事务"（内核按 (kb,slug) 幂等 + 逐条小事务）；
+        #   · **会话溯源边由内核自动挂**（`source.session_no` → `ensure_session_page` + `bmm:sourceSession`），
+        #     所以本分支不再手工调 `link_source_session`；
+        #   · 溯源列 `source_refs`（L3 兼容字段）与正文「## 原文依据」由内核写。
+        _ptype = ((report or {}).get("page_type") or "").strip() or "bmm:Assessment"
+        _upstream = [s for s in ((report or {}).get("upstream") or []) if s]
+        spec = {
+            "slug": slug,                    # 复用既有报告页时由上面的幂等查询给出；空则由内核派生
+            "title": title, "page_type": _ptype, "type_label": ctx["report_label"],
+            "mode": "document",              # 报告=文档类；**不依赖本体判定**（legacy 的 `summary` 不是本体类）
+            "wiki_content": body,
+            "summary": (report or {}).get("summary") or "",
+            "source": {
+                "doc_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
+                "doc_title": doc_meta.get("title", ""),
+                "source_text": ctx["report_source"],
+                "derived_from": _upstream,
+            },
+            "metadata_extra": {"design": {"upstream": _upstream, "context": ctx["id"]}},
+            "aliases": (report or {}).get("aliases") or [],
+        }
+        if ident.get("ok"):
+            spec["source"]["session_no"] = ident["session_no"]
+            spec["source"]["agent_name"] = ident.get("agent_name", "")
+        res = ke_pages.write_knowledge(
+            kb_id, spec, dry_run=(mode != "apply"),
+            strict_source=bool(doc_meta.get("id") or ident.get("ok")),
+            sync_folders=not defer_maintenance)
+        _created = bool(res.get("created"))
+        _action = ("created" if _created else "updated") if mode == "apply" else "preview"
+        _graph = res.get("graph") or {}
+        summary = {
+            "model": model_obj["key"], "kb_id": kb_id, "knowledge_id": doc_meta["id"],
+            "resolved_note": (kb_note or "").strip(), "doc_title": doc_meta.get("title", ""),
+            "elements": 1, "relationships": 0,
+            "created": [{"name": title, "type": _ptype, "slug": res.get("slug")}] if _created else [],
+            "merged": ([] if _created else
+                       [{"name": title, "type": _ptype, "into": res.get("slug"),
+                         "similarity": 1.0, "note": "按 (kb,slug) 幂等更新"}]),
+            "pending": [], "violations": [], "unmatched": [], "dropped_relations": [],
+            "dry_run": mode != "apply", "applied": mode == "apply",
+            "thresholds": {"high": high, "low": low}, "generated_at": now_text(),
+            "page_versions": [{"slug": res.get("slug"), "before": res.get("before_version"),
+                               "action": _action,
+                               "applied": mode == "apply"}],
+            "graph": _graph, "warnings": res.get("warnings") or [],
+            "source_session_edges": [],
+            "stage": "report", "context": ctx["id"],
+            "maintenance": "deferred" if defer_maintenance else "inline",
+            "engine": "kernel:write_knowledge/document",
+            "report_page": {"slug": res.get("slug"), "title": title, "chars": len(body),
+                            "type_label": ctx["report_label"], "page_type": _ptype,
+                            "action": _action,
+                            "category_path": (report or {}).get("category_path")
+                                             or [ctx["report_category"]],
+                            "session_page": _graph.get("session_page")},
+            "write_check": {"kb_id": kb_id, "mode": "kernel", "expected": 1,
+                            "verified": 1 if mode == "apply" else 0,
+                            "note": "落库由内核完成（按 (kb,slug) 幂等、逐条小事务）"},
+        }
+        if mode != "apply":
+            summary["write_note"] = ("**未写库**（dry_run）：本回执只是预览。要真正落库请用**同一份载荷**、"
+                                     "`mode=\"apply\"` 重跑。")
+        if _graph.get("session_page"):
+            summary["source_session_link"] = dict(_graph["session_page"], ok=True, via="kernel")
+        elif mode == "apply" and not ident.get("ok"):
+            summary["source_session_link"] = {"ok": False, "reason": session_warn or "无会话身份"}
         return _attach_session(summary, ident, session_warn)
 
     payloads, checked = design_elements(
