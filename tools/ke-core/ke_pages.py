@@ -269,9 +269,22 @@ def sync_folders(kb_id: str) -> dict:
     return _sync_folders(kb_id)
 
 
+def _uniq_str(seq) -> list:
+    """去重且保序的字符串列表（`source_refs`/`chunk_refs` 用；顺带 strip/丢空）。"""
+    out: list = []
+    seen: set = set()
+    for x in (seq or []):
+        s = str(x).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                 summary: str = "", tag: str = "bodhi-cxt-edit",
-                metadata: dict | None = None, sync_folders: bool = True) -> dict:
+                metadata: dict | None = None, sync_folders: bool = True,
+                source_refs: list | None = None, chunk_refs: list | None = None) -> dict:
     """**建或改**一页（概念页/映射页专用；2026-09-28）。
 
     - 已存在 → 走 `_apply_content_update`（快照旧版 → content/version+1），
@@ -282,6 +295,10 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
       全量重建（还起子进程 `sync_folders.py`），批量写 40 页 = 40 次全库目录重建，
       是 knowledge_save 2 分钟超时的最大块开销。批量写路径由调用方**整批做一次**
       （或交给前端 `/bodhi/folders/refresh` 按需刷新）。
+    - `source_refs` / `chunk_refs`（2026-10-09 补**内核缺口**）：巡检 C1/C3「无来源」看的
+      就是这两列，而旧内核**根本没写**（走内核写的页必然被报"无来源"）。语义：
+      · INSERT → 直接写入给定列表（`[]` 也行）；
+      · UPDATE → 与既有值**并集**（不丢已继承的来源；要给空请显式传 `[]` 也只会"并空"，不会清空）。
     """
     if len(tag) > 16:
         raise ValueError("tag 超过 last_edit_source 的 varchar(16)：%s" % tag)
@@ -293,6 +310,15 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
              "page_metadata = COALESCE(page_metadata, '{}'::jsonb) || %s::jsonb"
              % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
                 ke_db.sql_json(metadata or {})))
+    # 来源列（2026-10-09 内核缺口修复）：UPDATE 走**并集**，绝不丢已继承的来源。
+    if source_refs is not None:
+        extra += (", source_refs = COALESCE((SELECT jsonb_agg(DISTINCT v) FROM "
+                  "jsonb_array_elements_text(COALESCE(source_refs,'[]'::jsonb) || %s::jsonb) AS t(v)),"
+                  " '[]'::jsonb)" % ke_db.sql_json(_uniq_str(source_refs)))
+    if chunk_refs is not None:
+        extra += (", chunk_refs = COALESCE((SELECT jsonb_agg(DISTINCT v) FROM "
+                  "jsonb_array_elements_text(COALESCE(chunk_refs,'[]'::jsonb) || %s::jsonb) AS t(v)),"
+                  " '[]'::jsonb)" % ke_db.sql_json(_uniq_str(chunk_refs)))
     if existing:
         before = int(existing[0]["version"] or 1)
         _apply_content_update(kb_id, slug, content, tag, extra_set=extra)
@@ -311,17 +337,21 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     except Exception:  # noqa: BLE001
         cat = []
     cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
-            "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path")
+            "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path, "
+            "source_refs, chunk_refs")
     # 2026-10-05 M3：统一写路径——INSERT 也「先图后 wiki」（抽关系→去正文关系小节→出入链置空→投影图）
     import ke_graph as _kg
     edges = [(r["type"], r["slug"]) for r in parse_out_relations(content) if r.get("slug")]
     content = _kg.strip_relation_sections(content)
-    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, %s, %s::jsonb, %d, %s"
+    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, %s, "
+            "%s::jsonb, %d, %s, %s::jsonb, %s::jsonb"
             % (int(kb[0]["tenant_id"] or 0), ke_db.sql_str(kb_id), ke_db.sql_str(slug),
                ke_db.sql_str(title), ke_db.sql_str(page_type), ke_db.sql_str(content),
                ke_db.sql_str(summary), ke_db.sql_json(metadata or {}),
                ke_db.sql_str(tag), ke_db.sql_json(cat), len(cat),
-               ke_db.sql_str("/".join([str(x) for x in cat] + [title]))))
+               ke_db.sql_str("/".join([str(x) for x in cat] + [title])),
+               ke_db.sql_json(_uniq_str(source_refs)),
+               ke_db.sql_json(_uniq_str(chunk_refs))))
     ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\nCOMMIT;\n" % (cols, vals), stdin=True)
     if sync_folders:
         _sync_folders(kb_id)
@@ -603,9 +633,21 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
         graph["reason"] = "图节点写入失败：%s" % str(exc)[:180]
     # ② 节点落 PG（建/合并页）—— **关系校验（domain/range、目标页存在）要读 PG 的 `page_type`**，
     #    所以必须在建边之前完成：否则源/目标页未落库 → add_edge 报「目标页不存在」（2026-10-09 修）。
+    # 溯源列（契约 §5，2026-10-09 补内核缺口）：文档来源 → `source_refs`；片段/分块 → `chunk_refs`。
+    # 允许调用方用 `spec["source_refs"]/["chunk_refs"]` **显式覆盖**（如设计页继承上游页的文档来源）。
+    # 不写这两列 → 巡检 C1/C3 判「无来源」，所以内核必须落。
+    _doc_refs = spec.get("source_refs")
+    if _doc_refs is None:
+        _doc_refs = [str(x) for x in (src.get("doc_refs") or []) if str(x).strip()]
+        if src.get("doc_id"):
+            _doc_refs.append(str(src["doc_id"]))
+    _chunk_refs = spec.get("chunk_refs")
+    if _chunk_refs is None:
+        _chunk_refs = [str(x) for x in (src.get("chunk_refs") or []) if str(x).strip()]
     res = upsert_page(kb_id, slug, title, page_type, content,
                       summary=(spec.get("summary") or "").strip()[:500], tag=TAG_CONTRACT,
-                      metadata=metadata, sync_folders=sync_folders)
+                      metadata=metadata, sync_folders=sync_folders,
+                      source_refs=_doc_refs, chunk_refs=_chunk_refs)
     # ③ 关系（节点已就绪）
     for rel in (spec.get("relations") or []):
         rt, ts = rel.get("type"), rel.get("target_slug")
