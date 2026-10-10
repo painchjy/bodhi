@@ -2619,6 +2619,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             _n_edges = 0
             _edge_errors = []
             _planned = 0
+            _triples: list = []          # P3-0f2：先收集，再**批量**建边（见下方）
             # 2026-10-05 M3 修（回归缺陷）：边一律用 `design_elements` **已解析好的**
             # `payload.relations[].target_slug`（覆盖"本批节点"与"本库既有页"两种目标）；
             # 旧实现遍历 `checked["edges"]` 的**裸节点名**、且用 `":" in src` 判错变量（src 是 slug/名，
@@ -2627,25 +2628,44 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 _src = _p.get("slug")
                 for _r in (_p.get("relations") or []):
                     _t, _dst = _r.get("type"), _r.get("target_slug")
-                    if not (_src and _dst and _t):
-                        continue
-                    _planned += 1
-                    try:
-                        ke_graph.add_edge(kb_id, _src, _t, _dst)
-                        _n_edges += 1
-                    except Exception as exc:  # noqa: BLE001
-                        _edge_errors.append({"source": _src, "type": _t,
-                                             "target_slug": _dst, "error": str(exc)[:160]})
+                    if _src and _dst and _t:
+                        _planned += 1
+                        _triples.append((_src, _t, _dst))
             _all = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
             _all += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
-            for s in dict.fromkeys(_all):
-                try:
-                    ke_graph.strip_wiki_page(kb_id, s)
-                except Exception:  # noqa: BLE001
-                    pass
+            _all = list(dict.fromkeys(_all))
+            # P3-0f2（2026-10-10）：**批量写图 + 批量 strip**。
+            # 旧实现：每条边 `add_edge`（4 次 PG + 5 次 Neo4j，实测 `_page_type`=2×边数、
+            # `_ensure_instance`=2×边数）+ 每页 `strip_wiki_page`（2 次 PG）→ 27 边/33 页 =
+            # **190 次 psql / 25-31 s**，超过客户端 ~30 s 超时 → 前端重发同一批 → **重复版本**。
+            # 现在：① 一次 `page_info_map` 预读页信息（免掉每条边 2 次 `_page_type`）；
+            # ② 一次 `ensure_instances` UNWIND 确保节点（免掉每条边 2 次 `_ensure_instance`）；
+            # ③ `add_edges_batch` 按关系类型分组 UNWIND（N 边 → 去重后类型数次 Neo4j）；
+            # ④ `strip_wiki_pages` 整批一次读 + 一条 `UPDATE..FROM (VALUES)`。
+            _info = ke_graph.page_info_map(
+                kb_id, [s for t in _triples for s in (t[0], t[2])] + _all)
+            _nodes = [{"slug": s, "name": (v or {}).get("title") or s.rsplit("/", 1)[-1],
+                       "page_type": (v or {}).get("pt") or "", "tenant_id": (v or {}).get("tenant")}
+                      for s, v in (_info or {}).items()]
+            if _nodes:
+                ke_graph.ensure_instances(kb_id, _nodes)
+            _res = (ke_graph.add_edges_batch(kb_id, _triples,
+                                            {"info": _info, "nodes_ensured": True})
+                    if _triples else {"written": 0, "errors": [], "types": 0, "total": 0})
+            _edge_errors = list(_res.get("errors") or [])
+            # 回执口径与旧版一致：`edges_written` = **校验通过并入图的条目数**
+            # （旧版是"成功调用 add_edge 的条数"）；另给 `edge_merge_hits` 是 MERGE 命中数
+            # （含"同样的边已存在"，因为 `MERGE` 命中既有边也计 1）。
+            _n_edges = _planned - len(_edge_errors)
+            _strip = ke_graph.strip_wiki_pages(kb_id, _all)
             summary["graph"] = {"edges_written": _n_edges, "edges_planned": _planned,
                                 "edge_errors": _edge_errors[:20],
-                                "edge_errors_total": len(_edge_errors)}
+                                "edge_errors_total": len(_edge_errors),
+                                "edge_types": _res.get("types"),
+                                "edge_merge_hits": _res.get("written"),
+                                "stripped": _strip.get("stripped"),
+                                "strip_total": _strip.get("total"),
+                                "batched": True}
             # C 回归防护：声明了边却一条都没落图 → 显式告警（防"循环静默失效"回归）
             if _planned and _n_edges == 0:
                 summary["graph"]["warn"] = (
@@ -4287,7 +4307,76 @@ def start_overview_job(args: dict) -> dict:
                      "查回执；**不要**重复调用 apply=true。")}
 
 
+# ---------------------------------------------------------------------------
+# P3-0i3（2026-10-10）：**同载荷重入保护** —— 客户端超时重发不再写出重复版本
+#
+# 实测（内网 09:40）：apply 一次 25-31 s，**超过客户端 ~30 s 超时** → 前端把**同一份载荷**
+# 又发了一次（日志两条 BEGIN 相隔 30 s、args 文件不同内容相同）→ 同一批被写两遍、
+# 页版本 +2（用户看到"重复版本"）。P3-0f2 把 apply 压到超时内之后应当不再触发，
+# 但**兜底必须留着**：同一 (工具, 载荷指纹) 在窗口内再次到达 → **附着到正在跑的那一次**，
+# 等它出结果后**原样返回同一份回执**（并标 `reentry.deduped=true`），绝不重复写库。
+# ---------------------------------------------------------------------------
+_REENTRY: dict = {}                                  # key → {"event","result","done","at"}
+_REENTRY_LOCK = threading.Lock()
+REENTRY_TOOLS = ("save_knowledge",)                  # 只有会产生版本/页面的写工具需要
+REENTRY_WINDOW_S = 600                               # 兜底窗口（远大于客户端超时即可）
+
+
+def _reentry_key(name: str, args: dict) -> str:
+    """同载荷指纹；**只对真正的写库调用**生效（dry_run 幂等，重复无害，不该被挡）。"""
+    if name not in REENTRY_TOOLS:
+        return ""
+    if str((args or {}).get("mode") or "dry_run").strip().lower() != "apply":
+        return ""
+    blob = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+    return "%s|%s" % (name, hashlib.sha1(blob.encode("utf-8")).hexdigest())
+
+
+def _prune_reentry(now: float) -> None:
+    for k, v in list(_REENTRY.items()):
+        if v.get("done") and now - float(v.get("at") or 0.0) > REENTRY_WINDOW_S:
+            _REENTRY.pop(k, None)
+
+
 def call_tool(name: str, args: dict) -> dict:
+    """工具**唯一入口**：同载荷重入保护（P3-0i3）→ 真正实现（`_call_tool_impl`）。"""
+    key = _reentry_key(name, args)
+    if not key:
+        return _call_tool_impl(name, args)
+    with _REENTRY_LOCK:
+        _prune_reentry(time.time())
+        slot = _REENTRY.get(key)
+        if slot is None:
+            slot = {"event": threading.Event(), "result": None, "done": False, "at": time.time()}
+            _REENTRY[key] = slot
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        slot["event"].wait(timeout=REENTRY_WINDOW_S)     # 等正在跑的那一次出结果
+        prev = slot.get("result")
+        if isinstance(prev, dict):
+            out = dict(prev)
+            out["reentry"] = {"deduped": True, "note": (
+                "同一份载荷已由本服务处理（客户端超时重发）：**未重复写库**，"
+                "本回执与那一次完全一致。")}
+            return out
+        with _REENTRY_LOCK:                              # 上一次没留下回执（异常/中断）→ 自己跑
+            slot = {"event": threading.Event(), "result": None, "done": False, "at": time.time()}
+            _REENTRY[key] = slot
+    try:
+        result = _call_tool_impl(name, args)
+    except Exception:
+        slot["event"].set()
+        raise
+    slot["result"] = result
+    slot["done"] = True
+    slot["at"] = time.time()
+    slot["event"].set()
+    return result
+
+
+def _call_tool_impl(name: str, args: dict) -> dict:
     # P3-0f（2026-10-10）：每次工具调用先清**请求级只读 memo**（页 id / 属主 / 会话页引用）。
     # 放在这里而不是各工具里：唯一入口、线程局部、绝不会把上一次调用的结果带进来。
     _reset_request_cache()

@@ -746,6 +746,39 @@ def strip_wiki_page(kb_id: str, slug: str) -> dict:
     return {"ok": True, "slug": slug}
 
 
+def strip_wiki_pages(kb_id: str, slugs) -> dict:
+    """**批量 strip 正文**（P3-0f2，2026-10-10）：整批**一次读 + 一条 `UPDATE..FROM (VALUES)`**。
+
+    与逐页 `strip_wiki_page` **语义一致**（同 `strip_relation_sections`、同样清
+    `out_links`/`in_links`、同样只动 `content`/`updated_at`），但把"每页 2 次 psql"压成
+    "整批 2 次"——实测 33 页 **66 次 → 2 次**（1 次 psql ≈ 150-250 ms，这就是 apply 里
+    那一大块成本；`add_edge` 同批还被重写成 `add_edges_batch`）。
+    只更新**内容确实变了**的页（strip 幂等，重跑即 no-op）。返回 `{ok,total,stripped,skipped}`。
+    """
+    import ke_db  # noqa: PLC0415
+    want = list(dict.fromkeys([str(s).strip() for s in (slugs or []) if str(s).strip()]))
+    if not want:
+        return {"ok": True, "total": 0, "stripped": 0, "skipped": 0}
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(content,'') AS content FROM wiki_pages "
+        "WHERE knowledge_base_id=%s AND deleted_at IS NULL AND slug IN (%s)"
+        % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(s) for s in want)))
+    pairs = [(str(r.get("slug")), strip_relation_sections(r.get("content") or ""))
+             for r in rows
+             if strip_relation_sections(r.get("content") or "") != (r.get("content") or "")]
+    if pairs:
+        values = ", ".join("(%s::text, %s::text)" % (ke_db.sql_str(s), ke_db.sql_str(c))
+                           for s, c in pairs)
+        ke_db.psql(
+            "UPDATE wiki_pages AS p SET content = v.content, out_links = '[]'::jsonb, "
+            "       in_links = '[]'::jsonb, updated_at = now() "
+            "  FROM (VALUES %s) AS v(slug, content) "
+            " WHERE p.knowledge_base_id = %s AND p.slug = v.slug AND p.deleted_at IS NULL;"
+            % (values, ke_db.sql_str(kb_id)), stdin=True)
+    return {"ok": True, "total": len(want), "stripped": len(pairs),
+            "skipped": len(want) - len(pairs)}
+
+
 def instance_count(kb_id: str) -> int:
     rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN count(n) AS n", {"kb": kb_id})
     return int((rows[0].get("n") if rows else 0) or 0)
