@@ -1168,8 +1168,12 @@ def _schema_violations(page: dict, new_type: str, pages: list[dict]) -> list[dic
     return out
 
 
-def retag_preview(kb_id: str, slug: str, new_type: str) -> dict:
-    """**只读**影响面：新 slug、引用页清单、会话命中、预计 violations、风险与 ticket。"""
+def retag_preview(kb_id: str, slug: str, new_type: str, pages: list | None = None) -> dict:
+    """**只读**影响面：新 slug、引用页清单、会话命中、预计 violations、风险与 ticket。
+
+    `pages`（P3-0h，2026-10-10）：调用方若**已持有**本库活页（`_kb_pages_raw` 的形状），
+    传进来即可**免掉"每项一次全库页 dump"**（`retag_queue` 有多项时是个 pg 热点）。
+    """
     import hashlib
     import json as _json
 
@@ -1178,7 +1182,6 @@ def retag_preview(kb_id: str, slug: str, new_type: str) -> dict:
     if new_type and new_type not in meta_all:
         raise ValueError("未知本体类型：%s" % new_type)
     page = _load_page(kb_id, slug)
-    pages = _kb_pages_raw(kb_id)
     module, _local, name = split_slug(slug)
     out: dict = {"kb_id": kb_id, "slug": slug, "title": page.get("title", ""),
                  "old": {"page_type": page["page_type"],
@@ -1201,13 +1204,20 @@ def retag_preview(kb_id: str, slug: str, new_type: str) -> dict:
         out["ticket"] = ""
         return out
     out["slug_change"] = {"from": slug, "to": new_slug, "changed": new_slug != slug}
-    conflict = next((p for p in pages if p["slug"] == new_slug), None)
-    out["conflict"] = ({"slug": new_slug, "title": conflict.get("title", "")} if conflict else None)
+    # P3-0h（2026-10-10）：**"已是最新状态"的快路径提到全库页 dump 之前** ——
+    # 旧顺序先 `_kb_pages_raw()`（把全库页**含正文**拉一遍，每项 1 次 psql）再判 already，
+    # 于是"根本不需要迁移"的项也白白拉全库（`retag_queue` 每项一次）→ pg 热点。
     if new_type == page["page_type"] and new_slug == slug:
         out["already"] = True
+        out["conflict"] = None      # 新旧 slug 相同 → 不存在"目标被占用"（旧实现会把它误报为自己）
         out["ticket"] = ""
         out["apply_hint"] = "类型与 slug 都已是目标状态，无需迁移"
         return out
+
+    # 只有**真的需要迁移**才拉全库页（调用方给了 `pages` 就直接复用，不再重拉）
+    pages = pages if pages is not None else _kb_pages_raw(kb_id)
+    conflict = next((p for p in pages if p["slug"] == new_slug), None)
+    out["conflict"] = ({"slug": new_slug, "title": conflict.get("title", "")} if conflict else None)
 
     refs = find_slug_refs(kb_id, slug, pages)
     out["refs"] = refs
