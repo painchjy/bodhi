@@ -872,7 +872,9 @@ def _bulk_write_pages(kb_id: str, items: list, tenant_id, tag: str) -> dict:
     `items` 每项：`{slug,title,page_type,content,summary,metadata,category_path,wiki_path,
     source_refs,chunk_refs,exists}`；`exists` 由 `page_info_map` 一次预读给出（**不再逐页查**）。
     与逐页 `upsert_page` **语义对齐**；区别：**不投影图**（图由批量路径自己写）、不做副本写保护
-    （`replica_guard`，逐页版才有）—— 因此本函数默认**关闭**，待 P0-c 接真实库做 diff 后再开。
+    （`replica_guard` 在调用方 `save_elements` 里做）。
+    **2026-10-10 起已接线**：`write_knowledge(sink=[...])` 只构建不落库，`write_knowledge_batch`
+    收集全批后**一次**调用本函数（整批 2 次 psql），回执 `kernel.bulk_write:{inserted,updated}`。
     """
     news = [x for x in items if not x.get("exists")]
     olds = [x for x in items if x.get("exists")]

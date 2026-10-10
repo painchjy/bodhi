@@ -1,467 +1,80 @@
-# knowledge_save 性能改造 + 阶段化建模（方案 → P0 实施）
+# 落库（knowledge_save）写入链路与性能 —— 当前实现（2026-10-10）
 
-> 2026-10-09。触发：内网「技术方案评审智能体」需求建模调一次 `knowledge_save`
-> **超过 2 分钟被客户端超时切断，且没有任何调用记录**。本文 = 诊断 + 方案 + P0 实施记录。
-> 相关：`docs/knowledge-write-contract.md`（写入契约）、`docs/context-mapping-plan.md`。
+> 本文只写**当前版本的行为与实测**。历史中间态、方案权衡、排期与未采用的提议（如"图写完→PG 异步派生"）
+> 已删除 —— 需要考古请看 `git log` 与提交信息（每个阶段都有实测数字）。
+> 契约见 `docs/knowledge-write-contract.md`；KPI/开关见 `deploy/delivery/MCP-SERVER.md`。
 
----
+## 1 写入链路（唯一路径）
 
-## 1. 实测基线（本机，只读原语，2026-10-09）
+`save_knowledge` → `save_elements`（构建页）→ `ke_pages.write_knowledge_batch`：
 
-| 原语 | 实测 | 说明 |
+| 步 | 动作 | 实现 |
 |---|---|---|
-| `ke_db.psql()` 1 次往返 | **271.7 ms** | 每次都是**起子进程**（`docker exec` / `psql`）|
-| `ke_neo4j.query()` 1 次往返 | **74.4 ms** | HTTP 事务端点 |
+| ① | 图节点 | `ke_graph.upsert_nodes_batch`（一条 `UNWIND`） |
+| ② | PG 页 | `_bulk_write_pages`（新建：一条多行 `INSERT`；更新：一条事务 = 快照 `INSERT..SELECT` + `UPDATE..FROM(VALUES)`） |
+| ③ | 图边 + 节点兜底 | `ke_graph.add_edges_batch`（按关系类型分组 `UNWIND`）+ `ensure_instances` |
+| ④ | 目录树 | 默认**延迟**（`BODHI_DEFER_MAINTENANCE=1`；前端 `/bodhi/folders/refresh` 按需刷新） |
+| ⑤ | 正文 strip | `ke_graph.strip_wiki_pages`（整批一次读 + 一条 `UPDATE..FROM(VALUES)`） |
 
-**结论：瓶颈不是计算，是往返次数。** 内网 RTT 更大、没有本地 docker exec 优化 → 只会更贵。
+**不要回退的设计**：
 
----
+- **无 wiki→图 投影**：关系只由图边承载（正文不再有「本体关系」小节），图一律由写路径直写；
+  存量重建只用 `rebuild_kb_graph`（**保留边**、只重建节点/属性）。
+- **无相似度合并**（`BODHI_SIMILARITY_MERGE=0`）：一律按 `(kb, slug)` 幂等 upsert；`pending` 恒空，
+  `merged` 含义 = "同 slug 覆盖"。相似度是**全文比较**的事，治理走运维/巡检（`audit_*`）。
+- **文档类必须有正文**：本体 `render_mode(page_type)=document` 的节点（设计单/建议/评测/安装指引/报告…）
+  在 graph 阶段**未带 `wiki_content` 一律跳过**（回执 `skipped_document_nodes` + note），
+  应改用 `stage="report"` 落整篇正文（同 slug 幂等覆盖）。
+- **校验类读走图**（`BODHI_VALIDATE_FROM_GRAPH=1`）：关系 domain/range 用图上的 `page_type`
+  （1 次 Neo4j 替掉每条边 2 次 psql），图里没有才回落 PG。
+- **本体元数据进程级 memo**（`class_meta` / `ancestors` / `descendants` / `relation_type_map` /
+  `target_closure` / `top_ancestor`，按 `index_stamp()` 失效）→ 热进程本体读 0 次 Neo4j。
 
-## 2. 诊断（都带证据位置）
+## 2 观测：怎么看"这次调用花了什么"
 
-| # | 现象 | 根因 | 位置 |
+- `logs/mcp_calls_YYYYMMDD.log` 的 `DONE` 行：`耗时` / `io=pg:N次/Xms，neo4j:N次/Xms |合计… |墙钟…`
+  / `|pg调用者:…|neo4j调用者:…`（**按类型归因**，谁在打库/打图一眼可见）/ `|阶段:…`。
+  **`result=` 只保留 500 字摘要**（想看全量回执：让调用方打印，或复测工具直接读返回值）。
+- 入参全文：`logs/args/<时间戳>-<工具名>.json`（与 DONE 行同序，便于配对）。
+- 复测：`python3 tools/diag/_replay_sk.py <args.json>`（**默认强制 `dry_run`**，加 `--apply` 才写）。
+
+## 3 实测（同参 33 nodes / 27 edges；本机）
+
+| 阶段 | 墙钟 | pg | neo4j |
 |---|---|---|---|
-| 1 | 一次 save > 2 分钟 | 40 节点 + 40 关系的往返量 **~150-250 次** | 见 §3 拆解 |
-| 2 | **最大的块**：目录树 | `upsert_page` 在**每一页**末尾调 `_sync_folders(kb_id)` → **全量重建整库目录树**，还要**起子进程**（`sync_folders.py`）。40 页 = 40 次全库重建 + 40 次 Python 启动 | `ke_pages.py:295/321`（改前）|
-| 3 | 每条关系 1.46 s | `add_edge` = 2×`_page_type` + 2×`_ensure_instance`(各含 1 PG + 1 Neo4j) + dup 检查 + MERGE + `relations_of` = **4 PG + 5 Neo4j** | `ke_graph.py:316-337`（改前）|
-| 4 | **整个 payload 一个事务** | `save_elements` 把全部 INSERT/UPDATE 拼成**一个** `BEGIN;…COMMIT;`：任何一条抖动 → **全批回滚、无部分成功** | `server.py:1497-1498` |
-| 5 | **索引列表先出现、图谱滞后** | `save_knowledge` 走的 `save_elements` **根本不写图**：关系只被渲染进页面正文；Neo4j 实例边只由**事后**的 `link_source_session` + 投影补 | `save_elements` 全篇无 `add_edge`；`server.py:2294-2302`、`2330-2339` |
-| 6 | 超时=**零记录** | `_log_tool_call` 在 handler **返回后**才写日志，且 args 被 `[:300]` 截断 | `server.py:4193-4234` |
-| 7 | 每页会话边 2 往返 | `link_source_session` 逐页 `_ensure_instance`×2 + MERGE；40 页 ≈ 160 次往返 | `server.py:2056-2071`（改前）|
-| 8 | Neo4j 没索引 | `_ensure_index()` 只在 `rebuild_kb_graph` 里调 → 日常 `MERGE` 走**标签全扫**（实测 `ensure_instances` 4 行要 **3.2 s**）| `ke_graph.py:20`（改前）|
+| 改造前（旧进程，apply） | 31351 ms | 190 次 | 221 次 |
+| dry_run（当前，热进程） | **2.2 s** | **11 次** | **0 次** |
+| apply（当前，批量写后） | **3 s 档** | ~15 次 | ~30 次 |
 
----
+其它实测：本体校验读搬图后 dry_run `neo4j 64 → 0`（热）；孤儿图节点清理 **186/378**（378 → 192）。
 
-## 3. 开销拆解（40 节点 + 40 关系，改前）
+## 4 开关（`deploy/delivery/payload/mcp/.env.example` 同步）
 
-| 阶段 | 往返量级 | 估算 |
+| 变量 | 默认 | 说明 |
 |---|---|---|
-| 会话身份 + engine/index | 5-10 | 1-3 s |
-| `fetch_existing_pages`（拉全库页） | 1（大） | 0.3-1 s |
-| 相似度匹配（本地 CPU，载荷×存量） | 0 | 0.1-0.5 s |
-| 一次大事务（~80 条语句） | 1 | 0.5-3 s |
-| `write_check` 对账 | 1 | 0.3 s |
-| **`sync_folders` × 40 页** | 数十~上百 + 40 子进程 | **10-60 s** ⚠️ |
-| `refresh_crud_matrix`（每服务页） | 5-8 × N | 5-30 s |
-| `link_source_session`（每页 2 往返） | ~80 | 20-30 s |
-| retag/retract/回执 | 若干 | 2-10 s |
-| **合计** | **~150-250** | **≈1.5-3 分钟** |
+| `BODHI_SIMILARITY_MERGE` | `0` | 相似度合并：`0` 停用（幂等 upsert）｜`1` 旧行为（并页 + 待确认页） |
+| `BODHI_VALIDATE_FROM_GRAPH` | `1` | 关系 domain/range 的类型读：图优先（PG 兜底） |
+| `BODHI_DEFER_MAINTENANCE` | `1` | 目录树/CRUD 矩阵延迟到前端按需刷新 |
+| `BODHI_DEBUG_ENGINE` | `0` | 内核 spec 构建的内部打印（排障用） |
 
-→ 与内网「>2 分钟超时」吻合。
+## 5 已删除 / 已废弃（考古索引）
 
----
+- `BODHI_SAVE_ENGINE` 与 legacy 单事务写（拼 `statements` + 一个事务）—— 2026-10-10 删；
+  落库只有内核一条路，`id_strategy` 由内核回执回填。
+- wiki→图 投影：`ke_graph.project_page` / `project_page_from_content` / `strip_wiki_page` /
+  `delete_kb_graph` / `_edges_of` 及 `ke_pages` 两处调用。
+- 逐页 psql 家族：`sql_insert_page` / `sql_update_page` / `_resolve_page_id` / `_page_id_of_slug` /
+  `_page_id_owner` / `_prior_version` / `_prime_page_ids` / `_prime_prior_versions`。
+- 相似度合并分支（并页 / 待确认页）默认停用（`pending` 恒空）。
+- 判「新建 / 覆盖」改用**循环前的库里快照**（`fetch_existing_pages` 那次预读）；副作用：只剩
+  "软删旧行"的 slug 从 `revived` 改判 `created`（内核 upsert 会复活它）。
 
-## 4. 方案（用户 2026-10-09 确认）
+## 6 排障（当前版本）
 
-1. **`knowledge_save` 彻底改走新内核**（`ke_pages.write_knowledge_batch`）；`save_elements` 降级为仅供旧抽取路径。
-2. **`sync_folders` 增量/按需**：不再每次落库重建整库目录树；交给前端 `/bodhi/folders/refresh`（接口已存在）。
-3. **建模阶段表**（S0-S4 × 允许的类 × 范围建议）由 `artifacts/ontology_index.json` **生成草案**再人工过一遍。
-4. **续作语义**先**模拟验证可行性**再定稿。
-5. **属性别名表**：从现有本体模型自动挖「别名 → 规范名」初稿；
-   **并且取消正文里数据属性的 150 字截断**（已完成，见 P0）。
-
----
-
-## 5. P0 实施记录（已完成 · 本次提交）
-
-### 5.1 `ke_graph.py`
-| 改动 | 效果 |
+| 现象 | 先看什么 |
 |---|---|
-| 新增 `page_info_map(kb_id, slugs)` | **一次** SQL 取多 slug 的 `{pt,title,tenant}` → 替代每条边 2 次 `_page_type` |
-| 新增 `ensure_instances(kb_id, rows)` | **一次 UNWIND MERGE** 批量确保节点 → 替代逐节点 `_ensure_instance` |
-| `_ensure_index()` 加**进程级缓存** `_INDEX_READY`，并在 `ensure_instances` 前调用 | 修掉「日常 MERGE 标签全扫」 |
-| `add_edge(..., ctx=None)` | `ctx={"info","nodes_ensured","skip_relations"}` → 每条边从 **4 PG + 5 Neo4j** 降到 **1-2 Neo4j**；不传 `ctx` 行为与旧版逐字一致（兼容） |
-
-**实测（本机）**：
-```
-page_info_map    4 slug → 4 条    267 ms   (旧: 8×_page_type ≈ 2.2 s)
-ensure_instances 冷(含建索引)     106 ms   (改前 3169 ms —— 建索引后 30×)
-ensure_instances 热                 8 ms   (旧: 8×_ensure_instance ≈ 2.8 s → 350×)
-add_edge(ctx) 目标不存在 → ValueError（ctx 校验路径正确，0 写入）
-```
-
-### 5.2 `ke_pages.py`
-| 改动 | 说明 |
-|---|---|
-| `upsert_page(..., sync_folders=True)` | `False` 时**不再逐页全量重建目录树**（改前的最大开销）；两个调用点都加了守卫 |
-| `write_knowledge(..., sync_folders=True)` | 透传给 `upsert_page`；批量路径传 `False` |
-| `write_knowledge_batch(...)` **重写** | ①批量预读 → ②逐节点小事务（`sync_folders=False`）→ ③`ensure_instances` 一次 + 逐边 `add_edge(ctx)` → ④**整批一次**目录；返回新增 `applied_count / failed / edge_errors / folders / resume_hint` |
-| `ATTR_RENDER_LIMIT = 0` | **取消 150 字截断**（用户口径）；`0` = 不截断 |
-
-### 5.3 `server.py`
-| 改动 | 说明 |
-|---|---|
-| `link_source_session` **批量化** | 一次 `page_info_map` + 一次 `ensure_instances` + **一条 `UNWIND` 建全部 `bmm:sourceSession` 边**（40 页 ~160 次往返 → **3 次**）|
-
-### 5.4 验收（已跑的冒烟）
-```
-SYNTAX_OK（ke_pages / ke_graph / server 三文件）
-batch dry_run -> {"applied": false, "count": 1, "edges_written": 0, "failed": [], "folders": null}
-属性正文长度 = 445  (>150 证明截断已取消)
-```
-**预期**：40 节点 + 40 关系 ≈ 40 次节点往返 + 40~80 次边往返 ≈ **15-25 s（本机）**，内网 < 90 s；
-失败只丢**当前那一条**，同 payload 重跑即续作。
-
----
-
-## 5.5 P0-b 实施记录（已完成 · 本次提交 `d254950`）
-
-> 重要修正：`save_elements` **不走 `upsert_page`**（它自己拼一个大 `BEGIN…COMMIT`），
-> 所以 §5.2 的「逐页目录重建」修复**没有**惠及 `save_knowledge`；
-> 它的目录同步是**每次调用一次**（但仍是大库上 10-60 s 的一块）。
-> 因此 P0-b 针对 `save_knowledge` 的真实瓶颈下手。
-
-### 改了什么
-| 位置 | 改动 | 效果 |
-|---|---|---|
-| `save_elements(..., skip_folders, skip_crud)` | 新增两个开关；目录树全量重建、CRUD 矩阵刷新**可跳过** | 落库不再同步等 10-60 s 的重型维护 |
-| `save_knowledge` | `defer_maintenance`（默认开，`BODHI_DEFER_MAINTENANCE=0` 可关）→ 两条分支都传 `skip_folders/skip_crud=defer_maintenance`；回执加 `maintenance: deferred/inline` 与 `folders_synced: deferred（按需刷新）` | 前端进 wiki 会调 `/bodhi/folders/refresh` 按需刷新 |
-| **新增 `ke_pages.write_relations_batch(kb_id, pairs)`** | 一次 `page_info_map` + 一次 `ensure_instances` + 逐条 `add_edge(ctx)`，**幂等可重跑** | **修掉「本体图谱滞后」**：旧实现只把关系渲染进正文、**不写图** |
-| `save_knowledge(stage="graph")` | `mode=apply` 时用 `created/merged` 的 **name→真实 slug** 映射批量写边，回执 `graph_edges: {ok,written,total,errors}` | 关系**当场**进图，不必等事后投影 |
-| `_log_tool_call` keys | 补 `graph_edges / edge_errors / folders_synced / maintenance / resume_hint` | 内网可自证「边有没有真写进图」 |
-
-### 验收（已跑）
-```
-SYNTAX_OK（ke_pages / server）
-write_relations_batch([])                 -> {'ok': True, 'written': 0, 'total': 0, 'errors': []}
-write_relations_batch(不存在的节点)        -> ok=True written=0 total=1 errors=[{source,type,target_slug,...}]  ← 不抛、不写
-save_elements(skip_folders/skip_crud)      -> True True
-save_knowledge 形参未变                    -> ['kb_id','stage','model','report','nodes']（向后兼容）
-```
-
-### 用户决策
-- **接受**「按 slug 幂等 upsert」，**去掉 similarity 相似度合并 / `pending` 待确认页**（用户 2026-10-09 选 1）。
-
----
-
-## 6. 未完项（按序）
-
-| 阶段 | 内容 | 验收 |
-|---|---|---|
-| ~~P0-b~~ ✅ | **已完成**（见 §5.5）：热路径瘦身（目录/CRUD 可延迟）+ 关系**批量写进图** | §5.5 验收已过 |
-| **P0-c** | `save_knowledge` **写入段接新内核**：payload → spec 适配器 + **设计页正文渲染对齐**（服务页 `purpose/inputs/outputs/assertions/## 溯源`）+ 回执形状兼容 | 页面内容**不回归**；40 节点 < 90 s（内网）|
-| ~~P3-0~~ ✅ | 图侧批量建边：`add_edges_batch`（按关系类型 UNWIND）—— `3339401` | 40 边 → ≈关系类型数 次 |
-| ~~P3-0b~~ ✅ | `upsert_nodes_batch`（一条 UNWIND 批量 upsert 图节点）—— `7ee3b0d` | 40 节点 → 1 次 |
-| ~~P3-0c~~ ✅ | `preloaded`：免掉每页 2 次 psql（存在性 + 租户；`page_info_map` 补 `version`）—— `21bb271` | 40 节点 psql 120 → 40 |
-| ~~P3-0d~~ ✅ | 图节点批量**接线**（`skip_graph` + 循环后一条 UNWIND）—— `c036ebd` | 实测：逐节点 0 次 / 批量 1 次 / 建边 1 次 / failed=0 |
-| ~~P3-0e~~ ✅ | **`_bulk_write_pages` 原语**（多行 INSERT + 快照 + `UPDATE..FROM(VALUES)`）—— `584691d` | 3 页仅 2 次 psql；**默认未接线** |
-| **P3-0f** | **build/write 拆分 + 接 `_bulk_write_pages` + 真实库 diff** | psql 40 → ~3；总计 **≈ 8 次往返 / 2-3 s** |
-
-### 6.0 为什么 P3-0f 必须与 P0-c 一起做（2026-10-10 判断）
-- `_bulk_write_pages` 只在**多页批量**时有收益，而**当前唯一在产的多页路径是 `stage="graph"`**；
-  报告分支是**单页**（`write_knowledge` 调一次）→ 批量化对它**零收益**。
-- 接线必须先做 **build/write 拆分**（`_build_node` 只构建不落库），那会**改到生产热路径**
-  （报告分支正在用 `write_knowledge`）→ 必须与 **P0-c** 一次做完并在**真实库**上 diff
-  （比 `version / content / page_metadata / source_refs / wiki_page_revisions`），
-  否则等于"动热路径 + 零收益 + 无验证"。
-- P0-c 的 graph 分支**本来就需要**只构建不落库的能力（把设计页正文渲染出来交给 `wiki_content`），
-  所以拆分放在 P0-c 是**顺路**，不是额外成本。
-| **P1** | 观测性：`_log_tool_call` 改**两段写**（进入即写工具+完整 args 落 `logs/args/*.json`，返回补 result）+ 写库进度行 | ✅ **已完成**（见 §8）|
-| **P2** | 阶段表共享知识页（S0-S4 × 允许类 × 范围）+ `knowledge_save` **阶段白名单硬门禁** | 传越界类 → `violation` + 可选类清单 |
-| **P3** | 属性名规范化（去前缀/别名表/下划线-斜杠归一）+ 未知键进 `violations` + 回执「已纠正」清单 | 传 `under_score`/`a/b` → 自动规范 |
-| **P4** | **合并** `ops/design/modeler` 三个自建智能体 → 一个「企业建模智能体」+ 技能提示改写 | 一轮任务一个智能体、阶段推进可见 |
-| **P5** | `BODHI_DB_PASSWORD` 统一（已提交 `5a82a17`）随下次发布包生效 | 内网 `.env` 写 `BODHI_DB_PASSWORD` 即生效 |
-
-### 6.1 待确认
-- ~~相似度合并 / `pending`~~ → **已定（用户 2026-10-09 选 1）**：接受「按 slug 幂等 upsert」，去掉 similarity 合并与 `pending` 页。
-- **续作语义**：先做**模拟验证**（造 N 条、中途 kill、重跑看是否只补缺）再定稿提示词约定。
-- **P0-c 的正文渲染**：设计页正文当前由 `save_elements` 的 `sql_insert_page/sql_update_page` 渲染
-  （含 `purpose/inputs/outputs/assertions/## 溯源` 等），新内核 `mode="entity"` 渲染的是
-  「定义段 + 属性段」，**两者不等价** → P0-c 需要新增 `mode="design"` 渲染器保持内容不回归。
-
----
-
-## 7. 一句话总结
-
-> 2 分钟超时**不是模型慢、也不是数据库慢**，是**往返次数**：40 页 × 每页一次全量目录重建（还起子进程）
-> + 每条边 4 次 psql 往返。P0 把这些压成「批量预读 + 逐条小事务 + 每条边 1 次 Neo4j + 整批一次目录」。
-
----
-
-## 8. P1 实施记录（已完成 · 提交 `c199675`）
-
-### 8.1 新增 `tools/ke-core/ke_stats.py`
-- `ContextVar` 承载「当前这次工具调用」的计数桶 → `ThreadingHTTPServer` **多线程天然隔离**；
-- `begin() / record() / mark(阶段) / snapshot() / reset()`；**未开启统计时零开销**（一次 `get()`）；
-- 预留 `marks`（阶段标记）→ 超时时能看出卡在哪个阶段。
-
-### 8.2 埋点（唯一的两个 IO 出口）
-| 出口 | 埋点 | 说明 |
-|---|---|---|
-| `ke_db.psql()` | `kind="pg"` | **子进程启动时间计入**（272 ms 主要就是它）|
-| `ke_neo4j.query()` | `kind="neo4j"` | 含 HTTP 往返与解析 |
-两者都在"未开启统计"时**立即返回**，不影响既有路径。
-
-### 8.3 两段写日志（修「超时零记录」）
-| 时机 | 落什么 |
-|---|---|
-| **进入工具前** | `logs/args/<时间>-<工具>.json`（**完整入参**，不再 `[:300]` 截断）+ 主日志一行 `BEGIN args_file=…` |
-| **返回后** | 主日志一行 `DONE`（或 `ERR`）：耗时 / **`io=pg:12次/3264ms，neo4j:40次/2976ms \|合计… \|墙钟… \|阶段:…`** / 结果摘要 |
-
-### 8.4 验收（已跑）
-```
-SYNTAX_OK（ke_stats / ke_db / ke_neo4j / server）
-snapshot = {"calls":2,"ms":917.3,"detail":{"pg":{"n":1,"ms":512.6},"neo4j":{"n":1,"ms":404.7}},"wall_ms":918.3}
-reset 后 = None
-日志 BEGIN 行： … selftest  BEGIN  args_file=args/20261009-213422-815899-selftest.json  args={…}
-日志 DONE  行： … selftest  1234ms  DONE  io=pg:2次/778ms，neo4j:0次/0ms |合计2次/778ms |墙钟778ms |阶段:326ms:nodes 3/3  args_file=…
-args 落盘 = True
-```
-
-### 8.5 用法（内网排错）
-```bash
-tail -f logs/mcp_calls_$(date +%Y%m%d).log        # 看 BEGIN/DONE + io= 统计
-ls -t logs/args/ | head                            # 拿完整入参（可重放/续作）
-```
-**从此"超时"不再是一个黑盒**：至少能看到"调了哪个工具、传了什么、PG/Neo4j 各打了多少次、卡在第几阶段"。
-
----
-
-## 9. 用户提议评估：**图写完 → PG 异步派生**（"PG 是派生的历史版本记录，Neo4j 是最新版"）
-
-> 用户 2026-10-09 提议：既然 PG 是派生的，图写完就让 **PG 异步派生**（和目录一样），
-> 不一致可通过运维同步；PG 幂等即使重放也不产生新版本；Neo4j 是最新版本，PG 是派生 + 历史版本记录。
-> 并问：**异步之后，能否事后查询 PG 的操作情况和时长？**
-
-### 9.1 结论：**方向正确，且 P1 已经为"事后可查"打好地基**；但落地前必须先解 4 个问题
-**"能否事后查询"→ 能，而且有两种粒度**：
-1. **日志粒度（现在就可用 P1）**：派生消费者自己 `ke_stats.begin()/snapshot()` → 同一套 `io=pg:n次/xms`
-   落 `logs/derive_*.log`（或主日志 `phase=DERIVE` 行）；`logs/args/` 里留派生的输入清单。
-2. **数据库粒度（更推荐）**：建 PG 表 **`bodhi_derive_jobs`**（`id, kb_id, batch_id, slug, phase,
-   attempt, pg_n, pg_ms, neo4j_n, neo4j_ms, ok, error, version_before, version_after, started_at, ended_at`）
-   → **运维可直接 SQL 查"某批派生打了多少次 PG/花了多久/哪些失败"**，并天然支持**重试/对账/断点续作**。
-   （比纯日志更耐重放，也是你问的"事后查询 PG 操作情况和时长"的最佳答案。）
-
-### 9.2 必须先解决的 4 个问题（否则引入新坑）
-| # | 问题 | 说明 / 解法 |
-|---|---|---|
-| 1 | **"重放不涨版本"需要新判据** | 现在 `upsert_page` 是"存在就 `version+1`"。要支持幂等重放，得改成**内容哈希比对**：渲染结果 hash == 已存 hash → **跳过**（不写、不 +1、不写 revision）；hash 变了才写新版本。这样才区分得开「同一份图再派生」（跳过）与「图变了」（新版本）。|
-| 2 | **哪一层能异步** | `wiki_pages`（+`wiki_page_revisions`）是我们的；**WeKnora 的 `chunks`/向量索引不由我们写** → 异步只覆盖前者。要明确边界，别指望"全链路异步"。|
-| 3 | **读一致性（最关键）** | 异步期会变成**"图有、页无"**（与你现在观察到的"页先出现、图滞后"**正好反过来**）。影响：`page_get`、`add_edge` 的 `_page_type`、`link_source_session` 的 slugs 校验都按 PG 读 → 必须加**图优先回落**：`_page_type` 读不到 PG 时回落读 Neo4j 的 `n.page_type`。同时前端要接受"图谱立即可见、页面稍后"（图谱直接读 Neo4j，天然满足）。|
-| 4 | **队列持久化 + 对账** | 队列必须落库（进程重启不丢）；并加巡检项 **`derive_lag`**（比较 Neo4j 实例 vs `wiki_pages`：列出"图有页无/页有图无"）→ 复用 `audit_scan` 框架，可一键重放。|
-
-### 9.3 但**先别急着异步** —— 有个更划算的顺序
-**图侧还没批量化**：现在每节点 1 次 + 每边 1-2 次 Neo4j 往返 → 40 节点+40 边 ≈ **80-120 次往返**。
-如果先做 **P3-0「图侧一条 UNWIND 全批」**（一条 Cypher 建全部节点、一条建全部边）：
-- 往返从 ~120 次压到 **~5 次**；
-- **无任何一致性代价**（图仍是最新、PG 同步写）；
-- 内网按 74 ms/次算：**~9 s → <1 s**。
-
-异步派生只省下 PG 那一段（40-80 次 × 272 ms ≈ 11-22 s）。
-所以建议顺序：
-
-| 序 | 动作 | 预期 |
-|---|---|---|
-| **P3-0** | 图侧 `UNWIND` 全批（节点/边各一条 Cypher）| 往返 ~120 → ~5，**无一致性代价** |
-| **P3-a** | 用 P1 的 `io=` 统计**在内网实测**一次真实 payload | 拿到 PG/Neo4j 的真实占比，决定要不要异步 |
-| **P3-b** | 若 PG 占比 > 60% → 上异步派生（§9.1 的 `bodhi_derive_jobs` + §9.2 四问）| 落库只写图，PG 派生可查、可重放 |
-
----
-
-## 10. 渲染模式收敛（用户口径 2026-10-09）
-
-### 10.1 结论
-1. **不需要 `mode="design"`** —— 复用已有 `mode="document"`（= 调用方给整篇正文 + 统一页头 + 可选属性段）。
-   原 P0-c 设想的"新增 design 渲染器"是多做的，改为：**复用 document + 保内容不回归**。
-2. **不存 `summary` 这类"摘要知识"** —— `summary` / `index` 是 WeKnora **内建 wiki 页类型**，
-   **不是本体类** → 报告页写成 `type="summary"`（`server.py:2295`）是"不合理的模式"，
-   应改为**本体里的文档类**（bmm 已有 **评估类** `bmm:Assesment`；agent 侧有 **评测 / 设计单** 等）。
-3. **渲染模式由本体决定，只有两种**：`entity`（知识单元，正文由数据属性渲染）/
-   `document`（文档类，调用方给整篇正文）。
-
-### 10.2 实现方式（**不引入新注解** —— 用户 2026-10-09 口径）
-> `bodhi:shortName` / `bodhi:expertRole` 是**模块级**的，而渲染方式是**类级**的；
-> 与其新加一个 `bodhi:renderMode` 注解（要改 loader/model/两个 emitter），不如**复用已有的数据属性机制**：
-> **谁声明了 `wikiContent` 数据属性，谁就按 `document` 渲染；其余一律 `entity`。**
-> —— 数据属性本来就被编进 `ontology_index.json` 并投影成 `BodhiOntProperty`，**编译器零改动**；
-> 而"这个类带一篇长正文"本身就是"文档类"的定义，语义自洽。
-
-| 位置 | 改动 |
-|---|---|
-| `ke_ontology.RENDER_MODES` | `("entity", "document")` —— 唯一合法取值 |
-| **`ke_ontology.render_mode(type_name)`** | 判定 = 该类**或其祖先**是否在 `wikiContent` 数据属性的 `domains` 里（用 `ancestors()` 链 + `data_properties()`）；是 → `document`，否则 `entity` |
-| ⚠️ 判定只看 **`domains` 显式命中** | 不认 `data_properties_for()` 的"全局可用"兜底 —— 否则只要有人把 `wikiContent` **不写 domain**，全库所有类都会变 `document`（已验证会规避） |
-| `ke_pages.CONTRACT_MODES` | 收敛为 `("entity", "document")`；`raw` 降级为**旧别名**（`MODE_ALIASES={"raw":"document"}`）|
-| `ke_pages.write_knowledge` | `spec.mode` **可省略** → 自动取 `ke_ontology.render_mode(page_type)`；调用方不再自己选模式 |
-| `ke_ontology.class_meta()` | **不加** `render` 字段（派生值会让每个类都打一次 Neo4j；判定统一走 `render_mode()`）|
-
-### 10.3 验收（已跑）
-```
-SYNTAX_OK
-① 本体未声明 wikiContent： bmm:Assesment / bmm:Goal / bmm:KnowledgeSession → 全 entity
-② 模拟 wikiContent domain=[bmm:Assesment]： bmm:Assesment → document ✅， bmm:Goal → entity ✅（不误伤）
-③ 模拟 wikiContent 无 domain（全局）： bmm:Goal → entity ✅（坑已规避）
-④ CONTRACT_MODES = ('entity','document') | 别名 = {'raw':'document'}
-```
-
-### 10.4 落地状态（2026-10-09）
-**已完成**：
-- 本体 `ontology/sources/bmm.ttl` 新增数据属性 **`:wikiContent`（`rdfs:domain :Assessment`）**，
-  并写明"**必须带 domain**，否则全库变 document"；
-- 重编译（校验通过）+ **重投影到 Neo4j**（`00_constraints` 11 条 + `10_ontology` 536 条，ok=bad=0）；
-- 实测：`bmm:Assessment → document`、`bmm:Goal / bmm:BusinessProcess / bmm:KnowledgeSession → entity`、
-  `wikiContent 声明 = {'bmm:wikiContent': ['bmm:Assessment']}`。
-
-**更正**：上轮我说 `bmm:Assesment` 拼写漏了 s —— **是我读乱码日志看错了**，
-本体里的类名是 **`bmm:Assessment`**（正确）。评审报告页归到它就对了。
-
-**agent 侧文档类（已解决，2026-10-09）**：你提的"agent import bmm 后直接用 `bmm:wikiContent`"**可行且更干净** —— 已验证代码依据：
-`loader.extract_properties`（`loader.py:468-492`）里**属性只在声明它的模块被抽出**（`module_graph.subjects(...)`），
-但 **`rdfs:domain` 是从合并图 `combined` 读的**（`combined.objects(subject, RDFS_DOMAIN)`）。
-所以在 `agent.ttl` 里**追加 domain** 即可，**bmm 模块不用动，也不用新属性、不撞 E3 同名限制**：
-
-```turtle
-@prefix bmm: <http://example.org/bmm#> .
-bmm:wikiContent rdfs:domain :Advice ;
-    rdfs:domain :DesignSpec ;
-    rdfs:domain :Evaluation ;
-    rdfs:domain :InstallGuide .
-```
-
-**实测**：重编译通过 → 重投影 **540 条 ok=540 bad=0**（比上次多 4 条 `BODHI_DOMAIN` 边）→
-`wikiContent 声明 = {'bmm:wikiContent': [agent:InstallGuide, agent:DesignSpec, agent:Advice, agent:Evaluation, bmm:Assessment]}`，
-判定：`bmm:Assessment / agent:Evaluation / agent:DesignSpec / agent:Advice / agent:InstallGuide → document`；
-`agent:Skill / agent:Agent / bmm:Goal / bmm:KnowledgeSession / bmm:BusinessProcess → entity`（**不误伤**）。
-
-**存量归位（2026-10-09，已做 4/5）**：`page_type='summary'` 的活页共 **5 个**（跨 3 个库），
-走现成两段式 `retag_preview → retag_apply` 归到 `bmm:Assessment`：
-
-| 页 | refs | 处置 |
-|---|---|---|
-| `bmm/summary/…`（结算平台库） | 0 | ✅ 已 retag → `bmm/assessment/…` |
-| `agent/summary/…`（智能体开发库） | 0 | ✅ 已 retag |
-| `ea/summary/…`（522d5f81） | 0 | ✅ 已 retag |
-| `ea/summary/it…`（dbc2528f） | 0 | ✅ 已 retag |
-| `ea/summary/…`（dbc2528f，另 1 页） | **156** | ⏸ **停手待确认**（风险 `url_break + refs_rewrite`：会重写 156 处引用）|
-
-`retag_apply(kb_id, slug, new_type, ticket, acknowledge_risks)`；风险 `url_break` = 旧 slug 链接失效。
-
-**仍待办**：① 上面那 1 页 156 引用的归位（需你确认是否接受引用重写）；
-② 前端为 `summary` 做的适配（`CONTENT_TABS` / `graphFilterTypes`）可随存量清理收敛；
-③ `save_knowledge` 报告分支改走内核 `document` 模式（P0-c 的第一小步，见 §6）。
-
-
-
-## 8 P3-0i2 / P3-0f：归因按类型分开 + 逐页只读查询批量预读（2026-10-10）
-
-### 8.1 先记一个**非代码**的根因：优化"不生效"是进程没重启
-
-内网反馈"改完还是 20–30 s、日志里也没有新埋点"。实测：
-
-| 事实 | 值 |
-|---|---|
-| `systemctl show bodhi-mcp -p ExecMainStartTimestamp` | **2026-10-10 04:59:47** |
-| `NRestarts` | 0 |
-| `9c0ba67`(P3-0g2) / `fad7f0d`(P3-0h) / `f4d8db0`(P3-0i) 提交时间 | 06:35 / 08:09 / 08:20 |
-| `tools/ontology-mcp/server.py` mtime | 08:19 |
-
-即运行中的进程是 **04:59:47 加载的旧字节码**：三个提交（含本体 memo 与调用者归因）**一个都没载入**
-（所以日志里一条 `|调用者:` 都没有）。`ss -ltnp` 证实 8765 就是该 systemd PID
-（**不存在**"容器里的旧快照 / 端口被别的进程抢"）。重启（PID 与时间戳都变）后同参复测立即生效。
-
-**运维口径**：以后"改了没效果"，先比对 `ExecMainStartTimestamp` 与代码 mtime/提交时间，再看日志。
-
-### 8.2 归因按类型分开（P3-0i2）
-
-`ke_stats.record(who=...)` 的归因从"pg+neo4j 混一张表"改为**挂在各自 kind 的格子里**
-（不再出现 `_resolve_page_id=66 次` 却看不出是打库还是打图）；日志 DONE 行相应改为
-`|pg调用者:… |neo4j调用者:…`。分开后 PG 的 138 次一眼见底（见 8.3）。
-
-### 8.3 逐页只读查询批量预读（P3-0f）
-
-| 消费点 | 旧 | 新 | 做法 |
-|---|---|---|---|
-| `_resolve_page_id`（每页 2 次：slug 查 id → 候选 id 查属主） | 66 次 | **2 次** | `_prime_page_ids(kb, slugs)`：`slug IN (…)` + `id IN (…)` 各一条 |
-| `save_elements` 逐页 `prior`（版本 / 是否软删） | 33 次 | **1 次** | `_prime_prior_versions`：`slug IN (…)` 一条；同 slug 多行时**不猜**，回落原查询 |
-| `_session_page_ref`（每页问**同一个**会话） | 32 次 | **1 次** | 请求级 memo（命中与未命中都记） |
-| **PG 合计** | **138 次** | **11 次** | |
-
-memo 作用域 = **一次工具调用**：`call_tool` 入口重建、`save_elements` **写库后作废**
-（`_reset_request_cache()`）—— 所以"本批正要建的会话页/新页"不会被写之前的空结果骗到
-（这条正是 2026-10-04 修过的 `sourceSession` 自动补边所依赖的语义）。
-
-**等价性**（不是"看着像"）：把旧实现**逐字拷贝**作基准，在**真实库**上对每个 slug + 探针逐条比对
-（页 id 策略 `existing`/`new`、`prior` 行形状），**两库两轮全 PASS**（`existing` 54 / `new` 6）。
-第一版就是在这一步被抓到一处形状差异：批量 SQL 多取了 `slug` 列 → 改为只留 `version`/`dead`。
-
-### 8.4 实测（同一份 payload：33 nodes / 27 edges，`mode=dry_run`）
-
-| 版本 | pg | neo4j | 合计 | 墙钟 |
-|---|---|---|---|---|
-| 旧进程（08:30） | 138 次 / 22360 ms | 1214 次 / 6420 ms | 1352 次 / 28780 ms | 29470 ms |
-| 重启后（08:49） | 138 / 20930 | 64 / 654 | 202 / 21584 | 24184 ms |
-| +P3-0f 第一批（09:01） | 74 / 11516 | 64 / 392 | 138 / 11908 | 14409 ms |
-| **+P3-0f 全量（09:12 / 09:21）** | **11 / 1599** | **64 / 378** | **75 / 1976** | **4324 ms** |
-
-另一份 payload（32 nodes / 27 edges，同库）旧 22047 ms / pg 134 / neo4j 1145 → **4122 ms / pg 11 / neo4j 33**。
-
-**结论**：IO 次数 **−94.5%**、墙钟 **−85.3%**。IO 只剩 ~2.0 s，其余 ~2.3 s 是**进程内工作**
-（页面渲染 / 本体校验 / 拼 SQL）——下一步若还要挤，方向是**减少"每页一次"的循环**，而不是再减少往返。
-
-**仍待办**：
-
-1. `ke_ontology.top_group` 冷启动仍是 1 页 1 次 Neo4j（33 次 / ~180 ms；进程内 warm 后降到 12 次）——
-   量级已无关痛痒，可按 P3-0g 同样加进程级 memo；
-2. `mode=apply` 的**写后**行为（`sourceSession` 自动补边、`id_strategy`、版本 +1）本次只跑了 dry_run，
-   建议用一次真实 apply 复跑确认（P3-0f 已把"写库后作废 memo"做进去了，但要实测背书）；
-3. 打开 `_bulk_write_pages`（P0-c 第二步）仍需要**真实库 diff** 背书，不能只靠 dry_run。
-
-
-## 9 内核接线收口 + 投影移除 + 批量写 + 死代码清理（2026-10-10）
-
-### 9.1 落库只走契约内核（`BODHI_SAVE_ENGINE` 已删）
-
-- `save_elements` 的**legacy 写库分支删除**：不再拼 `statements`（`sql_insert_page`/`sql_update_page`）
-  + 一个事务多条语句；改为一律 `ke_pages.write_knowledge_batch`（§8 写序、逐页幂等 upsert）。
-- 三个分支（合并 / 新建 / 覆盖 / 待确认）统一收进 `built[]`，由内核批量写；
-  `id_strategy` 回执改由**内核回执**回填（`created` → `new`，否则 `existing`）。
-- 判「新建 / 覆盖」改用**循环前的库里快照**（`fetch_existing_pages` 那次预读），
-  不再逐页查 PG。副作用：只剩"软删旧行"的 slug 从 `revived` 改判 `created`（内核 upsert 会复活它）。
-- 随之删除 8 个失效 helper（共 **215 行**）：`sql_insert_page`、`sql_update_page`、
-  `_resolve_page_id`、`_page_id_of_slug`、`_page_id_owner`、`_prior_version`、
-  `_prime_page_ids`、`_prime_prior_versions`；`_req_cache` 只保留 `session_ref`。
-
-### 9.2 wiki→图 投影**彻底移除**
-
-图不再从正文派生（正文早已不承载关系）：删 `ke_graph.project_page`(43 行)、
-`project_page_from_content`(23 行)、`strip_wiki_page`(17 行)、`delete_kb_graph`(5 行)、
-`_edges_of`、以及 `ke_pages` 里两处调用与"抽关系→投影"链路。图一律由写路径直写
-（`upsert_node(s)_batch` / `add_edge(s)_batch` / `ensure_instances`）；
-存量重建只用 `rebuild_kb_graph`（**保留边**、只重建节点/属性）。
-
-### 9.3 文档类节点（`render_mode=document`）在 graph 阶段必须有正文（方案 a）
-
-`save_elements` 对 `render_mode(page_type)=="document"` 且 **未带 `wiki_content`** 的节点
-**跳过不落**（不建页/不改页），回执给 `skipped_document_nodes[]` + `skipped_document_note`，
-指向它的关系按"目标页不存在"丢弃并在 `dropped_relations[].reason` 说明
-（提示改用 `stage="report"` 落整篇正文）。
-**根因**：graph/抽取路径的渲染器 `build_new_page` **不看** `render_mode`，旧行为会把设计单
-按 entity 渲染成一页错正文（实测：设计单 v1 = 416 字 entity 版，随后被 report 分支的
-4896 字 document 版覆盖 → 白占一个版本）。
-
-### 9.4 批量写 PG（P0-c-3：`_bulk_write_pages` 接线）
-
-`write_knowledge(..., sink=[...])`：给 `sink` 就**只构建**这一页（不碰 PG，存在性/版本来自
-已预读的 `preloaded`）；`write_knowledge_batch` 收集全批后**一次** `_bulk_write_pages`
-（多行 INSERT + 快照 `INSERT..SELECT`/`UPDATE..FROM(VALUES)` = 整批 **2 次 psql**），
-回执新增 `kernel.bulk_write:{inserted,updated}`。
-零写入验证（`tools/diag/_bulk_ab.py`）：`_bulk_write_pages` **1 次**、**逐页写事务 0 条**、
-`engine=kernel`、`applied=N`、`failed=[]`。
-
-### 9.5 死代码清理与目录整理
-
-- 两轮共删 **14 个函数**（投影 5 + legacy 8 + `_strip_legacy_head`），约 **300 行**。
-- 根目录临时文件：`_*.txt` 97 个 + `_*.log` + 一次性 `_*.py` 14 个 **全部清空**；
-  常用诊断脚本移入 **`tools/diag/`**（`_replay_sk` / `_engine_ab` / `_bulk_ab` / `_p0c2_diff` /
-  `_ab_p0c2` / `_orphan` / `_audit_orphan` / `_flag` / `_verify_clean` / `_cleanup` / `_rmfunc`），
-  并在 `pack_release.py` 的 `TOOLS_MANUAL_PKG` 里排除 `diag` → **不进任何交付包**。
-- 保留但有意保留：`ke_graph.rebuild_kb_wiki`（图→PG 恢复手段）、`ke_pages._bulk_write_pages`
-  （P0-c-3 已接线）、`parse_out_relations`（巡检/设计在用）。
-
-### 9.6 巡检与图库一致（2026-10-10）
-
-新增 kind **`orphan_graph_nodes`**（已并入 `all`）：`audit_scan` 报
-`summary.orphan_graph_nodes` + `graph_orphans` 全库明细；`audit_purge(kinds=orphan_graph_nodes)`
-一步清（整库范围）。根因：WeKnora 删库是**软删**、只删 PG 不删图，且
-`ke_audit._hard_delete_graph` 旧实现匹配的是 **`n.kb`**（现网节点是 `n.kb_id`）⇒ `init` 的清图
-一直空转。实测清理 **186/378 个孤儿节点**（378 → 192）。
+| 改了没生效 | `systemctl show <unit> -p ExecMainStartTimestamp` 必须**晚于**源文件 mtime（不重启=跑旧字节码） |
+| 回执 `failed>0` | 用**同一份载荷重跑**即续作（节点按 `(kb,slug)`、边按 `(kb,源,类型,目标)` 幂等） |
+| 图上有幽灵节点（库已删） | `audit_scan` 看 `graph_orphans`；`audit_purge(kinds="orphan_graph_nodes")` 一步清 |
+| 设计单/报告类"没落库" | 看回执 `skipped_document_nodes`：该类必须在 `stage="report"` 带 `wiki_content` |
+| 边没进图 | 回执 `graph:{batched,edges_written,edge_errors}`；`edge_errors` 会给出拒绝原因 |

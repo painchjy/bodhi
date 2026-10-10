@@ -128,8 +128,12 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 
 ## 8. 落库顺序（图本优先）
 
-`write_knowledge` 内部固定：**① 建/更新图节点（属性）→ ② 写图边 → ③ 写 PG 页（content 渲染）→ ④ 补 L1~L4 溯源**。
-图写失败不阻断 PG（巡检/回填兜底），但回执必须说清（`graph.ok=false`）。
+`write_knowledge` 内部固定：**① 建/更新图节点（属性）→ ② 写 PG 页（content 渲染）→ ③ 写图边 → ④ 补 L1~L4 溯源**。
+
+> **②③ 的次序**：建边要校验 domain/range 与"目标页存在"，所以**页先落 PG、边后写**（节点仍先入图）。
+> 批量路径把三者各自并成一条 `UNWIND`/一条 SQL（图节点 1 次、PG 2 次、边按关系类型数次），
+> 详见 `docs/knowledge-save-perf-and-staged-modeling.md`。
+> 图写失败不阻断 PG（巡检/回填兜底），但回执必须说清（`graph.ok=false`）。
 
 ---
 
