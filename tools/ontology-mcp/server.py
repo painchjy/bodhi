@@ -204,6 +204,142 @@ def page_id_for(kb_id: str, slug: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s" % (kb_id, slug)))
 
 
+# ---------------------------------------------------------------------------
+# P3-0f（2026-10-10）：**逐页只读查询**的批量预读 / 请求级 memo
+#
+# 实测归因（内网 33 页 dry_run，`|pg调用者:` 一行）：
+#   `_resolve_page_id` **66 次**（每页 2 次：slug 查 id → 候选 id 查属主）、
+#   `_session_page_ref` **32 次**（每页问一次，且问的是**同一个会话**）。
+#   本机 1 次 psql ≈ 150 ms ⇒ 这两项就吃掉 ~14 s（pg 合计 138 次 / 20.9 s）。
+#
+# 做法：把"本批全部 slug"压成 **1 次** `IN (...)` 查询、"本批全部候选 id"再压成 1 次；
+# 会话页引用是"同一问题问 N 遍"→ memo。作用域 = **一次工具调用**（`call_tool` 入口重建、
+# 写库之后作废）⇒ 不跨请求复用，不会读到别处进程/别的工具的写入。
+# ---------------------------------------------------------------------------
+_REQ_CACHE = threading.local()
+
+
+def _req_cache() -> dict:
+    """本请求线程的只读查询 memo（无则自建：CLI/单测直接调这些函数时也能用）。"""
+    cache = getattr(_REQ_CACHE, "d", None)
+    if cache is None:
+        cache = {"slug_ids": {}, "id_owner": {}, "session_ref": {}, "prior": {}}
+        _REQ_CACHE.d = cache
+    return cache
+
+
+def _reset_request_cache() -> None:
+    """丢弃本请求的全部 memo。工具入口调一次；**写库之后**也必须调（页已变）。"""
+    _REQ_CACHE.d = None
+
+
+def _page_id_of_slug(kb_id: str, slug: str) -> str | None:
+    """本库该 slug 的现有 id（`None` = 本库没有）。请求级 memo —— 同 slug 只问一次。"""
+    cache = _req_cache()["slug_ids"]
+    per_kb = cache.setdefault(kb_id, {})
+    if slug not in per_kb:
+        rows = psql_csv("SELECT id FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s "
+                        "ORDER BY version DESC LIMIT 1" % (sql_str(kb_id), sql_str(slug)))
+        per_kb[slug] = rows[0]["id"] if rows else None
+    return per_kb[slug]
+
+
+def _page_id_owner(cand: str) -> str | None:
+    """该页 id 的属主知识库（`None` = 空闲）。请求级 memo。"""
+    owner = _req_cache()["id_owner"]
+    if cand not in owner:
+        rows = psql_csv("SELECT knowledge_base_id AS kb FROM wiki_pages WHERE id = %s"
+                        % sql_str(cand))
+        owner[cand] = rows[0]["kb"] if rows else None
+    return owner[cand]
+
+
+def _prime_page_ids(kb_id: str, slugs) -> None:
+    """**一次**预读本批 slug 的现有 id + 候选 id 的属主（替代每页 2 次 psql）。
+
+    · ① `slug IN (...)` 一条 SQL（`ORDER BY version DESC` → 每 slug 取最高版本，与旧口径一致：
+      `ORDER BY version DESC LIMIT 1`）；未命中的 slug 记 `None`（= 要走新建派生）。
+    · ② 未命中 slug 的**派生候选 id** 再一条 `id IN (...)` 查属主（空闲记 `None`）。
+    兜底后缀（n>0）不预读 —— 那条路径按设计几乎不可达（见 `_warn_noncanonical_ids`），
+    真走到了仍由 `_page_id_owner()` 单查，只是慢一点，不影响正确性。
+    """
+    want = sorted({str(s).strip() for s in (slugs or []) if str(s).strip()})
+    if not want:
+        return
+    per_kb = _req_cache()["slug_ids"].setdefault(kb_id, {})
+    todo = [s for s in want if s not in per_kb]
+    if not todo:
+        return
+    rows = psql_csv("SELECT slug, id FROM wiki_pages WHERE knowledge_base_id = %s AND slug IN (%s) "
+                    "ORDER BY version DESC"
+                    % (sql_str(kb_id), ", ".join(sql_str(s) for s in todo)))
+    found: dict = {}
+    for row in rows:                        # 先出现的 version 最大
+        found.setdefault(row["slug"], row["id"])
+    for s in todo:
+        per_kb[s] = found.get(s)
+    owner = _req_cache()["id_owner"]
+    cands = [page_id_for(kb_id, s) for s in todo if not per_kb[s]]
+    missing = [c for c in cands if c not in owner]
+    if missing:
+        rows = psql_csv("SELECT id, knowledge_base_id AS kb FROM wiki_pages WHERE id IN (%s)"
+                        % ", ".join(sql_str(c) for c in missing))
+        seen = {row["id"]: row["kb"] for row in rows}
+        for c in missing:
+            owner[c] = seen.get(c)          # 库里有 → 属主 kb；没有 → None（空闲）
+
+
+def _prior_version(kb_id: str, slug: str) -> dict | None:
+    """该 slug 的现有行 `{version, dead}`（本库没有该 slug → `None`）。请求级 memo。
+
+    **与旧实现逐字等价**：旧代码在 `save_elements` 的新建分支里逐页问
+    `SELECT version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages WHERE kb=… AND slug=…`
+    然后取 `prior[0]`（**没有 ORDER / LIMIT**）—— 33 页 = 33 次 psql ≈ 5 s（实测归因
+    `__main__.save_elements=33次`）。批量路径先用 `_prime_prior_versions()` 一次 `slug IN (...)`
+    预读；同一 slug 多行（历史换过 id）时**不猜**，仍由本函数逐 slug 走原查询。
+    """
+    memo = _req_cache()["prior"]
+    if slug in memo:
+        return memo[slug]
+    rows = psql_csv("SELECT version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages "
+                    "WHERE knowledge_base_id = %s AND slug = %s"
+                    % (sql_str(kb_id), sql_str(slug)))
+    memo[slug] = rows[0] if rows else None
+    return memo[slug]
+
+
+def _prime_prior_versions(kb_id: str, slugs) -> None:
+    """**一次**预读这些 slug 的 `{version, dead}`（替代每页 1 次 psql）。
+
+    · slug 不在结果里 → 本库没有该 slug，与旧查询的空结果**完全等价**（该查询**不过滤**
+      `deleted_at`，所以"批量里没有"就是"确实没有"）；
+    · 只出现 1 行 → 与旧 `prior[0]` **完全等价**；
+    · 出现多行（同 slug 历史上被换过 id）→ **不写 memo**，留给 `_prior_version()` 单查原样返回，
+      逐字保留旧行为（含旧查询本身的不确定性）。
+    """
+    want = sorted({str(s).strip() for s in (slugs or []) if str(s).strip()})
+    if not want:
+        return
+    memo = _req_cache()["prior"]
+    todo = [s for s in want if s not in memo]
+    if not todo:
+        return
+    rows = psql_csv("SELECT slug, version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages "
+                    "WHERE knowledge_base_id = %s AND slug IN (%s)"
+                    % (sql_str(kb_id), ", ".join(sql_str(s) for s in todo)))
+    grouped: dict = {}
+    for row in rows:
+        grouped.setdefault(row["slug"], []).append(row)
+    for s in todo:
+        got = grouped.get(s) or []
+        if not got:
+            memo[s] = None                  # 本库没有该 slug
+        elif len(got) == 1:
+            # 只留旧查询的两个列：批量 SQL 多取了一个 `slug` 列，**不要**把它带进 memo
+            # —— 否则下游看到的行"多一个键"（形状不再等价；`_equiv_p30f.py` 就是这么抓到的）。
+            memo[s] = {"version": got[0]["version"], "dead": got[0]["dead"]}
+
+
 def _resolve_page_id(kb_id: str, slug: str) -> tuple[str, str]:
     """给 `(kb_id, slug)` 定一个**本库内唯一**的页 id，并说明用的哪种方式。
 
@@ -212,20 +348,22 @@ def _resolve_page_id(kb_id: str, slug: str) -> tuple[str, str]:
        加后缀再派生，直到拿到"空闲 / 属本库"的 id。
 
     返回 `(id, how)`，`how` ∈ `existing` / `new` / `suffixed`。
+
+    P3-0f：两个查询都走**请求级 memo**（`_page_id_of_slug` / `_page_id_owner`）；批量路径先用
+    `_prime_page_ids(kb_id, slugs)` 一次预读 → 每批固定 2 次 psql（旧实现 33 页 = 66 次）。
+    未预读时行为与旧实现**逐字一致**（只是同 slug/同候选不重复问）。
     """
-    rows = psql_csv("SELECT id FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s "
-                    "ORDER BY version DESC LIMIT 1" % (sql_str(kb_id), sql_str(slug)))
-    if rows:
-        return rows[0]["id"], "existing"
+    known = _page_id_of_slug(kb_id, slug)
+    if known:
+        return known, "existing"
     base = page_id_for(kb_id, slug)
     for n in range(0, 50):
         cand = base if n == 0 else str(uuid.uuid5(
             uuid.NAMESPACE_URL, "bodhi-element:%s|%s|%d" % (kb_id, slug, n)))
-        owner = psql_csv("SELECT knowledge_base_id AS kb FROM wiki_pages WHERE id = %s"
-                         % sql_str(cand))
-        if not owner:
+        owner = _page_id_owner(cand)
+        if owner is None:
             return cand, ("new" if n == 0 else "suffixed")
-        if owner[0]["kb"] == kb_id:
+        if owner == kb_id:
             return cand, "new"
     raise RuntimeError("给（kb=%s, slug=%s）找不到可用页 id（已试 50 个后缀）" % (kb_id, slug))
 
@@ -1397,6 +1535,14 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
 
     retagged: list = []
     retag_queue: list = []
+    # P3-0f（2026-10-10）：**一次预读**本批 slug 的现有 id（+ 候选 id 属主）。
+    # 旧实现每页 2 次 psql（内网归因 `_resolve_page_id=66 次` / 33 页 ≈ 9.7 s）；
+    # 预读后每批固定 2 次（`IN (...)` 两条），后续 `sql_insert_page` 全部命中 memo。
+    _batch_slugs = [element_page_slug(model, p) for p in payloads]
+    _prime_page_ids(kb_id, _batch_slugs)
+    # 同一批 slug 的"现有版本 / 是否软删"也一次预读 —— 新建分支每页要一次
+    # （旧实现 33 次 psql ≈ 5 s，归因 `__main__.save_elements=33次`）。
+    _prime_prior_versions(kb_id, _batch_slugs)
     for element in payloads:
         # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），直接走合并；
         # 否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
@@ -1458,15 +1604,14 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                 page["wiki_path"] = page["slug"]
             # 回执如实（2026-09-21 用户实测：`fetch_existing_pages` 排除 summary/index 页，报告页会走
             # 到这里；若不说清是「覆盖既有活页」，就会出现"回执说 created，用户看到的是旧正文"的错觉）。
-            prior = psql_csv("SELECT version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages "
-                             "WHERE knowledge_base_id = %s AND slug = %s"
-                             % (sql_str(kb_id), sql_str(page["slug"])))
+            # P3-0f（2026-10-10）：**批量预读 + memo**（旧实现每页 1 次 psql：实测 33 次 ≈ 5 s）。
+            prior = _prior_version(kb_id, page["slug"])
             if prior:
-                if str(prior[0].get("dead", "f")).lower().startswith("t"):
-                    action, before_v = "revived（复活软删旧行并覆盖）", int(prior[0]["version"] or 1)
+                if str(prior.get("dead", "f")).lower().startswith("t"):
+                    action, before_v = "revived（复活软删旧行并覆盖）", int(prior["version"] or 1)
                 else:
                     action, before_v = "updated（同 slug 既有活页：正文按本次载荷覆盖，title/type 不动）", \
-                                       int(prior[0]["version"] or 1)
+                                       int(prior["version"] or 1)
             else:
                 action, before_v = "created", 0
             if action == "created":
@@ -1503,6 +1648,9 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
 
     if not dry_run and statements:
         psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
+        # P3-0f：页已变 → 本请求的"slug→id / 属主 / 会话页引用"memo 一律作废
+        # （否则后续阶段——`link_source_session`、`sourceLocator`——会读到写之前的空结果）。
+        _reset_request_cache()
         # 写后对账（2026-09-24）：回执里的每个 slug 必须**在本库**查得到 ——
         # 否则就是"回执成功、库里没有"（历史 bug：页 id 只按 slug 派生 → upsert 更新了别库那一行）。
         # 这里把它变成**显式的失败**：`applied` 回拨为 False + missing 清单，提示不要向用户汇报成功。
@@ -1907,6 +2055,15 @@ def _session_page_ref(kb_id: str, session_no: str) -> tuple[str, str]:
     sid = (session_no or "").strip()
     if not sid:
         return "", ""
+    # P3-0f（2026-10-10）：**命中即 memo**。`save_knowledge` 建页阶段每页要一次 `bmm:partNo`
+    # （`_session_part_no`）→ 实测 33 页 = **32 次**同一个查询（1 次 psql ≈ 150 ms，白花 ~4.8 s）。
+    # **只缓存命中**（查不到时不缓存）：会话页可能正是**本批**要建的，写库后应重新查
+    # （`save_elements` 写库后会 `_reset_request_cache()`，双保险）。
+    memo = _req_cache()["session_ref"]
+    key = (kb_id, sid)
+    if key in memo:
+        return memo[key]
+    hit = ("", "")
     try:
         # 2026-10-04 修：**不能只按 slug 前缀 `session/<编号>` 找** —— 实测智能体常把会话页
         # 命名成 `bmm/knowledgesession/会话-XXX`（slug 里没有编号前缀）⇒ 匹配不到、自动边挂不上。
@@ -1917,11 +2074,15 @@ def _session_page_ref(kb_id: str, session_no: str) -> tuple[str, str]:
             "AND page_type = 'bmm:KnowledgeSession' AND (content LIKE %s OR slug LIKE %s) "
             "ORDER BY (slug LIKE '%%/p%%') DESC, length(slug) DESC LIMIT 1"
             % (sql_str(kb_id), sql_str("%" + sid + "%"), sql_str("session/" + sid + "%")))
+        if rows:
+            hit = ((rows[0].get("title") or "").strip(), (rows[0].get("slug") or "").strip())
     except Exception:  # noqa: BLE001
-        return "", ""
-    if not rows:
-        return "", ""
-    return (rows[0].get("title") or "").strip(), (rows[0].get("slug") or "").strip()
+        hit = ("", "")
+    # P3-0f：命中与**未命中**都记（本次实测：本库当时没有该会话页 → 33 页白问 32 次、
+    # 每次 ~150 ms）。不担心"会话页稍后由本批创建"：`save_elements` 落库后会
+    # `_reset_request_cache()`、`call_tool` 入口也会清 —— memo 生命周期严格限定在"写入之前"。
+    memo[key] = hit
+    return hit
 
 
 def _session_part_no(kb_id: str, session_no: str) -> str:
@@ -4127,6 +4288,9 @@ def start_overview_job(args: dict) -> dict:
 
 
 def call_tool(name: str, args: dict) -> dict:
+    # P3-0f（2026-10-10）：每次工具调用先清**请求级只读 memo**（页 id / 属主 / 会话页引用）。
+    # 放在这里而不是各工具里：唯一入口、线程局部、绝不会把上一次调用的结果带进来。
+    _reset_request_cache()
     if name == "job_status":
         return job_status(str(args.get("job_id", "")))
     if name == "list_pending_merges":
@@ -4399,9 +4563,14 @@ def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = N
                 io_txt += " |阶段:%s" % "；".join("%sms:%s" % (m[0], m[1]) for m in marks[-4:])
             # P3-0i（2026-10-10）：**按调用者归因** —— "io=neo4j:1145 次"这类总数无从定位，
             # 这里直接给出打得最多的几个函数（谁在打图/打库一眼可见）。
-            tc = io.get("top_callers") or []
-            if tc:
-                io_txt += " |调用者:%s" % "；".join("%s=%s次" % (k, v) for k, v in tc[:5])
+            # P3-0i2（2026-10-10）：**按类型分开**打印 —— 此前 pg/neo4j 混在一张表，
+            # "138 次 psql 到底谁打的"读不出来；分开后 PG 侧消费点直接可见
+            # （重启到新代码后实测：neo4j 1214→64 次，瓶颈已转到 pg 138 次）。
+            for kind in ("pg", "neo4j"):
+                tc = (d.get(kind) or {}).get("top_callers") or []
+                if tc:
+                    io_txt += " |%s调用者:%s" % (kind, "；".join(
+                        "%s=%s次" % (k, v) for k, v in tc[:4]))
         _log_line("%s\t%-26s\t%7.0fms\t%s\t%s\targs_file=%s\tresult=%s"
                   % (now_text(), name, ms, phase, io_txt, args_file or "-",
                      json.dumps(picked, ensure_ascii=False)[:500]))

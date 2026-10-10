@@ -61,7 +61,7 @@ def _who(skip: int = 2) -> str:
 
 
 def record(kind: str, ms: float, ok: bool = True, who: str = "") -> None:
-    """记一次 IO（未开启统计时立即返回）。`who` = 调用者（用于归因）。"""
+    """记一次 IO（未开启统计时立即返回）。`who` = 调用者（**按 kind 分开累计**，见 P3-0i2）。"""
     bucket = _BUCKET.get()
     if bucket is None:
         return
@@ -73,7 +73,10 @@ def record(kind: str, ms: float, ok: bool = True, who: str = "") -> None:
     if not ok:
         cell["err"] += 1
     if who:
-        by = bucket.setdefault("who", {})
+        # P3-0i2（2026-10-10）：归因挂在**各自类型**的格子里。此前 pg+neo4j 混在一张表，
+        # `_resolve_page_id=66次` 这种看不出是打库还是打图（实测 neo4j 已降到 64 次、
+        # 瓶颈转到 pg 的 138 次 psql），分开后才能直接读出 PG 侧消费点。
+        by = cell.setdefault("who", {})
         by[who] = by.get(who, 0) + 1
 
 
@@ -93,9 +96,16 @@ def snapshot() -> dict | None:
     if bucket is None:
         return None
     out: dict = {"calls": 0, "ms": 0.0, "detail": {}}
+    merged: dict = {}
     for kind in _KINDS:
         cell = bucket.get(kind) or {"n": 0, "ms": 0.0, "err": 0}
+        by = cell.get("who") or {}
         out["detail"][kind] = {"n": cell["n"], "ms": round(cell["ms"], 1), "err": cell["err"]}
+        if by:
+            out["detail"][kind]["top_callers"] = [
+                [k, v] for k, v in sorted(by.items(), key=lambda kv: -kv[1])[:6]]
+            for k, v in by.items():
+                merged[k] = merged.get(k, 0) + v
         out["calls"] += cell["n"]
         out["ms"] += cell["ms"]
     out["ms"] = round(out["ms"], 1)
@@ -103,9 +113,8 @@ def snapshot() -> dict | None:
         out["wall_ms"] = round((time.time() - bucket["started"]) * 1000.0, 1)
     if bucket.get("marks"):
         out["marks"] = bucket["marks"][-8:]
-    by = bucket.get("who") or {}
-    if by:
-        out["top_callers"] = [[k, v] for k, v in sorted(by.items(), key=lambda kv: -kv[1])[:6]]
+    if merged:                       # 兼容旧口径：跨类型的合计 top（新日志按类型分开打印）
+        out["top_callers"] = [[k, v] for k, v in sorted(merged.items(), key=lambda kv: -kv[1])[:6]]
     return out
 
 
