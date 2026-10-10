@@ -418,6 +418,14 @@ def top_ancestor(type_name: str, meta: dict[str, dict] | None = None) -> str:
     """
     if not type_name:
         return ""
+    # P0-c-2（2026-10-10）：**进程级 memo** —— 这条 Cypher 对**每个类型**都要打一遍，
+    # 实测一次 33 页落库 `ke_ontology.top_group` = **33 次 Neo4j**（每页一次，且从不命中缓存）。
+    # 结果只依赖本体产物（按 `index_stamp()` 失效，见 `_memo_get`）+ 类名，故与
+    # `ancestors`/`descendants` 同款安全 memo。
+    key = ("topanc", type_name)
+    hit = _memo_get(key)
+    if hit is not None:
+        return hit
     try:
         if ke_neo4j.available():
             rows = ke_neo4j.query(
@@ -427,6 +435,7 @@ def top_ancestor(type_name: str, meta: dict[str, dict] | None = None) -> str:
                 {"p": type_name})
             for row in rows:
                 if row.get("prefixed"):
+                    _memo_put(key, row["prefixed"])
                     return row["prefixed"]
     except Exception:  # noqa: BLE001
         pass
@@ -437,14 +446,31 @@ def top_ancestor(type_name: str, meta: dict[str, dict] | None = None) -> str:
         last = cur
         plist = (meta.get(cur) or {}).get("parents") or []
         cur = plist[0] if plist else ""
+    _memo_put(key, last)
     return last
 
 
 def top_group(type_name: str, meta: dict[str, dict] | None = None) -> str:
-    meta = meta or class_meta()
-    top = top_ancestor(type_name, meta) or type_name
-    info = meta.get(top) or {}
-    return info.get("label") or top
+    """顶层大类中文名（目录第二级）。**进程级 memo**（P0-c-2，2026-10-10）。
+
+    实测归因：一次 33 页落库，`ke_ontology.top_group` **33 次 Neo4j**（每页一次 `top_ancestor`
+    的 Cypher，且**从不命中缓存**）—— 它是纯本体函数（只依赖本体产物 + 继承链），按
+    `index_stamp()` 失效即可，与 `class_meta`/`ancestors`/`descendants` 同款 memo。
+    显式传 `meta` 时不缓存（调用方已自备元数据，可能是临时/覆盖版本）。
+    """
+    key = None
+    if meta is None:
+        key = ("topgroup", type_name)
+        hit = _memo_get(key)
+        if hit is not None:
+            return hit
+    _meta = meta or class_meta()
+    top = top_ancestor(type_name, _meta) or type_name
+    info = _meta.get(top) or {}
+    out = info.get("label") or top
+    if key is not None:
+        _memo_put(key, out)
+    return out
 
 
 def category_path(type_name: str) -> list[str]:

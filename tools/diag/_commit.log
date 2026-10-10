@@ -1,0 +1,4 @@
+warning: in the working copy of 'tools/diag/_ab_p0c2.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_audit_orphan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_bulk_ab.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_cleanup.py', CRLF will be replaced by LF the next time Git touches it

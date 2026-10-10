@@ -1,0 +1,43 @@
+4507:def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = None,
+4508-                   args_file: str = "", phase: str = "DONE") -> None:
+4509-    """**两段写日志的"结束"段**：时间 / 工具 / 耗时 / **IO 统计** / 结果摘要。
+4510-
+4511-    `io` = `ke_stats.snapshot()` —— **PG / Neo4j 各自的往返次数与时长**。
+4512-    从此"这 2 分钟到底花在 PG 还是 Neo4j、打了多少次往返"可以直接从日志读出来，
+4513-    不必再靠推算（实测基线：1 次 psql ≈ 272 ms、1 次 Neo4j ≈ 74 ms）。
+4514-    """
+4515-    try:
+4516-        summary = result if isinstance(result, dict) else {}
+4517-        keys = ("applied", "created", "merged", "pending", "violations", "unmatched", "retract",
+4518-                "retract_planned", "crud_matrix", "report_page", "page_versions", "count",
+4519-                "catalog", "id", "name", "error", "how_to_use", "source", "note",
+4520-                "images_found", "images", "by_document",
+4521-                # P0/P0-b：落库性能与写图结果（便于内网自证"边有没有真的写进图"）
+4522-                "graph_edges", "edge_errors", "folders_synced", "maintenance", "resume_hint",
+4523-                "merge", "engine", "kernel")
+4524-        picked = {}
+4525-        for key in keys:
+4526-            if key in summary:
+4527-                value = summary[key]
+4528-                if isinstance(value, list):
+4529-                    value = "len=%d %s" % (len(value),
+4530-                                           json.dumps(_log_brief(value), ensure_ascii=False)[:120])
+4531-                elif isinstance(value, dict) and len(json.dumps(value, ensure_ascii=False)) > 160:
+4532-                    value = json.dumps(_log_brief(value), ensure_ascii=False)[:160] + "…"
+4533-                picked[key] = value
+4534-        io_txt = "-"
+4535-        if isinstance(io, dict):
+4536-            d = io.get("detail") or {}
+4537-            parts = []
+4538-            for kind in ("pg", "neo4j"):
+4539-                cell = d.get(kind) or {}
+4540-                parts.append("%s:%s次/%.0fms%s" % (kind, cell.get("n", 0), cell.get("ms", 0),
+4541-                                                   ("/错%s" % cell["err"]) if cell.get("err") else ""))
+4542-            io_txt = ("io=%s |合计%s次/%.0fms |墙钟%.0fms"
+4543-                      % ("，".join(parts), io.get("calls", 0), io.get("ms", 0),
+4544-                         io.get("wall_ms", 0)))
+4545-            marks = io.get("marks") or []
+4546-            if marks:
+4547-                io_txt += " |阶段:%s" % "；".join("%sms:%s" % (m[0], m[1]) for m in marks[-4:])
+4548-            # P3-0i（2026-10-10）：**按调用者归因** —— "io=neo4j:1145 次"这类总数无从定位，
+4549-            # 这里直接给出打得最多的几个函数（谁在打图/打库一眼可见）。

@@ -215,7 +215,10 @@ def _apply_content_update(kb_id: str, slug: str, content: str, tag: str,
     ④ 落库后把关系投影到图实例（失败不阻断写库）。"""
     replica_guard(kb_id, slug, tag)      # 副本页禁止本地修改（pull 通道除外）
     import ke_graph  # noqa: PLC0415  懒导入避免 ke_pages ↔ ke_graph 环
-    edges = [(r["type"], r["slug"]) for r in parse_out_relations(content) if r.get("slug")]
+    # 2026-10-10（用户口径）：**wiki→图 投影已彻底移除** ——
+    # 关系不再从正文派生（正文早已不承载关系，`strip_relation_sections` 会去掉那两小节），
+    # 图一律由写路径直写：`upsert_node`/`upsert_nodes_batch`、`add_edge`/`add_edges_batch`、
+    # `ensure_instances`；存量重建只用 `ke_graph.rebuild_kb_graph`（它**保留边**、只重建节点/属性）。
     content = ke_graph.strip_relation_sections(content)
     stmts = [_snapshot_stmt(kb_id, slug, tag),
              "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
@@ -223,10 +226,6 @@ def _apply_content_update(kb_id: str, slug: str, content: str, tag: str,
              "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
              % (ke_db.sql_str(content), tag, extra_set, ke_db.sql_str(kb_id), ke_db.sql_str(slug))]
     ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;\n", stdin=True)
-    try:
-        ke_graph.project_page(kb_id, slug, edges=edges)
-    except Exception:  # noqa: BLE001  图投影失败不阻断写库（巡检/回填兜底）
-        pass
     return content
 
 
@@ -357,9 +356,8 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
             "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path, "
             "source_refs, chunk_refs")
-    # 2026-10-05 M3：统一写路径——INSERT 也「先图后 wiki」（抽关系→去正文关系小节→出入链置空→投影图）
+    # 2026-10-10（用户口径）：wiki→图 投影已彻底移除 —— INSERT 只去关系小节，图由写路径直写。
     import ke_graph as _kg
-    edges = [(r["type"], r["slug"]) for r in parse_out_relations(content) if r.get("slug")]
     content = _kg.strip_relation_sections(content)
     vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, %s, "
             "%s::jsonb, %d, %s, %s::jsonb, %s::jsonb"
@@ -373,10 +371,6 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\nCOMMIT;\n" % (cols, vals), stdin=True)
     if sync_folders:
         _sync_folders(kb_id)
-    try:
-        _kg.project_page(kb_id, slug, edges=edges)
-    except Exception:  # noqa: BLE001
-        pass
     return {"slug": slug, "created": True, "before_version": 0, "after_version": 1,
             "category_path": cat,
             "content": _wiki_content_for_graph, "attrs": _attrs_for_graph}
@@ -457,7 +451,10 @@ def _contract_head(spec: dict) -> list[str]:
         lines.append("> **生成方式**：%s  " % spec["generated_by"])
     if src.get("session_no"):
         lines.append("> **来源会话**：%s  " % src["session_no"])
-    lines.append("> **首个版本生成**：%s" % ke_db.now_text())
+    # P0-c-2（2026-10-10 用户口径）：**「首个版本生成」只在新建页写** —— 有既有值就沿用
+    # （`spec["created_at"]`，由调用方/适配器从既有页头或 `page_metadata.ontology.created_at` 带过来），
+    # 只有真新建时才取当前时间。否则每次写库这一行都会变（实测差异就卡在这一行）。
+    lines.append("> **首个版本生成**：%s" % (spec.get("created_at") or ke_db.now_text()))
     lines.append("")
     return lines
 
@@ -581,7 +578,8 @@ def _register_session_part(kb_id: str, base_slug: str, part_slug: str, part_titl
 
 def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                     strict_source: bool = True, sync_folders: bool = True,
-                    preloaded: dict | None = None, skip_graph: bool = False) -> dict:
+                    preloaded: dict | None = None, skip_graph: bool = False,
+                    sink: list | None = None) -> dict:
     """**知识写入统一内核**（契约 §1/§2/§8）。所有写入器都应薄封装本函数。
 
     `spec` 见 docs/knowledge-write-contract.md §2。`strict_source=True`（默认）时，
@@ -630,7 +628,8 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     if src.get("locator") and "sourceLocator" not in {str(k).split(":")[-1] for k in attrs}:
         attrs["bmm:sourceLocator"] = src["locator"]     # L2：片段定位（数据属性）
     metadata = {"ontology": {"model": page_type.split(":", 1)[0], "class": page_type,
-                             "name": title, "attributes": attrs, "generator": TAG_CONTRACT}}
+                             "name": title, "attributes": attrs, "generator": TAG_CONTRACT,
+                             "created_at": spec.get("created_at") or ke_db.now_text()}}
     for k, v in (spec.get("metadata_extra") or {}).items():     # 如 review 页的 `page_metadata.review`
         if k != "ontology":
             metadata[k] = v
@@ -669,20 +668,68 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     _chunk_refs = spec.get("chunk_refs")
     if _chunk_refs is None:
         _chunk_refs = [str(x) for x in (src.get("chunk_refs") or []) if str(x).strip()]
-    res = upsert_page(kb_id, slug, title, page_type, content,
-                      summary=(spec.get("summary") or "").strip()[:500], tag=TAG_CONTRACT,
-                      metadata=metadata, sync_folders=sync_folders,
-                      source_refs=_doc_refs, chunk_refs=_chunk_refs, preloaded=preloaded)
-    # ③ 关系（节点已就绪）
-    for rel in (spec.get("relations") or []):
-        rt, ts = rel.get("type"), rel.get("target_slug")
-        if not (rt and ts):
-            continue
+    if sink is not None:
+        # P0-c-3（2026-10-10）：**批量 PG 写** —— 调用方给了 `sink` 就只**构建**这一页（不碰 PG），
+        # 由调用方用 `_bulk_write_pages` **一次**写完：31 页从「31 个小事务」降到「2 次 psql」。
+        # 版本/存在性来自 `preloaded`（批量路径已预读），所以这里不需要任何 PG 往返。
+        _exists = bool((preloaded or {}).get("exists"))
+        _before = int((preloaded or {}).get("version") or 1) if _exists else 0
         try:
-            _kg.add_edge(kb_id, slug, rt, ts)
-            graph["edges_written"] += 1
+            _cat = ke_ontology.category_path(page_type) or []
+        except Exception:  # noqa: BLE001
+            _cat = []
+        sink.append({"slug": slug, "title": title, "page_type": page_type, "content": content,
+                     "summary": (spec.get("summary") or "").strip()[:500],
+                     "metadata": metadata, "category_path": _cat,
+                     "wiki_path": "/".join([str(x) for x in _cat] + [title]),
+                     "source_refs": _doc_refs, "chunk_refs": _chunk_refs, "exists": _exists})
+        res = {"slug": slug, "created": not _exists, "before_version": _before,
+               "after_version": (_before + 1) if _exists else 1,
+               "content": content, "attrs": attrs}
+    else:
+        res = upsert_page(kb_id, slug, title, page_type, content,
+                          summary=(spec.get("summary") or "").strip()[:500], tag=TAG_CONTRACT,
+                          metadata=metadata, sync_folders=sync_folders,
+                          source_refs=_doc_refs, chunk_refs=_chunk_refs, preloaded=preloaded)
+    # ③ 关系（节点已就绪）—— P0-c-2（2026-10-10）：**类型一次取（图优先）+ 边一次批量建**。
+    #    旧实现每条边 `add_edge`（无 ctx）= 2 次 `_page_type`(PG) + 2 次 `_ensure_instance`(PG+Neo4j)
+    #    + 1 次查重 + 1 次 MERGE + 1 次 `relations_of` —— 实测 27 条边 ≈ 108 次 psql。
+    #    现在：① 类型映射优先读图（1 Neo4j；图上没有的才**批量**问 PG 一次）
+    #          ② 目标节点一次 UNWIND 确保 ③ 边按关系类型分组 UNWIND（N 条 → 去重后类型数次 Neo4j）。
+    _rels = [r for r in (spec.get("relations") or [])
+             if (r.get("type") and r.get("target_slug"))]
+    if _rels:
+        _targets = sorted({str(r["target_slug"]).strip() for r in _rels})
+        _tinfo = (_kg.info_from_graph(kb_id, [slug] + _targets)
+                  if _kg._validate_from_graph() else {})
+        _missing = [t for t in _targets if not ((_tinfo.get(t) or {}).get("pt"))]
+        if _missing:                   # 图上没有 → 一次 PG 兜底（"在 PG 但还没投影进图"的页）
+            _tinfo.update(_kg.page_info_map(kb_id, _missing))
+        _tinfo.setdefault(slug, {"pt": page_type, "title": title, "tenant": None})
+        if _targets:
+            try:
+                _kg.ensure_instances(kb_id, [
+                    {"slug": t, "name": (_tinfo.get(t) or {}).get("title") or t.rsplit("/", 1)[-1],
+                     "page_type": (_tinfo.get(t) or {}).get("pt") or "",
+                     "tenant_id": (_tinfo.get(t) or {}).get("tenant")}
+                    for t in _targets])
+            except Exception as exc:  # noqa: BLE001
+                graph["edge_errors"].append({"scope": "ensure_instances", "error": str(exc)[:160]})
+        try:
+            _eres = _kg.add_edges_batch(
+                kb_id, [(slug, r["type"], r["target_slug"]) for r in _rels], {"info": _tinfo})
+            # 回执口径与旧版一致：`edges_written` = 校验通过并入图的**条目数**；
+            # `edge_merge_hits` 才是 MERGE 命中数（含"同样的边已存在"）。
+            _errs = list(_eres.get("errors") or [])
+            graph["edges_written"] = len(_rels) - len(_errs)
+            graph["edge_merge_hits"] = int(_eres.get("written") or 0)
+            graph["edge_types"] = _eres.get("types")
+            for e in _errs:
+                graph["edge_errors"].append({"type": e.get("type"),
+                                             "target_slug": e.get("target_slug"),
+                                             "error": str(e.get("error"))[:160]})
         except Exception as exc:  # noqa: BLE001
-            graph["edge_errors"].append({"type": rt, "target_slug": ts, "error": str(exc)[:160]})
+            graph["edge_errors"].append({"scope": "add_edges_batch", "error": str(exc)[:160]})
     # ④ 会话溯源边（L1）—— **核心自动确保会话页**（没有则建；换智能体/角色→新建分页）。
     #    外围只需传 `source.session_no` + 场景（session_name/agent_name/role）。
     session_slug = (src.get("session_slug") or "").strip()
@@ -714,6 +761,102 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
             "graph": graph, "warnings": warnings,
             # P3-0d：回传"已构建好的"正文/属性，供批量路径一条 UNWIND 写图节点
             "content": res.get("content"), "attrs": res.get("attrs")}
+
+
+def _parse_legacy_head(content: str) -> tuple[dict, str]:
+    """解析 legacy 页头 → `({字段: 值}, 去掉头部的正文)`。
+
+    legacy 页头形如：`# 标题` + `> **本体类型**：目的（\\`bmm:Goal\\`）` +
+    `> **生成方式**：领域建模智能体（未指定来源文档）` + `> **首个版本生成**：<时间>（\\`tag\\`）`。
+
+    为什么要解析（P0-c-2，2026-10-10 用户口径：内核要写「生成方式」、「首个版本生成」**只在新建页写**）：
+    切内核后页头由 `_contract_head` 重写，其中这两项的**值必须沿用 legacy 的**，否则
+    ① 每次写库「首个版本生成」都会变成当前时间；②「生成方式」丢失。
+    实测（`_p0c2_diff.py`）：解析 + 回填后，重写正文与库里现有正文**逐字一致**（差异 0 行）。
+    """
+    lines = (content or "").splitlines()
+    head: dict = {}
+    i = 0
+    if i < len(lines) and lines[i].lstrip().startswith("# "):
+        i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    while i < len(lines):
+        s = lines[i].strip()
+        if not (s.startswith("> **") and ("：" in s or ":" in s)):
+            break
+        body_txt = s[4:]
+        sep = "：" if "：" in body_txt else ":"
+        key, _, val = body_txt.partition(sep)
+        head[key.strip().strip("*").strip()] = val.strip()
+        i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    return head, "\n".join(lines[i:])
+
+
+
+def spec_from_page(page: dict, element: dict | None = None, *, source: dict | None = None,
+                   mode: str = "", relations: list | None = None,
+                   strip_legacy_head: bool = False) -> dict:
+    """**legacy 页/要素 → 契约内核 spec**（P0-c-2，2026-10-10 适配器）。
+
+    目的：让领域建模/设计那条 legacy 路径（`save_elements` 的 payload + 已渲染好的 page）
+    能喂给内核 `write_knowledge(_batch)` —— 统一契约 §8 写序、顺路打开 `_bulk_write_pages`。
+    **默认不接线**：`mode=document` 时内核会**再拼一段 `_contract_head`**、`entity` 时内核**重新
+    渲染正文**，所以与 legacy 正文**不逐字相同**，必须先在真实库上做 diff（见 `_p0c2_diff.py`）
+    再决定用哪种 mode（或先把渲染器统一）。
+
+    字段映射（逐条对齐 legacy `save_elements`）：
+      slug/title/page_type ← `page['slug'/'title'/'page_type']`
+      wiki_content        ← `page['content']`（**仅 document 模式传**；entity 模式由内核渲染）
+      attributes          ← `page_metadata.ontology.attributes`（无则 `element['attributes']`）
+      relations           ← 参数 `relations` 或 `page['relations']`（须已解析出 `target_slug`）
+      summary/source_refs/chunk_refs/metadata_extra ← 同名键（`metadata_extra` = page_metadata 里
+      除 `ontology` 外的其余键，如 `design`）
+    """
+    import ke_ontology  # noqa: PLC0415
+    page = dict(page or {})
+    element = dict(element or {})
+    page_type = (page.get("page_type") or element.get("type") or "").strip()
+    meta = dict(page.get("page_metadata") or {})
+    ont = dict(meta.get("ontology") or {})
+    attrs = dict(ont.get("attributes") or element.get("attributes") or {})
+    rels = relations if relations is not None else (page.get("relations") or element.get("relations") or [])
+    # 本体**中文标签**：内核页头用 `spec["type_label"]`（`_contract_head`），legacy 也写它
+    # （"目的（`bmm:Goal`）"）。不补这个字段，切内核后页头会从中文标签退化成 prefixed —— 实测这就是
+    # `document+strip-head` 残余差异里的第一条（详见 `_p0c2_diff.py`）。
+    try:
+        type_label = (ke_ontology.class_meta().get(page_type) or {}).get("label") or ""
+    except Exception:  # noqa: BLE001
+        type_label = ""
+    # 页头的**值**沿用 legacy 解析结果（内核要写「生成方式」；「首个版本生成」只在新建页写）
+    _head, _legacy_body = _parse_legacy_head(page.get("content") or "")
+    spec = {
+        "slug": (page.get("slug") or element.get("slug") or "").strip(),
+        "title": (page.get("title") or element.get("name") or "").strip(),
+        "page_type": page_type,
+        "type_label": type_label,
+        "generated_by": (page.get("generated_by") or element.get("generated_by")
+                         or _head.get("生成方式") or ""),
+        "created_at": (page.get("created_at") or _head.get("首个版本生成")
+                       or ont.get("created_at") or ""),
+        "mode": (mode or "").strip().lower() or ke_ontology.render_mode(page_type),
+        "attributes": attrs,
+        "definition_key": page.get("definition_key", "definition"),
+        "summary": (page.get("summary") or element.get("definition") or "")[:500],
+        "relations": [{"type": r.get("type"), "target_slug": r.get("target_slug")}
+                      for r in rels if r.get("type") and r.get("target_slug")],
+        "source_refs": page.get("source_refs"),
+        "chunk_refs": page.get("chunk_refs"),
+        "source": dict(source or {}),
+    }
+    extra = {k: v for k, v in meta.items() if k != "ontology"}
+    if extra:
+        spec["metadata_extra"] = extra
+    if spec["mode"] != "entity":          # document/raw 需要正文（legacy 已渲染好）
+        spec["wiki_content"] = _legacy_body if strip_legacy_head else (page.get("content") or "")
+    return spec
 
 
 def _bulk_write_pages(kb_id: str, items: list, tenant_id, tag: str) -> dict:
@@ -804,6 +947,7 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
     import ke_graph as _kg  # noqa: PLC0415
     specs = [dict(s or {}) for s in (specs or [])]
     pages, errors, prepared = [], [], []
+    items: list = []                     # P0-c-3：批量 PG 写（sink 收集，最后一次性写）
     # ① 批量预读（本批 slug + 关系目标）——一次往返拿全 page_type，供 ③ 的 domain/range 校验
     want = [(s.get("slug") or "").strip() for s in specs]
     want += [(r.get("target_slug") or "").strip()
@@ -828,7 +972,8 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
                 else ((_hit or {}).get("tenant") if _hit else None)}
         try:
             r = write_knowledge(kb_id, spec, dry_run=dry_run, strict_source=strict_source,
-                                sync_folders=False, preloaded=_pre, skip_graph=not dry_run)
+                                sync_folders=False, preloaded=_pre, skip_graph=not dry_run,
+                                sink=None if dry_run else items)
             pages.append(r)
             prepared.append((r, rels))
             slug = str(r.get("slug") or "")
@@ -850,6 +995,15 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
             _kg.upsert_nodes_batch(kb_id, _node_rows)
         except Exception as exc:  # noqa: BLE001
             edge_errors.append({"scope": "upsert_nodes_batch", "error": str(exc)[:160]})
+    # ③-0b PG 页：**一次批量写**（P0-c-3，2026-10-10）—— 旧路径每页一个小事务
+    #      （31 页 ≈ 31 × ~250ms ≈ 8 s，正是 apply 的主成本）；`_bulk_write_pages` = 新建一条
+    #      多行 INSERT + 更新一条事务（快照 INSERT..SELECT + UPDATE..FROM(VALUES)），整批 **2 次 psql**。
+    bulk_write = None
+    if not dry_run and items:
+        try:
+            bulk_write = _bulk_write_pages(kb_id, items, _kb_tenant, TAG_CONTRACT)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"scope": "_bulk_write_pages", "error": str(exc)[:200]})
     if not dry_run:
         # ③-1 一次 UNWIND：把全批节点（本批新建 + 关系目标）批量确保在图里
         if info:
@@ -895,7 +1049,7 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
     return {"applied": not dry_run, "kb_id": kb_id, "pages": pages, "errors": errors,
             "count": len(pages), "edges_written": edges_written, "edge_errors": edge_errors,
             "applied_count": len(pages), "failed": errors,
-            "folders": folders,
+            "folders": folders, "bulk_write": bulk_write,
             "resume_hint": ("同 payload 重跑即可续作（节点按 (kb,slug)、关系按 (kb,源,类型,目标) 幂等；"
                             "已成功的会被判为 merged/已存在，不会重复建）。")}
 

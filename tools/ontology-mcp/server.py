@@ -223,7 +223,7 @@ def _req_cache() -> dict:
     """本请求线程的只读查询 memo（无则自建：CLI/单测直接调这些函数时也能用）。"""
     cache = getattr(_REQ_CACHE, "d", None)
     if cache is None:
-        cache = {"slug_ids": {}, "id_owner": {}, "session_ref": {}, "prior": {}}
+        cache = {"session_ref": {}}       # 只剩会话页引用 memo（页 id/版本预读已随 legacy 删除）
         _REQ_CACHE.d = cache
     return cache
 
@@ -233,139 +233,6 @@ def _reset_request_cache() -> None:
     _REQ_CACHE.d = None
 
 
-def _page_id_of_slug(kb_id: str, slug: str) -> str | None:
-    """本库该 slug 的现有 id（`None` = 本库没有）。请求级 memo —— 同 slug 只问一次。"""
-    cache = _req_cache()["slug_ids"]
-    per_kb = cache.setdefault(kb_id, {})
-    if slug not in per_kb:
-        rows = psql_csv("SELECT id FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s "
-                        "ORDER BY version DESC LIMIT 1" % (sql_str(kb_id), sql_str(slug)))
-        per_kb[slug] = rows[0]["id"] if rows else None
-    return per_kb[slug]
-
-
-def _page_id_owner(cand: str) -> str | None:
-    """该页 id 的属主知识库（`None` = 空闲）。请求级 memo。"""
-    owner = _req_cache()["id_owner"]
-    if cand not in owner:
-        rows = psql_csv("SELECT knowledge_base_id AS kb FROM wiki_pages WHERE id = %s"
-                        % sql_str(cand))
-        owner[cand] = rows[0]["kb"] if rows else None
-    return owner[cand]
-
-
-def _prime_page_ids(kb_id: str, slugs) -> None:
-    """**一次**预读本批 slug 的现有 id + 候选 id 的属主（替代每页 2 次 psql）。
-
-    · ① `slug IN (...)` 一条 SQL（`ORDER BY version DESC` → 每 slug 取最高版本，与旧口径一致：
-      `ORDER BY version DESC LIMIT 1`）；未命中的 slug 记 `None`（= 要走新建派生）。
-    · ② 未命中 slug 的**派生候选 id** 再一条 `id IN (...)` 查属主（空闲记 `None`）。
-    兜底后缀（n>0）不预读 —— 那条路径按设计几乎不可达（见 `_warn_noncanonical_ids`），
-    真走到了仍由 `_page_id_owner()` 单查，只是慢一点，不影响正确性。
-    """
-    want = sorted({str(s).strip() for s in (slugs or []) if str(s).strip()})
-    if not want:
-        return
-    per_kb = _req_cache()["slug_ids"].setdefault(kb_id, {})
-    todo = [s for s in want if s not in per_kb]
-    if not todo:
-        return
-    rows = psql_csv("SELECT slug, id FROM wiki_pages WHERE knowledge_base_id = %s AND slug IN (%s) "
-                    "ORDER BY version DESC"
-                    % (sql_str(kb_id), ", ".join(sql_str(s) for s in todo)))
-    found: dict = {}
-    for row in rows:                        # 先出现的 version 最大
-        found.setdefault(row["slug"], row["id"])
-    for s in todo:
-        per_kb[s] = found.get(s)
-    owner = _req_cache()["id_owner"]
-    cands = [page_id_for(kb_id, s) for s in todo if not per_kb[s]]
-    missing = [c for c in cands if c not in owner]
-    if missing:
-        rows = psql_csv("SELECT id, knowledge_base_id AS kb FROM wiki_pages WHERE id IN (%s)"
-                        % ", ".join(sql_str(c) for c in missing))
-        seen = {row["id"]: row["kb"] for row in rows}
-        for c in missing:
-            owner[c] = seen.get(c)          # 库里有 → 属主 kb；没有 → None（空闲）
-
-
-def _prior_version(kb_id: str, slug: str) -> dict | None:
-    """该 slug 的现有行 `{version, dead}`（本库没有该 slug → `None`）。请求级 memo。
-
-    **与旧实现逐字等价**：旧代码在 `save_elements` 的新建分支里逐页问
-    `SELECT version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages WHERE kb=… AND slug=…`
-    然后取 `prior[0]`（**没有 ORDER / LIMIT**）—— 33 页 = 33 次 psql ≈ 5 s（实测归因
-    `__main__.save_elements=33次`）。批量路径先用 `_prime_prior_versions()` 一次 `slug IN (...)`
-    预读；同一 slug 多行（历史换过 id）时**不猜**，仍由本函数逐 slug 走原查询。
-    """
-    memo = _req_cache()["prior"]
-    if slug in memo:
-        return memo[slug]
-    rows = psql_csv("SELECT version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages "
-                    "WHERE knowledge_base_id = %s AND slug = %s"
-                    % (sql_str(kb_id), sql_str(slug)))
-    memo[slug] = rows[0] if rows else None
-    return memo[slug]
-
-
-def _prime_prior_versions(kb_id: str, slugs) -> None:
-    """**一次**预读这些 slug 的 `{version, dead}`（替代每页 1 次 psql）。
-
-    · slug 不在结果里 → 本库没有该 slug，与旧查询的空结果**完全等价**（该查询**不过滤**
-      `deleted_at`，所以"批量里没有"就是"确实没有"）；
-    · 只出现 1 行 → 与旧 `prior[0]` **完全等价**；
-    · 出现多行（同 slug 历史上被换过 id）→ **不写 memo**，留给 `_prior_version()` 单查原样返回，
-      逐字保留旧行为（含旧查询本身的不确定性）。
-    """
-    want = sorted({str(s).strip() for s in (slugs or []) if str(s).strip()})
-    if not want:
-        return
-    memo = _req_cache()["prior"]
-    todo = [s for s in want if s not in memo]
-    if not todo:
-        return
-    rows = psql_csv("SELECT slug, version, (deleted_at IS NOT NULL) AS dead FROM wiki_pages "
-                    "WHERE knowledge_base_id = %s AND slug IN (%s)"
-                    % (sql_str(kb_id), ", ".join(sql_str(s) for s in todo)))
-    grouped: dict = {}
-    for row in rows:
-        grouped.setdefault(row["slug"], []).append(row)
-    for s in todo:
-        got = grouped.get(s) or []
-        if not got:
-            memo[s] = None                  # 本库没有该 slug
-        elif len(got) == 1:
-            # 只留旧查询的两个列：批量 SQL 多取了一个 `slug` 列，**不要**把它带进 memo
-            # —— 否则下游看到的行"多一个键"（形状不再等价；`_equiv_p30f.py` 就是这么抓到的）。
-            memo[s] = {"version": got[0]["version"], "dead": got[0]["dead"]}
-
-
-def _resolve_page_id(kb_id: str, slug: str) -> tuple[str, str]:
-    """给 `(kb_id, slug)` 定一个**本库内唯一**的页 id，并说明用的哪种方式。
-
-    ① 本库已有同 slug 的页 → **沿用它的现有 id**（继续更新它，不产生重复页；老数据零迁移）；
-    ② 否则用 `page_id_for(kb_id, slug)`；该 id 若**属于别的知识库**（历史遗留的纯 slug 派生），
-       加后缀再派生，直到拿到"空闲 / 属本库"的 id。
-
-    返回 `(id, how)`，`how` ∈ `existing` / `new` / `suffixed`。
-
-    P3-0f：两个查询都走**请求级 memo**（`_page_id_of_slug` / `_page_id_owner`）；批量路径先用
-    `_prime_page_ids(kb_id, slugs)` 一次预读 → 每批固定 2 次 psql（旧实现 33 页 = 66 次）。
-    未预读时行为与旧实现**逐字一致**（只是同 slug/同候选不重复问）。
-    """
-    known = _page_id_of_slug(kb_id, slug)
-    if known:
-        return known, "existing"
-    base = page_id_for(kb_id, slug)
-    for n in range(0, 50):
-        cand = base if n == 0 else str(uuid.uuid5(
-            uuid.NAMESPACE_URL, "bodhi-element:%s|%s|%d" % (kb_id, slug, n)))
-        owner = _page_id_owner(cand)
-        if owner is None:
-            return cand, ("new" if n == 0 else "suffixed")
-        if owner == kb_id:
-            return cand, "new"
-    raise RuntimeError("给（kb=%s, slug=%s）找不到可用页 id（已试 50 个后缀）" % (kb_id, slug))
 
 
 def _warn_noncanonical_ids(strategies: list, subject: str = "") -> list[dict]:
@@ -1327,88 +1194,6 @@ def union_list(old, new) -> list:
     return list(dict.fromkeys(list(old or []) + list(new or [])))
 
 
-def sql_update_page(page: dict, content: str, summary: str, source_refs: list,
-                    chunk_refs: list, metadata: dict) -> str:
-    """合并 = 更新：先快照旧版本到 revisions（version 用旧值），再 version+1。
-
-    2026-10-05 M3：关系只走 Neo4j 图，`out_links`/`in_links` 两列恒空，不再从正文解析出边。
-    """
-    return ("INSERT INTO wiki_page_revisions (id, tenant_id, knowledge_base_id, page_id, slug, version, "
-            "       title, page_type, status, content, summary, aliases, edit_source, editor_id, "
-            "       edited_at, created_at)\n"
-            "SELECT gen_random_uuid()::text, tenant_id, knowledge_base_id, id, slug, version, "
-            "       title, page_type, status, content, summary, aliases, '%s', "
-            "       COALESCE(last_editor_id,''), now(), now()\n"
-            "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;\n"
-            "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, summary = %s, "
-            "       source_refs = %s, chunk_refs = %s, "
-            "       page_metadata = %s, version = version + 1, updated_at = now(), "
-            "       last_edit_source = '%s' "
-            " WHERE knowledge_base_id = %s AND slug = %s;\n"
-            % (TOOL_TAG, sql_str(page["knowledge_base_id"]), sql_str(page["slug"]),
-               sql_str(content), sql_str(summary),
-               sql_json(source_refs), sql_json(chunk_refs),
-               sql_json(metadata), TOOL_TAG, sql_str(page["knowledge_base_id"]),
-               sql_str(page["slug"])))
-
-
-def sql_insert_page(page: dict, kb_id: str, tenant_id: int,
-                    strategies: list | None = None) -> str:
-    """插入新页；id 由 `(kb_id, slug)` 决定（见 `_resolve_page_id`），本库已有同 slug 页时沿用其 id。
-
-    历史背景
-    --------
-    2026-09-19 实测崩溃：page id 由 slug 派生（UUIDv5），而上游的重复检查只看内存里
-    加载到的活页（deleted_at IS NULL）。用户删文档后旧页是**软删除**、id 仍占着，
-    于是重复抽取会 INSERT 撞主键（wiki_pages_pkey）→ 整批事务回滚 → 工具报错。
-    用 ON CONFLICT(id) DO UPDATE 一次解决：复活、覆盖内容、版本+1、标记来源。
-
-    2026-09-24 实测（用户报「保存成功但知识全在别的知识库」）：id 只按 slug 派生 → 跨库撞主键，
-    upsert 把**别的库那一行**更新了。现在 ① id 包含 kb ② upsert 加**同库守卫**
-    （`WHERE wiki_pages.knowledge_base_id = EXCLUDED.knowledge_base_id`）——
-    任何情况下都不会再更新别的知识库的行。
-
-    `strategies`：可选出参列表，逐页记录 `{"slug","id","how"}`（how = existing/new/suffixed）。
-    正常只有 existing/new；一旦出现 suffixed 说明走到了兜底分支（见 `_resolve_page_id`），
-    回执里能看到、不用去翻库。巡检 D5 也盯这一项。
-    """
-    pid, how = _resolve_page_id(kb_id, page["slug"])
-    if strategies is not None:
-        strategies.append({"slug": page["slug"], "id": pid, "how": how})
-    values = [
-        sql_str(pid), str(tenant_id), sql_str(kb_id),
-        sql_str(page["slug"]), sql_str(page["title"]), sql_str(page["page_type"]),
-        sql_str("published"), sql_str(page["content"]), sql_str(page["summary"]),
-        sql_str(""), sql_str(""), sql_json(page["category_path"]), sql_str(page["wiki_path"]),
-        str(len(page["category_path"])), "0", sql_json(page.get("source_refs") or []),
-        sql_json(page.get("chunk_refs") or []), sql_json([]), sql_json(page.get("out_links") or []),
-        sql_json(page["page_metadata"]), sql_json(page.get("aliases") or []), "1",
-        sql_str(TOOL_TAG), sql_str(""),
-    ]
-    conflict = (
-        "ON CONFLICT (id) DO UPDATE SET "
-        # 2026-09-21：护栏从「活页一律跳过」改为「**活页只更新内容字段**」——
-        #   跳过会让写入静默失效（用户实测 4 次：报告页 slug 相同 → 撞主键 → 回执成功但正文不变）。
-        #   保留原意：**同 id 命中活页时不得改它的 title / page_type / status**（事故：设计节点把报告页
-        #   覆盖成「注册信息登记服务 / bmm-ea-ext:APIService」），只有类型相同时才跟着改标题。
-        "content = EXCLUDED.content, summary = EXCLUDED.summary, "
-        "out_links = EXCLUDED.out_links, "
-        "category_path = EXCLUDED.category_path, wiki_path = EXCLUDED.wiki_path, "
-        "page_metadata = EXCLUDED.page_metadata, aliases = EXCLUDED.aliases, "
-        "source_refs = EXCLUDED.source_refs, chunk_refs = EXCLUDED.chunk_refs, "
-        "title = CASE WHEN wiki_pages.deleted_at IS NOT NULL "
-        "                  OR wiki_pages.page_type = EXCLUDED.page_type "
-        "             THEN EXCLUDED.title ELSE wiki_pages.title END, "
-        "page_type = CASE WHEN wiki_pages.deleted_at IS NOT NULL "
-        "                 THEN EXCLUDED.page_type ELSE wiki_pages.page_type END, "
-        "status = wiki_pages.status, "
-        "deleted_at = NULL, version = wiki_pages.version + 1, "
-        "last_edit_source = %s, updated_at = now() "
-        # 同库守卫（2026-09-24）：撞主键时若那一行属于**别的知识库**，DO UPDATE 不生效
-        # （宁可写不进去也不能改写别库；正常情况下 `_resolve_page_id` 已保证 id 属本库）
-        "WHERE wiki_pages.knowledge_base_id = EXCLUDED.knowledge_base_id" % sql_str(TOOL_TAG))
-    return ("INSERT INTO wiki_pages (%s) VALUES (%s) %s;"
-            % (", ".join(PAGE_COLUMNS), ", ".join(values), conflict))
 
 
 def build_pending_page(model: dict, element: dict, candidate: dict, similarity: float,
@@ -1480,8 +1265,35 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     """
     tenant = tenant_id if tenant_id is not None else get_kb_tenant(kb_id)
     pages = fetch_existing_pages(kb_id)
+    # P0-c-2（2026-10-10 用户口径）：**先取消相似度合并** —— 落库一律按 `(kb, slug)` 幂等 upsert
+    # （同 slug 覆盖、否则新建），不再做"全文相似度比较 → 合并 / 生成待确认页"。
+    # 理由（用户原话）：相似度是"**全文比较**"的事，不是 slug 问题，不该压在落库热路径上 ——
+    # 相似度治理交给运维/巡检（`audit_*`）。`BODHI_SIMILARITY_MERGE=1` 可临时恢复旧行为。
+    merge_on = str(ke_db.env_value("BODHI_SIMILARITY_MERGE", "0")).lower() in ("1", "true", "yes")
+    # P0-c-2（2026-10-10）：**库里既有页的快照 —— 必须在此刻做**。
+    # 下面的循环会把"本次构建的页"逐个 `pages.append(...)` 进去（65 = 32 库里行 + 33 新构建），
+    # 之后再按 slug 建映射会**取到新页**而非库里那一行 → 拿不到原有的「首个版本生成」等原值
+    # （实测：那正是 kernel 与 legacy 页头差异的最后一行）。
+    _exist_before = {p.get("slug"): p for p in pages if p.get("slug")}
     # 跨库引用护栏（2026-09-22）：关系目标只允许指本库的页（本库已有 + 本次要建的）。
     # 旧实现会因 `_graph_target_slug` 全库查而把**别的知识库**的 slug 写进本库页 → 回执成功但本库没记录。
+    # P0-c-2（2026-10-10 用户口径 · 方案 a）：**文档类节点在 graph 阶段必须带正文**。
+    # 本体 `render_mode(page_type)=="document"` 的类（设计单/建议/评测/安装指引/报告…）本该整篇正文
+    # 入库；graph 阶段若只给 definition/attributes（没带 `wiki_content`），旧行为会把它按 entity 渲染成
+    # 一页**错正文**（实测：设计单 v1 = 416 字 entity 版，随后被 report 分支的 4896 字 document 版覆盖
+    # → 白占一个版本、巡检还会看到"两个版本两种形态"）。现在**跳过不落** + 回执回报 + 关系按
+    # "目标页不存在"丢弃并给出准确原因，提示改用 `stage="report"`。
+    _doc_skipped: dict = {}
+    for _p in list(payloads):
+        _t = str(_p.get("type") or "")
+        try:
+            _is_doc = bool(_t) and ke_ontology.render_mode(_t) == "document"
+        except Exception:  # noqa: BLE001
+            _is_doc = False
+        if _is_doc and not str(_p.get("wiki_content") or "").strip():
+            _doc_skipped[element_page_slug(model, _p)] = {"name": _p.get("name"), "type": _t}
+    if _doc_skipped:
+        payloads = [p for p in payloads if element_page_slug(model, p) not in _doc_skipped]
     known_slugs = {p["slug"] for p in pages} | {p.get("slug") for p in payloads if p.get("slug")}
     dropped_relations: list = []
     # 副本写保护（2026-09-29 用户口径）：目标页若是**权威副本** → 拒写，回执给"从权威复制"的指引
@@ -1501,16 +1313,17 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         for rel in payload.get("relations") or []:
             ts = str(rel.get("target_slug") or "").strip()
             if ts and ts not in known_slugs:
+                _why = ("目标页是**文档类**且本次未提供 `wiki_content`（请用 `stage=\"report\"` 落整篇正文）：%s"
+                        % ts if ts in _doc_skipped else
+                        "目标 slug 不属于本知识库（跨库引用已丢弃；请在本库先建该节点）")
                 dropped_relations.append({
                     "source": payload.get("name"), "relation": rel.get("type"),
-                    "target": rel.get("target"), "target_slug": ts,
-                    "reason": "目标 slug 不属于本知识库（跨库引用已丢弃；请在本库先建该节点）"})
+                    "target": rel.get("target"), "target_slug": ts, "reason": _why})
                 continue
             kept.append(rel)
         payload["relations"] = kept
-    statements: list[str] = []
-    # id 策略留痕（2026-09-24 加固）：逐页记 existing/new/suffixed，最后进回执 `id_strategy`。
-    # 正常情况下只有 existing/new；出现 suffixed 立即在日志里告警（兜底分支按设计几乎不可达）。
+    # id 策略留痕（2026-09-24 加固）：写库后由内核回执回填 existing/new（见下方 `_kres`），
+    # 出现 suffixed 会告警（兜底分支按设计几乎不可达）。
     id_strategies: list[dict] = []
     summary = {
         "model": model["key"], "kb_id": kb_id, "knowledge_id": knowledge_id,
@@ -1524,6 +1337,16 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     }
     if extra:
         summary.update(extra)
+    summary["merge"] = ({"enabled": False, "note": (
+        "相似度合并已停用（BODHI_SIMILARITY_MERGE=0）：一律按 (kb, slug) 幂等 upsert —— "
+        "同 slug 覆盖、否则新建；相似度是全文比较的事，治理走运维/巡检（audit_*）。")}
+        if not merge_on else {"enabled": True})
+    if _doc_skipped:
+        summary["skipped_document_nodes"] = [
+            {"slug": k, "name": v["name"], "type": v["type"]} for k, v in sorted(_doc_skipped.items())]
+        summary["skipped_document_note"] = (
+            "以下节点是**文档类**（本体 `render_mode=document`）：graph 阶段必须带 `wiki_content`（整篇正文）"
+            "才能入库；本批未带 → **未建页/未改页**。请改用 `stage=\"report\"` 落整篇正文（同一 slug 幂等覆盖）。")
     # 写库自证（2026-09-21 用户实测：`mode` 忘了传 → 默认 dry_run 只算不写，回执里只有一行
     # `dry_run: true`，极易被当成"已落库"，于是反复出现"回执成功但 wiki 没变"）：
     # 顶层给 `applied`（是否真写库）与 `write_note`，并附上被更新页的 version 变化。
@@ -1535,26 +1358,31 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
 
     retagged: list = []
     retag_queue: list = []
-    # P3-0f（2026-10-10）：**一次预读**本批 slug 的现有 id（+ 候选 id 属主）。
-    # 旧实现每页 2 次 psql（内网归因 `_resolve_page_id=66 次` / 33 页 ≈ 9.7 s）；
-    # 预读后每批固定 2 次（`IN (...)` 两条），后续 `sql_insert_page` 全部命中 memo。
-    _batch_slugs = [element_page_slug(model, p) for p in payloads]
-    _prime_page_ids(kb_id, _batch_slugs)
-    # 同一批 slug 的"现有版本 / 是否软删"也一次预读 —— 新建分支每页要一次
-    # （旧实现 33 次 psql ≈ 5 s，归因 `__main__.save_elements=33次`）。
-    _prime_prior_versions(kb_id, _batch_slugs)
+    # 2026-10-10（用户口径）：**落库只走契约内核**（`BODHI_SAVE_ENGINE` 开关与 legacy 单事务写已删）。
+    # `ke_pages.write_knowledge_batch` 统一契约 §8 写序（图节点 → 页 → 边）、批量写 PG（P0-c-3：
+    # `_bulk_write_pages` 一次多行 INSERT + 一次快照/UPDATE）、失败只丢当前那条。
+    # · 内核 spec 用 **`mode="document"` + `strip_legacy_head=True`**：实测与改造前的正文**逐字相同**；
+    # · **不自带 relations**：边由调用方（`save_knowledge` 的 apply 段）整批 UNWIND 建；
+    # · 页 id / 存在性 / 版本由内核自己批量预读（一次 `page_info_map` 免掉逐页查询）。
+    built: list = []          # 收集"已构建好"的页（element + page + action），最后交内核批量写
     for element in payloads:
-        # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），直接走合并；
-        # 否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
-        exact = next((p for p in pages if p["slug"] == element_page_slug(model, element)), None)
+        exact = None
+        if merge_on:
+            # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），直接走合并；
+            # 否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
+            exact = next((p for p in pages if p["slug"] == element_page_slug(model, element)), None)
         if exact is not None:
             sim, candidate = 1.0, exact
-        else:
+        elif merge_on:
             # 同类型守卫（设计路径开启）：只在同一本体类族（相等、同一继承链，或**同根**）的页之间做
             # 相似度合并，避免「设计节点并进报告页/需求页」这类跨类误合并（2026-09-21 沙箱实测事故）。
             pool = ([p for p in pages if same_type_family(element["type"], p.get("page_type"))]
                     if same_type_only else pages)
             sim, candidate = pick_match(element, pool)
+        else:
+            # 合并已停用（P0-c-2）→ 一律走「同 slug 幂等覆盖 / 新建」分支（`candidate is None`），
+            # 顺带**跳过 `pick_match` 的全文比较**（CPU）与 `pending` 待确认页。
+            sim, candidate = 0.0, None
         if candidate is not None and sim >= high:
             content, post = merge_content(candidate["content"], element, element["chunk_id"],
                                           element["chunk_index"], doc_meta)
@@ -1574,8 +1402,13 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                 des["upstream"] = sorted(set(list(des.get("upstream") or []) + upstream))
                 des.setdefault("generator", TOOL_TAG)
             new_summary = (element.get("definition") or candidate.get("summary") or "")[:500]
-            statements.append(sql_update_page(candidate, content, new_summary,
-                                              source_refs, chunk_refs, metadata))
+            built.append({"element": element, "action": "merged",
+                          "page": {**candidate, "content": content, "summary": new_summary,
+                                   "source_refs": source_refs, "chunk_refs": chunk_refs,
+                                   "page_metadata": metadata,
+                                   "slug": candidate.get("slug"),
+                                   "title": candidate.get("title") or element.get("name"),
+                                   "page_type": candidate.get("page_type") or element["type"]}})
             summary["merged"].append({"name": element["name"], "type": element["type"],
                                       "into": candidate["slug"], "similarity": sim, **post})
             summary["page_versions"].append({"slug": candidate["slug"],
@@ -1598,34 +1431,37 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
             page = build_new_page(engine or load_engine(), model=model, element=element,
                                   chunk_id=element["chunk_id"], chunk_index=element["chunk_index"],
                                   doc_meta=doc_meta)
-            if any(p["slug"] == page["slug"] for p in pages):
+            # 同 slug 已存在 → 加哈希后缀另建，**只在"相似度合并开着"时**才需要：
+            # 那时同 slug 的要素走合并分支，走到这里说明是要区分两个不同要素。
+            # **合并停用（P0-c-2）后绝不能加后缀** —— slug 就是唯一的键，同 slug = 同一页，
+            # 应当幂等覆盖（`_resolve_page_id`→existing、`sql_insert_page` 的 ON CONFLICT 守卫）。
+            # （实测回归：合并停用后若仍加后缀，会去查一个不存在的"带后缀 slug"→ 误判 created →
+            #  apply 时建出一批重复页。dry_run 复测抓到的。）
+            if merge_on and any(p["slug"] == page["slug"] for p in pages):
                 page["slug"] = "%s-%s" % (page["slug"],
                                           hashlib.sha1(element["type"].encode()).hexdigest()[:6])
                 page["wiki_path"] = page["slug"]
             # 回执如实（2026-09-21 用户实测：`fetch_existing_pages` 排除 summary/index 页，报告页会走
             # 到这里；若不说清是「覆盖既有活页」，就会出现"回执说 created，用户看到的是旧正文"的错觉）。
-            # P3-0f（2026-10-10）：**批量预读 + memo**（旧实现每页 1 次 psql：实测 33 次 ≈ 5 s）。
-            prior = _prior_version(kb_id, page["slug"])
-            if prior:
-                if str(prior.get("dead", "f")).lower().startswith("t"):
-                    action, before_v = "revived（复活软删旧行并覆盖）", int(prior["version"] or 1)
-                else:
-                    action, before_v = "updated（同 slug 既有活页：正文按本次载荷覆盖，title/type 不动）", \
-                                       int(prior["version"] or 1)
+            # 2026-10-10：判「新建 / 覆盖」用**循环前的库里快照**（`_exist_before`，来自
+            # `fetch_existing_pages` 那次预读）—— 不再逐页查 PG（旧实现每页 1 次 psql ≈ 5 s/33 页）。
+            _old_row = _exist_before.get(page["slug"]) or {}
+            if _old_row:
+                action = "updated（同 slug 既有活页：正文按本次载荷覆盖，title/type 不动）"
+                before_v = int(_old_row.get("version") or 1)
             else:
+                # 注：库里只剩"软删旧行"时这里也判 created（内核 upsert 会复活它）；
+                # 旧实现那一次单查 PG 能细分 `revived` —— 为省掉逐页查询，回执不再细分这一种。
                 action, before_v = "created", 0
             if action == "created":
-                statements.append(sql_insert_page(page, kb_id, tenant, strategies=id_strategies))
+                built.append({"element": element, "page": page, "action": action})
                 summary["created"].append({"name": element["name"], "type": element["type"],
                                            "slug": page["slug"]})
             else:
                 # 既有活页（典型：`summary` 报告页被 fetch_existing_pages 排除在合并候选之外）：
                 # 用**本次渲染的整页**覆盖内容 —— 报告页是"生成物"，整体替换可避免旧正文里的过期小节、
                 # 旧措辞（如"（来源：《…》）"）残留；title / page_type / created_at 一律不动。
-                statements.append(sql_update_page({**page, "knowledge_base_id": kb_id},
-                                                  page["content"], page["summary"],
-                                                  page["source_refs"], page["chunk_refs"],
-                                                  page["page_metadata"]))
+                built.append({"element": element, "page": page, "action": action})
                 summary["merged"].append({"name": element["name"], "type": element["type"],
                                           "into": page["slug"], "similarity": 1.0, "note": action})
             summary["page_versions"].append({"slug": page["slug"], "before": before_v,
@@ -1637,7 +1473,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         else:
             page = build_pending_page(model, element, candidate, sim, element["chunk_id"],
                                       element["chunk_index"], doc_meta, high, low)
-            statements.append(sql_insert_page(page, kb_id, tenant, strategies=id_strategies))
+            built.append({"element": element, "page": page, "action": "pending"})
             summary["pending"].append({"name": element["name"], "type": element["type"],
                                        "pending_slug": page["slug"],
                                        "candidate": candidate["slug"], "similarity": sim})
@@ -1646,9 +1482,65 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                           "summary": page["summary"], "aliases": page["aliases"],
                           "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
 
-    if not dry_run and statements:
-        psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
-        # P3-0f：页已变 → 本请求的"slug→id / 属主 / 会话页引用"memo 一律作废
+    summary["engine"] = "kernel"
+    if not dry_run and built:
+        if built:      # 单一写路径（legacy 单事务写已删，2026-10-10）
+            # P0-c-2：**走契约内核**（逐页小事务 + 按 (kb,slug) 幂等 upsert；图节点先入图 = §8 写序）。
+            # 正文用 legacy 构建结果**原样托运**（`mode=document` + 剥 legacy 头，实测逐字一致）；
+            # 关系不带上（由 `save_knowledge` 的 apply 段整批 UNWIND 建，比按页快）。
+            import ke_pages as _kp  # noqa: PLC0415
+            _id = _IDENT.ident or {}
+            # 库里既有页用**循环前的快照**（`pages` 已混入本次新建的页，见 `_exist_before` 注释）
+            if str(ke_db.env_value("BODHI_DEBUG_ENGINE", "0")) not in ("0", "", "false", "no"):
+                print("[dbg-engine] exist_before=%d built=%d 样例=%s"
+                      % (len(_exist_before), len(built),
+                         [(b["page"].get("slug"), bool(_exist_before.get(b["page"].get("slug"))))
+                          for b in built[:2]]))
+            _specs = []
+            _sno = str(_id.get("session_no") or "")
+            _part = _session_part_no(kb_id, _sno) if _sno else ""
+            _loc = (("session/%s/p%s" % (_sno, _part)) if (_sno and _part)
+                    else (("session/%s" % _sno) if _sno else ""))
+            for _b in built:
+                _pg = _b["page"]
+                _old = _exist_before.get(_pg.get("slug")) or {}
+                # 「首个版本生成」的**权威值在既有页正文的页头里**（legacy 只把它渲染进正文，
+                # 没写进 page_metadata —— 实测取 metadata 取不到、时间戳会被重置成当前时间）。
+                # 兜底再看 metadata（内核写过的页会有 `ontology.created_at`）。
+                _old_created = (_kp._parse_legacy_head(_old.get("content") or "")[0].get("首个版本生成")
+                                or ((_old.get("page_metadata") or {}).get("ontology") or {})
+                                .get("created_at"))
+                # 不传 `session_slug`：页头的「来源会话」行由内核按 source 渲染，而 legacy 页头从来没有
+                # 这一行 → 传了就会改正文（实测 +50 字符）。会话溯源仍由本路径既有的会话边逻辑负责。
+                # **但 `locator` 要传**：它是 L2 数据属性 `bmm:sourceLocator`（含分页序 `/pN`），
+                # 与内核自己的口径一致（实测库里就是 `session/<no>/p2`）。
+                _s = _kp.spec_from_page(
+                    _pg, _b["element"], mode="document", strip_legacy_head=True, relations=[],
+                    source={"doc_refs": _pg.get("source_refs") or [],
+                            "chunk_refs": _pg.get("chunk_refs") or [],
+                            "locator": _loc})
+                if _old_created:
+                    # 更新既有页 → **沿用库里记录的"首个版本生成"**（口径：只在新建页写；否则每次
+                    # 写库这一行都会变成当前时间，实测 diff 就差在这一行）。
+                    _s["created_at"] = _old_created
+                if _loc:
+                    _attrs = dict(_s.get("attributes") or {})
+                    _attrs["bmm:sourceLocator"] = _loc
+                    _s["attributes"] = _attrs
+                _specs.append(_s)
+            _kres = _kp.write_knowledge_batch(kb_id, _specs, dry_run=False, strict_source=False,
+                                              sync_folders=False)
+            summary["kernel"] = {"planned": len(_specs), "applied": _kres.get("applied_count"),
+                                 "failed": _kres.get("failed"),
+                                 "bulk_write": _kres.get("bulk_write"),
+                                 "resume_hint": _kres.get("resume_hint")}
+            if _kres.get("failed"):
+                summary["applied"] = False
+            # id 策略回执：由**内核回执**回填（替代旧的逐页 `_resolve_page_id` 留痕）
+            for _pr in (_kres.get("pages") or []):
+                id_strategies.append({"slug": _pr.get("slug"), "id": "",
+                                      "how": ("new" if _pr.get("created") else "existing")})
+        # P3-0f：页已变 → 本请求的"会话页引用"memo 一律作废
         # （否则后续阶段——`link_source_session`、`sourceLocator`——会读到写之前的空结果）。
         _reset_request_cache()
         # 写后对账（2026-09-24）：回执里的每个 slug 必须**在本库**查得到 ——
@@ -2636,7 +2528,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             _all = list(dict.fromkeys(_all))
             # P3-0f2（2026-10-10）：**批量写图 + 批量 strip**。
             # 旧实现：每条边 `add_edge`（4 次 PG + 5 次 Neo4j，实测 `_page_type`=2×边数、
-            # `_ensure_instance`=2×边数）+ 每页 `strip_wiki_page`（2 次 PG）→ 27 边/33 页 =
+            # `_ensure_instance`=2×边数）+ 每页逐条 strip（读正文 + UPDATE 各 1 次 psql）→ 27 边/33 页 =
             # **190 次 psql / 25-31 s**，超过客户端 ~30 s 超时 → 前端重发同一批 → **重复版本**。
             # 现在：① 一次 `page_info_map` 预读页信息（免掉每条边 2 次 `_page_type`）；
             # ② 一次 `ensure_instances` UNWIND 确保节点（免掉每条边 2 次 `_ensure_instance`）；
@@ -3857,7 +3749,9 @@ def tool_definitions() -> list[dict]:
             "description": ("**巡检清理·一步硬删（写）**：只要调用者对该知识库**有写权限**就执行，不需要后台 plan/confirm。"
                             "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理）；"
                             "② 不给 → 按 `kinds`（all=清理异常+修问题；也可 no_source_pages/deleted_source_pages/"
-                            "mixed_source_refs/soft_deleted_rows/orphan_revisions 等）生成计划并立即执行。"
+                            "mixed_source_refs/soft_deleted_rows/orphan_revisions/**orphan_graph_nodes** 等）生成计划并立即执行。"
+                            "`orphan_graph_nodes` = **图库对账**（全库）：删掉「对应知识库已删除/软删」的孤儿实例节点"
+                            "（WeKnora 删库只删 PG、不删图）；已含在 `kinds=all` 里。"
                             "`dry_run=true` 只看影响面。**删除不可逆**，删前先 `audit_scan` 把 target 念给用户确认。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
@@ -4625,7 +4519,8 @@ def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = N
                 "catalog", "id", "name", "error", "how_to_use", "source", "note",
                 "images_found", "images", "by_document",
                 # P0/P0-b：落库性能与写图结果（便于内网自证"边有没有真的写进图"）
-                "graph_edges", "edge_errors", "folders_synced", "maintenance", "resume_hint")
+                "graph_edges", "edge_errors", "folders_synced", "maintenance", "resume_hint",
+                "merge", "engine", "kernel")
         picked = {}
         for key in keys:
             if key in summary:

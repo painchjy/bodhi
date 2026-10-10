@@ -105,13 +105,6 @@ def _attrs_of(page_meta_json: str) -> dict[str, str]:
     return out
 
 
-def _edges_of(content: str, known_slugs: set[str]) -> list[tuple[str, str]]:
-    """页正文 `## 本体关系` 行 → [(关系类型, 目标 slug)]；只留目标在库内的边。"""
-    out: list[tuple[str, str]] = []
-    for r in ke_pages.parse_out_relations(content):
-        if r.get("type") and r.get("slug") and r["slug"] in known_slugs:
-            out.append((r["type"], r["slug"]))
-    return out
 
 
 def _run(statement: str, params: dict) -> list[dict]:
@@ -259,6 +252,54 @@ def _page_type(kb_id: str, slug: str) -> str:
     return (row[0].get("pt") or "") if row else ""
 
 
+def _validate_from_graph() -> bool:
+    """是否把**纯校验类**只读查询改走图（P0-c-2，2026-10-10；`BODHI_VALIDATE_FROM_GRAPH=0` 回退）。
+
+    为什么：关系 domain/range 校验只需要**类型**，而图节点自 2026-10-05 起就带 `page_type`
+    （`upsert_node` / `ensure_instances` 都写）。实测 1 次 psql ≈ 150-250 ms、
+    1 次 Neo4j ≈ 5-15 ms ⇒ 校验读改走图后「每条边 2 次 PG」变成「每条边 2 次 Neo4j」，
+    便宜一个量级；图里查不到时**仍回落 PG**（那种页是"在 PG 但还没投影进图"，如别的工具刚建的页）。
+    """
+    import ke_db  # noqa: PLC0415
+    return str(ke_db.env_value("BODHI_VALIDATE_FROM_GRAPH", "1")).lower() not in ("0", "false", "no")
+
+
+def info_from_graph(kb_id: str, slugs) -> dict:
+    """**一次** Cypher 取多个 slug 的 `{pt,title,tenant}` —— 与 `page_info_map` **同形状**（可互换）。
+
+    差别：**不含 `version`**。版本 / 软删是 **PG 的正本**（图节点不存它们，实测 `version` 计数为 0），
+    所以本函数**只服务校验类**用途；要 `version` 的地方（回执 `before_version`、`preloaded`、
+    `_bulk_write_pages` 的 exists 判定）仍旧走 `page_info_map`。
+    图不可用 / 该 slug 图上没有 → 不在结果里（调用方回落 PG）。
+    """
+    want = sorted({str(s).strip() for s in (slugs or []) if str(s).strip()})
+    out: dict = {}
+    if not want:
+        return out
+    try:
+        rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) WHERE n.slug IN $slugs "
+                    "RETURN n.slug AS slug, n.page_type AS pt, n.name AS name, n.tenant_id AS tenant",
+                    {"kb": kb_id, "slugs": want})
+    except Exception:  # noqa: BLE001  图不可用 → 全部回落 PG
+        return out
+    for r in rows or []:
+        slug = str(r.get("slug") or "")
+        pt = str(r.get("pt") or "")
+        if slug and pt:
+            out[slug] = {"pt": pt, "title": str(r.get("name") or ""),
+                         "tenant": r.get("tenant"), "tenant_id": r.get("tenant")}
+    return out
+
+
+def _pt_for_validate(kb_id: str, slug: str) -> str:
+    """校验用的 `page_type`：**图优先**（1 Neo4j），图里没有才问 PG（1 psql、带 `deleted_at` 过滤）。"""
+    if _validate_from_graph():
+        got = info_from_graph(kb_id, [slug])
+        if (got.get(slug) or {}).get("pt"):
+            return got[slug]["pt"]
+    return _page_type(kb_id, slug)
+
+
 def _check_domain(rel_type: str, source_type: str) -> None:
     import ke_ontology  # noqa: PLC0415
     allowed = ke_ontology.relation_type_map(source_type) if source_type else {}
@@ -280,14 +321,18 @@ def _ensure_instance(kb_id: str, slug: str, page_type: str = "") -> None:
 
     2026-10-05 修：**必须带 `name`** —— 前端图谱（`instance_graph`）读 `n.name`，缺失就回落
     到完整 slug（显示成 `bmm/类/知识名`）。旧实现只写 `page_type` → M3 增量建的节点没名字。
-    顺带补 `module`/`tenant_id`，与 `rebuild_kb_graph`/`project_page` 口径一致。
+    顺带补 `module`/`tenant_id`，与 `rebuild_kb_graph` 的节点字段口径一致。
     """
     import ke_db  # noqa: PLC0415
-    row = ke_db.psql_csv(
-        "SELECT COALESCE(title,'') AS title, COALESCE(page_type,'') AS pt, tenant_id "
-        "FROM wiki_pages WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
-        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
-    r = row[0] if row else {}
+    # P0-c-2（2026-10-10）：**图里已有就不问 PG** —— 名字/类型/租户图上都有（`upsert_node` 写全），
+    # 省掉每条边 2 次 psql（实测 1 次 ≈ 150-250 ms，1 次 Neo4j ≈ 5-15 ms）。
+    r = (info_from_graph(kb_id, [slug]).get(slug) or {}) if _validate_from_graph() else {}
+    if not r:
+        row = ke_db.psql_csv(
+            "SELECT COALESCE(title,'') AS title, COALESCE(page_type,'') AS pt, tenant_id "
+            "FROM wiki_pages WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
+            % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+        r = row[0] if row else {}
     pt = page_type or (r.get("pt") or "")
     name = (r.get("title") or "").strip() or (slug or "").rsplit("/", 1)[-1]
     _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) "
@@ -358,8 +403,8 @@ def upsert_node(kb_id: str, slug: str, title: str, page_type: str,
                 attributes: dict | None = None, wiki_content: str | None = None) -> dict:
     """**直写/更新图节点**（2026-10-08 契约 §8「图本优先」）。
 
-    与 `project_page` 的区别：本函数**不读 PG**（供内核先图后 PG 调用）；
-    属性键按「去前缀」存（与 `project_page` 口径一致）。
+    与 `upsert_nodes_batch` 的关系：本函数是**单节点**版（增量路径用），它**不读 PG**
+    （调用方必须给出 title/page_type）；属性键按「去前缀」存。
     """
     pt = (page_type or "").strip() or _page_type(kb_id, slug)
     params = {"kb": kb_id, "slug": slug, "pt": pt, "module": _module_of(pt),
@@ -400,8 +445,9 @@ def add_edge(kb_id: str, slug: str, rel_type: str, target_slug: str, label: str 
         tt = str(((info.get(target_slug) or {}).get("pt")) or "")
         st = str(((info.get(slug) or {}).get("pt")) or "")
     else:
-        tt = _page_type(kb_id, target_slug)
-        st = _page_type(kb_id, slug)
+        # P0-c-2：校验类类型读**图优先**（图里没有才问 PG）
+        tt = _pt_for_validate(kb_id, target_slug)
+        st = _pt_for_validate(kb_id, slug)
     if not tt:
         raise ValueError("目标页不存在：%s" % target_slug)
     _check_domain(rel_type, st)
@@ -445,15 +491,17 @@ def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
             errors.append({"source": src, "type": rel, "target_slug": tgt,
                            "error": "不能把关系指向本页"})
             continue
-        st = str(((info.get(src) or {}).get("pt")) or "") or (None if ctx is not None else _page_type(kb_id, src))
-        tt = str(((info.get(tgt) or {}).get("pt")) or "") or (None if ctx is not None else _page_type(kb_id, tgt))
+        # P0-c-2（2026-10-10）：校验类类型读**图优先** —— 传了 `ctx`（批量路径）就用调用方预读的
+        # `info`；没传则 `_pt_for_validate`（1 Neo4j，图里没有才 1 psql）。旧实现恒为 2 次 psql/边。
+        st = str(((info.get(src) or {}).get("pt")) or "") or (None if ctx is not None else _pt_for_validate(kb_id, src))
+        tt = str(((info.get(tgt) or {}).get("pt")) or "") or (None if ctx is not None else _pt_for_validate(kb_id, tgt))
         try:
             if not tt and ctx is None:
-                tt = _page_type(kb_id, tgt)
+                tt = _pt_for_validate(kb_id, tgt)
             if not tt:
                 raise ValueError("目标页不存在：%s" % tgt)
             if st is None:
-                st = _page_type(kb_id, src)
+                st = _pt_for_validate(kb_id, src)
             _check_domain(rel, st or "")
             _check_range(rel, tt)
         except Exception as exc:  # noqa: BLE001
@@ -662,94 +710,11 @@ def audit_kb(kb_id: str, fix: bool = False) -> dict:
     return out
 
 
-def project_page(kb_id: str, slug: str, edges=None) -> dict:
-    """单页图投影（**先图后 wiki** 的"图"侧，2026-10-05 M3 统一写路径）。
-
-    - MERGE 实例节点 + 数据属性（正文属性行兜底、metadata 优先）；
-    - 删本页旧出边，再按 `edges`（[(关系类型, 目标 slug), …]）MERGE 新边。
-    """
-    import ke_db  # noqa: PLC0415
-    row = ke_db.psql_csv(
-        "SELECT COALESCE(title,'') AS title, COALESCE(page_type,'') AS pt, COALESCE(content,'') AS content, "
-        "COALESCE(page_metadata::text,'{}') AS meta, tenant_id FROM wiki_pages "
-        "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
-        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
-    if not row:
-        return {"ok": False, "slug": slug, "reason": "页不存在"}
-    r = row[0]
-    attrs = _attrs_from_content(r["content"])
-    attrs.update(_attrs_of(r["meta"]))
-    wc = strip_relation_sections(r["content"])     # S-10：全文入图（去关系小节），供图→wiki 重建
-    params = {"kb": kb_id, "slug": slug, "pt": r["pt"], "module": _module_of(r["pt"]),
-              "name": r["title"], "tenant": r.get("tenant_id"), "wc": wc}
-    sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name", "n.tenant_id=$tenant",
-            "n.wiki_content=$wc"]
-    for k, v in attrs.items():
-        if k in ("kb", "slug", "pt", "module", "name", "tenant"):
-            continue
-        sets.append("n.%s=$a_%s" % (k, k))
-        params["a_" + k] = v
-    _run("MERGE (n:BodhiInstance {kb_id:$kb, slug:$slug}) SET %s" % ", ".join(sets), params)
-    _run("MATCH (n:BodhiInstance {kb_id:$kb, slug:$slug})-[r]->() DELETE r", {"kb": kb_id, "slug": slug})
-    n_edges = 0
-    if edges:
-        known = {x["slug"] for x in ke_db.psql_csv(
-            "SELECT slug FROM wiki_pages WHERE knowledge_base_id=%s AND deleted_at IS NULL"
-            % ke_db.sql_str(kb_id))}
-        for rel_type, tgt in edges:
-            if tgt not in known:
-                continue
-            _ensure_instance(kb_id, tgt, _page_type(kb_id, tgt))
-            _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s}) MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
-                 "MERGE (a)-[e:`%s`]->(b)" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": tgt})
-            n_edges += 1
-    return {"ok": True, "slug": slug, "attrs": len(attrs), "edges": n_edges}
-
-
-def project_page_from_content(kb_id: str, slug: str) -> dict:
-    """先图后 wiki（单页）：从该页正文抽关系 → 写图实例+边 → 正文去掉关系小节 + 清出入链。
-
-    只用于**新建页**（INSERT 未 strip 的路径）；合并/更新页已由 `_apply_content_update` 投影。
-    """
-    import ke_db, ke_pages  # noqa: PLC0415
-    row = ke_db.psql_csv(
-        "SELECT COALESCE(content,'') AS content FROM wiki_pages "
-        "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
-        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
-    if not row:
-        return {"ok": False, "slug": slug, "reason": "页不存在"}
-    content = row[0]["content"]
-    edges = [(r["type"], r["slug"]) for r in ke_pages.parse_out_relations(content) if r.get("slug")]
-    projected = project_page(kb_id, slug, edges=edges)
-    stripped = strip_relation_sections(content)
-    ke_db.psql(
-        "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
-        "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s;"
-        % (ke_db.sql_str(stripped), ke_db.sql_str(kb_id), ke_db.sql_str(slug)), stdin=True)
-    return {"ok": True, "slug": slug, "edges": len(edges), "projected": projected.get("ok")}
-
-
-def strip_wiki_page(kb_id: str, slug: str) -> dict:
-    """只 strip 该页正文（去关系小节 + 清出入链），**不动图边**（图边已由 add_edge 直写）。"""
-    import ke_db  # noqa: PLC0415
-    row = ke_db.psql_csv(
-        "SELECT COALESCE(content,'') AS content FROM wiki_pages "
-        "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
-        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
-    if not row:
-        return {"ok": False, "slug": slug, "reason": "页不存在"}
-    stripped = strip_relation_sections(row[0]["content"])
-    ke_db.psql(
-        "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
-        "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s;"
-        % (ke_db.sql_str(stripped), ke_db.sql_str(kb_id), ke_db.sql_str(slug)), stdin=True)
-    return {"ok": True, "slug": slug}
-
 
 def strip_wiki_pages(kb_id: str, slugs) -> dict:
     """**批量 strip 正文**（P3-0f2，2026-10-10）：整批**一次读 + 一条 `UPDATE..FROM (VALUES)`**。
 
-    与逐页 `strip_wiki_page` **语义一致**（同 `strip_relation_sections`、同样清
+    与**旧逐页版语义一致**（同 `strip_relation_sections`、同样清
     `out_links`/`in_links`、同样只动 `content`/`updated_at`），但把"每页 2 次 psql"压成
     "整批 2 次"——实测 33 页 **66 次 → 2 次**（1 次 psql ≈ 150-250 ms，这就是 apply 里
     那一大块成本；`add_edge` 同批还被重写成 `add_edges_batch`）。
@@ -784,7 +749,52 @@ def instance_count(kb_id: str) -> int:
     return int((rows[0].get("n") if rows else 0) or 0)
 
 
-def delete_kb_graph(kb_id: str) -> int:
-    rows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) WITH n, count(*) AS c DETACH DELETE n "
-                "RETURN count(*) AS n", {"kb": kb_id})
-    return int((rows[0].get("n") if rows else 0) or 0)
+def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = True) -> dict:
+    """**清理"没有对应知识库"的图节点**（用户 2026-10-10 口径）。
+
+    背景：知识库在 WeKnora 侧删除时**只删 PG 记录**，图上的 `BodhiInstance` 留着 →
+    库没了、图还在（前端图谱/巡检都会看到幽灵节点）。`ke_audit._hard_delete_graph()` 本是
+    KB 级清理，但它查的是 **`n.kb`**（旧属性名）—— 现网节点用的是 **`n.kb_id`** ⇒ 一直没匹配上，
+    所以删库后图里仍有残留；巡检里那几条**裸 DELETE** 也只删 PG、不删图。
+
+    本函数**以 PG 的 `knowledge_bases` 为准**做全集对账：图上出现、PG 里没有的 kb_id →
+    该库节点（连同其边）整批 `DETACH DELETE`；另清 **没有 kb_id 的历史脏节点**。
+    `dry_run=True` 只报清单（不改图），便于先看影响面。
+    `include_soft_deleted=True`（默认）把 **`knowledge_bases.deleted_at IS NOT NULL`（软删库）**
+    也当孤儿 —— WeKnora 删库是**软删**，用户视角"库已删"，可图节点还在（实测 186/378 就是这类）。
+    传 `False` 只清"PG 里连行都没有"的库。**可恢复**：库里页还在时 `rebuild_kb_graph()` 能重投影。
+    """
+    import ke_db  # noqa: PLC0415
+    rows = _run("MATCH (n:BodhiInstance) RETURN n.kb_id AS kb, count(*) AS n ORDER BY n DESC", {})
+    in_graph = {str(r.get("kb") or ""): int(r.get("n") or 0) for r in (rows or [])}
+    live = {str(r["id"]) for r in ke_db.psql_csv(
+        "SELECT id FROM knowledge_bases WHERE deleted_at IS NULL")}
+    soft = {str(r["id"]) for r in ke_db.psql_csv(
+        "SELECT id FROM knowledge_bases WHERE deleted_at IS NOT NULL")}
+    # 判定口径：PG 里不存在 → 孤儿；**软删库**是否算孤儿由 `include_soft_deleted` 决定
+    # （默认算：WeKnora 删库是软删，用户视角"库已删"）
+    orphan = {k: v for k, v in in_graph.items()
+              if k and (k not in live if include_soft_deleted else k not in (live | soft))}
+    no_kb = int(in_graph.get("", 0) or 0)
+    out = {"ok": True, "dry_run": bool(dry_run),
+           "graph_kbs": len([k for k in in_graph if k]), "pg_kbs_live": len(live),
+           "pg_kbs_soft_deleted": sorted(soft),
+           "orphan_kbs": {k: v for k, v in sorted(orphan.items())},
+           "orphan_nodes": sum(orphan.values()), "no_kb_id_nodes": no_kb,
+           "total_nodes": sum(in_graph.values()),
+           "live_counts": {k: v for k, v in in_graph.items() if k in live}}
+    if dry_run or (not orphan and not no_kb):
+        return out
+    deleted = 0
+    if orphan:
+        res = _run("UNWIND $kbs AS k MATCH (n:BodhiInstance {kb_id:k}) "
+                   "DETACH DELETE n RETURN count(n) AS n", {"kbs": sorted(orphan)})
+        deleted += int((res[0].get("n") if res else 0) or 0)
+    if no_kb:
+        res = _run("MATCH (n:BodhiInstance) WHERE n.kb_id IS NULL OR n.kb_id = '' "
+                   "DETACH DELETE n RETURN count(n) AS n", {})
+        deleted += int((res[0].get("n") if res else 0) or 0)
+    out["deleted_nodes"] = deleted
+    out["deleted_kbs"] = sorted(orphan)
+    return out
+

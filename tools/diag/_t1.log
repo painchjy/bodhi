@@ -1,0 +1,14 @@
+  已删 def sql_insert_page（原 58 行）
+  已删 def sql_update_page（原 24 行）
+  已删 def _resolve_page_id（原 27 行）
+  已删 def _page_id_of_slug（原 10 行）
+  已删 def _page_id_owner（原 10 行）
+  已删 def _prior_version（原 18 行）
+  已删 def _prime_page_ids（原 35 行）
+  已删 def _prime_prior_versions（原 33 行）
+文件已更新：tools/ontology-mcp/server.py（删了 8 个）
+COMPILE_OK
+--- 残留引用（应 0）---
+sed: -e expression #1, char 6: unexpected `,'
+Exception ignored while flushing sys.stdout:
+BrokenPipeError: [Errno 32] Broken pipe

@@ -124,6 +124,16 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 | `BODHI_CONCEPT_KB_ID` | 空 | **企业共享概念模型**知识库 id（跨库上下文映射的落点，见 `KB-CONFIG.md`）|
 | `BODHI_CONCEPT_KB_NAME` | `企业共享概念模型` | 同上（库名匹配用）|
 | `BODHI_TENANT_ID` | 空 | **写权限判定**用的调用者租户；不配且没带请求头 `X-Bodhi-Tenant` → 写路径 fail-closed 拒（读不受影响）|
+| `BODHI_SIMILARITY_MERGE` | `0` | 相似度合并：`0`=停用（一律按 `(kb,slug)` 幂等 upsert，`pending` 恒空、`merged` 表示"同 slug 覆盖"）；`1`=旧行为（相似度并页 + 待确认页）。**落库只走契约内核一条路**（`BODHI_SAVE_ENGINE` 已删除）|
+| `BODHI_VALIDATE_FROM_GRAPH` | `1` | 关系 domain/range 校验的**类型读**：`1`=图优先（1 次 Neo4j 替掉每条边 2 次 psql，图里没有才回落 PG）；`0`=只用 PG |
+| `BODHI_DEFER_MAINTENANCE` | `1` | 重型维护（全库目录树重建 / CRUD 矩阵）延迟到前端按需刷新（`/bodhi/folders/refresh`）；`0`=落库时同步做 |
+| `BODHI_DEBUG_ENGINE` | `0` | 内核路径内部调试打印（排障用）|
+
+> **落库引擎切换（2026-10-10）**：`BODHI_SAVE_ENGINE=kernel` 与 legacy **行为等价已验**（同批回执逐条一致、
+> 正文 strip 后逐字相同）；切换只需在 `.env` 改一行 + **`systemctl restart bodhi-mcp`**（改了不重启=跑旧字节码，
+> 这是本仓最容易踩的坑）。回退：改回 `legacy` 再重启。**巡检清理**新增 kind `orphan_graph_nodes`
+> （图库对账：删掉"对应知识库已删除/软删"的孤儿实例节点；已含在 `kinds=all` 里）——
+> WeKnora 删库只删 PG 记录、不删图，正是它把图库与 PG 对齐。
 
 `.env.example` 已给出容器部署的推荐值（`BODHI_DB_HOST=postgres`）。
 

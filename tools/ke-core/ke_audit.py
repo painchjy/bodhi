@@ -1325,7 +1325,7 @@ def check_governance_rest(ctx: dict, rep: Report, mine: list) -> None:
 # P2：计划(只读) → 人工确认 → 执行（**硬删**；用户 2026-09-20 口径：不得自动修）
 # ---------------------------------------------------------------------------
 PURGE_KINDS = ("no_source_pages", "deleted_source_pages", "mixed_source_refs",
-               "soft_deleted_rows", "orphan_revisions")
+               "soft_deleted_rows", "orphan_revisions", "orphan_graph_nodes")
 FIX_KINDS = ("dangling_edges", "dup_edges")
 INIT_KINDS = ("init_wiki", "init_graph")
 ALL_KINDS = INIT_KINDS + PURGE_KINDS + FIX_KINDS
@@ -1339,6 +1339,9 @@ KIND_HELP = {
     "orphan_revisions": "孤儿版本快照（D3，没有对应页）→ 删",
     "dangling_edges": "悬空关系行（A1）→ 删该行（快照+版本+1）",
     "dup_edges": "重复/自环关系行（A5）→ 去重（快照+版本+1）",
+    "orphan_graph_nodes": ("图库对账：**全库**孤儿实例节点（对应知识库已删/软删）→ 删（含其边）；"
+                           "WeKnora 删库只删 PG 记录，不删图 ⇒ 此项让巡检清理与图库一致"
+                           "（`all` 已包含；也可单独 kinds=orphan_graph_nodes 跑）"),
 }
 PLAN_DIR = HERE.parents[1] / "logs" / "audit"
 
@@ -1406,15 +1409,23 @@ def _hard_delete_wiki(kb_id: str) -> dict:
 
 
 def _hard_delete_graph(kb_id: str) -> dict:
-    """初始化：删 Neo4j 里该 KB 的本体实例（节点 + 其边）。"""
+    """初始化：删 Neo4j 里该 KB 的本体实例（节点 + 其边）。
+
+    **2026-10-10 修（用户实测"删了库、图还在"）**：旧实现只匹配 `n.kb`——那是**旧属性名**，
+    现网节点用的是 **`n.kb_id`**（见 `upsert_node`/`ensure_instances`）⇒
+    条件恒假、一个节点都没删。现在三种键都认（`kb_id` / 旧 `kb` / 文档 `knowledge_id`），
+    并回报删除数，便于自证。
+    """
     try:
         ids = [r["id"] for r in ke_db.psql_csv(
             "SELECT id FROM knowledges WHERE knowledge_base_id = %s" % _q(kb_id))]
         before = _instance_nodes(kb_id)
-        if before:
-            ke_neo4j.query("MATCH (n:BodhiInstance) WHERE n.kb = $kb OR n.knowledge_id IN $ids "
-                           "DETACH DELETE n", {"kb": kb_id, "ids": ids})
-        return {"documents": len(ids), "nodes_deleted": before}
+        res = ke_neo4j.query(
+            "MATCH (n:BodhiInstance) WHERE n.kb_id = $kb OR n.kb = $kb "
+            "OR n.knowledge_id IN $ids DETACH DELETE n RETURN count(n) AS n",
+            {"kb": kb_id, "ids": ids})
+        return {"documents": len(ids), "nodes_before": before,
+                "nodes_deleted": int((res[0].get("n") if res else 0) or 0)}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
@@ -1760,9 +1771,19 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     model = ctx["model"]
     rep.data = ctx["data"]
     rep.findings.sort(key=lambda f: (SEV.get(f["severity"], 9), f["check"], f["subject"]))
+    # P0-c-2（2026-10-10）：**图库对账**（只读）—— WeKnora 删库只删 PG、不删图，图里会留
+    # 幽灵节点；这里把"图上出现但 PG 已无该库"的节点数报出来（`scope=all/graph` 时才算）。
+    graph_orphans = None
+    if scope in ("all", "graph"):
+        try:
+            import ke_graph as _kg  # noqa: PLC0415
+            graph_orphans = _kg.purge_orphan_kb_nodes(dry_run=True)
+        except Exception as exc:  # noqa: BLE001  图不可用不影响巡检
+            graph_orphans = {"ok": False, "error": str(exc)[:160]}
     return {
         "kb_id": kb_id, "kb_name": kb_name, "scope": scope, "generated_at": ke_db.now_text(),
         "kb_id_note": kb_note,
+        "graph_orphans": graph_orphans,
         "summary": {
             "pages": len(pages),
             "instance_pages": sum(1 for p in pages if _is_instance(p["page_type"])),
@@ -1771,6 +1792,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
             "checks": dict(sorted(rep.totals.items())),
             "findings_returned": len(rep.findings), "max_findings": rep.max,
             "page_limit": page_limit, "truncated": truncated,
+            "orphan_graph_nodes": ((graph_orphans or {}).get("orphan_nodes")
+                                   if isinstance(graph_orphans, dict) else None),
             "model": ({"source": model["source"], "classes": len(model["classes"]),
                        "relations": len(model["relations"])} if model else None),
             "ontology_kb": kb_id == ONTOLOGY_KB,
@@ -1798,6 +1821,23 @@ def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 
         return {"ok": False, "error": "need_write_permission", "permission": acl,
                 "hint": ("巡检清理需要对该知识库的写权限（属主 / kb_shares 的 editor|writer|admin）；"
                          "调用者租户来自 MCP 头 X-Bodhi-Tenant 或 env BODHI_TENANT_ID")}
+    # P0-c-2（2026-10-10）：**图库对账**（全库孤儿节点）—— 显式指定 `orphan_graph_nodes`
+    # 或 `kinds=all`（已包含）时执行。放在 plan 之前：它是**全库**动作，而计划指纹依赖
+    # "本库动作清单"（全库计数一变指纹就失效）；也只走 kinds 路径（不带 `slugs`），
+    # 避免"删几页"时顺带做全库图操作。
+    orphan_out = None
+    if not slugs:
+        try:
+            _kn = _normalize_kinds(kinds)
+        except Exception:  # noqa: BLE001  空 kinds → 交给既有路径去报错
+            _kn = []
+        if "orphan_graph_nodes" in _kn:
+            import ke_graph as _kg  # noqa: PLC0415
+            orphan_out = _kg.purge_orphan_kb_nodes(dry_run=dry_run)
+            if dry_run:
+                return {"ok": True, "dry_run": True, "kb": {"id": kb, "name": kname},
+                        "mode": "orphan_graph_nodes", "permission": acl.get("mode"),
+                        "orphan_graph_nodes": orphan_out}
     if slugs:
         targets = [s for s in dict.fromkeys(slugs) if s]
         existing = [r["slug"] for r in ke_db.psql_csv(
@@ -1823,8 +1863,11 @@ def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 
         return {"ok": True, "dry_run": True, "kb": {"id": kb, "name": kname}, "mode": "kinds",
                 "plan": brief, "permission": acl.get("mode")}
     applied = apply_plan(kb, plan["plan_id"], True, page_limit)
-    return {"ok": True, "mode": "kinds", "kb": {"id": kb, "name": kname},
-            "permission": acl.get("mode"), "plan": brief, "applied": applied}
+    out = {"ok": True, "mode": "kinds", "kb": {"id": kb, "name": kname},
+           "permission": acl.get("mode"), "plan": brief, "applied": applied}
+    if orphan_out is not None:
+        out["orphan_graph_nodes"] = orphan_out
+    return out
 
 
 def main() -> int:

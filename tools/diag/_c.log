@@ -1,0 +1,27 @@
+=== ① 根目录 `_*` 清单 ===
+  .log       1 个  例：_tidy.log
+  .py        2 个  例：_ab_p30f2.py, _equiv_p30f.py
+  .txt      97 个  例：_a1.txt, _a2.txt, _a3.txt, _a4.txt, _a5.txt, _a6.txt
+  _*.py（**不动**）： _ab_p30f2.py, _equiv_p30f.py
+  已删 98 个（.txt/.log）；剩余 _* = 2
+
+=== ② Task1 候选死代码的引用（全仓 tools/**/*.py）===
+  _resolve_page_id         引用 13  _cleanup.py:1, ke_audit.py:1, ke_pages.py:1, ke_stats.py:1, server.py:9
+  _page_id_of_slug         引用  4  _cleanup.py:1, server.py:3
+  _page_id_owner           引用  5  _cleanup.py:1, server.py:4
+  _prior_version           引用  4  _cleanup.py:1, server.py:3
+  _prime_page_ids          引用  4  _cleanup.py:1, server.py:3
+  _prime_prior_versions    引用  4  _cleanup.py:1, server.py:3
+  _req_cache               引用  9  _cleanup.py:1, server.py:8
+  _reset_request_cache     引用  8  _bulk_ab.py:1, _cleanup.py:1, _engine_ab.py:1, server.py:5
+  sql_insert_page          引用  8  _cleanup.py:1, server.py:7
+  sql_update_page          引用  5  _cleanup.py:1, server.py:4
+  page_id_for              引用  9  _cleanup.py:1, ontology_wiki.py:2, server.py:4, weknora_sync.py:2
+  element_slug             引用  5  _cleanup.py:1, ke_pages.py:1, server.py:3
+  element_page_slug        引用  7  _cleanup.py:1, server.py:6
+  build_pending_page       引用  3  _cleanup.py:1, server.py:2
+  pick_match               引用  4  _cleanup.py:1, server.py:3
+  merge_content            引用  4  _cleanup.py:1, server.py:3
+  same_type_family         引用  4  _cleanup.py:1, server.py:3
+  _expect                  引用  1  _cleanup.py:1  ← 候选死代码
+  id_strategies            引用  8  _cleanup.py:1, server.py:7

@@ -1,0 +1,16 @@
+COMPILE_OK
+ExecMainStartTimestamp=Sat 2026-10-10 19:00:28 CST
+ExecMainPID=2532391
+active
+--- 开关 ---
+BODHI_SAVE_ENGINE       = 'kernel'
+BODHI_SIMILARITY_MERGE  = '0'
+BODHI_VALIDATE_FROM_GRAPH = '1'
+BODHI_DEBUG_ENGINE      = '0'
+--- 清理核验 ---
+  ke_pages._parse_legacy_head           在   = True
+  ke_pages.write_knowledge_batch        在   = True
+  ke_pages._bulk_write_pages            在   = True
+  server.save_elements                在   = True
+
+RESULT: PASS
