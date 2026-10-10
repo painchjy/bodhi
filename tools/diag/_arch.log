@@ -1,0 +1,14 @@
+=== audit_scan 工具描述 ===
+733:                        "只读操作（doc_outline / extract_state / audit_scan …）不受限制。" % len(ids))}
+3112:                if with_audit else "见 `audit_scan(scope=\"coupling\")`（本页落库时由运维脚本补全）"),
+3463:            "name": "audit_scan",
+3755:                            "`dry_run=true` 只看影响面。**删除不可逆**，删前先 `audit_scan` 把 target 念给用户确认。"),
+4120:def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
+4297:    if name == "audit_scan":
+4298:        return audit_scan(str(args.get("kb_id", "")), args.get("kb_ids") or None,
+
+=== 归档 docs ===
+--- docs/ 剩余 ---
+18
+0
+--- 已暂存 ---

@@ -1,0 +1,109 @@
+=== docs/*.md（按体量） ===
+     53025  docs/context-mapping-plan.md
+     50374  docs/weknora-fork.md
+     49945  docs/agent-design-flow.md
+     38935  docs/knowledge-ops-strategy.md
+     33065  docs/knowledge-save-perf-and-staged-modeling.md
+     26211  docs/handoff-ontology-upload.md
+     25980  docs/session-handoff.md
+     22187  docs/ontology-rebuild-analysis.md
+     21429  docs/ontology-modeling-recommendation.md
+     17665  docs/bodhi-ops-audit.md
+     16299  docs/knowledge-governance.md
+     12504  docs/structured-modeling-skill.md
+     12209  docs/structured-data-import-plan.md
+     11969  docs/bodhi-reasoning.md
+      9980  docs/ontology-refactor-ea-bmm.md
+      8694  docs/bodhi-doc-cleanup.md
+      8360  docs/knowledge-write-contract.md
+      7771  docs/ontology-service-neo4j.md
+
+=== docs/cases/*.md ===
+     54941  docs/cases/技术方案评审/two-loops-framework.md
+     20357  docs/cases/技术方案评审/P1-knowledge-inventory.md
+     16975  docs/cases/技术方案评审/image-extraction-experiment.md
+     11065  docs/cases/技术方案评审/manual-verification-script.md
+      6889  docs/cases/技术方案评审/P3-materials-draft.md
+
+=== deploy/delivery/*.md ===
+     35896  deploy/delivery/TROUBLESHOOTING.md
+     23380  deploy/delivery/MCP-SERVER.md
+     14026  deploy/delivery/FRONTEND.md
+     12286  deploy/delivery/MANUAL.md
+     12172  deploy/delivery/KB-CONFIG.md
+     10302  deploy/delivery/ONTOLOGY-KB.md
+      8508  deploy/delivery/AGENTS-SQL.md
+
+=== perf 文档小节 ===
+     1  # knowledge_save 性能改造 + 阶段化建模（方案 → P0 实施）
+     9  ## 1. 实测基线（本机，只读原语，2026-10-09）
+    20  ## 2. 诊断（都带证据位置）
+    35  ## 3. 开销拆解（40 节点 + 40 关系，改前）
+    54  ## 4. 方案（用户 2026-10-09 确认）
+    65  ## 5. P0 实施记录（已完成 · 本次提交）
+    67  ### 5.1 `ke_graph.py`
+    83  ### 5.2 `ke_pages.py`
+    91  ### 5.3 `server.py`
+    96  ### 5.4 验收（已跑的冒烟）
+   107  ## 5.5 P0-b 实施记录（已完成 · 本次提交 `d254950`）
+   114  ### 改了什么
+   123  ### 验收（已跑）
+   132  ### 用户决策
+   137  ## 6. 未完项（按序）
+   150  ### 6.0 为什么 P3-0f 必须与 P0-c 一起做（2026-10-10 判断）
+   165  ### 6.1 待确认
+   174  ## 7. 一句话总结
+   181  ## 8. P1 实施记录（已完成 · 提交 `c199675`）
+   183  ### 8.1 新增 `tools/ke-core/ke_stats.py`
+   188  ### 8.2 埋点（唯一的两个 IO 出口）
+   195  ### 8.3 两段写日志（修「超时零记录」）
+   201  ### 8.4 验收（已跑）
+   211  ### 8.5 用法（内网排错）
+   220  ## 9. 用户提议评估：**图写完 → PG 异步派生**（"PG 是派生的历史版本记录，Neo4j 是最新版"）
+   226  ### 9.1 结论：**方向正确，且 P1 已经为"事后可查"打好地基**；但落地前必须先解 4 个问题
+   235  ### 9.2 必须先解决的 4 个问题（否则引入新坑）
+   243  ### 9.3 但**先别急着异步** —— 有个更划算的顺序
+   261  ## 10. 渲染模式收敛（用户口径 2026-10-09）
+   263  ### 10.1 结论
+   272  ### 10.2 实现方式（**不引入新注解** —— 用户 2026-10-09 口径）
+   288  ### 10.3 验收（已跑）
+   297  ### 10.4 落地状态（2026-10-09）
+   345  ## 8 P3-0i2 / P3-0f：归因按类型分开 + 逐页只读查询批量预读（2026-10-10）
+   347  ### 8.1 先记一个**非代码**的根因：优化"不生效"是进程没重启
+   364  ### 8.2 归因按类型分开（P3-0i2）
+   370  ### 8.3 逐页只读查询批量预读（P3-0f）
+   387  ### 8.4 实测（同一份 payload：33 nodes / 27 edges，`mode=dry_run`）
+   410  ## 9 内核接线收口 + 投影移除 + 批量写 + 死代码清理（2026-10-10）
+   412  ### 9.1 落库只走契约内核（`BODHI_SAVE_ENGINE` 已删）
+   424  ### 9.2 wiki→图 投影**彻底移除**
+   432  ### 9.3 文档类节点（`render_mode=document`）在 graph 阶段必须有正文（方案 a）
+   442  ### 9.4 批量写 PG（P0-c-3：`_bulk_write_pages` 接线）
+   451  ### 9.5 死代码清理与目录整理
+   461  ### 9.6 巡检与图库一致（2026-10-10）
+  总行数：467
+
+=== 契约 §8 写序现状 ===
+    15  目标：**一个内核、一份输入契约、三种渲染模式、统一溯源、图本优先**。
+    16  
+    17  ---
+    18  
+    19  ## 1. 统一内核
+    20  
+    21  所有写入器（7 条通道 + 未来的批量/导入）**只准**调用：
+    22  
+  ---
+   129  ## 8. 落库顺序（图本优先）
+   130  
+   131  `write_knowledge` 内部固定：**① 建/更新图节点（属性）→ ② 写图边 → ③ 写 PG 页（content 渲染）→ ④ 补 L1~L4 溯源**。
+   132  图写失败不阻断 PG（巡检/回填兜底），但回执必须说清（`graph.ok=false`）。
+   133  
+   134  ---
+   135  
+   136  ## 9. 各入口 → 内核 映射（迁移计划）
+  ---
+
+=== 过期口径残留 ===
+  tools/ke-core/ke_pages.py         :875  （`replica_guard`，逐页版才有）—— 因此本函数默认**关闭**，待 P0-c 接真实库做 diff 后再开。
+  tools/ke-core/ke_pages.py         :875  （`replica_guard`，逐页版才有）—— 因此本函数默认**关闭**，待 P0-c 接真实库做 diff 后再开。
+  tools/ontology-mcp/server.py      :1361  # 2026-10-10（用户口径）：**落库只走契约内核**（`BODHI_SAVE_ENGINE` 开关与 legacy 单事务写已删）。
+  .env                              :33  BODHI_SAVE_ENGINE=kernel

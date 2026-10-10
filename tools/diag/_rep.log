@@ -1,0 +1,43 @@
+=== _Report API ===
+
+=== SCOPES / SEV ===
+71:SEV = {"high": 0, "medium": 1, "low": 2}
+72-# 企业标准定义「待评审」天数阈值（附录 A：draft 超过它 → G9 low）
+73-STANDARD_REVIEW_DAYS = 14
+74:SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling")
+75-# 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
+76-ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
+77-# B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
+78-#   —— 用户 2026-09-21 口径：这类问题提示后**直接给命令**，不走 plan_id 确认流程
+79-ONTOLOGY_INDEX = HERE.parents[1] / "artifacts" / "weknora" / "ontology_index.json"
+80-ARTIFACT_FIX = ("/opt/bodhi-venv/bin/python3 tools/ontology-compiler/compile.py compile --diff"
+81-                "（产物含前端类型清单 ontologyTypes.ts 的来源；重编后需重建/部署前端才会在界面出现新分类："
+82-                "bash deploy/weknora-fork/build_frontend.sh && bash deploy/weknora-fork/deploy_frontend.sh）")
+
+=== check_dupes 模板 ===
+808:def check_dupes(ctx: dict, rep: Report) -> None:
+809-    kb_id = ctx["kb_id"]
+810-    groups: dict = {}
+811-    for page in ctx["pages"]:
+812-        if not _is_instance(page["page_type"]):
+813-            continue
+814-        groups.setdefault((page["page_type"], _norm_title(page["title"])), []).append(page["slug"])
+815-    for (ptype, _norm), slugs in sorted(groups.items()):
+816-        if len(slugs) > 1:
+817-            rep.add("D1", "medium", slugs[0],
+818-                    "同类型同语义多页（%s，%d 个）：%s"
+819-                    % (ptype, len(slugs), "、".join(sorted(slugs)[:5])),
+820-                    "人工合并（保留一页、把另一页的出边并过去）")
+821-    # D2 软删旧行与活页并存（重复抽取撞主键的历史根因）
+822-    rows = ke_db.psql_csv(
+823-        "SELECT slug, count(*) AS n FROM wiki_pages "
+824-        " WHERE knowledge_base_id = %s AND deleted_at IS NOT NULL GROUP BY slug"
+825-        % ke_db.sql_str(kb_id))
+826-    dupes = [(r["slug"], int(r["n"] or 0)) for r in rows if r["slug"] in ctx["live"]]
+827-    ctx["data"]["soft_deleted_dupes"] = len(dupes)
+828-    for slug, n in dupes[:20]:
+829-        rep.add("D2", "medium", slug, "有 %d 条软删旧行 + 当前活页同在" % n,
+830-                "可硬删旧行（P2，硬删才彻底）；不影响展示")
+831-    # D3 孤儿版本快照
+832-    rows = ke_db.psql_csv(
+833-        "SELECT count(*) AS n FROM wiki_page_revisions r WHERE r.knowledge_base_id = %s "

@@ -71,7 +71,8 @@ except Exception:  # noqa: BLE001
 SEV = {"high": 0, "medium": 1, "low": 2}
 # 企业标准定义「待评审」天数阈值（附录 A：draft 超过它 → G9 low）
 STANDARD_REVIEW_DAYS = 14
-SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling")
+SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling",
+          "similar")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
@@ -805,6 +806,81 @@ def check_page_identity(ctx: dict, rep: Report) -> None:
 # ---------------------------------------------------------------------------
 # D. 重复 / 幂等残留
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# S1 / S2 相似知识（2026-10-10 用户口径）：**落库不再做相似度合并**，改由巡检治理 ——
+# 智能体在 `save_knowledge` 之后跑一次 `audit_scan`（`scope=all` 已含本项）即可看到：
+#   · S1 本库**近重复**（标题+摘要 3-gram 余弦 ≥ 阈值，同类型/同族内的近似页）→ 人工裁决 并入/补别名；
+#   · S2 **领域上下文之外**的同名页（其它知识库里有归一化同名的页）→ 确认跨库引用/建映射，或判为不同领域概念。
+# ---------------------------------------------------------------------------
+SIM_THRESHOLD = 0.86          # 同类型内的近重复阈值
+SIM_THRESHOLD_CROSS = 0.93    # 跨类型（可能是"同一知识落在不同类"）更保守
+
+
+def _grams(text: str) -> set:
+    """中文友好的 3-gram 集合（去空白；<3 字用整串）。"""
+    s = re.sub(r"\s+", "", text or "")
+    if len(s) < 3:
+        return {s} if s else set()
+    return {s[i:i + 3] for i in range(len(s) - 2)}
+
+
+def _trigram_cos(a: str, b: str) -> float:
+    ga, gb = _grams(a), _grams(b)
+    if not ga or not gb:
+        return 0.0
+    inter = len(ga & gb)
+    import math as _math  # noqa: PLC0415
+    return inter / _math.sqrt(len(ga) * len(gb))
+
+
+def _similar_text(page: dict) -> str:
+    """相似度比对的文本 = 归一化标题 + 摘要前 300 字（与已退役的落库合并口径同源）。"""
+    return ("%s %s" % (_norm_title(page.get("title") or ""),
+                       re.sub(r"\s+", "", (page.get("summary") or "")[:300]))).strip()
+
+
+def check_similar(ctx: dict, rep: Report) -> None:
+    """S1 本库近重复 / S2 域外（其它库）同名。**只报不修**（P1 只读）。"""
+    inst = [p for p in ctx["pages"] if _is_instance(p.get("page_type"))]
+    pairs = []
+    limit = 400                      # 规模保护：超大库只做同类型内比对
+    for i in range(min(len(inst), limit)):
+        for j in range(i + 1, min(len(inst), limit)):
+            a, b = inst[i], inst[j]
+            same_type = (a.get("page_type") or "") == (b.get("page_type") or "")
+            score = _trigram_cos(_similar_text(a), _similar_text(b))
+            if score >= (SIM_THRESHOLD if same_type else SIM_THRESHOLD_CROSS):
+                pairs.append((round(score, 3), a["slug"], b["slug"]))
+    pairs.sort(reverse=True)
+    ctx["data"]["similar_pages"] = len(pairs)
+    for score, sa, sb in pairs[:20]:
+        rep.add("S1", "medium", sa,
+                "疑似重复知识（相似度 %.2f）：%s ≈ %s" % (score, sa, sb),
+                "人工裁决：并入一页（保留更完整者）或补别名；**落库已不做自动合并**"
+                "（相似度治理走巡检。阈值 %.2f 同类型 / %.2f 跨类型）"
+                % (SIM_THRESHOLD, SIM_THRESHOLD_CROSS))
+    # S2：领域上下文**之外**的同名页（其它知识库）
+    want = {_norm_title(p.get("title") or "") for p in inst if p.get("title")}
+    want.discard("")
+    if not want:
+        ctx["data"]["cross_kb_same_name"] = 0
+        return
+    rows = ke_db.psql_csv(
+        "SELECT w.knowledge_base_id AS kb, w.slug, w.title, COALESCE(k.name,'') AS kb_name "
+        "  FROM wiki_pages w LEFT JOIN knowledge_bases k ON k.id = w.knowledge_base_id "
+        " WHERE w.deleted_at IS NULL AND w.knowledge_base_id <> %s "
+        "   AND COALESCE(w.page_type,'') NOT IN ('index','summary') LIMIT 3000"
+        % ke_db.sql_str(ctx["kb_id"]))
+    hits = [r for r in rows if _norm_title(r.get("title") or "") in want]
+    ctx["data"]["cross_kb_same_name"] = len(hits)
+    for r in hits[:20]:
+        rep.add("S2", "low", r["slug"],
+                "领域上下文**之外**（kb=%s）存在同名页：%s"
+                % (r.get("kb_name") or str(r.get("kb"))[:8], r.get("title")),
+                "确认是否应跨库引用/建映射（context_lookup / context_concept_apply）；"
+                "若确为不同领域的同名概念 → 可忽略本项")
+
+
 def check_dupes(ctx: dict, rep: Report) -> None:
     kb_id = ctx["kb_id"]
     groups: dict = {}
@@ -1761,6 +1837,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     if scope in ("all", "dupes"):
         check_dupes(ctx, rep)
         check_page_identity(ctx, rep)
+    if scope in ("all", "similar"):
+        check_similar(ctx, rep)      # S1 本库近重复 / S2 域外（其它库）同名 —— 相似度治理入口
     if scope in ("all", "governance"):
         check_governance(ctx, rep)
     if scope in ("all", "governance", "context"):

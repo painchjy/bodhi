@@ -1,0 +1,7 @@
+=== 结果 ===
+4ede298 docs(ke): 落库性能文档重写为「当前实现」(467→80 行, 删历史讨论/方案/排期/未采用提议) + 修正契约 §8 写序(页先于边) + _bulk_write_pages 标注已接线
+bdcd977 perf+refactor(ke): 落库统一走契约内核 + 批量写 PG + 投影彻底移除 + 死代码清理
+ docs/knowledge-save-perf-and-staged-modeling.md | 525 ++++--------------------
+ docs/knowledge-write-contract.md                | 332 +++++++--------
+ tools/ke-core/ke_pages.py                       |   4 +-
+ 3 files changed, 240 insertions(+), 621 deletions(-)

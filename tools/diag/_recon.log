@@ -1,0 +1,46 @@
+=== ① 符号引用（tools/**/*.py）===
+  merge_on                   _recon.py:1, server.py:5
+  pick_match                 _cleanup.py:1, _recon.py:1, server.py:3
+  score_element              _recon.py:1, server.py:2
+  merge_content              _cleanup.py:1, _recon.py:1, server.py:3
+  build_pending_page         _cleanup.py:1, _recon.py:1, server.py:2
+  resolve_pending_merge      _recon.py:3, server.py:12
+  list_pending_merges        _recon.py:2, server.py:8
+  same_type_only             _recon.py:1, server.py:3
+  same_type_family           _cleanup.py:1, _recon.py:1, server.py:3
+  BODHI_SIMILARITY_MERGE     _flag.py:2, _recon.py:1, server.py:3
+  retag_queue                _recon.py:1, ke_pages.py:2, server.py:4
+  _expect                    _cleanup.py:1, _recon.py:2
+  TYPE_PENDING               _recon.py:1, server.py:6, backfill_paths.py:1
+  PENDING_PREFIX             _recon.py:1, server.py:2
+  merge_history              _recon.py:1, graph_page.py:3, server.py:5
+  thresholds                 _recon.py:1, server.py:2
+
+=== ② 两个「待确认合并」工具的出现位置（全仓 py/md/sql）===
+  list_pending_merges      8  docs/agent-design-flow.md, docs/session-handoff.md, tools/diag/_recon.py, tools/ontology-mcp/server.py, deploy/delivery/KB-CONFIG.md, deploy/delivery/MCP-SERVER.md, deploy/weknora-fork/gen_agents.py, deploy/weknora-fork/config/agents.sql
+  resolve_pending_merge    8  docs/session-handoff.md, tools/diag/_recon.py, tools/ontology-mcp/server.py, deploy/delivery/KB-CONFIG.md, deploy/delivery/MCP-SERVER.md, deploy/weknora-fork/gen_agents.py, deploy/weknora-fork/config/agents.sql, deploy/weknora-fork/config/agent_system_prompt.yaml
+
+=== ③ 工具数口径（“38 个”等断言）===
+  /mnt/c/Users/PHJY/source/bodhi2/docs/ontology-refactor-ea-bmm.md:128  > 备份：`/root/onto-backup-20260929-211245/ontology`（37 个文件）+ git（`git revert` 可回）。
+  /mnt/c/Users/PHJY/source/bodhi2/docs/weknora-fork.md:37  二进制内嵌路径给出 838 个 app 自有 `.go` 完整清单，其中与本改造相关的：
+  /mnt/c/Users/PHJY/source/bodhi2/tools/diag/_recon.py:35  print("\n=== ③ 工具数口径（“38 个”等断言）===")
+  /mnt/c/Users/PHJY/source/bodhi2/tools/diag/_recon.py:43  if re.search(r"(38|36|37)\s*个|tools/list.{0,20}(38|36|37)|工具.{0,6}(38|36|37)", ln):
+  /mnt/c/Users/PHJY/source/bodhi2/deploy/delivery/AGENTS-SQL.md:67  | `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + `mcp_bodhi_ontology_*`（含 `sk
+  /mnt/c/Users/PHJY/source/bodhi2/deploy/delivery/MANUAL.md:41  | **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（38 个）` |
+  /mnt/c/Users/PHJY/source/bodhi2/deploy/delivery/MANUAL.md:42  | **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_onto
+  /mnt/c/Users/PHJY/source/bodhi2/deploy/delivery/MANUAL.md:110  | 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（38 个）` + `skills() OK（3 个）` |
+  /mnt/c/Users/PHJY/source/bodhi2/deploy/delivery/MCP-SERVER.md:5  > 作用：给 WeKnora 提供 **38 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概
+  /mnt/c/Users/PHJY/source/bodhi2/deploy/delivery/MCP-SERVER.md:10  > `selfcheck.py` 全绿（initialize / tools/list **38 个** / skills() **6 个**）。
+  /mnt/c/Users/PHJY/source/bodhi2/artifacts/prompts/bmm_extraction.md:10  你从**业务与架构文档**里抽取知识，产出必须严格使用下面列出的本体术语。本模块共 29 个类、37 个关系、29 个属性；不在清单里的说法一律不要自造名称，确实无法归类的内容放进 `unmatched`。
+
+=== ④ docs 归档候选是否已存在 archive/ ===
+  docs/archive 存在 = False 
+  handoff-ontology-upload.md                 存在=True
+  session-handoff.md                         存在=True
+  bodhi-doc-cleanup.md                       存在=True
+  structured-data-import-plan.md             存在=True
+  ontology-rebuild-analysis.md               存在=True
+  ontology-refactor-ea-bmm.md                存在=True
+  ontology-modeling-recommendation.md        存在=True
+  knowledge-ops-strategy.md                  存在=True
+  bodhi-ops-audit.md                         存在=True

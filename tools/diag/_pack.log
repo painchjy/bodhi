@@ -1,0 +1,47 @@
+== 1/6 刷新 DB 种子（本体模型库页面 + 智能体/MCP 登记）
+   （--skip-export）
+== 2/6 暂存三个包
+      （--no-image：跳过 docker save；README 里有自行构建说明）
+   去重断言通过：169 个文件，无任何内容重复
+      01-frontend        16 个文件
+      02-mcp-server      90 个文件
+      03-manual          63 个文件
+   ID 断言通过：0 个 SQL 文件里无写死 UUID（仅保留 MCP 服务自身 id）
+   编译产物断言通过：23 个文件，ontology_index.json 在
+== 3/6 打 tar.gz（可复现：同内容 → 同哈希）
+   bodhi2-01-frontend.tar.gz                0.1 MB
+   bodhi2-02-mcp-server.tar.gz              0.6 MB
+   bodhi2-03-manual.tar.gz                  3.7 MB
+== 4/6 顶层：只放 MANUAL.md（总指引）+ 清单
+== 5/6 清理临时目录
+== 6/6 完成：/mnt/c/Users/PHJY/source/bodhi2/dist-delivery/bodhi2-delivery-20261010-2
+   MANIFEST.json                         0.00 MB
+   MANUAL.md                             0.01 MB
+   README.md                             0.00 MB
+   SHA256SUMS                            0.00 MB
+   bodhi2-01-frontend.tar.gz             0.06 MB
+   bodhi2-02-mcp-server.tar.gz           0.56 MB
+   bodhi2-03-manual.tar.gz               3.69 MB
+
+### 核验 ###
+bodhi2-01-frontend.tar.gz        0.06 MB  sha256=9a87ffb8b682eb0e01731af5c18c7f348f700c35fb317cb9ec714ce70f58a400
+bodhi2-02-mcp-server.tar.gz      0.54 MB  sha256=f488b947bac40037d44ed24df04983cd8357cb6f484a46d4ccb5497c8fd07696
+bodhi2-03-manual.tar.gz          3.52 MB  sha256=b066571db4fb35550a18977fb40fd0573420020743c8dacae46ca76bfb3cf220
+
+9a87ffb8b682eb0e01731af5c18c7f348f700c35fb317cb9ec714ce70f58a400  bodhi2-01-frontend.tar.gz
+f488b947bac40037d44ed24df04983cd8357cb6f484a46d4ccb5497c8fd07696  bodhi2-02-mcp-server.tar.gz
+b066571db4fb35550a18977fb40fd0573420020743c8dacae46ca76bfb3cf220  bodhi2-03-manual.tar.gz
+
+02 包文件数 = 90
+tools/diag 是否被打进 02 = False （应为 False）
+
+=== 关键改动是否进包 ===
+  BODHI_SAVE_ENGINE 已删（应为 0）         命中 3  !!   MCP-SERVER.md, .env.example
+  bulk_write（P0-c-3）                 命中 3  OK   tools/ontology-mcp/server.py, tools/ke-core/ke_pages.py
+  spec_from_page（适配器）                命中 1  OK   tools/ke-core/ke_pages.py
+  purge_orphan_kb_nodes              命中 1  OK   tools/ke-core/ke_graph.py
+  orphan_graph_nodes（巡检 kind）        命中 3  OK   MCP-SERVER.md, tools/ontology-mcp/server.py
+  info_from_graph（校验读走图）             命中 1  OK   tools/ke-core/ke_graph.py
+  project_page 已删（应为 0）              命中 0  OK   
+  sql_insert_page 已删（应为 0）           命中 0  OK   
+  skipped_document_nodes（方案 a）       命中 1  OK   tools/ontology-mcp/server.py

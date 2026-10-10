@@ -1,0 +1,38 @@
+  归档 handoff-ontology-upload.md
+  归档 session-handoff.md
+  归档 bodhi-doc-cleanup.md
+  归档 structured-data-import-plan.md
+  归档 ontology-rebuild-analysis.md
+  归档 ontology-refactor-ea-bmm.md
+  归档 ontology-modeling-recommendation.md
+  归档 knowledge-ops-strategy.md
+  归档 bodhi-ops-audit.md
+归档 9 个；docs/ 剩 9 个 .md，archive/ 有 9 个
+已 git add： R100	docs/bodhi-doc-cleanup.md	docs/archive/bodhi-doc-cleanup.md
+R100	docs/bodhi-ops-audit.md	docs/archive/bodhi-ops-audit.md
+R100	docs/handoff-ontology-upload.md	docs/archive/handoff-ontology-upload.md
+R099	docs/knowledge-ops-strategy.md	docs/archive/knowledge-ops-strategy.md
+R099	docs/ontology-modeling-recommendation.md	docs/archive/ontology-modeling-recommendation.md
+R098	docs/ontology-rebuild-analysis.md	docs/archive/ontology-rebuild-analysis.md
+R100	docs/ontology-refactor-ea-bmm.md	docs/archive/ontology-refactor-ea-bmm.md
+R100	docs/session-handoff.md	docs/archive/session-handoff.md
+R100	docs/structured-data-import-plan.md	docs/archive/structured-data-import-plan.md
+22d208e docs: 归档历史讨论/一次性稿到 docs/archive（9 份：handoff/session-handoff/doc-cleanup/structured-import-plan/ontology-rebuild-analysis/ontology-refactor-ea-bmm/ontology-modeling-recommendation/knowledge-ops-strategy/bodhi-ops-audit）
+
+
+=== 编译 ===
+COMPILE_OK
+ExecMainStartTimestamp=Sun 2026-10-11 07:30:37 CST
+ExecMainPID=2626837
+active
+
+=== S1/S2 冒烟（只读）===
+SCOPES = ('all', 'wiki', 'model', 'source', 'dupes', 'governance', 'context', 'coupling', 'similar')
+S1 疑似重复对 = 1 ／ S2 域外同名 = 20
+data = {'similar_pages': 1, 'cross_kb_same_name': 82}
+  · [S1] agent/agent/技术方案评审智能体 | 疑似重复知识（相似度 1.00）：agent/agent/技术方案评审智能体 ≈ bmm/means/技术方案评审智能体
+  · [S2] agent/agent/技术方案评审智能体 | 领域上下文**之外**（kb=技术方案评审领域）存在同名页：技术方案评审智能体
+  · [S2] agent/skill/技术方案知识提取 | 领域上下文**之外**（kb=技术方案评审领域模型）存在同名页：技术方案知识提取
+  · [S2] bmm/operativebusinessrule/合理性行动方案合理性 | 领域上下文**之外**（kb=技术方案评审领域模型）存在同名页：合理性-行动方案合理性
+  · [S2] bmm/operativebusinessrule/技术架构系统隔离原则 | 领域上下文**之外**（kb=测试）存在同名页：技术架构-系统隔离原则
+（scope=all 的 summary.checks 也会含 S1/S2）

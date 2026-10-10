@@ -1,0 +1,9 @@
+DOC_REWRITTEN
+ENV_LINE_REMOVED
+perf 文档行数 = 80
+perf 文档字节 = 5613
+COMPILE_OK
+.env 是否被 git 跟踪 = 0
+ExecMainStartTimestamp=Sun 2026-10-11 06:58:08 CST
+ExecMainPID=2619245
+active

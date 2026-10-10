@@ -2,3 +2,14 @@ warning: in the working copy of 'tools/diag/_ab_p0c2.py', CRLF will be replaced 
 warning: in the working copy of 'tools/diag/_audit_orphan.py', CRLF will be replaced by LF the next time Git touches it
 warning: in the working copy of 'tools/diag/_bulk_ab.py', CRLF will be replaced by LF the next time Git touches it
 warning: in the working copy of 'tools/diag/_cleanup.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_engine_ab.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_flag.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_orphan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_p0c2_diff.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_replay_sk.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_rmfunc.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_verify_clean.py', CRLF will be replaced by LF the next time Git touches it
+=== 结果 ===
+bdcd977 perf+refactor(ke): 落库统一走契约内核 + 批量写 PG + 投影彻底移除 + 死代码清理
+--- 剩余未提交数 ---
+16
