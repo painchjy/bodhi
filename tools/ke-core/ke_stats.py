@@ -44,8 +44,24 @@ def enabled() -> bool:
     return _BUCKET.get() is not None
 
 
-def record(kind: str, ms: float, ok: bool = True) -> None:
-    """记一次 IO（未开启统计时立即返回）。"""
+def _who(skip: int = 2) -> str:
+    """当前 IO 的**调用者**（`模块.函数`）——跳过 ke_stats/ke_neo4j/ke_db 自身的帧。
+
+    用途（2026-10-10）：`io=neo4j:1145 次` 这种"总数很高但不知谁打的"很难定位；
+    按调用者归因后，日志里直接能看到是哪个函数在打图。
+    """
+    import sys  # noqa: PLC0415  （只在开启统计时调用，开销可忽略）
+    frame = sys._getframe(skip + 1)
+    while frame is not None and frame.f_code.co_filename.endswith(
+            ("ke_stats.py", "ke_neo4j.py", "ke_db.py")):
+        frame = frame.f_back
+    if frame is None:
+        return "?"
+    return "%s.%s" % (frame.f_globals.get("__name__", "?"), frame.f_code.co_name)
+
+
+def record(kind: str, ms: float, ok: bool = True, who: str = "") -> None:
+    """记一次 IO（未开启统计时立即返回）。`who` = 调用者（用于归因）。"""
     bucket = _BUCKET.get()
     if bucket is None:
         return
@@ -56,6 +72,9 @@ def record(kind: str, ms: float, ok: bool = True) -> None:
     cell["ms"] += float(ms)
     if not ok:
         cell["err"] += 1
+    if who:
+        by = bucket.setdefault("who", {})
+        by[who] = by.get(who, 0) + 1
 
 
 def mark(label: str) -> None:
@@ -84,6 +103,9 @@ def snapshot() -> dict | None:
         out["wall_ms"] = round((time.time() - bucket["started"]) * 1000.0, 1)
     if bucket.get("marks"):
         out["marks"] = bucket["marks"][-8:]
+    by = bucket.get("who") or {}
+    if by:
+        out["top_callers"] = [[k, v] for k, v in sorted(by.items(), key=lambda kv: -kv[1])[:6]]
     return out
 
 

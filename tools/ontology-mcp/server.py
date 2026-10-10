@@ -4397,6 +4397,11 @@ def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = N
             marks = io.get("marks") or []
             if marks:
                 io_txt += " |阶段:%s" % "；".join("%sms:%s" % (m[0], m[1]) for m in marks[-4:])
+            # P3-0i（2026-10-10）：**按调用者归因** —— "io=neo4j:1145 次"这类总数无从定位，
+            # 这里直接给出打得最多的几个函数（谁在打图/打库一眼可见）。
+            tc = io.get("top_callers") or []
+            if tc:
+                io_txt += " |调用者:%s" % "；".join("%s=%s次" % (k, v) for k, v in tc[:5])
         _log_line("%s\t%-26s\t%7.0fms\t%s\t%s\targs_file=%s\tresult=%s"
                   % (now_text(), name, ms, phase, io_txt, args_file or "-",
                      json.dumps(picked, ensure_ascii=False)[:500]))

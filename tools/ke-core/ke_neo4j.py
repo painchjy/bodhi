@@ -46,8 +46,12 @@ except Exception:  # noqa: BLE001
             return False
 
         @staticmethod
-        def record(kind: str, ms: float, ok: bool = True) -> None:
+        def record(kind: str, ms: float, ok: bool = True, who: str = "") -> None:
             pass
+
+        @staticmethod
+        def _who(skip: int = 2) -> str:
+            return ""
 
 
 HTTP_URL = _env_value("BODHI_NEO4J_HTTP", "http://127.0.0.1:7474").rstrip("/")
@@ -103,7 +107,7 @@ def query(statement: str, params: dict | None = None, timeout: float = 20.0) -> 
                 for item in (results[0].get("data") or [])]
     finally:
         if _stats.enabled():
-            _stats.record("neo4j", (time.perf_counter() - _t0) * 1000.0, _ok)
+            _stats.record("neo4j", (time.perf_counter() - _t0) * 1000.0, _ok, who=_stats._who())
 
 
 def available(force: bool = False) -> bool:

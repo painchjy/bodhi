@@ -42,8 +42,12 @@ except Exception:  # noqa: BLE001
             return False
 
         @staticmethod
-        def record(kind: str, ms: float, ok: bool = True) -> None:
+        def record(kind: str, ms: float, ok: bool = True, who: str = "") -> None:
             pass
+
+        @staticmethod
+        def _who(skip: int = 2) -> str:
+            return ""
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -218,7 +222,7 @@ def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
         return done.stdout
     finally:
         if _stats.enabled():
-            _stats.record("pg", (time.perf_counter() - _t0) * 1000.0, _ok)
+            _stats.record("pg", (time.perf_counter() - _t0) * 1000.0, _ok, who=_stats._who())
 
 
 def psql_csv(sql: str) -> list[dict]:
