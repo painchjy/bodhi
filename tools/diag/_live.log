@@ -1,0 +1,13 @@
+========== 生产现状（真 Neo4j，只读） ==========
+data_properties source = neo4j
+  bmm:wikiContent domains = ['agent:InstallGuide', 'agent:DesignSpec', 'agent:Advice', 'agent:Evaluation', 'bmm:Assessment']
+  bmm:Assessment         render_mode = document  ancestors=['bmm:Assessment']
+  agent:Advice           render_mode = document  ancestors=['agent:Advice']
+  agent:DesignSpec       render_mode = document  ancestors=['agent:DesignSpec']
+  agent:Evaluation       render_mode = document  ancestors=['agent:Evaluation']
+  agent:InstallGuide     render_mode = document  ancestors=['agent:InstallGuide']
+  agent:ToolContract     render_mode = entity    ancestors=['agent:ToolContract']
+  agent:Agent            render_mode = entity    ancestors=['agent:Agent']
+  agent:Skill            render_mode = entity    ancestors=['agent:Skill']
+  bmm:BusinessProcess    render_mode = entity    ancestors=['bmm:BusinessProcess']
+  bmm:Report             render_mode = entity    ancestors=['bmm:Report']

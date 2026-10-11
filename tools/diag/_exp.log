@@ -1,0 +1,123 @@
+=== compile.py 用法 ===
+#!/usr/bin/env python
+"""BODHI2 本体编译器 · 命令行入口。
+
+    python tools/ontology-compiler/compile.py list                   # 模块清单
+    python tools/ontology-compiler/compile.py validate               # 只体检，不写产物
+    python tools/ontology-compiler/compile.py validate --module bmm  # 只体检指定模块
+    python tools/ontology-compiler/compile.py compile                # 体检 + 写 artifacts/
+    python tools/ontology-compiler/compile.py compile --diff         # 并列出与上次编译的差异
+
+退出码（CI 依赖这几个数字，改动需同步 README）
+---------------------------------------------
+0  成功（校验无 ERROR；compile 已写出产物）
+1  校验未通过：有 ERROR，或 `--fail-on-warn` 命中 WARN（**不写产物**，避免半成品）
+2  命令行参数错误（argparse 约定）
+3  输入/环境错误：模块名非法、TTL 缺失或语法错误、词表 YAML 错误、缺少 rdflib/PyYAML
+
+可复现编译
+----------
+产物里带 `generated_at`，默认每次编译的 sha256 都会变。要逐字节比对（快照测试 /
+「产物是否与本体同步」）时固定时间戳：
+
+    PowerShell: $env:BODHI_GENERATED_AT = "2026-01-01T00:00:00Z"
+    cmd:        set BODHI_GENERATED_AT=2026-01-01T00:00:00Z
+
+也可用 `--generated-at` 显式指定（优先级高于环境变量）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from ontology_compiler import __version__ as COMPILER_VERSION  # noqa: E402
+from ontology_compiler.compiler import compile_all, format_diff  # noqa: E402
+from ontology_compiler.config import (  # noqa: E402
+    ARTIFACTS_DIR,
+    GENERATED_AT_ENV,
+    REPO_ROOT,
+    build_modules,
+    parse_module_selection,
+)
+=== bmm.ttl 646-672 ===
+    rdfs:comment "会话内定位：分页序号 + 轮次/消息/段落（或图坐标），用于可复核" .
+
+### 35. 渲染模式开关：文档类专属的正文属性（2026-10-09 新增）
+# **知识渲染模式由本体决定，且只有两种**（用户口径）：
+#   声明了 `wikiContent` 的类 → `document`（半结构化：调用方给整篇正文）；
+#   其余类 → `entity`（结构化知识单元：正文由数据属性渲染）。
+# 所以本属性**必须带 `rdfs:domain`**（不能是 owl:Thing）：不写 domain 就成了全局属性，
+# 会让**所有类**都变 document（ke_ontology.render_mode 只看 domains 显式命中来规避）。
+:wikiContent rdf:type owl:DatatypeProperty ;
+    rdfs:label "正文"@zh ;
+    rdfs:domain :Assessment ;
+    rdfs:range xsd:string ;
+    rdfs:comment "文档类的整篇正文（Markdown）。**有它的类按 document 渲染**：评估/评审报告这类半结构化知识——正文是主体，数据属性只做结构化摘要；其余类不要用本属性（它们是 entity，正文由数据属性生成）。"@zh .
+
+:sessionFor rdf:type owl:ObjectProperty ;
+    rdfs:label "服务方案"@zh ;
+    rdfs:domain :KnowledgeSession ;
+    rdfs:range :CourseOfAction ;
+    rdfs:comment "该会话服务于哪个行动方案/需求/项目（弱桥，可选）"@zh .
+
+### 34. 规则元数据：判定所需知识（2026-10-01 新增）
+:knowledgeNeed rdf:type owl:DatatypeProperty ;
+    rdfs:label "判定所需知识"@zh ;
+    rdfs:domain :OperativeBusinessRule ;
+    rdfs:range xsd:string ;
+    rdfs:comment "判定该规则前必须先提取的知识项（需求『按规则需要的知识内容提取』的落点；也是抽取技能的输入契约）"@zh .
+
+=== agent.ttl 344,370 ===
+    rdfs:range xsd:string .
+
+:adviceImpact rdf:type owl:DatatypeProperty ;
+    rdfs:label "影响面"@zh ;
+    rdfs:domain :Advice ;
+    rdfs:range xsd:string .
+
+### 渲染模式：本模块的文档类「追加」到 bmm:wikiContent 的 domain（2026-10-09）
+# **知识渲染模式由本体决定，且只有两种**（用户口径）：声明了 `wikiContent` 的类 → `document`
+# （半结构化：调用方给整篇正文）；其余类 → `entity`（结构化知识单元：正文由数据属性渲染）。
+#
+# 为什么不是在本模块另声明一个 `agent:wikiContent`：编译器**禁止跨模块同名属性**
+# （实测 `[ERROR E3] wikiContent … 定义在 agent:wikiContent … bmm:wikiContent`），
+# 而"渲染模式"是**全局唯一**的语义，就该只有**一个**属性。
+#
+# 为什么这样写能生效：属性只在**声明它的模块**（bmm）里被抽出，但 `rdfs:domain`
+# 是从**合并图**读的（`loader.extract_properties` 用 `combined.objects(subject, RDFS_DOMAIN)`）
+# —— 所以在 agent 侧"追加 domain"即可，**bmm 模块不用动**。
+@prefix bmm: <http://example.org/bmm#> .
+
+bmm:wikiContent rdfs:domain :Advice ;
+    rdfs:domain :DesignSpec ;
+    rdfs:domain :Evaluation ;
+    rdfs:domain :InstallGuide .
+
+# 模块短名（目录名/列表名；≤16 字符，导入时校验）
+<http://example.org/agent> bodhi:shortName "智能体开发本体" .
+=== ke_ontology 里 index 路径/环境变量 ===
+13:- 主：Neo4j 本体投影（`artifacts/neo4j/10_ontology.cypher`，ontology-compiler 生成）。
+14:- 兜底：`artifacts/weknora/ontology_index.json`（同一份 TTL 的编译产物，含 label/color/
+34:INDEX_PATH = HERE.parents[1] / "artifacts" / "weknora" / "ontology_index.json"
+36:# 模块展示顺序（与 artifacts 的 module_order 一致；Neo4j 里也能查，这里只做排序兜底）
+39:_INDEX_CACHE: dict | None = None
+40:# 产物指纹 (mtime, size)：磁盘上的 ontology_index.json 变了就重读 —— 这样
+42:_INDEX_STAMP: tuple | None = None
+49:    否则 `_INDEX_CACHE` 还是加载前的旧类清单 —— 表现为维护后新模块的类
+53:    global _INDEX_CACHE, _INDEX_STAMP
+54:    _INDEX_CACHE = None
+55:    _INDEX_STAMP = None
+59:    """ontology_index.json 的 (mtime, size)；文件不存在返回 None。"""
+61:        st = INDEX_PATH.stat()
+108:    global _INDEX_CACHE, _INDEX_STAMP
+111:    if _INDEX_CACHE is None or (stamp is not None and stamp != _INDEX_STAMP):
+113:            _INDEX_CACHE = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+115:            _INDEX_CACHE = {"models": [], "module_order": _MODULE_ORDER_FALLBACK}
+116:        _INDEX_STAMP = stamp
+117:    return _INDEX_CACHE
+310:        也不需要改编译器（数据属性本来就编进 `ontology_index.json` 并投影成 `BodhiOntProperty`）；

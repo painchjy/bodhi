@@ -1,0 +1,47 @@
+=== 编译器入口 ===
+README.md
+compile.py
+ontology_compiler
+tests
+
+=== 用法 ===
+#!/usr/bin/env python
+"""BODHI2 本体编译器 · 命令行入口。
+
+    python tools/ontology-compiler/compile.py list                   # 模块清单
+    python tools/ontology-compiler/compile.py validate               # 只体检，不写产物
+    python tools/ontology-compiler/compile.py validate --module bmm  # 只体检指定模块
+    python tools/ontology-compiler/compile.py compile                # 体检 + 写 artifacts/
+    python tools/ontology-compiler/compile.py compile --diff         # 并列出与上次编译的差异
+
+退出码（CI 依赖这几个数字，改动需同步 README）
+---------------------------------------------
+0  成功（校验无 ERROR；compile 已写出产物）
+1  校验未通过：有 ERROR，或 `--fail-on-warn` 命中 WARN（**不写产物**，避免半成品）
+2  命令行参数错误（argparse 约定）
+3  输入/环境错误：模块名非法、TTL 缺失或语法错误、词表 YAML 错误、缺少 rdflib/PyYAML
+
+可复现编译
+----------
+产物里带 `generated_at`，默认每次编译的 sha256 都会变。要逐字节比对（快照测试 /
+「产物是否与本体同步」）时固定时间戳：
+
+    PowerShell: $env:BODHI_GENERATED_AT = "2026-01-01T00:00:00Z"
+    cmd:        set BODHI_GENERATED_AT=2026-01-01T00:00:00Z
+
+也可用 `--generated-at` 显式指定（优先级高于环境变量）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from ontology_compiler import __version__ as COMPILER_VERSION  # noqa: E402
+from ontology_compiler.compiler import compile_all, format_diff  # noqa: E402
+from ontology_compiler.config import (  # noqa: E402
+    ARTIFACTS_DIR,

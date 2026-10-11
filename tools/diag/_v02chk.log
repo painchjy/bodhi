@@ -51,3 +51,5 @@ warning: in the working copy of 'tools/diag/_sync_ac.py', CRLF will be replaced 
 warning: in the working copy of 'tools/diag/_toolcount.py', CRLF will be replaced by LF the next time Git touches it
 warning: in the working copy of 'tools/diag/_verify_clean.py', CRLF will be replaced by LF the next time Git touches it
 warning: in the working copy of 'tools/diag/_ttl_probe.py', CRLF will be replaced by LF the next time Git touches it
+98547ac docs: 建模工艺 v0.2（报告基类进本体+assessment纯entity；阶段合并为A-E五段+会话四律；流程不固化；阶段声明落企业知识管理领域库）
+f1c531a docs: 企业知识管理智能体 + 建模工艺阶段 草案 v0.1（阶段声明/流程视图/本地化 + 阶段v0 S0-S8 + 过程件vs资产硬边界 + D1-D9待裁决）

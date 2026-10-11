@@ -1,0 +1,30 @@
+=== 旧类名残留（应 0）===
+2
+=== 行数/字符 ===
+  323 17746 docs/knowledge-mgmt-agent-and-modeling-stages.md
+warning: in the working copy of 'tools/diag/_ab_p0c2.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_archive.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_audit_orphan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_bulk_ab.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_cleanup.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_cut.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_docscan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_engine_ab.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_flag.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kill_pending.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kiltool.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_orphan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_p0c2_diff.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_pkgcheck.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_plan_ac.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_recon.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_replay_sk.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_rmfunc.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_sim_check.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_smoke_ac.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_sub.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_sync_ac.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_toolcount.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_probe.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_verify_clean.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_exp_inherit.py', CRLF will be replaced by LF the next time Git touches it
