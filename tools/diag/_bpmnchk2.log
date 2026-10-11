@@ -1,0 +1,25 @@
+--- apply 尾 ---
+
+→ 已写入
+
+已应用。
+--- 编译尾 ---
+    ~~~~~~~~~^^^^^
+  File "/opt/bodhi-venv/lib/python3.14/site-packages/rdflib/plugins/parsers/notation3.py", line 524, in feed
+    i = self.directiveOrStatement(s, j)
+  File "/opt/bodhi-venv/lib/python3.14/site-packages/rdflib/plugins/parsers/notation3.py", line 545, in directiveOrStatement
+    return self.checkDot(argstr, j)
+           ~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/opt/bodhi-venv/lib/python3.14/site-packages/rdflib/plugins/parsers/notation3.py", line 1227, in checkDot
+    self.BadSyntax(argstr, j, "expected '.' or '}' or ']' at end of statement")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bodhi-venv/lib/python3.14/site-packages/rdflib/plugins/parsers/notation3.py", line 1743, in BadSyntax
+    raise BadSyntax(self._thisDoc, self.lines, argstr, i, msg)
+rdflib.plugins.parsers.notation3.BadSyntax: <no detail available>
+--- 模块核对 ---
+module_keys = ['bmm', 'agent']
+totals = None
+  module bmm      label=BMM 扩展本体（含信息来源追踪与枚举类型）         short=None
+  module agent    label=智能体开发本体（业务智能体 + 技能/工具开发 + 评测与改进建议） short=None
+  model bmm    classes=31  关注类=['bmm:Report', 'bmm:RequirementAnalysisReport']
+  model agent  classes=13  关注类=['agent:EvaluationPlan']

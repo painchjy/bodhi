@@ -5,6 +5,7 @@
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix bodhi: <http://example.org/bodhi#> .
 @prefix bmm: <http://example.org/bmm#> .
+@prefix bpmn: <http://example.org/bpmn#> .
 
 <http://example.org/agent> rdf:type owl:Ontology ;
     rdfs:label "智能体开发本体（业务智能体 + 技能/工具开发 + 评测与改进建议）"@zh ;
@@ -371,3 +372,11 @@
     rdfs:label "评测方案"@zh ;
     rdfs:comment "「开发交付」活动的产出、「评测」活动的输入：指标/用例/样本/通过门槛（对齐 agent:Metric）。"@zh ;
     rdfs:subClassOf bmm:Report .
+
+# ============ 与 BPMN 的连接（2026-10-11；本模块 imports bpmn）============
+# **一条关系**连接两个模块：**智能体协助活动**（智能体的工作由技能/工具支撑，见 :agentUsesSkill / :skillUsesTool）。
+:agentAssistsActivity rdf:type owl:ObjectProperty ;
+    rdfs:label "协助活动"@zh ;
+    rdfs:domain :Agent ;
+    rdfs:range bpmn:Activity ;
+    rdfs:comment "智能体**协助**完成活动（活动下的任务由人或智能体执行，取决于任务的**实现手段**）。"@zh .

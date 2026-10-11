@@ -1,0 +1,11 @@
+ls: cannot access 'ontology/sources/bpmn.ttl': No such file or directory
+--- apply 尾部 ---
+tail: cannot open 'tools/diag/_bpmnapply.log' for reading: No such file or directory
+--- 编译关键行 ---
+--- 模块核对 ---
+module_keys = ['bmm', 'agent']
+totals = None
+  module bmm      label=BMM 扩展本体（含信息来源追踪与枚举类型）         short=None
+  module agent    label=智能体开发本体（业务智能体 + 技能/工具开发 + 评测与改进建议） short=None
+  model bmm    classes=31  关注类=['bmm:Report', 'bmm:RequirementAnalysisReport']
+  model agent  classes=13  关注类=['agent:EvaluationPlan']

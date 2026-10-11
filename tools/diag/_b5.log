@@ -1,0 +1,10 @@
+checks = {'B5': 1, 'C4': 1} | findings = 2
+RAW findings: [{"check": "B5", "severity": "medium", "subject": "08810cbd-af86-48d1-bd25-3b2c338e3d68", "detail": "本体投影与编译产物不一致：投影 48 类/64 对象属性/57 数据属性，产物 47 类/61 对象属性/55 数据属性（产物模块：bmm、agent、bpmn）。投影有产物无 → 类 bpmn:Property；对象属性 agent:agentPerformsTask、agent:skillImplementsActivity、bpmn:dataObjectHasProperty。产物有投影无 → 类 —；对象属性 —。数据属性差 +2。", "fix_hint": "① 重编产物：/opt/bodhi-venv/bin/python3 tools/ontology-compiler/compile.py compile --diff（产物含前端类型清单 ontologyTypes.ts 的来源；重编后需重建/部署前端才会在界面出现新分类：bash deploy/weknora-fork/build_frontend.sh && bash deploy/weknora-fork/deploy_frontend.sh）；② 重载投影：bash deploy/bootstrap-neo4j.sh（两步都是直接命令，无需计划确认）", "fixable": false}, {"check": "C4", "severity": "medium", "subject": "neo4j", "detail": "225/225 个 BodhiInstance 节点没有任何溯源（knowledge_id/source_doc 均为空）", "fix_hint": "按实例层口径补溯源或清掉（CLI 抽取路径才会写）", "fixable": false}]
+RAW keys: ['kb_id', 'kb_name', 'scope', 'generated_at', 'kb_id_note', 'graph_orphans', 'summary', 'totals', 'findings', 'data', 'note']
+--- B5 定义 ---
+25:  B5（本体投影 ↔ 编译产物不一致）：修复**直接给命令**（重编产物 / 重载投影），不走 plan_id
+78:# B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
+535:    """B5：Neo4j 本体投影（**运行真源**）与编译产物 `artifacts/` 是否一致。
+561:        rep.add("B5", "medium", ctx["kb_id"], "无法读 Neo4j 本体投影：%s" % exc, PROJECTION_FIX)
+566:        rep.add("B5", "high", ctx["kb_id"], "读不到编译产物 %s：%s" % (ONTOLOGY_INDEX, exc),
+595:        rep.add("B5", "medium", ctx["kb_id"],

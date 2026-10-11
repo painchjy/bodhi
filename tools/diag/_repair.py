@@ -11,9 +11,10 @@ import urllib.request
 ONT_KB = "08810cbd-af86-48d1-bd25-3b2c338e3d68"
 mode = (sys.argv[1] if len(sys.argv) > 1 else "repair").strip()
 
-if mode == "load-bmm":
+if mode.startswith("load-"):
+    model = mode.split("-", 1)[1].strip()          # load-bmm / load-bpmn / load-agent
     url = "http://127.0.0.1:8765/bodhi/ontology/load"
-    body = {"model_id": "bmm", "kb_id": ONT_KB, "purge": True,
+    body = {"model_id": model, "kb_id": ONT_KB, "purge": True,
             "compile": True, "project_wiki": True}
 else:
     url = "http://127.0.0.1:8765/bodhi/ontology/repair"

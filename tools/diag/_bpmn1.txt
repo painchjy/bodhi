@@ -1,0 +1,116 @@
+@prefix : <http://example.org/bpmn#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix bodhi: <http://example.org/bodhi#> .
+@prefix bmm: <http://example.org/bmm#> .
+
+# =====================================================================
+# BPMN 业务流程模型（**按需子集**）（2026-10-11 新增）
+#
+# 参考 **BPMN 2.0**，但只落**当前需要的概念**：活动 / 任务 / 业务实体 / 业务属性，
+# 以及三条关键关联：**活动 ↔ 业务流程**（`processHasActivity` → bmm:BusinessProcess）、
+# **任务 → 业务规则**（`taskExecutesRule` → bmm:BusinessRule，故本模块 **imports bmm**）、
+# **活动 → 报告**（`activityProducesReport` → bmm:Report）。
+# 技能/智能体是活动/任务的具体实现 → 由 `agent.ttl` **imports bpmn** 表达
+# （`agent:skillImplementsActivity` / `agent:agentPerformsTask`）。
+# 刻意**不落**：SequenceFlow / Gateway（顺序不固化）、Message / Collaboration / Choreography。
+# =====================================================================
+<http://example.org/bpmn> rdf:type owl:Ontology ;
+    rdfs:label "BPMN业务流程模型（按需子集）"@zh ;
+    rdfs:comment "BPMN 2.0 的按需子集：活动/任务/业务实体/业务属性 + 活动↔业务流程、任务→业务规则。imports bmm。"@zh ;
+    bodhi:expertRole "业务流程建模专家，熟悉 BPMN 2.0 与业务规则落地"@zh .
+
+# ============ 1. 活动 Activity（BPMN: Activity） ============
+:Activity rdf:type owl:Class ;
+    rdfs:label "活动"@zh ;
+    rdfs:comment "流程中的**工作单元**（BPMN Activity）。本工程口径：一个活动产出**一份报告**（过程件）+ **一批资产**（entity）；活动有明确的**启动条件**与**结束条件**（结束条件含「对该模型范围质检 + 问题项反馈」）。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+# ============ 2. 任务 Task（BPMN: Task ⊂ Activity） ============
+:Task rdf:type owl:Class ;
+    rdfs:label "任务"@zh ;
+    rdfs:comment "**不可再分**的工作单元（BPMN Task，是 Activity 的一种）：执行一条/一组**业务规则**（`taskExecutesRule` → `bmm:BusinessRule`），由**技能/智能体**实现。"@zh ;
+    rdfs:subClassOf :Activity .
+
+# ============ 3. 业务实体 DataObject（BPMN: DataObject） ============
+:DataObject rdf:type owl:Class ;
+    rdfs:label "业务实体"@zh ;
+    rdfs:comment "活动/任务读写的**业务对象**（BPMN DataObject）：技术方案、系统、设备申请、技术栈、认证清单…。**各领域模型里的「业务实体」类建议继承本类**（`rdfs:subClassOf bpmn:DataObject`），使「数据从哪来、到哪去」可查。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+# ============ 4. 业务属性 Property（BPMN: Property） ============
+:Property rdf:type owl:Class ;
+    rdfs:label "业务属性"@zh ;
+    rdfs:comment "业务实体在**本流程范围内**的属性（BPMN Property）：如「本次评审的方案等级」。⚠️ 与 OWL 数据属性分工：**跨流程稳定的类属性**用 `owl:DatatypeProperty`；**某活动/任务范围内的取值**用本类实例。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+# ============ 关系（对象属性） ============
+:processHasActivity rdf:type owl:ObjectProperty ;
+    rdfs:label "包含活动"@zh ;
+    rdfs:domain bmm:BusinessProcess ;
+    rdfs:range :Activity ;
+    rdfs:comment "业务流程包含活动（BPMN Process → flowElement）：**「企业知识管理流程」→ A1 立项与需求分析 / A2 设计与规划 / A3 开发交付 / A4 评测**。"@zh .
+
+:activityProducesReport rdf:type owl:ObjectProperty ;
+    rdfs:label "产出报告"@zh ;
+    rdfs:domain :Activity ;
+    rdfs:range bmm:Report ;
+    rdfs:comment "活动产出**报告**（过程件）—— 报告与活动**一一对应**：需求分析报告 / 设计单 / 安装指引 / 评测方案 / 评测报告 / 结项报告。"@zh .
+
+:activityUsesEntity rdf:type owl:ObjectProperty ;
+    rdfs:label "使用业务实体"@zh ;
+    rdfs:domain :Activity ;
+    rdfs:range :DataObject ;
+    rdfs:comment "活动读写的业务实体（输入/输出对象）。"@zh .
+
+:dataObjectHasProperty rdf:type owl:ObjectProperty ;
+    rdfs:label "具有业务属性"@zh ;
+    rdfs:domain :DataObject ;
+    rdfs:range :Property ;
+    rdfs:comment "业务实体具有的业务属性。"@zh .
+
+:taskExecutesRule rdf:type owl:ObjectProperty ;
+    rdfs:label "执行规则"@zh ;
+    rdfs:domain :Task ;
+    rdfs:range bmm:BusinessRule ;
+    rdfs:comment "任务执行业务规则（**所以本模块 imports bmm**）：如「评审任务」执行 R1 最低部署与灾备要求 / R2 开源软件适用规则。"@zh .
+
+# ============ 数据属性 ============
+:activityId rdf:type owl:DatatypeProperty ;
+    rdfs:label "活动编号"@zh ;
+    rdfs:domain :Activity ;
+    rdfs:range xsd:string ;
+    rdfs:comment "活动稳定 id（如 `a1-requirement-analysis`）。"@zh .
+
+:activityEntry rdf:type owl:DatatypeProperty ;
+    rdfs:label "启动条件"@zh ;
+    rdfs:domain :Activity ;
+    rdfs:range xsd:string ;
+    rdfs:comment "启动条件（缺一不可）：输入的文档/报告 + **声明的本体模型范围** + 产出物与反馈人。"@zh .
+
+:activityExit rdf:type owl:DatatypeProperty ;
+    rdfs:label "结束条件"@zh ;
+    rdfs:domain :Activity ;
+    rdfs:range xsd:string ;
+    rdfs:comment "结束条件：报告落库 + **对该模型范围质检** + **问题项明确反馈**（现象·证据·处理·责任人·时间）。"@zh .
+
+:activityScopeModel rdf:type owl:DatatypeProperty ;
+    rdfs:label "模型范围"@zh ;
+    rdfs:domain :Activity ;
+    rdfs:range xsd:string ;
+    rdfs:comment "本活动声明的**本体模型范围**（律五），如 `bmm` 或 `bmm,ea`；结束前按它做越界质检（律六）。"@zh .
+
+:propertyName rdf:type owl:DatatypeProperty ;
+    rdfs:label "属性名"@zh ;
+    rdfs:domain :Property ;
+    rdfs:range xsd:string .
+
+:propertyValue rdf:type owl:DatatypeProperty ;
+    rdfs:label "属性值"@zh ;
+    rdfs:domain :Property ;
+    rdfs:range xsd:string .
+
+# 模块短名（目录名/列表名；≤16 字符，导入时校验）
+<http://example.org/bpmn> bodhi:shortName "BPMN流程模型" .

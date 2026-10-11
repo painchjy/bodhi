@@ -1,0 +1,202 @@
+
+===== ontology/sources/bpmn.ttl =====
+--- before
++++ after
+@@ -30,7 +30,11 @@
+ 
+ # ============ 2. 任务 Task（BPMN: Task ⊂ Activity） ============
++# 口径（2026-10-11 用户手工修订）：**为达成某个目标、由一个角色连续执行的工作单元**。
++# · 任务**指定"角色"与"目标"**（数据属性 `taskRole` / `taskGoal`）；
++# · **人工 / 自动 / 线下取决于"实现的手段"**（`taskMeans`），**不是任务的子类特性** → 不分子类；
++# · 任务执行**业务规则**（`taskExecutesRule` → `bmm:BusinessRule`），可由**智能体协助**（`agent:agentAssistsActivity`）。
+ :Task rdf:type owl:Class ;
+     rdfs:label "任务"@zh ;
+-    rdfs:comment "**不可再分**的工作单元（BPMN Task，是 Activity 的一种）：执行一条/一组**业务规则**（`taskExecutesRule` → `bmm:BusinessRule`），由**技能/智能体**实现。"@zh ;
++    rdfs:comment "为达成某个目标、由一个角色**连续执行**的工作单元（BPMN Task，是 Activity 的一种）：指定**角色**（`taskRole`）与**目标**（`taskGoal`）；人工/自动/线下由**实现的手段**（`taskMeans`）决定；执行一条/一组业务规则。"@zh ;
+     rdfs:subClassOf :Activity .
+ 
+@@ -41,9 +45,6 @@
+     rdfs:subClassOf owl:Thing .
+ 
+-# ============ 4. 业务属性 Property（BPMN: Property） ============
+-:Property rdf:type owl:Class ;
+-    rdfs:label "业务属性"@zh ;
+-    rdfs:comment "业务实体在**本流程范围内**的属性（BPMN Property）：如「本次评审的方案等级」。⚠️ 与 OWL 数据属性分工：**跨流程稳定的类属性**用 `owl:DatatypeProperty`；**某活动/任务范围内的取值**用本类实例。"@zh ;
+-    rdfs:subClassOf owl:Thing .
++# ============ 4.（业务属性 Property：**2026-10-11 用户口径先去除**）============
++# 需要时再回来：BPMN Property 表达"流程范围内的属性"；当前用 OWL 数据属性承载即可。
+ 
+ # ============ 关系（对象属性） ============
+@@ -65,10 +66,4 @@
+     rdfs:range :DataObject ;
+     rdfs:comment "活动读写的业务实体（输入/输出对象）。"@zh .
+-
+-:dataObjectHasProperty rdf:type owl:ObjectProperty ;
+-    rdfs:label "具有业务属性"@zh ;
+-    rdfs:domain :DataObject ;
+-    rdfs:range :Property ;
+-    rdfs:comment "业务实体具有的业务属性。"@zh .
+ 
+ :taskExecutesRule rdf:type owl:ObjectProperty ;
+@@ -103,13 +98,27 @@
+     rdfs:comment "本活动声明的**本体模型范围**（律五），如 `bmm` 或 `bmm,ea`；结束前按它做越界质检（律六）。"@zh .
+ 
+-:propertyName rdf:type owl:DatatypeProperty ;
+-    rdfs:label "属性名"@zh ;
+-    rdfs:domain :Property ;
+-    rdfs:range xsd:string .
++:activityRound rdf:type owl:DatatypeProperty ;
++    rdfs:label "轮次"@zh ;
++    rdfs:domain :Activity ;
++    rdfs:range xsd:integer ;
++    rdfs:comment "第几轮（第二轮、第三轮…）：每轮评审都**更新同一份报告**（同 slug 覆盖、版本+1）。"@zh .
+ 
+-:propertyValue rdf:type owl:DatatypeProperty ;
+-    rdfs:label "属性值"@zh ;
+-    rdfs:domain :Property ;
+-    rdfs:range xsd:string .
++:taskGoal rdf:type owl:DatatypeProperty ;
++    rdfs:label "实现的目标"@zh ;
++    rdfs:domain :Task ;
++    rdfs:range xsd:string ;
++    rdfs:comment "该任务要达成的目标（用户口径：任务 = 为达成某个目标、由一个角色连续执行的工作单元）。"@zh .
++
++:taskRole rdf:type owl:DatatypeProperty ;
++    rdfs:label "执行角色"@zh ;
++    rdfs:domain :Task ;
++    rdfs:range xsd:string ;
++    rdfs:comment "执行该任务的角色（如评审组长 / 评审专家）。"@zh .
++
++:taskMeans rdf:type owl:DatatypeProperty ;
++    rdfs:label "实现手段"@zh ;
++    rdfs:domain :Task ;
+
+
+===== ontology/BPMN完整版.ttl =====
+--- before
++++ after
+@@ -30,7 +30,11 @@
+ 
+ # ============ 2. 任务 Task（BPMN: Task ⊂ Activity） ============
++# 口径（2026-10-11 用户手工修订）：**为达成某个目标、由一个角色连续执行的工作单元**。
++# · 任务**指定"角色"与"目标"**（数据属性 `taskRole` / `taskGoal`）；
++# · **人工 / 自动 / 线下取决于"实现的手段"**（`taskMeans`），**不是任务的子类特性** → 不分子类；
++# · 任务执行**业务规则**（`taskExecutesRule` → `bmm:BusinessRule`），可由**智能体协助**（`agent:agentAssistsActivity`）。
+ :Task rdf:type owl:Class ;
+     rdfs:label "任务"@zh ;
+-    rdfs:comment "**不可再分**的工作单元（BPMN Task，是 Activity 的一种）：执行一条/一组**业务规则**（`taskExecutesRule` → `bmm:BusinessRule`），由**技能/智能体**实现。"@zh ;
++    rdfs:comment "为达成某个目标、由一个角色**连续执行**的工作单元（BPMN Task，是 Activity 的一种）：指定**角色**（`taskRole`）与**目标**（`taskGoal`）；人工/自动/线下由**实现的手段**（`taskMeans`）决定；执行一条/一组业务规则。"@zh ;
+     rdfs:subClassOf :Activity .
+ 
+@@ -41,9 +45,6 @@
+     rdfs:subClassOf owl:Thing .
+ 
+-# ============ 4. 业务属性 Property（BPMN: Property） ============
+-:Property rdf:type owl:Class ;
+-    rdfs:label "业务属性"@zh ;
+-    rdfs:comment "业务实体在**本流程范围内**的属性（BPMN Property）：如「本次评审的方案等级」。⚠️ 与 OWL 数据属性分工：**跨流程稳定的类属性**用 `owl:DatatypeProperty`；**某活动/任务范围内的取值**用本类实例。"@zh ;
+-    rdfs:subClassOf owl:Thing .
++# ============ 4.（业务属性 Property：**2026-10-11 用户口径先去除**）============
++# 需要时再回来：BPMN Property 表达"流程范围内的属性"；当前用 OWL 数据属性承载即可。
+ 
+ # ============ 关系（对象属性） ============
+@@ -65,10 +66,4 @@
+     rdfs:range :DataObject ;
+     rdfs:comment "活动读写的业务实体（输入/输出对象）。"@zh .
+-
+-:dataObjectHasProperty rdf:type owl:ObjectProperty ;
+-    rdfs:label "具有业务属性"@zh ;
+-    rdfs:domain :DataObject ;
+-    rdfs:range :Property ;
+-    rdfs:comment "业务实体具有的业务属性。"@zh .
+ 
+ :taskExecutesRule rdf:type owl:ObjectProperty ;
+@@ -103,13 +98,27 @@
+     rdfs:comment "本活动声明的**本体模型范围**（律五），如 `bmm` 或 `bmm,ea`；结束前按它做越界质检（律六）。"@zh .
+ 
+-:propertyName rdf:type owl:DatatypeProperty ;
+-    rdfs:label "属性名"@zh ;
+-    rdfs:domain :Property ;
+-    rdfs:range xsd:string .
++:activityRound rdf:type owl:DatatypeProperty ;
++    rdfs:label "轮次"@zh ;
++    rdfs:domain :Activity ;
++    rdfs:range xsd:integer ;
++    rdfs:comment "第几轮（第二轮、第三轮…）：每轮评审都**更新同一份报告**（同 slug 覆盖、版本+1）。"@zh .
+ 
+-:propertyValue rdf:type owl:DatatypeProperty ;
+-    rdfs:label "属性值"@zh ;
+-    rdfs:domain :Property ;
+-    rdfs:range xsd:string .
++:taskGoal rdf:type owl:DatatypeProperty ;
++    rdfs:label "实现的目标"@zh ;
++    rdfs:domain :Task ;
++    rdfs:range xsd:string ;
++    rdfs:comment "该任务要达成的目标（用户口径：任务 = 为达成某个目标、由一个角色连续执行的工作单元）。"@zh .
++
++:taskRole rdf:type owl:DatatypeProperty ;
++    rdfs:label "执行角色"@zh ;
++    rdfs:domain :Task ;
++    rdfs:range xsd:string ;
++    rdfs:comment "执行该任务的角色（如评审组长 / 评审专家）。"@zh .
++
++:taskMeans rdf:type owl:DatatypeProperty ;
++    rdfs:label "实现手段"@zh ;
++    rdfs:domain :Task ;
+
+
+===== ontology/sources/agent.ttl =====
+--- before
++++ after
+@@ -374,15 +374,9 @@
+     rdfs:subClassOf bmm:Report .
+ 
+-# ============ 与 BPMN 的连接（2026-10-11 新增；本模块 imports bpmn）============
+-# 技能 / 智能体是**活动 / 任务的具体实现**（活动↔业务流程、任务→业务规则 在 bpmn 侧表达）
+-:skillImplementsActivity rdf:type owl:ObjectProperty ;
+-    rdfs:label "实现活动"@zh ;
+-    rdfs:domain :Skill ;
++# ============ 与 BPMN 的连接（2026-10-11；本模块 imports bpmn）============
++# **一条关系**连接两个模块：**智能体协助活动**（智能体的工作由技能/工具支撑，见 :agentUsesSkill / :skillUsesTool）。
++:agentAssistsActivity rdf:type owl:ObjectProperty ;
++    rdfs:label "协助活动"@zh ;
++    rdfs:domain :Agent ;
+     rdfs:range bpmn:Activity ;
+-    rdfs:comment "技能是**活动**的具体实现（如 `model_recommendation` 实现 A1 立项与需求分析）。"@zh .
+-
+-:agentPerformsTask rdf:type owl:ObjectProperty ;
+-    rdfs:label "执行任务"@zh ;
+-    rdfs:domain :Agent ;
+-    rdfs:range bpmn:Task ;
+-    rdfs:comment "智能体**执行任务**（任务执行业务规则）—— 与技能、工具共同构成能力的实现面。"@zh .
++    rdfs:comment "智能体**协助**完成活动（活动下的任务由人或智能体执行，取决于任务的**实现手段**）。"@zh .
+
+
+===== ontology/智能体开发完整版.ttl =====
+--- before
++++ after
+@@ -374,15 +374,9 @@
+     rdfs:subClassOf bmm:Report .
+ 
+-# ============ 与 BPMN 的连接（2026-10-11 新增；本模块 imports bpmn）============
+-# 技能 / 智能体是**活动 / 任务的具体实现**（活动↔业务流程、任务→业务规则 在 bpmn 侧表达）
+-:skillImplementsActivity rdf:type owl:ObjectProperty ;
+-    rdfs:label "实现活动"@zh ;
+-    rdfs:domain :Skill ;
++# ============ 与 BPMN 的连接（2026-10-11；本模块 imports bpmn）============
++# **一条关系**连接两个模块：**智能体协助活动**（智能体的工作由技能/工具支撑，见 :agentUsesSkill / :skillUsesTool）。
++:agentAssistsActivity rdf:type owl:ObjectProperty ;
++    rdfs:label "协助活动"@zh ;
++    rdfs:domain :Agent ;
+     rdfs:range bpmn:Activity ;
+-    rdfs:comment "技能是**活动**的具体实现（如 `model_recommendation` 实现 A1 立项与需求分析）。"@zh .
+-
+-:agentPerformsTask rdf:type owl:ObjectProperty ;
+-    rdfs:label "执行任务"@zh ;
+-    rdfs:domain :Agent ;
+-    rdfs:range bpmn:Task ;
+-    rdfs:comment "智能体**执行任务**（任务执行业务规则）—— 与技能、工具共同构成能力的实现面。"@zh .
++    rdfs:comment "智能体**协助**完成活动（活动下的任务由人或智能体执行，取决于任务的**实现手段**）。"@zh .
+
+
+**dry-run**（未写文件）；确认后加 --apply。

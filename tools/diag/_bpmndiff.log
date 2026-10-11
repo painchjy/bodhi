@@ -1,0 +1,74 @@
+
+===== ontology/sources/bpmn.ttl（新建）=====
+@prefix : <http://example.org/bpmn#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix bodhi: <http://example.org/bodhi#> .
+@prefix bmm: <http://example.org/bmm#> .
+
+# =====================================================================
+# BPMN 业务流程模型（**按需子集**）（2026-10-11 新增）
+#
+# 参考 **BPMN 2.0**，但只落**当前需要的概念**：活动 / 任务 / 业务实体 / 业务属性，
+
+  … 共 116 行 / 4728 字
+
+===== ontology/sources/agent.ttl =====
+--- before
++++ after
+@@ -6,4 +6,5 @@
+ @prefix bodhi: <http://example.org/bodhi#> .
+ @prefix bmm: <http://example.org/bmm#> .
++@prefix bpmn: <http://example.org/bpmn#> .
+ 
+ <http://example.org/agent> rdf:type owl:Ontology ;
+@@ -372,2 +373,16 @@
+     rdfs:comment "「开发交付」活动的产出、「评测」活动的输入：指标/用例/样本/通过门槛（对齐 agent:Metric）。"@zh ;
+     rdfs:subClassOf bmm:Report .
++
++# ============ 与 BPMN 的连接（2026-10-11 新增；本模块 imports bpmn）============
++# 技能 / 智能体是**活动 / 任务的具体实现**（活动↔业务流程、任务→业务规则 在 bpmn 侧表达）
++:skillImplementsActivity rdf:type owl:ObjectProperty ;
++    rdfs:label "实现活动"@zh ;
++    rdfs:domain :Skill ;
++    rdfs:range bpmn:Activity ;
++    rdfs:comment "技能是**活动**的具体实现（如 `model_recommendation` 实现 A1 立项与需求分析）。"@zh .
++
++:agentPerformsTask rdf:type owl:ObjectProperty ;
++    rdfs:label "执行任务"@zh ;
++    rdfs:domain :Agent ;
++    rdfs:range bpmn:Task ;
++    rdfs:comment "智能体**执行任务**（任务执行业务规则）—— 与技能、工具共同构成能力的实现面。"@zh .
+
+
+===== ontology/智能体开发完整版.ttl =====
+--- before
++++ after
+@@ -6,4 +6,5 @@
+ @prefix bodhi: <http://example.org/bodhi#> .
+ @prefix bmm: <http://example.org/bmm#> .
++@prefix bpmn: <http://example.org/bpmn#> .
+ 
+ <http://example.org/agent> rdf:type owl:Ontology ;
+@@ -372,2 +373,16 @@
+     rdfs:comment "「开发交付」活动的产出、「评测」活动的输入：指标/用例/样本/通过门槛（对齐 agent:Metric）。"@zh ;
+     rdfs:subClassOf bmm:Report .
++
++# ============ 与 BPMN 的连接（2026-10-11 新增；本模块 imports bpmn）============
++# 技能 / 智能体是**活动 / 任务的具体实现**（活动↔业务流程、任务→业务规则 在 bpmn 侧表达）
++:skillImplementsActivity rdf:type owl:ObjectProperty ;
++    rdfs:label "实现活动"@zh ;
++    rdfs:domain :Skill ;
++    rdfs:range bpmn:Activity ;
++    rdfs:comment "技能是**活动**的具体实现（如 `model_recommendation` 实现 A1 立项与需求分析）。"@zh .
++
++:agentPerformsTask rdf:type owl:ObjectProperty ;
++    rdfs:label "执行任务"@zh ;
++    rdfs:domain :Agent ;
++    rdfs:range bpmn:Task ;
++    rdfs:comment "智能体**执行任务**（任务执行业务规则）—— 与技能、工具共同构成能力的实现面。"@zh .
+
+
+**dry-run**（未写文件）；确认后加 --apply。

@@ -19,3 +19,10 @@ __pycache__/
 # 部署本地配置：含图库密码，只入库模板 deploy/.env.example
 warning: in the working copy of 'tools/diag/_exp_inherit.py', CRLF will be replaced by LF the next time Git touches it
 warning: in the working copy of 'tools/diag/_audit_c4.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_repair.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_patch_v05.py', CRLF will be replaced by LF the next time Git touches it
+=== 提交 ===
+4143dc4 ontology(报告类型): 加 bmm:Report 基类 + bmm:RequirementAnalysisReport(需求分析报告/需求规格说明书) + agent:EvaluationPlan(评测方案)；4 个既有报告类改继承 bmm:Report；bmm:Assessment 摘 wiki_content 改纯 entity（已编译+Neo4j重投影+live 抽查通过）
+811eedd docs: 建模工艺 v0.5（收敛为 4 个活动 A1-A4；A1+A2 合并，新增子类 需求分析报告/需求规格说明书；A2 可多份设计单；A3 出安装指引+评测方案；A4 按方案评测并反馈；去掉 A5/A7）
+=== 工作区剩余 ===
+11

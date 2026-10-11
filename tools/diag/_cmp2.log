@@ -1,0 +1,249 @@
+本体体检：模块 3 / 类 48 / 对象属性 63 / 数据属性 53 / 限制 4 / 枚举 0（取值 0）
+载入时间戳：2026-10-11T11:33:33Z
+
+---- WARN（42）----
+[WARN W2] agent:adviceImpact 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] agent:advicePriority 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] agent:endpoint 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] agent:metricName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] agent:metricValue 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] agent:runAt 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] agent:skillVersion 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] agent:toolId 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:agentName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:definition 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:description 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:englishName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:name 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:realizesProcess 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:sessionName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:startedAt 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bmm:tenantName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bpmn:propertyName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W2] bpmn:propertyValue 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+      提示：补一句「什么时候用这个术语」的定义，避免与其他术语混淆
+[WARN W4] agent:Agent 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] agent:MCPService 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] agent:Metric 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] agent:Skill 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] agent:Stub 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] agent:Tool 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] agent:ToolContract 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] agent:WorkKnowledgeBase 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:Assessment 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:BusinessProcess 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:DesiredResult 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:Influencer 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:KnowledgeSession 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:Liability 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:Means 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:OrganizationUnit 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bmm:Report 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bpmn:Activity 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bpmn:DataObject 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W4] bpmn:Property 类没有父类（本体顶层悬空）
+      提示：确认是否刻意的顶层类；否则挂到上层概念（如 bmm:Resource / ea:ArchitectureElement）
+[WARN W6] bmm:governs owl:inverseOf 未成对：bmm:governs 指向 bmm:isGovernedBy，但对方没有指回来
+      提示：两端都写 inverseOf，才能让「所有权 / 持有」这类关系双向推理成立
+[WARN W6] bmm:isDerivedFrom owl:inverseOf 未成对：bmm:isDerivedFrom 指向 bmm:isBasisFor，但对方没有指回来
+      提示：两端都写 inverseOf，才能让「所有权 / 持有」这类关系双向推理成立
+[WARN W6] bmm:realizesProcess owl:inverseOf 未成对：bmm:realizesProcess 指向 bmm:realizedBy，但对方没有指回来
+      提示：两端都写 inverseOf，才能让「所有权 / 持有」这类关系双向推理成立
+
+---- INFO（65）----
+[INFO I1] agent 跨模块桥 4 条：agent:adviceFromSession、agent:agentPerformsTask、agent:agentRealizesMeans、agent:skillImplementsActivity
+      提示：跨层推理依赖这些接缝，改动需同步更新查询与抽取提示词
+[INFO I1] bmm 跨模块桥 1 条：bmm:sourceSession
+      提示：跨层推理依赖这些接缝，改动需同步更新查询与抽取提示词
+[INFO I1] bpmn 跨模块桥 3 条：bpmn:activityProducesReport、bpmn:processHasActivity、bpmn:taskExecutesRule
+      提示：跨层推理依赖这些接缝，改动需同步更新查询与抽取提示词
+[INFO I2] agent 模块 智能体开发本体（业务智能体 + 技能/工具开发 + 评测与改进建议）（key=agent，extension）：类 13 / 对象属性 21 / 数据属性 18，文件 ontology/sources/agent.ttl
+[INFO I2] bmm 模块 BMM 扩展本体（含信息来源追踪与枚举类型）（key=bmm，base）：类 31 / 对象属性 37 / 数据属性 29，文件 ontology/sources/bmm.ttl
+[INFO I2] bpmn 模块 BPMN业务流程模型（按需子集）（key=bpmn，extension）：类 4 / 对象属性 5 / 数据属性 6，文件 ontology/sources/bpmn.ttl
+[INFO I3] agent:adviceCategory 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:adviceId 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:adviceImpact 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:advicePriority 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:adviceStatus 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:adviceText 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:contractVersion 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:endpoint 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:metricName 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:metricValue 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:mockSource 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:runAt 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:skillId 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:skillPath 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:skillVersion 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:stubReason 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:stubStatus 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] agent:toolId 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:CourseOfActionlevel 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:agentName 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:assessmentType 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:coreFunction 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:definition 引用了外部词汇表术语 owl:Thing（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:definition 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:description 引用了外部词汇表术语 owl:Thing（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:description 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:enforcementLevel 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:englishName 引用了外部词汇表术语 owl:Thing（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:englishName 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:hardwareAssetCategory 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:influencerCategory 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:initialQuestion 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:isAuthoritative 引用了外部词汇表术语 xsd:boolean（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:knowledgeNeed 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:name 引用了外部词汇表术语 owl:Thing（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:name 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:partNo 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:ruleImplementation 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:ruleReference 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:ruleScope 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:sessionName 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:sessionNo 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:sessionStatus 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:sourceLocator 引用了外部词汇表术语 owl:Thing（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:sourceLocator 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:sourceSession 引用了外部词汇表术语 owl:Thing（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:startedAt 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:systemAbbr 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:systemCriticality 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:systemNo 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:systemStatus 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:tenantName 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bmm:wikiContent 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bpmn:activityEntry 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bpmn:activityExit 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bpmn:activityId 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bpmn:activityScopeModel 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bpmn:propertyName 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+[INFO I3] bpmn:propertyValue 引用了外部词汇表术语 xsd:string（未在本体系声明，按外部标准处理）
+      提示：若该术语应受本体系治理，请在对应模块的 TTL 中补声明
+
+合计：error 0 / warn 42 / info 65
+== 产物（28）→ /mnt/c/Users/PHJY/source/bodhi2/artifacts ==
+  artifacts/json_schema/README.md                                2248 B  json_schema
+  artifacts/json_schema/extraction_result.agent.schema.json      5914 B  json_schema
+  artifacts/json_schema/extraction_result.bmm.schema.json        7354 B  json_schema
+  artifacts/json_schema/extraction_result.bpmn.schema.json       4435 B  json_schema
+  artifacts/json_schema/extraction_result.schema.json            9777 B  json_schema
+  artifacts/json_schema/index.json                               1416 B  json_schema
+  artifacts/json_schema/knowledge_point.schema.json              8415 B  json_schema
+  artifacts/mapping/label_map.json                             110800 B  label_map
+  artifacts/neo4j/00_constraints.cypher                          1580 B  neo4j
+  artifacts/neo4j/10_ontology.cypher                           148238 B  neo4j
+  artifacts/neo4j/20_cross_layer_queries.cypher                  5106 B  neo4j
+  artifacts/neo4j/README.md                                      2358 B  neo4j
+  artifacts/prompts/README.md                                    1331 B  prompts
+  artifacts/prompts/agent_extraction.md                          8419 B  prompts
+  artifacts/prompts/bmm_extraction.md                           14398 B  prompts
+  artifacts/prompts/bmm_light.md                                 9752 B  light_prompts
+  artifacts/prompts/bpmn_extraction.md                           4255 B  prompts
+  artifacts/shacl/README.md                                      1192 B  shacl
+  artifacts/shacl/authored/ownership.shapes.ttl                  4888 B  shacl
+  artifacts/shacl/authored/service-design.shapes.ttl             6476 B  shacl
+  artifacts/shacl/generated.shapes.ttl                          71969 B  shacl
+  artifacts/shacl/index.json                                     2604 B  shacl
+  artifacts/weknora/README.md                                    2764 B  weknora
+  artifacts/weknora/extract_config.agent.json                   10338 B  weknora
+  artifacts/weknora/extract_config.bmm.json                     19246 B  weknora
+  artifacts/weknora/extract_config.bpmn.json                     3903 B  weknora
+  artifacts/weknora/ontology_index.json                         78494 B  weknora_index
+  artifacts/weknora/provenance.json                              3901 B  weknora
+manifest：/mnt/c/Users/PHJY/source/bodhi2/artifacts/manifest.json
