@@ -1,0 +1,38 @@
+=== wiki* / knowledge* 表 ===
+   knowledge_bases
+   knowledge_processing_spans
+   knowledge_tag_relations
+   knowledge_tags
+   knowledges
+   wiki_folders
+   wiki_page_issues
+   wiki_page_revisions
+   wiki_pages
+--- knowledge_bases（28 列）---
+   id, name, description, tenant_id, chunking_config, image_processing_config, embedding_model_id, summary_model_id, cos_config, vlm_config, extract_config, created_at, updated_at, deleted_at, is_temporary, type, faq_config, question_generation_config, storage_provider_config, is_pinned, pinned_at, asr_config, vector_store_id, wiki_config, indexing_strategy, creator_id, storage_backend_id, auto_tag_config
+--- wiki_pages（27 列）---
+   id, tenant_id, knowledge_base_id, slug, title, page_type, status, content, summary, parent_slug, folder_id, category_path, wiki_path, depth, sort_order, source_refs, chunk_refs, in_links, out_links, page_metadata, aliases, version, created_at, updated_at, deleted_at, last_edit_source, last_editor_id
+--- wiki_folders（11 列）---
+   id, tenant_id, knowledge_base_id, parent_id, name, path, depth, sort_order, created_at, updated_at, deleted_at
+--- wiki_page_revisions（16 列）---
+   id, tenant_id, knowledge_base_id, page_id, slug, version, title, page_type, status, content, summary, aliases, edit_source, editor_id, edited_at, created_at
+--- wiki_configs（0 列）---
+   
+--- wiki_page_tags（0 列）---
+   
+
+=== KB 候选（含'技术方案'/'领域'）===
+   {'id': '522d5f81-57f7-42bc-a016-63de46c8b23f', 'name': '领域知识库-测试1', 'tenant_id': '10000', 'created_at': '2026-09-23 11:58:41.437832+00'}
+   {'id': '23571d94-1e24-4c4e-98de-282007bb5252', 'name': '领域知识0924', 'tenant_id': '10000', 'created_at': '2026-09-24 14:28:30.15833+00'}
+   {'id': '7efad3eb-762a-4981-9164-cd3b3a226bd4', 'name': '技术方案评审领域模型', 'tenant_id': '10000', 'created_at': '2026-10-01 15:52:31.480251+00'}
+   {'id': '12ccea38-f388-432c-8683-e0201a15dcaa', 'name': '技术方案评审任务知识库', 'tenant_id': '10000', 'created_at': '2026-10-01 15:54:07.416499+00'}
+   {'id': '6effde80-3ad0-46a1-92b2-76d695e0b58f', 'name': '企业知识管理领域', 'tenant_id': '10000', 'created_at': '2026-10-03 09:25:12.185823+00'}
+   {'id': '030e2021-0ed7-4346-a435-47f8f0a311e7', 'name': '技术方案评审领域', 'tenant_id': '10000', 'created_at': '2026-10-08 02:48:48.774325+00'}
+
+=== Neo4j 实例节点（按 kb）===
+   {'kb': None, 'c': 225}
+--- 关系类型 ---
+--- 单节点属性样例 ---
+   {'k': ['kb_id', 'tenant_id', 'name', 'slug', 'module', 'page_type'], 'kb': None, 'slug': 'session/1427c9a6-48b8-4888-8165-5c838c750ece'}
+   {'k': ['kb_id', 'stubStatus', 'stubReason', 'wiki_content', 'module', 'slug', 'mockSource', 'name', 'page_type', 'tenant_id', 'sourceLocator'], 'kb': None, 'slug': 'agent/stub/挡板参考规范资料获取'}
+   {'k': ['kb_id', 'stubStatus', 'stubReason', 'wiki_content', 'module', 'slug', 'mockSource', 'name', 'page_type', 'tenant_id', 'sourceLocator'], 'kb': None, 'slug': 'agent/stub/挡板人工协助子任务分派'}

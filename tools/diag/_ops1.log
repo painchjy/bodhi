@@ -1,0 +1,88 @@
+=== ke-core 文件 ===
+README.md
+__pycache__
+ke_admin.py
+ke_audit.py
+ke_context.py
+ke_db.py
+ke_design.py
+ke_docs.py
+ke_graph.py
+ke_import.py
+ke_neo4j.py
+ke_ontology.py
+ke_pages.py
+ke_review.py
+ke_sheet.py
+ke_stats.py
+ke_yamlmini.py
+=== 已有导出/导入/备份相关 ===
+tools/ke-core/ke_admin.py:672:def import_ttl(ttl_path, module: str = "", project_wiki: bool = False, kb_id: str = "",
+tools/delivery/export_db.py:92:def export_ontology_kb(kb_id: str, out: pathlib.Path) -> dict:
+tools/delivery/export_db.py:147:def export_agents(out: pathlib.Path) -> dict:
+tools/delivery/scan_secrets.py:33:TEXT_EXT = {".md", ".txt", ".py", ".sh", ".yml", ".yaml", ".json", ".sql", ".jsonl", ".env",
+=== 打包清单里的 ke-core / 目录 ===
+65:TOOLS_MANUAL_PKG = ("delivery", "diag")  # tools 下归 03（维护工具）；diag/ 是仓库内诊断脚本，**不进任何交付包**
+287:    copy_tree(REPO / "tools", d / "tools", skip_top=TOOLS_MANUAL_PKG)
+306:          "  tools/        MCP 服务源码 + ke-core + 编译/投影工具（不再套内层 tar）\n"
+=== pack 里 02 包的文件来源 ===
+4-    bodhi2-delivery-<version>/
+5-      MANUAL.md  README.md  MANIFEST.json  SHA256SUMS
+6-      bodhi2-01-frontend.tar.gz     UI 镜像(可选 docker save) + nginx 模板 + overlay + 打补丁脚本 + FRONTEND.md
+7:      bodhi2-02-mcp-server.tar.gz   MCP 服务「仓库根形状」整包：tools/** + artifacts/** + skills/** +
+8-                                    Dockerfile/compose/systemd/自检/install.sh + MCP-SERVER.md
+9-      bodhi2-03-manual.tar.gz       docs/ + ontology/(TTL 真源) + 页面种子 + 登记 SQL + 五份手册 +
+10-                                    tools/delivery/(维护工具) + refresh_ontology_kb.sh
+11-
+12-分包口径（2026-09-22 定，**每个文件只属于一个包**）
+13--------------------------------------------------
+14-| 内容 | 归属 | 理由 |
+15-|---|---|---|
+16-| `deploy/weknora-fork/frontend/**`、UI 镜像、`FRONTEND.md` | 01 | 只跟 UI 有关 |
+17-| `tools/**`（**除** `tools/delivery`）、`artifacts/**`（**除** `artifacts/shacl`）、`skills/**` | 02 | 服务运行 + 编译/投影工具的运行环境 |
+18-| `docs/**`、`ontology/**`、`sql/**`、`seed/**`、`tools/delivery/**`、手册 5 份 | 03 | 文档 + 本体真源 + 维护工具 |
+19-| `FRONTEND.md` / `MCP-SERVER.md` | 01 / 02 | 各自包的部署指引；总指引 `MANUAL.md` 在根目录（同时进 03 存档） |
+--
+67-FRONTEND_PATCH_FILES = ("patch_frontend.py", "gen_frontend_types.py", "ontologyTypes.ts",
+68-                        "bodhi_type_migration.ts")
+69-PACKAGES = (("01-frontend", "bodhi2-01-frontend.tar.gz"),
+70:            ("02-mcp-server", "bodhi2-02-mcp-server.tar.gz"),
+71-            ("03-manual", "bodhi2-03-manual.tar.gz"))
+72-
+73-
+74-def run(cmd: list[str], cwd: pathlib.Path | None = None, check: bool = True) -> int:
+75-    print("      $ %s" % " ".join(str(c) for c in cmd))
+76-    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=check).returncode
+77-
+78-
+79-def copy_tree(src: pathlib.Path, dst: pathlib.Path, ignore_pycache: bool = True,
+80-              skip_top: tuple[str, ...] = (), skip_names: tuple[str, ...] = ("uploads",),
+81-              skip_files: tuple[str, ...] = ()) -> None:
+82-    """复制目录树；**排除 `__pycache__` / `.pyc` / `archive`**，并可按名排除。
+--
+113-    02 包会缺 32 个文件**（`artifacts/json_schema|prompts|neo4j|mapping` 等），装上去既没有类型索引也没有
+114-    提示词 —— 这次排查重复内容时就撞到过。缺了直接报错，别让残缺包流出去。
+115-    """
+116:    art = stage / "02-mcp-server" / "artifacts"
+117-    need = art / "weknora" / "ontology_index.json"
+118-    files = [p for p in art.rglob("*") if p.is_file()] if art.is_dir() else []
+119-    if not need.is_file() or len(files) < 20:
+120-        raise SystemExit(
+121-            "!! 02 包里的编译产物不完整（%d 个文件，`artifacts/weknora/ontology_index.json` %s）：\n"
+122-            "   `artifacts/` 被 .gitignore，必须**在有编译产物的机器上出包**，或先跑\n"
+123-            "   `python3 tools/ontology-compiler/compile.py compile`（需要 rdflib + PyYAML）重新生成。"
+124-            % (len(files), "存在" if need.is_file() else "缺失"))
+125-    return {"artifact_files": len(files), "has_index": True}
+126-
+127-
+128-def check_no_machine_ids(stage: pathlib.Path) -> dict:
+--
+282-    文档里的三步因此容易踩空。现在外层包内**就是**仓库根：解包（可 `--strip-components=1` 到 /opt/bodhi2）
+283-    即得 `tools/ artifacts/ skills/ logs/ .env`，Dockerfile / compose 直接可用。
+284-    """
+285:    d = stage / "02-mcp-server"
+286-    d.mkdir(parents=True, exist_ok=True)
+287-    copy_tree(REPO / "tools", d / "tools", skip_top=TOOLS_MANUAL_PKG)
+288-    copy_tree(REPO / "skills", d / "skills")
+289-    shutil.rmtree(d / "skills" / "dist", ignore_errors=True)
+290-    copy_tree(REPO / "artifacts", d / "artifacts", skip_top=MCP_ARTIFACT_SKIP)
