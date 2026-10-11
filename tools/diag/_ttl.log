@@ -1,0 +1,59 @@
+
+===== ontology/BMM完整版.ttl =====
+-- 类（29）--  [带 * = 本类或其祖先带 wiki_content 数据属性]
+  Assessment                   评估                     parents=Thing                                       ★wiki_content
+  Asset                        资产                     parents=Influencer,InternalInfluencer,Resource,Thi
+  BusinessPolicy               业务政策                   parents=Directive,Means,Thing                     
+  BusinessProcess              业务流程                   parents=Thing                                     
+  BusinessRule                 业务规则                   parents=Directive,Means,Thing                     
+  BusinessService              业务服务                   parents=Asset,FixedAsset,Influencer,InternalInflue
+  CourseOfAction               行动方案                   parents=Means,Thing                               
+  DesiredResult                预期成果                   parents=Thing                                     
+  Directive                    指导规范                   parents=Means,Thing                               
+  ExpiringProduct              即将到期的产品                parents=Asset,FixedAsset,Influencer,InternalInflue
+  ExternalInfluencer           外部影响因素                 parents=Influencer,Thing                          
+  FixedAsset                   固定资产                   parents=Asset,Influencer,InternalInfluencer,Resour
+  Goal                         目的                     parents=DesiredResult,Thing                       
+  HardwareAsset                硬件资产                   parents=Asset,ITAsset,Influencer,InternalInfluence
+  ITAsset                      IT资产                   parents=Asset,Influencer,InternalInfluencer,Resour
+  Influencer                   影响因素                   parents=Thing                                     
+  InternalInfluencer           内部影响因素                 parents=Influencer,Thing                          
+  KnowledgeSession             知识会话                   parents=Thing                                     
+  Liability                    责任                     parents=Thing                                     
+  MainSystem                   主系统                    parents=Asset,ITAsset,Influencer,InternalInfluence
+  Means                        手段                     parents=Thing                                     
+  Objective                    目标                     parents=DesiredResult,Thing                       
+  Offering                     对外交付物                  parents=Asset,FixedAsset,Influencer,InternalInflue
+  OperativeBusinessRule        操作性业务规则                parents=BusinessRule,Directive,Means,Thing        
+  OrganizationUnit             组织机构                   parents=Thing                                     
+  Product                      产品                     parents=Asset,FixedAsset,Influencer,InternalInflue
+  Resource                     资源                     parents=Influencer,InternalInfluencer,Thing       
+  StructuralBusinessRule       结构性业务规则                parents=BusinessRule,Directive,Means,Thing        
+  SubSystem                    子系统                    parents=Asset,ITAsset,Influencer,InternalInfluence
+-- 数据属性里的 wiki/正文 相关 --
+  wikiContent              domain=['Assessment']
+
+===== ontology/智能体开发完整版.ttl =====
+-- 类（12）--  [带 * = 本类或其祖先带 wiki_content 数据属性]
+  Advice                       改进建议                   parents=Thing                                     
+  Agent                        业务智能体                  parents=Thing                                     
+  DesignSpec                   设计单                    parents=Thing                                     
+  Evaluation                   评测                     parents=Thing                                     
+  InstallGuide                 安装指引                   parents=Thing                                     
+  MCPService                   MCP服务                  parents=Thing                                     
+  Metric                       指标                     parents=Thing                                     
+  Skill                        技能                     parents=Thing                                     
+  Stub                         挡板                     parents=Thing                                     
+  Tool                         工具                     parents=Thing                                     
+  ToolContract                 工具契约                   parents=Thing                                     
+  WorkKnowledgeBase            工作知识库                  parents=Thing                                     
+-- 数据属性里的 wiki/正文 相关 --
+  adviceText               domain=['Advice']
+===== TTL 里的 renderMode / wikiContent =====
+ontology/BMM完整版.ttl:650:#   声明了 `wikiContent` 的类 → `document`（半结构化：调用方给整篇正文）；
+ontology/BMM完整版.ttl:654::wikiContent rdf:type owl:DatatypeProperty ;
+ontology/智能体开发完整版.ttl:351:### 渲染模式：本模块的文档类「追加」到 bmm:wikiContent 的 domain（2026-10-09）
+ontology/智能体开发完整版.ttl:352:# **知识渲染模式由本体决定，且只有两种**（用户口径）：声明了 `wikiContent` 的类 → `document`
+ontology/智能体开发完整版.ttl:355:# 为什么不是在本模块另声明一个 `agent:wikiContent`：编译器**禁止跨模块同名属性**
+ontology/智能体开发完整版.ttl:356:# （实测 `[ERROR E3] wikiContent … 定义在 agent:wikiContent … bmm:wikiContent`），
+ontology/智能体开发完整版.ttl:364:bmm:wikiContent rdfs:domain :Advice ;
