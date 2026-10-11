@@ -19,9 +19,10 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 SB_ROOT = REPO / "tools" / "diag" / ".exp"          # 用完即删（git 里不留）
 SB_SRC = SB_ROOT / "src"                           # 沙箱 TTL
 SB_ART = SB_ROOT / "artifacts"                     # 沙箱编译产物
-WATCH = ["bmm:Assessment", "agent:Advice", "agent:DesignSpec", "agent:Evaluation",
-         "agent:InstallGuide", "agent:ToolContract", "agent:Agent", "agent:Skill",
-         "bmm:BusinessProcess", "bmm:Report"]
+WATCH = ["bmm:Assessment", "bmm:Report", "bmm:RequirementAnalysisReport",
+         "agent:Advice", "agent:DesignSpec", "agent:Evaluation", "agent:InstallGuide",
+         "agent:EvaluationPlan", "agent:ToolContract", "agent:Agent", "agent:Skill",
+         "bmm:BusinessProcess"]
 
 BMM_OLD = (':wikiContent rdf:type owl:DatatypeProperty ;\n'
            '    rdfs:label "正文"@zh ;\n'

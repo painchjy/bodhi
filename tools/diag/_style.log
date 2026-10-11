@@ -1,0 +1,66 @@
+=== bmm.ttl 前缀 ===
+1:@prefix : <http://example.org/bmm#> .
+2:@prefix owl: <http://www.w3.org/2002/07/owl#> .
+3:@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+4:@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+5:@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+6:@prefix bodhi: <http://example.org/bodhi#> .
+=== agent.ttl 前缀 ===
+1:@prefix : <http://example.org/agent#> .
+2:@prefix owl: <http://www.w3.org/2002/07/owl#> .
+3:@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+4:@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+5:@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+6:@prefix bodhi: <http://example.org/bodhi#> .
+7:@prefix bmm: <http://example.org/bmm#> .
+362:@prefix bmm: <http://example.org/bmm#> .
+=== agent.ttl 类声名风格 ===
+35::Agent rdf:type owl:Class ;
+36-    rdfs:label "业务智能体"@zh ;
+37-    rdfs:comment "承载具体业务的作业体（如技术方案评审智能体）。**只在「领域知识库」里定义**（与业务领域知识、需求天然形成溯源关系）；通过技能获得能力、通过工具获得手段，并在**由领域指定的工作知识库**里读写业务知识。"@zh ;
+38-    rdfs:subClassOf owl:Thing .
+39-
+40-### 2. 技能 Skill
+41::Skill rdf:type owl:Class ;
+42-    rdfs:label "技能"@zh ;
+43-    rdfs:comment "可复用的作业方法。**单一真源是仓库里的 `skills/<id>/SKILL.md`**；本体内只保存引用个体（id/路径/版本/状态），不复制正文。业务技能在领域知识库中登记；知识提取/管理的技能归「企业知识管理领域知识库」共享（按需补充，不全集暴露）。"@zh ;
+44-    rdfs:subClassOf owl:Thing .
+45-
+46-### 3. 工具 Tool
+47::Tool rdf:type owl:Class ;
+48-    rdfs:label "工具"@zh ;
+49-    rdfs:comment "可被智能体调用的能力单元（MCP 工具/存量系统接口），有明确契约与**可操作的知识库角色**（识别与管控，禁止混用）；未投产前用挡板（Stub）先跑。"@zh ;
+50-    rdfs:subClassOf owl:Thing .
+51-
+52-### 4. MCP 服务 MCPService
+53::MCPService rdf:type owl:Class ;
+54-    rdfs:label "MCP服务"@zh ;
+55-    rdfs:comment "以 MCP 协议对外提供工具集的服务（工具清单可由服务端代码自动同步校验）。"@zh ;
+56-    rdfs:subClassOf owl:Thing .
+57-
+58-# ============================================================
+=== bmm.ttl 类声明风格 ===
+27::DesiredResult rdf:type owl:Class ;
+28-    rdfs:label "预期成果"@zh ;
+29-    rdfs:comment "是企业期望维持或实现的一种状态或结果"@zh ;
+30-    rdfs:subClassOf owl:Thing .
+31-
+32-### 2. 目的 Goal
+33::Goal rdf:type owl:Class ;
+34-    rdfs:label "目的"@zh ;
+35-    rdfs:comment "偏向长期性、定性（而非定量）、普遍性（而非具体性）以及持续性的特点"@zh ;
+36-    rdfs:subClassOf :DesiredResult .
+37-
+38-### 3. 目标 Objective
+39::Objective rdf:type owl:Class ;
+40-    rdfs:label "目标"@zh ;
+41-    rdfs:comment "更偏向短期性、定量（而非定性）、具体性（而非普遍性）"@zh ;
+42-    rdfs:subClassOf :DesiredResult .
+43-
+44-### 4. 手段 Means
+45::Means rdf:type owl:Class ;
+46-    rdfs:label "手段"@zh ;
+47-    rdfs:comment "是一种可以被调动、激活或强制执行的设备、能力、制度、技术、限制、代理人、工具或方法，用于实现预期成果"@zh ;
+48-    rdfs:subClassOf owl:Thing .
+49-
+50-### 5. 行动方案 CourseOfAction

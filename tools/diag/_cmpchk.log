@@ -1,0 +1,36 @@
+=== 校验/编译是否有 ERROR/WARN ===
+194:---- WARN（37）----
+195:[WARN W2] agent:adviceImpact 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+197:[WARN W2] agent:advicePriority 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+199:[WARN W2] agent:endpoint 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+201:[WARN W2] agent:metricName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+203:[WARN W2] agent:metricValue 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+205:[WARN W2] agent:runAt 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+207:[WARN W2] agent:skillVersion 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+209:[WARN W2] agent:toolId 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+211:[WARN W2] bmm:agentName 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+213:[WARN W2] bmm:definition 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+215:[WARN W2] bmm:description 术语缺少 rdfs:comment（提示词与文档会缺定义，模型只能靠猜）
+（空=无）
+=== 校验汇总行 ===
+16:-    rdfs:comment "文档类的整篇正文（Markdown）。**有它的类按 document 渲染**：评估/评审报告这类半结构化知识——正文是主体，数据属性只做结构化摘要；其余类不要用本属性（它们是 entity，正文由数据属性生成）。"@zh .
+19:+    rdfs:comment "报告类的整篇正文（Markdown）。**声明它的类（或祖先）按 document 渲染**：报告是正文主体、数据属性只做结构化摘要；entity 类不要用本属性。"@zh .
+23: # 模块短名（目录名/列表名；≤16 字符，导入时校验）
+27:+### 36. 报告基类 Report（2026-10-11 新增）
+28:+# **过程件基类**：报告/方案/评审/结项等**整篇正文**的载体，给人讨论·评审·反馈·溯源·取证；
+30:+# （`ke_ontology.render_mode` 的判据：类或祖先声明了带 domain 的 `wikiContent`）。
+33:+    rdfs:comment "过程件基类：承载整篇正文，供人讨论·评审·反馈·溯源·取证；不参与机器判定。继承它的类按 document 渲染。"@zh ;
+71:     rdfs:comment "闭环一的出口物、闭环二的入口物：现象+证据+涉及对象+不确定性类型+影响面+期望改动+优先级+状态；**被驳回的也要留痕**；落「领域知识库」，可回到产生它的会话。"@zh ;
+83:+# 2026-10-11：报告类改为**继承** `bmm:Report`（见上方 4 个类的 subClassOf），不再逐个追加 domain。
+85: # 模块短名（目录名/列表名；≤16 字符，导入时校验）
+91:+    rdfs:comment "「开发交付」活动的产出、「评测」活动的输入：指标/用例/样本/通过门槛（对齐 agent:Metric）。"@zh ;
+110:-    rdfs:comment "文档类的整篇正文（Markdown）。**有它的类按 document 渲染**：评估/评审报告这类半结构化知识——正文是主体，数据属性只做结构化摘要；其余类不要用本属性（它们是 entity，正文由数据属性生成）。"@zh .
+=== 新类是否进索引 ===
+6
+=== cypher 里 wikiContent 的 domain 边 ===
+244:MERGE (p:BodhiOntProperty {iri: 'http://example.org/bmm#wikiContent'})
+245:SET p += {prefixed: 'bmm:wikiContent', local_name: 'wikiContent', prefix: 'bmm', module: 'bmm', label: '正文', comment: '报告类的整篇正文（Markdown）。**声明它的类（或祖先）按 document 渲染**：报告是正文主体、数据属性只做结构化摘要；entity 类不要用本属性。', property_kind: 'datatype', is_functional: 'False', characteristics: '', range_literal: 'http://www.w3.org/2001/XMLSchema#string', bodhi_projection: 'ontology'};
+747:MATCH (a:BodhiOntProperty {iri: 'http://example.org/bmm#wikiContent'}), (b:BodhiOntClass {iri: 'http://example.org/bmm#Report'})
+749:MATCH (a:BodhiOntProperty {iri: 'http://example.org/bmm#wikiContent'}), (b:BodhiOntClass {iri: 'http://www.w3.org/2001/XMLSchema#string'})
+1025:MATCH (a:BodhiModule {iri: 'http://example.org/bmm'}), (b:BodhiOntProperty {iri: 'http://example.org/bmm#wikiContent'})
+=== Report 的 domain 边 ===

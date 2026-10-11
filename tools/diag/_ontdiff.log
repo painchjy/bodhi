@@ -1,0 +1,58 @@
+=== 未提交的 ontology 改动 ===
+ "ontology/BMM\345\256\214\346\225\264\347\211\210.ttl" | 12 ++++++++++++
+ ...45\217\221\345\256\214\346\225\264\347\211\210.ttl" | 18 ++++++++++++++++++
+ 2 files changed, 30 insertions(+)
+=== BMM完整版 diff（前 40 行）===
+diff --git "a/ontology/BMM\345\256\214\346\225\264\347\211\210.ttl" "b/ontology/BMM\345\256\214\346\225\264\347\211\210.ttl"
+index d253f56..ec155e1 100644
+--- "a/ontology/BMM\345\256\214\346\225\264\347\211\210.ttl"
++++ "b/ontology/BMM\345\256\214\346\225\264\347\211\210.ttl"
+@@ -645,6 +645,18 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
+     rdfs:range xsd:string ;
+     rdfs:comment "会话内定位：分页序号 + 轮次/消息/段落（或图坐标），用于可复核" .
+ 
++### 35. 渲染模式开关：文档类专属的正文属性（2026-10-09 新增）
++# **知识渲染模式由本体决定，且只有两种**（用户口径）：
++#   声明了 `wikiContent` 的类 → `document`（半结构化：调用方给整篇正文）；
++#   其余类 → `entity`（结构化知识单元：正文由数据属性渲染）。
++# 所以本属性**必须带 `rdfs:domain`**（不能是 owl:Thing）：不写 domain 就成了全局属性，
++# 会让**所有类**都变 document（ke_ontology.render_mode 只看 domains 显式命中来规避）。
++:wikiContent rdf:type owl:DatatypeProperty ;
++    rdfs:label "正文"@zh ;
++    rdfs:domain :Assessment ;
++    rdfs:range xsd:string ;
++    rdfs:comment "文档类的整篇正文（Markdown）。**有它的类按 document 渲染**：评估/评审报告这类半结构化知识——正文是主体，数据属性只做结构化摘要；其余类不要用本属性（它们是 entity，正文由数据属性生成）。"@zh .
++
+ :sessionFor rdf:type owl:ObjectProperty ;
+     rdfs:label "服务方案"@zh ;
+     rdfs:domain :KnowledgeSession ;
+=== 智能体开发完整版 diff（前 30 行）===
+diff --git "a/ontology/\346\231\272\350\203\275\344\275\223\345\274\200\345\217\221\345\256\214\346\225\264\347\211\210.ttl" "b/ontology/\346\231\272\350\203\275\344\275\223\345\274\200\345\217\221\345\256\214\346\225\264\347\211\210.ttl"
+index 91fc473..90aab96 100644
+--- "a/ontology/\346\231\272\350\203\275\344\275\223\345\274\200\345\217\221\345\256\214\346\225\264\347\211\210.ttl"
++++ "b/ontology/\346\231\272\350\203\275\344\275\223\345\274\200\345\217\221\345\256\214\346\225\264\347\211\210.ttl"
+@@ -348,5 +348,23 @@
+     rdfs:domain :Advice ;
+     rdfs:range xsd:string .
+ 
++### 渲染模式：本模块的文档类「追加」到 bmm:wikiContent 的 domain（2026-10-09）
++# **知识渲染模式由本体决定，且只有两种**（用户口径）：声明了 `wikiContent` 的类 → `document`
++# （半结构化：调用方给整篇正文）；其余类 → `entity`（结构化知识单元：正文由数据属性渲染）。
++#
++# 为什么不是在本模块另声明一个 `agent:wikiContent`：编译器**禁止跨模块同名属性**
++# （实测 `[ERROR E3] wikiContent … 定义在 agent:wikiContent … bmm:wikiContent`），
++# 而"渲染模式"是**全局唯一**的语义，就该只有**一个**属性。
++#
++# 为什么这样写能生效：属性只在**声明它的模块**（bmm）里被抽出，但 `rdfs:domain`
++# 是从**合并图**读的（`loader.extract_properties` 用 `combined.objects(subject, RDFS_DOMAIN)`）
++# —— 所以在 agent 侧"追加 domain"即可，**bmm 模块不用动**。
++@prefix bmm: <http://example.org/bmm#> .
++
++bmm:wikiContent rdfs:domain :Advice ;
++    rdfs:domain :DesignSpec ;
++    rdfs:domain :Evaluation ;
++    rdfs:domain :InstallGuide .
++
+ # 模块短名（目录名/列表名；≤16 字符，导入时校验）
+ <http://example.org/agent> bodhi:shortName "智能体开发本体" .
+=== sources 是否干净 ===

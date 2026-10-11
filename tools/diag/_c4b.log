@@ -1,0 +1,3 @@
+checks = {'C4': 1} | findings = 1
+RAW findings: [{"check": "C4", "severity": "medium", "subject": "neo4j", "detail": "225/225 个 BodhiInstance 节点没有任何溯源（knowledge_id/source_doc 均为空）", "fix_hint": "按实例层口径补溯源或清掉（CLI 抽取路径才会写）", "fixable": false}]
+RAW keys: ['kb_id', 'kb_name', 'scope', 'generated_at', 'kb_id_note', 'graph_orphans', 'summary', 'totals', 'findings', 'data', 'note']
