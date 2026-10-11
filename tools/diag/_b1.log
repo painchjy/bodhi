@@ -1,0 +1,33 @@
+COMPILE_OK
+=== dry-run 归档 ===
+Traceback (most recent call last):
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 642, in <module>
+    raise SystemExit(main(sys.argv))
+                     ~~~~^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 629, in main
+    archive_dangling_mappings(dry_run=("--apply" not in a), kb_ids=[x for x in a[1:] if not x.startswith("--")])
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 560, in archive_dangling_mappings
+    mf = REPO / "state" / "context_map" / "mappings.json"
+         ^^^^
+NameError: name 'REPO' is not defined
+=== apply 归档 ===
+Traceback (most recent call last):
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 642, in <module>
+    raise SystemExit(main(sys.argv))
+                     ~~~~^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 629, in main
+    archive_dangling_mappings(dry_run=("--apply" not in a), kb_ids=[x for x in a[1:] if not x.startswith("--")])
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 560, in archive_dangling_mappings
+    mf = REPO / "state" / "context_map" / "mappings.json"
+         ^^^^
+NameError: name 'REPO' is not defined
+warning: in the working copy of 'tools/diag/_ab_p0c2.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_agents_fix.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_archive.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_asm.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_audit_c4.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_audit_orphan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_bulk_ab.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_cleanup.py', CRLF will be replaced by LF the next time Git touches it

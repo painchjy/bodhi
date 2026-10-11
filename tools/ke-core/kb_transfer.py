@@ -49,6 +49,7 @@ import uuid
 csv.field_size_limit(min(sys.maxsize, 1 << 30))
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+REPO = pathlib.Path(__file__).resolve().parents[2]      # 仓库根（state/context_map、exports 等都在下面）
 import ke_db  # noqa: E402
 import ke_neo4j  # noqa: E402
 
@@ -527,6 +528,7 @@ def cmd_purge(kb_ids: list[str], dry_run: bool = True, drop_kb_row: bool = False
                  r["folders"], r["revisions"], r["issues"], r["graph_nodes"]))
     res = {"ok": True, "dry_run": dry_run, "items": plan, "deleted": {}}
     if dry_run:
+        res["mappings_preview"] = archive_dangling_mappings(dry_run=True, kb_ids=[r["kb_id"] for r in plan])
         return res
     ids = [r["kb_id"] for r in plan]
     for table in ("wiki_page_revisions", "wiki_pages", "wiki_folders", "wiki_page_issues"):
@@ -540,8 +542,61 @@ def cmd_purge(kb_ids: list[str], dry_run: bool = True, drop_kb_row: bool = False
     if drop_kb_row:
         q("DELETE FROM knowledge_bases WHERE id IN (%s)" % ", ".join(sql_lit(k) for k in ids))
     res["deleted"] = {"kb_ids": ids, "drop_kb_row": drop_kb_row}
-    print("硬删完成：%d 个库的内容已清（库行%s）" % (len(ids), "已删" if drop_kb_row else "保留"))
+    res["mappings"] = archive_dangling_mappings(dry_run=False, kb_ids=ids)   # B：连带归档悬空映射
+    print("硬删完成：%d 个库的内容已清（库行%s）；悬空映射归档 %s 条"
+          % (len(ids), "已删" if drop_kb_row else "保留", (res["mappings"] or {}).get("detached")))
     return res
+
+
+# ============================================================ ⑥ 悬空映射归档（B：硬删连带）
+def archive_dangling_mappings(dry_run: bool = True, kb_ids: list[str] | None = None) -> dict:
+    """把**指向已删页 / 已清库**的映射，从 `state/context_map/mappings.json` 的 `pairs`
+    **归档到 `detached`**（保留痕迹）—— 硬删残留后的连带动作，消除巡检 **G3（映射悬空）**。
+
+    · `kb_ids` 给了 → 这些库的 pair 一律归档；不给 → 逐个 pair **按页存在性**判定；
+    · 只改**缓存** `mappings.json`（写前备份 `.bak-<时间>`）；**事实源是概念页正文的
+      「各领域映射」表** → 要长期一致，还需把概念页里那几行也标成 detached（或删行），
+      否则下次 `ke_context.py cache-rebuild` 会把它们再读回来。
+    """
+    mf = REPO / "state" / "context_map" / "mappings.json"
+    if not mf.is_file():
+        print("无 mappings.json（跳过）")
+        return {"ok": True, "note": "无 mappings.json", "pairs": 0, "detached": 0}
+    doc = json.loads(mf.read_text(encoding="utf-8"))
+    pairs = [p for p in (doc.get("pairs") or []) if isinstance(p, dict)]
+    ids = [k for k in (kb_ids or []) if k]
+    keep, arch = [], []
+    for pr in pairs:
+        bad = False
+        for side in ("source", "target"):
+            d = pr.get(side) or {}
+            kb, slug = str(d.get("kb") or ""), str(d.get("slug") or "")
+            if not (kb and slug) or (ids and kb in ids):
+                bad = True
+                break
+            if not q_json("SELECT 1 AS x FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s "
+                          "AND deleted_at IS NULL" % (sql_lit(kb), sql_lit(slug))):
+                bad = True
+                break
+        (arch if bad else keep).append(pr)
+    print("%s：pairs %d → 保留 %d ／ **归档 detached %d**"
+          % ("dry-run（未写）" if dry_run else "归档", len(pairs), len(keep), len(arch)))
+    for pr in arch[:12]:
+        print("  · %s" % pr.get("id"))
+    if not dry_run and arch:
+        bak = mf.with_name("mappings.json.bak-%s" % now_text().replace(" ", "-").replace(":", ""))
+        bak.write_bytes(mf.read_bytes())
+        doc["pairs"] = keep
+        doc["detached"] = list(doc.get("detached") or []) + [
+            {**p, "detached_at": now_text(),
+             "detached_reason": "映射指向的页已硬删 / 所在知识库已清理（kb_transfer purge）"}
+            for p in arch]
+        doc["detached_updated_at"] = now_text()
+        mf.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        print("已写回（备份 %s）" % bak.name)
+    return {"ok": True, "dry_run": dry_run, "pairs": len(keep), "detached": len(arch),
+            "detached_ids": [p.get("id") for p in arch],
+            "note": "事实源=概念页「各领域映射」表；长期一致需同步改页（或先改页再 cache-rebuild）"}
 
 
 # ============================================================ CLI
@@ -570,6 +625,9 @@ def main(argv: list) -> int:
     if a[0] == "purge":
         ids = [x for x in a[1:] if not x.startswith("--")]
         cmd_purge(ids, dry_run=("--apply" not in a), drop_kb_row=("--drop-kb-row" in a))
+        return 0
+    if a[0] == "mappings":
+        archive_dangling_mappings(dry_run=("--apply" not in a), kb_ids=[x for x in a[1:] if not x.startswith("--")])
         return 0
     if a[0] == "purge-scan":
         for r in purge_scan([x for x in a[1:] if not x.startswith("--")]):

@@ -1,0 +1,68 @@
+COMPILE_OK
+=== dry-run ===
+dry-run（未写）：pairs 3 → 保留 0 ／ **归档 detached 3**
+  · m:kb:522d5f81:bmm/offering/手机银行服务→kb:dbc2528f:bmm/offering/手机银行服务
+  · m:kb:522d5f81:ea/businessentity/手机号码→kb:c7426a6e:ea/businessentity/手机号码
+  · m:kb:522d5f81:ea/businessentity/登录凭据→kb:c7426a6e:ea/businessentity/登录凭据
+=== apply ===
+归档：pairs 3 → 保留 0 ／ **归档 detached 3**
+  · m:kb:522d5f81:bmm/offering/手机银行服务→kb:dbc2528f:bmm/offering/手机银行服务
+  · m:kb:522d5f81:ea/businessentity/手机号码→kb:c7426a6e:ea/businessentity/手机号码
+  · m:kb:522d5f81:ea/businessentity/登录凭据→kb:c7426a6e:ea/businessentity/登录凭据
+已写回（备份 mappings.json.bak-2026-10-12-064046）
+=== 巡检复核 ===
+checks = {'C4': 1} | findings = 1
+RAW findings: [{"check": "C4", "severity": "medium", "subject": "neo4j", "detail": "160/160 个 BodhiInstance 节点没有任何溯源（knowledge_id/source_doc 均为空）", "fix_hint": "按实例层口径补溯源或清掉（CLI 抽取路径才会写）", "fixable": false}]
+RAW keys: ['kb_id', 'kb_name', 'scope', 'generated_at', 'kb_id_note', 'graph_orphans', 'summary', 'totals', 'findings', 'data', 'note']
+warning: in the working copy of 'tools/diag/_ab_p0c2.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_agents_fix.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_archive.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_asm.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_audit_c4.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_audit_orphan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_bulk_ab.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_cleanup.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ctx_fix.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ctx_verify.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_cut.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_docscan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_engine_ab.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_exp_inherit.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_fix_move.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_flag.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kb_cleanup.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kb_import_test.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kb_tools.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kb_zip_e2e.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kill_pending.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_kiltool.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_modchk.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ops2.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ops3.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_orphan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_orphan_purge.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_p0c2_diff.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_pkgcheck.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_plan_ac.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_recon.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_repair.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_replay_sk.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_rmfunc.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_sim_check.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_skills_use.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_smoke_ac.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_sub.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_sync_ac.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_toolcount.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_patch_bpmn.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_patch_v05.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_patch_v06.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_patch_v07.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_probe.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_up_test.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_verify_clean.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_xfer_verify.py', CRLF will be replaced by LF the next time Git touches it
+The following paths are ignored by one of your .gitignore files:
+state
+hint: Use -f if you really want to add them.
+hint: Disable this message with "git config set advice.addIgnoredFile false"
