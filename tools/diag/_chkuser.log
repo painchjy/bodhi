@@ -1,0 +1,35 @@
+=== 两个 bpmn 文件里的 DataObject/业务实体/业务对象 ===
+ontology/sources/bpmn.ttl:12:# 参考 **BPMN 2.0**，但只落**当前需要的概念**：活动 / 任务 / 业务实体 / 业务属性，
+ontology/sources/bpmn.ttl:22:    rdfs:comment "BPMN 2.0 的按需子集：活动/任务/业务实体/业务属性 + 活动↔业务流程、任务→业务规则。imports bmm。"@zh ;
+ontology/sources/bpmn.ttl:41:# ============ 3. 业务实体 DataObject（BPMN: DataObject） ============
+ontology/sources/bpmn.ttl:42::DataObject rdf:type owl:Class ;
+ontology/sources/bpmn.ttl:43:    rdfs:label "业务实体"@zh ;
+ontology/sources/bpmn.ttl:44:    rdfs:comment "活动/任务读写的**业务对象**（BPMN DataObject）：技术方案、系统、设备申请、技术栈、认证清单…。**各领域模型里的「业务实体」类建议继承本类**（`rdfs:subClassOf bpmn:DataObject`），使「数据从哪来、到哪去」可查。"@zh ;
+ontology/sources/bpmn.ttl:64:    rdfs:label "使用业务实体"@zh ;
+ontology/sources/bpmn.ttl:66:    rdfs:range :DataObject ;
+ontology/sources/bpmn.ttl:67:    rdfs:comment "活动读写的业务实体（输入/输出对象）。"@zh .
+ontology/BPMN完整版.ttl:12:# 参考 **BPMN 2.0**，但只落**当前需要的概念**：活动 / 任务 / 业务实体 / 业务属性，
+ontology/BPMN完整版.ttl:22:    rdfs:comment "BPMN 2.0 的按需子集：活动/任务/业务实体/业务属性 + 活动↔业务流程、任务→业务规则。imports bmm。"@zh ;
+ontology/BPMN完整版.ttl:41:# ============ 3. 业务对象 DataObject（BPMN: DataObject） ============
+ontology/BPMN完整版.ttl:42::DataObject rdf:type owl:Class ;
+ontology/BPMN完整版.ttl:43:    rdfs:label "业务对象"@zh ;
+ontology/BPMN完整版.ttl:44:    rdfs:comment "活动/任务读写的**业务对象**（BPMN DataObject）：技术方案、系统、设备申请、技术栈、认证清单…。**各领域模型里的「业务实体」类建议继承本类**（`rdfs:subClassOf bpmn:DataObject`），使「数据从哪来、到哪去」可查。"@zh ;
+ontology/BPMN完整版.ttl:63::activityUsesDataObject rdf:type owl:ObjectProperty ;
+ontology/BPMN完整版.ttl:64:    rdfs:label "使用业务对象"@zh ;
+ontology/BPMN完整版.ttl:66:    rdfs:range :DataObject ;
+ontology/BPMN完整版.ttl:67:    rdfs:comment "活动读写的业务对象（输入/输出对象）。"@zh .
+=== Task 相关数据属性/关系 ===
+23:    bodhi:expertRole "业务流程建模专家，熟悉 BPMN 2.0 与业务规则落地"@zh .
+32:# 口径（2026-10-11 用户手工修订）：**为达成某个目标、由一个角色连续执行的工作单元**。
+33:# · 任务**指定"角色"与"目标"**（数据属性 `taskRole` / `taskGoal`）；
+34:# · **人工 / 自动 / 线下取决于"实现的手段"**（`taskMeans`），**不是任务的子类特性** → 不分子类；
+38:    rdfs:comment "为达成某个目标、由一个角色**连续执行**的工作单元（BPMN Task，是 Activity 的一种）：指定**角色**（`taskRole`）与**目标**（`taskGoal`）；人工/自动/线下由**实现的手段**（`taskMeans`）决定；执行一条/一组业务规则。"@zh ;
+106::taskGoal rdf:type owl:DatatypeProperty ;
+110:    rdfs:comment "该任务要达成的目标（用户口径：任务 = 为达成某个目标、由一个角色连续执行的工作单元）。"@zh .
+112::taskRole rdf:type owl:DatatypeProperty ;
+113:    rdfs:label "执行角色"@zh ;
+116:    rdfs:comment "执行该任务的角色（如评审组长 / 评审专家）。"@zh .
+118::taskMeans rdf:type owl:DatatypeProperty ;
+=== 两份 bpmn 是否一致 ===
+Files ontology/sources/bpmn.ttl and ontology/BPMN完整版.ttl differ
+DIFFERENT
