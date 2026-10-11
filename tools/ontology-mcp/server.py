@@ -4454,6 +4454,9 @@ class MCPHandler(BaseHTTPRequestHandler):
         # 没带就问 env `BODHI_TENANT_ID`；都没有 → 写路径 fail-closed 拒（只读照常）。
         raw_tenant = str(self.headers.get("X-Bodhi-Tenant") or "").strip()
         ke_db.set_request_tenant(int(raw_tenant) if raw_tenant.isdigit() else None)
+        if path in ("/bodhi/kb-upload", "/bodhi/kb-import-upload"):
+            self._kb_upload(path)      # **原始字节**上传（非 JSON），故必须在解析 JSON 之前分流
+            return
         if path.startswith("/bodhi/"):
             self._bodhi_post(path)
             return
@@ -4542,6 +4545,40 @@ class MCPHandler(BaseHTTPRequestHandler):
             return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         except json.JSONDecodeError as exc:
             raise ValueError("JSON 解析失败：%s" % exc) from exc
+
+    def _kb_upload(self, path: str) -> None:
+        """`POST /bodhi/kb-upload?name=<file.zip>[&new_kb=…|&kb_id=…][&keep_ids=1][&verify=1]`
+
+        **body 就是文件原始字节**（不是 JSON、不是 multipart）→ curl / 浏览器 fetch 都能发：
+
+            curl -X POST --data-binary @kb-xfer.zip \\
+              "http://<mcp主机>:8765/bodhi/kb-upload?name=kb-xfer.zip&new_kb=技术方案评审领域模型&verify=1"
+
+        存到 `exports/uploads/<name>`；带 `new_kb`/`kb_id` 时**顺带导入**（默认 verify=1 → 回执含 `verify_ok`）。
+        """
+        params = dict(urlparse.parse_qsl(urlparse.urlsplit(self.path).query))
+        name = pathlib.Path(params.get("name", "")).name
+        if not name.lower().endswith(".zip"):
+            self._json({"error": "只接收 .zip：请给 name=<文件名.zip>（body 用 --data-binary @文件）"},
+                       400, self.CORS)
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            self._json({"error": "空 body：请用 curl --data-binary @<zip> 上传（或上传页选文件）"},
+                       400, self.CORS)
+            return
+        updir = EXPORT_DIR / "uploads"
+        updir.mkdir(parents=True, exist_ok=True)
+        fp = updir / name
+        fp.write_bytes(self.rfile.read(length))
+        out = {"ok": True, "saved": str(fp), "bytes": length,
+               "note": "已收到 zip；带 new_kb/kb_id 时本端点会顺带导入"}
+        if params.get("new_kb") or params.get("kb_id"):
+            out["import"] = kb_import(str(fp), kb_id=params.get("kb_id", ""),
+                                      new_kb=params.get("new_kb", ""),
+                                      keep_ids=bool(params.get("keep_ids")),
+                                      verify=bool(params.get("verify", "1")))
+        self._json(out, 200, self.CORS)
 
     def _bodhi_post(self, path: str) -> None:
         try:
@@ -5098,6 +5135,39 @@ class MCPHandler(BaseHTTPRequestHandler):
                     view = "browse"
             html = render_graph_page(params.get("kb_id", ""), params.get("model", ""), view)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        # 上传页（不依赖前端 UI：选 zip → 直接 POST 字节 → 显示导入回执）
+        if path in ("/bodhi/kb-upload", "/bodhi/kb-upload.html"):
+            html = """<!DOCTYPE html><meta charset="utf-8"><title>知识库导入（上传 zip）</title>
+<body style="font:14px/1.6 system-ui;max-width:720px;margin:32px auto">
+<h3>知识库导入 · 上传导出包（zip）</h3>
+<p>导出包来自 `kb_export`（或 <code>kb_transfer.py export --zip</code>）。填 <b>新库名</b>（跨环境迁移推荐）
+或 <b>既有 kb_id</b>；<code>keep_ids</code> 仅跨实例迁移时勾（同实例会自动降级为重编 UUID）。</p>
+<form id="f">
+  <p><input type="file" id="file" accept=".zip" required></p>
+  <p>新库名 <input name="new_kb" id="new_kb" size="32" placeholder="如：技术方案评审领域模型">
+     或既有 kb_id <input name="kb_id" id="kb_id" size="36" placeholder="UUID"></p>
+  <p><label><input type="checkbox" id="keep_ids" checked> keep_ids（跨实例迁移）</label></p>
+  <p><button>上传并导入</button></p>
+</form>
+<pre id="out" style="background:#f6f8fa;padding:12px;white-space:pre-wrap"></pre>
+<script>
+f.onsubmit = async (e) => {
+  e.preventDefault();
+  const file = document.getElementById('file').files[0];
+  if (!file) { document.getElementById('out').textContent = '请先选一个 .zip'; return; }
+  const q = new URLSearchParams({name: file.name,
+    new_kb: document.getElementById('new_kb').value.trim(),
+    kb_id: document.getElementById('kb_id').value.trim(),
+    keep_ids: document.getElementById('keep_ids').checked ? 1 : 0, verify: 1});
+  document.getElementById('out').textContent = '上传中…（大包请耐心等）';
+  const r = await fetch('/bodhi/kb-upload?' + q.toString(), {method: 'POST', body: file});
+  let j; try { j = await r.json(); } catch (err) { j = {http: r.status, text: await r.text()}; }
+  document.getElementById('out').textContent = JSON.stringify(j, null, 2);
+};
+</script></body>"""
+            self._send(200, html.encode("utf-8"), "text/html; charset=utf-8",
+                       {"Access-Control-Allow-Origin": "*"})
             return
         # 导出包下载（`kb_export` 的产物 → 直接拉 zip；只允许 exports/ 下的文件名，防目录穿越）
         if path in ("/bodhi/kb-export", "/bodhi/kb-export.zip"):

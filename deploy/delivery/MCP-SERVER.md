@@ -279,6 +279,12 @@ skills()    OK（3 个：document_review / domain_modeling / structured_modeling
 > 运维智能体（`bodhi-kb-ops`）已补 **`skills`**（技能目录，能看到 `skills/kb_transfer` 并按其指令执行）
 > 与这两个工具；建模/设计开发智能体也补了这两个工具。故障/坑：`docker exec psql -c` 单条 SQL 受 **ARG_MAX ~128 KB** 限制
 > （工具内已**按字节切批**）；`--keep-ids` 仅用于**跨实例**迁移（同实例会自动降级为重编 UUID）。
+>
+> **内网怎么把导出包送进服务器**（前端 UI 不支持上传 zip）：① 浏览器打 **`http://<mcp主机>:8765/bodhi/kb-upload`**
+> 选 zip、填新库名/`kb_id`、勾 `keep_ids` → 上传并导入（页面直接显示回执含 `verify_ok`）；
+> ② `curl -X POST --data-binary @kb-xfer.zip ".../bodhi/kb-upload?name=kb-xfer.zip&new_kb=库名&verify=1"`；
+> ③ 直接把 zip 拷到服务器（如 `<包根>/exports/uploads/`）后调 `kb_import(source=<路径|文件名>)`。
+> 上传落点 = **`exports/uploads/<文件名>`**；`exports/` 已在 `.gitignore`。
 ```
 
 > **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
