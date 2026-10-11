@@ -1,0 +1,60 @@
+=== docs ===
+total 228
+drwxrwxrwx 1 painchjy painchjy  4096 Oct 11 07:30 .
+drwxrwxrwx 1 painchjy painchjy  4096 Oct 11 06:58 ..
+-rwxrwxrwx 1 painchjy painchjy 49921 Oct 11 08:52 agent-design-flow.md
+drwxrwxrwx 1 painchjy painchjy  4096 Oct 11 07:30 archive
+-rwxrwxrwx 1 painchjy painchjy 11969 Sep 20 19:46 bodhi-reasoning.md
+drwxrwxrwx 1 painchjy painchjy  4096 Oct  4 07:56 cases
+-rwxrwxrwx 1 painchjy painchjy 53025 Oct  8 09:01 context-mapping-plan.md
+-rwxrwxrwx 1 painchjy painchjy 16299 Oct  8 09:02 knowledge-governance.md
+-rwxrwxrwx 1 painchjy painchjy  5870 Oct 11 08:56 knowledge-save-perf-and-staged-modeling.md
+-rwxrwxrwx 1 painchjy painchjy  8483 Oct 11 08:52 knowledge-write-contract.md
+-rwxrwxrwx 1 painchjy painchjy  7771 Sep 20 19:46 ontology-service-neo4j.md
+drwxrwxrwx 1 painchjy painchjy  4096 Sep 21 08:41 samples
+-rwxrwxrwx 1 painchjy painchjy 12504 Oct  8 09:01 structured-modeling-skill.md
+-rwxrwxrwx 1 painchjy painchjy 50374 Sep 20 19:46 weknora-fork.md
+=== docs/archive ===
+total 200
+drwxrwxrwx 1 painchjy painchjy  4096 Oct 11 07:30 .
+drwxrwxrwx 1 painchjy painchjy  4096 Oct 11 07:30 ..
+-rwxrwxrwx 1 painchjy painchjy  8694 Oct 11 07:30 bodhi-doc-cleanup.md
+-rwxrwxrwx 1 painchjy painchjy 17665 Oct 11 07:30 bodhi-ops-audit.md
+-rwxrwxrwx 1 painchjy painchjy 26211 Oct 11 07:30 handoff-ontology-upload.md
+-rwxrwxrwx 1 painchjy painchjy 38935 Oct 11 07:30 knowledge-ops-strategy.md
+-rwxrwxrwx 1 painchjy painchjy 21429 Oct 11 07:30 ontology-modeling-recommendation.md
+-rwxrwxrwx 1 painchjy painchjy 22187 Oct 11 07:30 ontology-rebuild-analysis.md
+-rwxrwxrwx 1 painchjy painchjy  9980 Oct 11 07:30 ontology-refactor-ea-bmm.md
+-rwxrwxrwx 1 painchjy painchjy 25980 Oct 11 07:30 session-handoff.md
+-rwxrwxrwx 1 painchjy painchjy 12209 Oct 11 07:30 structured-data-import-plan.md
+=== skills ===
+total 8
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  8 22:36 .
+drwxrwxrwx 1 painchjy painchjy 4096 Oct 11 06:58 ..
+-rwxrwxrwx 1 painchjy painchjy 5555 Oct  3 15:18 README.md
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  8 23:49 dist
+drwxrwxrwx 1 painchjy painchjy 4096 Sep 30 02:50 document_review
+drwxrwxrwx 1 painchjy painchjy 4096 Sep 22 08:18 domain_modeling
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  2 22:52 model_recommendation
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  8 22:36 multimodal_extraction
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  5 23:00 revision_trace
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  3 14:52 session_provenance
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  3 15:18 skill_development
+drwxrwxrwx 1 painchjy painchjy 4096 Sep 30 02:49 structured_modeling
+drwxrwxrwx 1 painchjy painchjy 4096 Oct  5 22:59 tech_review_extraction
+=== 案例目录 ===
+total 3408
+drwxrwxrwx 1 painchjy painchjy   4096 Oct  9 19:00 .
+drwxrwxrwx 1 painchjy painchjy   4096 Oct  4 07:56 ..
+-rwxrwxrwx 1 painchjy painchjy  20357 Oct  3 14:22 P1-knowledge-inventory.md
+-rwxrwxrwx 1 painchjy painchjy   6889 Oct  2 16:13 P3-materials-draft.md
+-rwxrwxrwx 1 painchjy painchjy  16975 Oct  8 23:45 image-extraction-experiment.md
+-rwxrwxrwx 1 painchjy painchjy  11065 Oct  4 22:50 manual-verification-script.md
+-rwxrwxrwx 1 painchjy painchjy  54941 Oct  4 23:03 two-loops-framework.md
+-rwxrwxrwx 1 painchjy painchjy 381335 Oct  7 11:01 历史库系统灾备方案.docx
+-rwxrwxrwx 1 painchjy painchjy 852434 Oct  2 13:29 图片1.jpg
+-rwxrwxrwx 1 painchjy painchjy 810682 Oct  2 13:29 图片2.jpg
+-rwxrwxrwx 1 painchjy painchjy 656698 Oct  2 11:10 技术方案评审智能体需求.docx
+-rwxrwxrwx 1 painchjy painchjy 322054 Oct  7 11:46 样例1-统一结算平台技术方案.docx
+-rwxrwxrwx 1 painchjy painchjy 322182 Oct  7 11:49 样例2-统一结算平台技术方案.docx
+-rwxrwxrwx 1 painchjy painchjy  11430 Oct  7 11:50 样例3-客户信息查询服务技术方案.docx

@@ -1,0 +1,39 @@
+=== push_agent_prompts.py 用法 ===
+"""把 `config/agent_system_prompt.yaml` 里的提示词**定向**推到线上智能体。
+
+为什么需要它（而不是 `gen_agents.py --apply`）
+--------------------------------------------------------
+`gen_agents.py --apply` 是 **DELETE + INSERT 整行重建**：会把 `knowledge_bases` 清空（它刻意留空）、
+把 `model_id` 换回内置智能体的默认值、并覆盖 bmm/ea 的精简提示词（脚本自己的注释也这么警告）。
+本脚本只做**一次最小写**：
+
+    UPDATE custom_agents SET config = jsonb_set(config, '{system_prompt}', <yaml 里的文本>)
+
+其它字段（`allowed_tools` / `mcp_services` / `knowledge_bases` / `model_id` / 温度…）**一律不动**。
+
+用法
+----
+    # 只看差异（不写库）：哪些智能体的线上提示词与 yaml 不一致
+    python3 deploy/weknora-fork/push_agent_prompts.py
+
+    # 只推指定的（逗号分隔，key 与 gen_agents.TEMPLATE_IDS 一致：bmm|ea|ops|design|modeler）
+    python3 deploy/weknora-fork/push_agent_prompts.py --only modeler --apply
+
+    # 回滚：备份在 <临时目录>/agents_config_backup.json（整份 config，含写前提示词）
+
+注意
+----
+- **bmm / ea**（抽取智能体）的线上提示词归 `archive/set_agent_prompt_lean.py` 管，推之前想清楚；
+- **design** 的线上版本历史上是手改过的 → 默认**不**在目标里，要推必须显式 `--only design`。
+=== 它与 config/agent_system_prompt.yaml 的关系 ===
+1:"""把 `config/agent_system_prompt.yaml` 里的提示词**定向**推到线上智能体。
+=== gen_agents.py 怎么取提示词 ===
+5:- agent-type preset（`agent_type_presets.yaml`）只是**编辑器里的模板**：前端
+7:- 运行时用的是 `custom_agents.config.system_prompt`（**提示词全文**），
+19:- **别用全量重跑覆盖 bmm/ea 的提示词**：它们的精简版归 `set_agent_prompt_lean.py` 管；
+30:import yaml
+132:# 免得被 `set_agent_prompt_lean.py`（按 `bodhi-ontology-%` 前缀改提示词）误伤。
+156:    doc = yaml.safe_load((CONFIG / "agent_system_prompt.yaml").read_text(encoding="utf-8"))
+176:             "-- ⚠️ bmm/ea 的提示词这里是 yaml 里的**长版**；线上用的是 set_agent_prompt_lean.py 的精简版。",
+185:            "system_prompt_id": TEMPLATE_IDS[key],
+186:            "system_prompt": content,               # 运行时用的是这个文本

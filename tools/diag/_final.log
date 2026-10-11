@@ -1,16 +1,27 @@
-COMPILE_OK
-ExecMainStartTimestamp=Sat 2026-10-10 19:00:28 CST
-ExecMainPID=2532391
+=== 提交链 ===
+d70bf58 chore(diag): (A)+(C) 收尾日志与校验脚本
+7905aca (A)(C) 相似度合并永久取消 + 新增运维工具 rebuild_wiki_from_graph（工具数 38->37）
+4f596cf feat(audit): 巡检新增 S1 近重复/S2 域外同名（相似度治理入口）+ audit_scan 描述与 scope 同步
+22d208e docs: 归档历史讨论/一次性稿到 docs/archive（9 份：handoff/session-handoff/doc-cleanup/structured-import-plan/ontology-rebuild-analysis/ontology-refactor-ea-bmm/ontology-modeling-recommendation/knowledge-ops-strategy/bodhi-ops-audit）
+=== 工作区（应只剩你那批历史文件）===
+ M "docs/cases/\346\212\200\346\234\257\346\226\271\346\241\210\350\257\204\345\256\241/P1-knowledge-inventory.md"
+ M "docs/cases/\346\212\200\346\234\257\346\226\271\346\241\210\350\257\204\345\256\241/P3-materials-draft.md"
+ M "docs/cases/\346\212\200\346\234\257\346\226\271\346\241\210\350\257\204\345\256\241/image-extraction-experiment.md"
+ M "docs/cases/\346\212\200\346\234\257\346\226\271\346\241\210\350\257\204\345\256\241/manual-verification-script.md"
+ M "docs/cases/\346\212\200\346\234\257\346\226\271\346\241\210\350\257\204\345\256\241/two-loops-framework.md"
+ M "ontology/BMM\345\256\214\346\225\264\347\211\210.ttl"
+ M "ontology/\346\231\272\350\203\275\344\275\223\345\274\200\345\217\221\345\256\214\346\225\264\347\211\210.ttl"
+ M skills/model_recommendation/SKILL.md
+ M skills/multimodal_extraction/SKILL.md
+ M skills/revision_trace/SKILL.md
+ M skills/skill_development/SKILL.md
+ M skills/tech_review_extraction/SKILL.md
+ M tools/diag/_final.log
+=== 服务 ===
 active
---- 开关 ---
-BODHI_SAVE_ENGINE       = 'kernel'
-BODHI_SIMILARITY_MERGE  = '0'
-BODHI_VALIDATE_FROM_GRAPH = '1'
-BODHI_DEBUG_ENGINE      = '0'
---- 清理核验 ---
-  ke_pages._parse_legacy_head           在   = True
-  ke_pages.write_knowledge_batch        在   = True
-  ke_pages._bulk_write_pages            在   = True
-  server.save_elements                在   = True
-
-RESULT: PASS
+2642624
+Sun 2026-10-11 08:54:20 CST
+=== diag 脚本 ===
+24
+=== 交付包 ===
+-rwxrwxrwx 1 painchjy painchjy 558936 Oct 11 08:57 dist-delivery/bodhi2-delivery-20261010-4/bodhi2-02-mcp-server.tar.gz
