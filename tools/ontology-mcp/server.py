@@ -3043,6 +3043,30 @@ def tool_definitions() -> list[dict]:
             }, "required": ["kb_id"]},
         },
         {
+            "name": "kb_export",
+            "description": ("**运维 · 导出知识库**：把指定知识库导出成文件（PG 页/目录/版本快照 + Neo4j 节点/边），"
+                            "落在服务端 `exports/` 并打成 zip；回执给 **download** 链接（下载到本地）。"
+                            "用于**本机 → 内网**迁移、建测试库、离线留档。"),
+            "inputSchema": {"type": "object",
+                            "properties": {"kb_id": {"type": "string"},
+                                           "out_dir": {"type": "string", "description": "可选：导出目录（默认 exports/kb-<id前8位>-时间戳）"},
+                                           "make_zip": {"type": "boolean", "description": "默认 true 打 zip"}},
+                            "required": ["kb_id"]},
+        },
+        {
+            "name": "kb_import",
+            "description": ("**运维 · 导入知识库**：把导出的**目录/zip** 导入到指定知识库（或 `new_kb` 现建/复用同名库），"
+                            "按 (kb, slug) 先删后插（幂等）；`verify=true` 默认**立刻做 PG + Neo4j 六项一致性比对**"
+                            "（页内容/页链/目录/版本/图节点/图边），回执给 `verify_ok`。"),
+            "inputSchema": {"type": "object",
+                            "properties": {"source": {"type": "string", "description": "导出目录或 zip 的路径/文件名（默认在服务端 exports/ 下找）"},
+                                           "kb_id": {"type": "string", "description": "导入到该既有库"},
+                                           "new_kb": {"type": "string", "description": "或：新建/复用同名库（与 kb_id 二选一）"},
+                                           "keep_ids": {"type": "boolean", "description": "保留原 UUID（跨实例迁移建议 true）"},
+                                           "verify": {"type": "boolean", "description": "默认 true：导入后比对"}},
+                            "required": ["source"]},
+        },
+        {
             "name": "rebuild_wiki_from_graph",
             "description": ("**运维 · 图→wiki 全量重建**：按图节点的 `wiki_content` 重写 PG 正文"
                             "（**正本是图、正文是派生**）。用于正文被误改/丢失后的**恢复**；"
@@ -3715,6 +3739,74 @@ def context_authority_apply(action: str, slug: str, master: str = "", kb: str = 
     return {"error": "action 只能是 decide / pull"}
 
 
+EXPORT_DIR = REPO / "exports"          # 导出产物目录（kb_export 落这里；HTTP 从这里下载）
+
+
+def kb_export(kb_id: str = "", out_dir: str = "", make_zip: bool = True) -> dict:
+    """**运维 · 导出知识库**：把指定知识库的内容导出成文件（PG 页/目录/版本 + Neo4j 节点/边）。
+
+    产物落在服务端 `exports/`（或 `out_dir`），并默认打成 **zip**；回执给 **download** 链接
+    （`GET /bodhi/kb-export?name=…`）→ 下载到本地后拷到内网，用 `kb_import` 导入。
+    """
+    import kb_transfer as _kbx  # noqa: PLC0415
+    from datetime import datetime as _dt  # noqa: PLC0415
+    kid = (kb_id or "").strip()
+    if not kid:
+        return {"ok": False, "reason": "缺少 kb_id"}
+    real_kb, note = resolve_kb_id(kid)
+    ts = _dt.now().strftime("%Y%m%d-%H%M%S")
+    base = (out_dir or "").strip() or str(EXPORT_DIR / ("kb-%s" % real_kb[:8]))
+    if not base.endswith(ts):
+        base = "%s-%s" % (base, ts)
+    man = _kbx.cmd_export(real_kb, base, make_zip=bool(make_zip))
+    z = man.get("zip") or ""
+    name = pathlib.Path(z).name if z else ""
+    return {"ok": True, "kb_id": real_kb, "kb_note": note, "dir": base, "zip": z,
+            "download": ("/bodhi/kb-export?name=%s" % name) if name else "",
+            "counts": man.get("counts"),
+            "note": "下载 zip（download 链接）→ 内网解包或直接 `kb_import(source=<zip或目录>)`"}
+
+
+def kb_import(source: str = "", kb_id: str = "", new_kb: str = "", keep_ids: bool = False,
+              verify: bool = True) -> dict:
+    """**运维 · 导入知识库**：把导出的**目录或 zip** 导入到指定知识库（或现建一个），并默认校验一致性。
+
+    · `source` 可为绝对路径、导出目录名/zip 名（默认在服务端 `exports/` 下找）；
+    · `new_kb`（且未给 `kb_id`）：建/复用同名库；
+    · 按 `(kb, slug)` 先删后插 → **幂等**，可重复执行；
+    · `verify=true`：导入后立刻做 **PG + Neo4j 六项比对**，回执给 `verify_ok`。
+    """
+    import kb_transfer as _kbx  # noqa: PLC0415
+    src = (source or "").strip()
+    if not src:
+        return {"ok": False, "reason": "缺少 source（导出目录或 zip 路径/文件名）"}
+    p = pathlib.Path(src)
+    if not p.exists():
+        cand = EXPORT_DIR / src
+        if cand.exists():
+            p = cand
+        else:
+            return {"ok": False, "reason": "找不到源：%s（也不在 %s 下）" % (src, EXPORT_DIR)}
+    tgt, tnote = "", ""
+    if new_kb and not kb_id:
+        tgt = _kbx.ensure_kb(new_kb)
+    else:
+        kid = (kb_id or "").strip()
+        if not kid:
+            return {"ok": False, "reason": "要么给 kb_id（导入到既有库），要么给 new_kb（新建/复用）"}
+        tgt, tnote = resolve_kb_id(kid)
+    counts = _kbx.cmd_import(str(p), to_kb=tgt, keep_ids=bool(keep_ids))
+    out = {"ok": True, "target_kb": tgt, "kb_note": tnote, "counts": counts,
+           "source": str(p)}
+    if verify:
+        v = _kbx.cmd_verify(str(p), tgt)
+        out["verify_ok"] = v["ok"]
+        out["verify"] = {k: bool(v["detail"][k].get("ok")) for k in v["detail"]}
+        out["note"] = ("一致性 ✅：PG + Neo4j 六项一致" if v["ok"] else
+                       "一致性 ❌：看 verify 各项（页内容/页链/目录/版本/图节点/图边）")
+    return out
+
+
 def rebuild_wiki_from_graph(kb_id: str = "", dry_run: bool = True) -> dict:
     """**运维 · 图→wiki 全量重建**：按图节点的 `wiki_content` 重写 PG `wiki_pages.content`。
 
@@ -3909,6 +4001,13 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return service_overview_tool(str(args["kb_id"]), False,
                                      str(args.get("slug", "")), str(args.get("title", "")),
                                      int(args.get("preview_lines", 25)))
+    if name == "kb_export":
+        return kb_export(str(args.get("kb_id", "")), str(args.get("out_dir", "")),
+                         bool(args.get("make_zip", True)))
+    if name == "kb_import":
+        return kb_import(str(args.get("source", "")), str(args.get("kb_id", "")),
+                         str(args.get("new_kb", "")), bool(args.get("keep_ids", False)),
+                         bool(args.get("verify", True)))
     if name == "rebuild_wiki_from_graph":
         return rebuild_wiki_from_graph(str(args.get("kb_id", "")), bool(args.get("dry_run", True)))
     if name == "audit_scan":
@@ -4999,6 +5098,19 @@ class MCPHandler(BaseHTTPRequestHandler):
                     view = "browse"
             html = render_graph_page(params.get("kb_id", ""), params.get("model", ""), view)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        # 导出包下载（`kb_export` 的产物 → 直接拉 zip；只允许 exports/ 下的文件名，防目录穿越）
+        if path in ("/bodhi/kb-export", "/bodhi/kb-export.zip"):
+            params = dict(urlparse.parse_qsl(parsed.query))
+            name = pathlib.Path(params.get("name", "")).name
+            fp = EXPORT_DIR / name
+            if not name or not fp.is_file():
+                self._json({"error": "找不到导出包：%s（在 %s 下）" % (name, EXPORT_DIR)}, 404,
+                           {"Access-Control-Allow-Origin": "*"})
+                return
+            self._send(200, fp.read_bytes(), "application/zip",
+                       {"Content-Disposition": 'attachment; filename="%s"' % name,
+                        "Access-Control-Allow-Origin": "*"})
             return
         # （原 `/bodhi/pending`、`/bodhi/resolve`（待确认合并的查/裁决）已随「相似度合并永久取消」删除，
         #  2026-10-10；相似知识治理改走巡检 `audit_scan` S1/S2。）

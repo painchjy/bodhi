@@ -1,0 +1,14 @@
+=== ① MCP skills() 目录 ===
+   技能清单（0）：
+   含 kb_transfer ? **否**
+=== ② skills(skill='kb_transfer') 能否取到全文 ===
+   返回长度 32889；首 160 字：{"id": "kb_transfer", "name": "知识库迁移（导出 → 转移 → 导入 → 一致性比对）", "when": "用户要\"导出/迁移/复制某个知识库\"\"把知识库搬到内网/另一套环境\"\"打个包带走\"\"给测试库灌一份数据\"\"核对迁移前后是否一致\"时", "front_matte
+=== ③ 各智能体的 allowed_tools（有没有 skills / 执行能力）===
+   bodhi-ea-design          工具数=7   skills=f     bash=f     sandbox=f    
+   bodhi-ea-modeler         工具数=37  skills=t     bash=f     sandbox=f    
+   bodhi-kb-ops             工具数=12  skills=f     bash=f     sandbox=f    
+   bodhi-ontology-bmm       工具数=6   skills=f     bash=f     sandbox=f    
+   bodhi-ontology-ea        工具数=6   skills=f     bash=f     sandbox=f    
+   bodhi-skill-dev          工具数=37  skills=t     bash=f     sandbox=f    
+=== ④ 运维智能体（bodhi-kb-ops）的完整工具面 ===
+   ["grep_chunks", "list_knowledge_chunks", "get_document_info", "wiki_search", "wiki_read_page", "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan", "mcp_bodhi_ontology_retag_preview", "mcp_bodhi_ontology_context_scan", "mcp_bodhi_ontology_context_lookup", "mcp_bodhi_ontology_context_page", "mcp_bodhi_ontology_context_authority"]

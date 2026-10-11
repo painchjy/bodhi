@@ -202,7 +202,7 @@ def bulk_delete(table: str, kb_id: str, column: str, values: list, chunk: int = 
 
 
 # ============================================================ ① 导出
-def cmd_export(kb_id: str, out_dir: str) -> dict:
+def cmd_export(kb_id: str, out_dir: str, make_zip: bool = False) -> dict:
     kb = kb_row(kb_id)
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -210,8 +210,11 @@ def cmd_export(kb_id: str, out_dir: str) -> dict:
     counts = {"kb": 1}
     for key, table in (("folders", "wiki_folders"), ("pages", "wiki_pages"),
                        ("revisions", "wiki_page_revisions"), ("issues", "wiki_page_issues")):
-        rows = q_json("SELECT * FROM %s WHERE knowledge_base_id = %s ORDER BY 1"
-                      % (table, sql_lit(kb_id)))
+        cols_of = table_columns(table)
+        where = "WHERE knowledge_base_id = %s" % sql_lit(kb_id)
+        if "deleted_at" in cols_of:            # **只导活行**（与 verify 的统计口径一致）
+            where += " AND deleted_at IS NULL"
+        rows = q_json("SELECT * FROM %s %s ORDER BY 1" % (table, where))
         write_jsonl(out / JSONL[key], rows)
         counts[key] = len(rows)
     nodes, edges = nodes_of(kb_id), edges_of(kb_id)
@@ -227,6 +230,11 @@ def cmd_export(kb_id: str, out_dir: str) -> dict:
     }
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                        encoding="utf-8")
+    if make_zip:                                  # 打包成一个 zip（便于上传/下载）
+        import shutil as _sh
+        z = _sh.make_archive(str(out), "zip", root_dir=str(out.parent), base_dir=out.name)
+        manifest["zip"] = z
+        print("已打包：%s" % z)
     print("导出完成 → %s" % out)
     for k, v in counts.items():
         print("   %-14s %s" % (k, v))
@@ -280,12 +288,34 @@ def _insert_row(table: str, row: dict) -> None:
 
 def cmd_import(in_dir: str, to_kb: str = "", new_kb: str = "", keep_ids: bool = False) -> dict:
     d = pathlib.Path(in_dir)
+    if d.is_file() and d.suffix.lower() == ".zip":        # 直接吃 zip（上传/下载场景）
+        import tempfile
+        import zipfile
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="kb-xfer-"))
+        with zipfile.ZipFile(d) as z:
+            z.extractall(tmp)
+        subs = [x for x in tmp.iterdir() if (x / "manifest.json").is_file()]
+        d = subs[0] if subs else tmp
+        print("已解包：%s → %s" % (in_dir, d))
     if not (d / "manifest.json").is_file():
-        raise SystemExit("不是有效的导出目录（缺 manifest.json）：%s" % d)
+        raise SystemExit("不是有效的导出目录/zip（缺 manifest.json）：%s" % d)
     kid = ensure_kb(new_kb) if new_kb else to_kb
     if not kid or not q_json("SELECT id FROM knowledge_bases WHERE id = %s" % sql_lit(kid)):
         raise SystemExit("目标知识库不存在：%s" % kid)
     new_id = (lambda old: old) if keep_ids else (lambda old: str(uuid.uuid4()))
+    if keep_ids:            # 同实例迁移会与**源库既有 UUID** 撞主键 → 自动降级为重编 id
+        probe = [r["id"] for r in read_jsonl(d / JSONL["folders"])][:500] + \
+                [r["id"] for r in read_jsonl(d / JSONL["pages"])][:500]
+        if probe:
+            hit = q_json("SELECT count(*) AS c FROM wiki_pages WHERE id IN (%s)"
+                         % ", ".join(sql_lit(x) for x in probe))[0]["c"]
+            hit += q_json("SELECT count(*) AS c FROM wiki_folders WHERE id IN (%s)"
+                          % ", ".join(sql_lit(x) for x in probe))[0]["c"]
+            if int(hit or 0) > 0:
+                print("⚠️ --keep-ids 与库内既有 id 冲突（%d 个，属**同实例**迁移）→ 自动改为重编 id"
+                      "（跨实例迁移才应保留原 UUID）" % hit)
+                keep_ids = False
+                new_id = lambda old: str(uuid.uuid4())  # noqa: E731
 
     folders = read_jsonl(d / JSONL["folders"])
     fmap = {r["id"]: new_id(r["id"]) for r in folders}
@@ -377,9 +407,24 @@ def _h(obj) -> str:
     return hashlib.sha256(json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def _as_dir(p: pathlib.Path) -> pathlib.Path:
+    """zip → 解包后的目录（目录原样返回）。"""
+    if p.is_file() and p.suffix.lower() == ".zip":
+        import tempfile
+        import zipfile
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="kb-xfer-"))
+        with zipfile.ZipFile(p) as z:
+            z.extractall(tmp)
+        subs = [x for x in tmp.iterdir() if (x / "manifest.json").is_file()]
+        return subs[0] if subs else tmp
+    return p
+
+
 def fingerprint(src: str) -> dict:
-    """src 可为 **kb_id** 或**导出目录**；两侧用同一套归一化，故可直接比哈希。"""
+    """src 可为 **kb_id**、**导出目录** 或 **zip**；两侧用同一套归一化，故可直接比哈希。"""
     d = pathlib.Path(src)
+    if d.exists() and (d.is_dir() or d.suffix.lower() == ".zip"):
+        d = _as_dir(d)
     if d.is_dir():
         pages, folders = read_jsonl(d / JSONL["pages"]), read_jsonl(d / JSONL["folders"])
         revs, nodes, edges = (read_jsonl(d / JSONL["revisions"]), read_jsonl(d / JSONL["graph_nodes"]),
@@ -445,7 +490,7 @@ def main(argv: list) -> int:
         print(__doc__)
         return 0
     if a[0] == "export":
-        cmd_export(a[1], a[2])
+        cmd_export(a[1], a[2], make_zip="--zip" in a)
         return 0
     if a[0] == "new-kb":
         cmd_new_kb(a[1], tenant=_opt(a, "--tenant", "10000"))

@@ -1,0 +1,5 @@
+ok=True target=a33033c7-d114-4d57-9cab-ef383fbe3647
+counts={"kb_id": "a33033c7-d114-4d57-9cab-ef383fbe3647", "folders": 28, "pages": 67, "revisions": 131, "issues": 0, "graph_nodes": 66, "graph_edges": 182, "edge_types": 26}
+verify_ok=False
+verify={"pages": true, "links": true, "folders": false, "revisions": true, "nodes": true, "edges": true}
+note=一致性 ❌：看 verify 各项（页内容/页链/目录/版本/图节点/图边）

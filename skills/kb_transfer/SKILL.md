@@ -25,34 +25,34 @@ version: 0.1.0
 | 校验两份数据是否一致 | `verify <源kb_id或导出目录> --to <目标kb_id>` |
 | 只想拿一份离线快照 | `export`（产物含 `manifest.json`：计数 + 每文件 sha256） |
 
-## 1 四条命令（在沙箱里执行）
+## 1 两条路（**优先 MCP 工具**，沙箱/命令行次之）
+
+### 1.1 路 A（推荐）：MCP 工具 —— 智能体直接调，**不依赖沙箱**
+
+```
+kb_export(kb_id, [out_dir], [make_zip=true])
+   → 服务端 exports/ 落目录 + zip；回执给 download 链接（/bodhi/kb-export?name=…）
+   → 用浏览器/curl 拉下来：curl -o kb-xfer.zip "http://<mcp主机>:8765/bodhi/kb-export?name=<zip名>"
+
+kb_import(source, [kb_id] | [new_kb], [keep_ids=false], [verify=true])
+   → source 可为 **zip 或目录**（也可只给文件名，自动在服务端 exports/ 找）
+   → 导入后**默认立刻做 PG + Neo4j 六项比对**，回执 `verify_ok`；**不 ✅ 不许说"迁移完成"**
+```
+| 参数 | 说明 |
+|---|---|
+| `new_kb "名称"` | 建/复用同名库（配置字段从现有库拷贝，避免 NOT NULL 缺默认）——跨环境迁移首选 |
+| `kb_id <id>` | 导入到**已有库**（按 `(knowledge_base_id, slug)` **先删后插**，可重复跑） |
+| `keep_ids` | 保留原页/目录 UUID（**跨实例迁移建议 true**，便于溯源）；不传则重编 id 并自动修 `folder_id`/`parent_id`/`page_id` |
+
+### 1.2 路 B：沙箱/命令行（等价能力，用于内网沙箱或批量运维）
 
 ```bash
 T="python3 <包根>/tools/ke-core/kb_transfer.py"
-
-# ① 导出（源库 → 目录；产物在沙箱工作目录）
-$T export <源kb_id> ./kb-xfer
-
-# ② 打包带走（tar 比散文件好传）
-tar czf kb-xfer.tgz kb-xfer            # 再把 kb-xfer.tgz 通过"沙箱文件导出/下载"取到本地
-
-# ③ 导入（内网沙箱：先上传 tar → 解包 → 导入）
-tar xzf kb-xfer.tgz
-$T import ./kb-xfer --new-kb "库名"          # 新建（同名自动复用）
-$T import ./kb-xfer --to <已存在kb_id>        # 或导进既有库（按 slug 覆盖）
-$T import ./kb-xfer --new-kb "库名" --keep-ids  # 跨实例迁移建议加：保留原 UUID
-
-# ④ 一致性比对（**必须 ✅ 才算迁移完成**）
-$T verify <源kb_id或./kb-xfer> --to <目标kb_id>
+$T export <源kb_id> ./kb-xfer [--zip]     # 导出（--zip 直接出包）
+$T import ./kb-xfer.zip --new-kb "库名" [--keep-ids]   # 直接吃 zip
+$T verify <源kb_id或目录或zip> --to <目标kb_id>          # 六项比对
 ```
-
-**参数**
-| 参数 | 说明 |
-|---|---|
-| `--new-kb "名称"` | 建/复用同名库（配置字段从现有库拷贝，避免 NOT NULL 缺默认） |
-| `--to <kb_id>` | 导入到已有库（按 `(knowledge_base_id, slug)` **先删后插**，可重复跑） |
-| `--keep-ids` | 保留原页/目录 UUID；**不传则重编 id**（并自动修 `folder_id`/`parent_id`/`page_id`） |
-| `verify` 的源 | 可以是**源库 kb_id**，也可以是**导出目录**（两侧用同一套归一化，所以能直比） |
+（`verify` 的源同样支持 **kb_id / 目录 / zip** 三种。）
 
 ## 2 验收口径（`verify` 六项）
 

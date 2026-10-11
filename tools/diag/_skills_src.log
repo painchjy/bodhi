@@ -1,0 +1,56 @@
+=== skills() 实现 ===
+2359:def skills(skill: str = "", model: str = "") -> dict:
+2360-    """技能目录 / 技能全文 + 该技能需要的那部分本体面。
+2361-
+2362-    - 不传 `skill`：返回**目录**（id / name / when / models / stages / tools）；
+2363-    - 传 `skill`：返回该技能**完整指令**（SKILL.md 正文）+ `front_matter`，
+2364-      并按 front-matter 的 `scope`（focus/classes/relations）把 `ontology_types` **收窄**后一并返回
+2365-      —— 智能体拿到"这个技能能用的类/关系/数据属性"，不用再自己筛。
+2366-    """
+2367-    all_skills = load_skills()
+2368-    if not skill:
+2369-        catalog = []
+2370-        for sid, item in all_skills.items():
+2371-            meta = item["meta"]
+2372-            catalog.append({"id": sid, "name": meta.get("name") or sid,
+2373-                            "when": meta.get("when") or "",
+2374-                            "models": meta.get("models") or [],
+2375-                            "default_model": meta.get("default_model") or "",
+2376-                            "stages": meta.get("stages") or [],
+2377-                            "tools": meta.get("tools") or []})
+2378-        return {"count": len(catalog), "catalog": catalog,
+2379-                "how_to_use": ("先用本目录选技能，再 `skills(skill=\"<id>\")` 取该技能完整指令"
+2380-                               "（含它需要的类/关系/数据属性）。**不要凭记忆猜步骤**。")}
+2381-    if skill not in all_skills:
+2382-        raise ValueError("未知技能：%s（可用：%s）" % (skill, "、".join(sorted(all_skills)) or "无"))
+2383-    item = all_skills[skill]
+2384-    meta = item["meta"]
+2385-    scope = meta.get("scope") or {}
+2386-    model_key = (model or meta.get("default_model")
+2387-                 or ((meta.get("models") or ["ea"])[0]))
+2388-    ontology = {}
+2389-    try:
+=== skills/dist ===
+total 136
+drwxrwxrwx 1 painchjy painchjy  4096 Oct  8 23:49 .
+drwxrwxrwx 1 painchjy painchjy  4096 Oct 11 23:10 ..
+drwxrwxrwx 1 painchjy painchjy  4096 Sep 25 21:47 archive
+-rwxrwxrwx 1 painchjy painchjy 54988 Oct  8 23:49 bodhi2-skills-20261008.tar.gz
+-rwxrwxrwx 1 painchjy painchjy  4395 Oct  8 23:45 document_review-0.3.0.zip
+-rwxrwxrwx 1 painchjy painchjy  5161 Oct  8 23:45 domain_modeling-0.2.0.zip
+-rwxrwxrwx 1 painchjy painchjy  3486 Sep 25 21:47 ea_overview_design-0.1.1.zip
+-rwxrwxrwx 1 painchjy painchjy  3836 Oct  8 23:45 manifest.json
+-rwxrwxrwx 1 painchjy painchjy  5450 Oct  8 23:45 model_recommendation-0.zip
+-rwxrwxrwx 1 painchjy painchjy  2957 Oct  8 23:45 multimodal_extraction-0.1.0.zip
+-rwxrwxrwx 1 painchjy painchjy  1803 Oct  8 23:45 revision_trace-0.2.0.zip
+=== SKILLS_DIR / 目录来源 ===
+tools/ontology-mcp/server.py:2314:#   ③ 未来若开 WeKnora 沙箱技能（tenant_skills/bundle），同一份 SKILL.md 可直接打成 bundle。
+tools/ontology-mcp/server.py:2317:SKILLS_DIR = REPO / "skills"
+tools/ontology-mcp/server.py:2325:                            for p in SKILLS_DIR.glob("*/SKILL.md")))
+tools/ontology-mcp/server.py:2331:    """读 `skills/<id>/SKILL.md`（front-matter + 正文），按 mtime 缓存。"""
+tools/ontology-mcp/server.py:2341:    for path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
+tools/ontology-mcp/server.py:2363:    - 传 `skill`：返回该技能**完整指令**（SKILL.md 正文）+ `front_matter`，
+tools/ontology-mcp/server.py:3003:            "description": ("**技能目录 / 技能指令**（本服务的技能库在 `skills/<id>/SKILL.md`，单一来源）。"
+tools/ke-core/ke_yamlmini.py:5:`skills/<id>/SKILL.md` 的 front-matter 是 YAML，`server.load_skills()` 原本用 PyYAML 解析。
+tools/ke-core/ke_yamlmini.py:9:本模块只实现 SKILL.md front-matter **实际用到**的那个子集：
+tools/ke-core/ke_yamlmini.py:91:    """便捷入口：直接读一个 SKILL.md 文件，返回其 front-matter dict（无 front-matter 返回 {}）。"""

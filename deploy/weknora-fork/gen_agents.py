@@ -82,6 +82,10 @@ OPS_TOOLS = [
     "mcp_bodhi_ontology_rules_of_policy", "mcp_bodhi_ontology_graph_query",
     "mcp_bodhi_ontology_reference_lookup",
     "mcp_bodhi_ontology_image_extract",     # 文档内嵌图识别（只读，2026-10-08）
+    # 迁移运维（2026-10-12 用户口径 B+C）：**技能目录**（能看到/读出技能指令→按技能做事）
+    #   + 知识库导出/导入（导出落 exports/ 并可经 /bodhi/kb-export 下载；导入默认做 PG+Neo4j 六项比对）
+    "mcp_bodhi_ontology_skills",
+    "mcp_bodhi_ontology_kb_export", "mcp_bodhi_ontology_kb_import",
 ]
 # 「EA 概要设计」智能体：只读 wiki + 看本体类型 + **设计落库工具**（不给原生写页、不给抽取）
 DESIGN_TOOLS = [

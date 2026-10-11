@@ -2,12 +2,12 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **37 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** / **多模态识别（`image_extract` 取文档内嵌图）** / **运维·图→正文重建（`rebuild_wiki_from_graph`）** …）
+> 作用：给 WeKnora 提供 **39 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** / **多模态识别（`image_extract` 取文档内嵌图）** / **运维·图→正文重建（`rebuild_wiki_from_graph`）** / **运维·知识库导出/导入（`kb_export` + `kb_import`，含 PG+Neo4j 六项一致性比对）** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
 > 的零依赖子集解析（我们逐键比对过，5 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list **37 个** / skills() **6 个**）。
+> `selfcheck.py` 全绿（initialize / tools/list **39 个** / skills() **6 个**）。
 
 **结构化数据批量建模（2026-09-29/30 新增，5 个工具）**：技能负责「理解」（从用户对表结构的中文描述得出
 有哪些类/关系/键列/列→属性映射），工具负责「确定性执行」，**一次只处理一个类（含数据属性）或一条关系**：
@@ -273,6 +273,12 @@ skills()    OK（3 个：document_review / domain_modeling / structured_modeling
 > **新增**运维工具 `rebuild_wiki_from_graph(kb_id, dry_run=true)`（按图节点 `wiki_content` 重建 PG 正文）。
 > 内网智能体注册请重跑 `deploy/weknora-fork` 的 SQL（`allowed_tools` 已同步）。
 > （下文时间线里的旧条目仍会提到这两个工具，仅作历史留痕。）
+>
+> **2026-10-12 运维能力增补（37 → 39）**：新增 **`kb_export` / `kb_import`**（知识库导出成 zip + 导入到另一库，
+> **导入后自动做 PG + Neo4j 六项一致性比对**，回执 `verify_ok`）；导出包经 **`GET /bodhi/kb-export?name=<zip>`** 下载。
+> 运维智能体（`bodhi-kb-ops`）已补 **`skills`**（技能目录，能看到 `skills/kb_transfer` 并按其指令执行）
+> 与这两个工具；建模/设计开发智能体也补了这两个工具。故障/坑：`docker exec psql -c` 单条 SQL 受 **ARG_MAX ~128 KB** 限制
+> （工具内已**按字节切批**）；`--keep-ids` 仅用于**跨实例**迁移（同实例会自动降级为重编 UUID）。
 ```
 
 > **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
