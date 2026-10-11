@@ -55,3 +55,6 @@ warning: in the working copy of 'tools/diag/_ttl_probe.py', CRLF will be replace
 warning: in the working copy of 'tools/diag/_verify_clean.py', CRLF will be replaced by LF the next time Git touches it
 warning: in the working copy of 'tools/diag/_ops2.py', CRLF will be replaced by LF the next time Git touches it
 warning: in the working copy of 'tools/diag/_ops3.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_xfer_verify.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/ke-core/kb_transfer.py', CRLF will be replaced by LF the next time Git touches it
+fb227f8 ops(kb_transfer): 知识库迁移运维工具（export/import/verify/new-kb）

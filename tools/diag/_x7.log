@@ -1,0 +1,64 @@
+COMPILE_OK
+复用已存在的知识库：迁移测试-技术方案评审领域  （829dbb59-52c6-4a53-8a2b-589e14f2de4f）
+Traceback (most recent call last):
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 451, in <module>
+    raise SystemExit(main(sys.argv))
+                     ~~~~^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 440, in main
+    cmd_import(a[1], to_kb=_opt(a, "--to"), new_kb=_opt(a, "--new-kb"),
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               keep_ids="--keep-ids" in a)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 298, in cmd_import
+    bulk_insert("wiki_pages", prows)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 171, in bulk_insert
+    q("INSERT INTO %s (%s) SELECT %s FROM jsonb_to_recordset(%s::jsonb) AS t(%s)"
+    ~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      % (table, ", ".join(cols), sel, sql_lit(json.dumps(part, ensure_ascii=False)), defs))
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/kb_transfer.py", line 63, in q
+    return ke_db.psql_csv(sql)
+           ~~~~~~~~~~~~~~^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/ke_db.py", line 229, in psql_csv
+    return list(csvlib.DictReader(io.StringIO(psql(sql, csv=True))))
+                                              ~~~~^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/PHJY/source/bodhi2/tools/ke-core/ke_db.py", line 217, in psql
+    done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True,
+                          check=False, env=env)
+  File "/usr/lib/python3.14/subprocess.py", line 555, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1039, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        pass_fds, cwd, env,
+                        ^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+                        gid, gids, uid, umask,
+                        ^^^^^^^^^^^^^^^^^^^^^^
+                        start_new_session, process_group)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1990, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+OSError: [Errno 7] Argument list too long: 'docker'
+--- verify ---
+测试库 = 迁移测试-技术方案评审领域（829dbb59-52c6-4a53-8a2b-589e14f2de4f）
+比对：
+  源   = 7efad3eb-762a-4981-9164-cd3b3a226bd4
+  目标 = 829dbb59-52c6-4a53-8a2b-589e14f2de4f
+  页内容      ❌ 不一致   源=67 目标=0
+      缺（目标没有） 67：agent/advice/改进建议a2026100708评审结论判定枚举数据属性, agent/advice/改进建议a2026100709问题严重度与问题清单字段数据属性, agent/agent/技术方案评审智能体, agent/designspec/业务技能设计单技术方案知识提取, agent/designspec/业务技能设计单评审轮次比对与问题溯源, agent/designspec/技术方案评审智能体设计单, agent/designspec/技术方案评审智能体设计单-提示词完善版, agent/evaluation/技术方案评审智能体评测方案口径反例计划…
+  页链       ❌ 不一致   源=67 目标=0
+      缺（目标没有） 67：agent/advice/改进建议a2026100708评审结论判定枚举数据属性, agent/advice/改进建议a2026100709问题严重度与问题清单字段数据属性, agent/agent/技术方案评审智能体, agent/designspec/业务技能设计单技术方案知识提取, agent/designspec/业务技能设计单评审轮次比对与问题溯源, agent/designspec/技术方案评审智能体设计单, agent/designspec/技术方案评审智能体设计单-提示词完善版, agent/evaluation/技术方案评审智能体评测方案口径反例计划…
+  目录       ✅ 一致   源=25 目标=25
+  版本       ❌ 不一致   源=131 目标=0
+      缺（目标没有） 131：agent/advice/改进建议a2026100708评审结论判定枚举数据属性#1, agent/advice/改进建议a2026100709问题严重度与问题清单字段数据属性#1, agent/agent/技术方案评审智能体#1, agent/agent/技术方案评审智能体#2, agent/agent/技术方案评审智能体#3, agent/agent/技术方案评审智能体#4, agent/agent/技术方案评审智能体#5, agent/agent/技术方案评审智能体#6…
+  图节点      ❌ 不一致   源=66 目标=0
+      缺（目标没有） 66：agent/advice/改进建议a2026100708评审结论判定枚举数据属性, agent/advice/改进建议a2026100709问题严重度与问题清单字段数据属性, agent/agent/技术方案评审智能体, agent/designspec/业务技能设计单技术方案知识提取, agent/designspec/业务技能设计单评审轮次比对与问题溯源, agent/designspec/技术方案评审智能体设计单, agent/designspec/技术方案评审智能体设计单-提示词完善版, agent/evaluation/技术方案评审智能体评测方案口径反例计划…
+  图边       ❌ 不一致   源=182 目标=0
+      仅源有 182：['agent/advice/改进建议a2026100708评审结论判定枚举数据属性|bmm:sourceSession|bmm/knowledgesession/会话分析评审改进建议优化技能与本体模型技术方案评审智能体', 'agent/advice/改进建议a2026100709问题严重度与问题清单字段数据属性|bmm:sourceSession|bmm/knowledgesession/会话分析评审改进建议优化技能与本体模型技术方案评审智能体', 'agent/agent/技术方案评审智能体|agent:agentHasDesign|agent/designspec/业务技能设计单技术方案知识提取', 'agent/agent/技术方案评审智能体|agent:agentHasDesign|agent/designspec/业务技能设计单评审轮次比对与问题溯源', 'agent/agent/技术方案评审智能体|agent:agentHasDesign|agent/designspec/技术方案评审智能体设计单']
+
+== 结论：❌ 存在差异（见上） ==
+
+详细： {'pages': False, 'links': False, 'folders': True, 'revisions': False, 'nodes': False, 'edges': False}

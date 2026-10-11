@@ -135,6 +135,72 @@ def table_columns(table: str) -> list[str]:
         "SELECT column_name FROM information_schema.columns WHERE table_name='%s'" % table)]
 
 
+def _col_types(table: str) -> dict[str, str]:
+    return {r["column_name"]: r["data_type"] for r in q(
+        "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='%s'" % table)}
+
+
+def _cast(col: str, dtype: str) -> str:
+    d = (dtype or "").lower()
+    if "json" in d:
+        return "t.%s::jsonb" % col
+    if d in ("integer", "bigint", "smallint"):
+        return "t.%s::%s" % (col, d)
+    if d == "boolean":
+        return "t.%s::boolean" % col
+    if d.startswith("timestamp"):
+        return "t.%s::timestamptz" % col
+    return "t.%s" % col
+
+
+def bulk_insert(table: str, rows: list[dict], max_bytes: int = 60000, max_rows: int = 400) -> int:
+    """**批量写**：一次多行 `INSERT … SELECT … FROM jsonb_to_recordset(...)`。
+
+    关键约束：`ke_db` 走的是 `docker exec psql -c "<SQL>"`，**单条 SQL 不能超 ~128 KB**（ARG_MAX）
+    —— 所以按**字节**切批（正文大时自动变小批），而不是固定行数。
+    """
+    rows = [r for r in rows if r]
+    if not rows:
+        return 0
+    types = _col_types(table)
+    cols = [c for c in table_columns(table) if c in rows[0]]
+    sel = ", ".join(_cast(c, types.get(c, "text")) for c in cols)
+    defs = ", ".join("%s %s" % (c, types.get(c, "text")) for c in cols)
+    done = 0
+
+    def flush(batch: list[dict]) -> None:
+        nonlocal done
+        payload = json.dumps(batch, ensure_ascii=False)
+        q("INSERT INTO %s (%s) SELECT %s FROM jsonb_to_recordset(%s::jsonb) AS t(%s)"
+          % (table, ", ".join(cols), sel, sql_lit(payload), defs))
+        done += len(batch)
+
+    batch: list[dict] = []
+    size = 0
+    for r in rows:
+        item = {c: r.get(c) for c in cols}
+        js = json.dumps(item, ensure_ascii=False)
+        if batch and (size + len(js) > max_bytes or len(batch) >= max_rows):
+            flush(batch)
+            batch, size = [], 0
+        batch.append(item)
+        size += len(js) + 1
+    if batch:
+        flush(batch)
+    return done
+
+
+def bulk_delete(table: str, kb_id: str, column: str, values: list, chunk: int = 120) -> None:
+    """按 (knowledge_base_id, column IN (…)) **批量删**（幂等重跑用；同样受 ARG_MAX 约束，故取 120）。"""
+    vals = [v for v in values if v is not None]
+    for i in range(0, len(vals), chunk):
+        sub = vals[i:i + chunk]
+        q("DELETE FROM %s WHERE knowledge_base_id = %s AND %s IN (%s)"
+          % (table, sql_lit(kb_id), column,
+             ", ".join(sql_lit(v) for v in sub)))
+
+
+
 # ============================================================ ① 导出
 def cmd_export(kb_id: str, out_dir: str) -> dict:
     kb = kb_row(kb_id)
@@ -189,6 +255,21 @@ def cmd_new_kb(name: str, tenant: str = "10000") -> str:
     return kid
 
 
+def find_kb_by_name(name: str) -> str:
+    rows = q_json("SELECT id FROM knowledge_bases WHERE name = %s AND deleted_at IS NULL "
+                  "ORDER BY created_at DESC" % sql_lit(name))
+    return rows[0]["id"] if rows else ""
+
+
+def ensure_kb(name: str, tenant: str = "10000") -> str:
+    """同名库**复用**（便于反复自测）；不存在才新建。"""
+    kid = find_kb_by_name(name)
+    if kid:
+        print("复用已存在的知识库：%s  （%s）" % (name, kid))
+        return kid
+    return cmd_new_kb(name, tenant)
+
+
 
 # ============================================================ ③ 导入
 def _insert_row(table: str, row: dict) -> None:
@@ -201,53 +282,57 @@ def cmd_import(in_dir: str, to_kb: str = "", new_kb: str = "", keep_ids: bool = 
     d = pathlib.Path(in_dir)
     if not (d / "manifest.json").is_file():
         raise SystemExit("不是有效的导出目录（缺 manifest.json）：%s" % d)
-    kid = cmd_new_kb(new_kb) if new_kb else to_kb
+    kid = ensure_kb(new_kb) if new_kb else to_kb
     if not kid or not q_json("SELECT id FROM knowledge_bases WHERE id = %s" % sql_lit(kid)):
         raise SystemExit("目标知识库不存在：%s" % kid)
     new_id = (lambda old: old) if keep_ids else (lambda old: str(uuid.uuid4()))
 
     folders = read_jsonl(d / JSONL["folders"])
     fmap = {r["id"]: new_id(r["id"]) for r in folders}
+    frows = []
     for r in folders:
         row = dict(r)
         row["id"] = fmap[r["id"]]
         row["knowledge_base_id"] = kid
         if row.get("parent_id") in fmap:
             row["parent_id"] = fmap[row["parent_id"]]
-        q("DELETE FROM wiki_folders WHERE knowledge_base_id = %s AND path = %s"
-          % (sql_lit(kid), sql_lit(row.get("path"))))
-        _insert_row("wiki_folders", row)
+        frows.append(row)
+    bulk_delete("wiki_folders", kid, "path", [r.get("path") for r in frows])
+    bulk_insert("wiki_folders", frows)
 
     pages = read_jsonl(d / JSONL["pages"])
     pmap = {r["id"]: new_id(r["id"]) for r in pages}
+    prows = []
     for r in pages:
         row = dict(r)
         row["id"] = pmap[r["id"]]
         row["knowledge_base_id"] = kid
         if row.get("folder_id") in fmap:
             row["folder_id"] = fmap[row["folder_id"]]
-        q("DELETE FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s"
-          % (sql_lit(kid), sql_lit(row.get("slug"))))
-        _insert_row("wiki_pages", row)
+        prows.append(row)
+    bulk_delete("wiki_pages", kid, "slug", [r.get("slug") for r in prows])
+    bulk_insert("wiki_pages", prows)
 
     revs = read_jsonl(d / JSONL["revisions"])
+    rrows = []
     for r in revs:
         row = dict(r)
         row["id"] = new_id(r["id"])
         row["knowledge_base_id"] = kid
         row["page_id"] = pmap.get(r.get("page_id"), r.get("page_id"))
-        q("DELETE FROM wiki_page_revisions WHERE knowledge_base_id = %s AND slug = %s AND version = %s"
-          % (sql_lit(kid), sql_lit(row.get("slug")), sql_lit(row.get("version"))))
-        _insert_row("wiki_page_revisions", row)
+        rrows.append(row)
+    bulk_delete("wiki_page_revisions", kid, "slug", sorted({r.get("slug") for r in rrows}))
+    bulk_insert("wiki_page_revisions", rrows)
 
     issues = read_jsonl(d / JSONL["issues"])
+    irows = []
     for r in issues:
         row = dict(r)
         row["id"] = new_id(r["id"])
         row["knowledge_base_id"] = kid
-        q("DELETE FROM wiki_page_issues WHERE knowledge_base_id = %s AND slug = %s"
-          % (sql_lit(kid), sql_lit(row.get("slug"))))
-        _insert_row("wiki_page_issues", row)
+        irows.append(row)
+    bulk_delete("wiki_page_issues", kid, "slug", [r.get("slug") for r in irows])
+    bulk_insert("wiki_page_issues", irows)
 
     nodes = [{"slug": (n.get("props") or {}).get("slug"),
               "props": {k: v for k, v in (n.get("props") or {}).items() if k != "kb_id"}}
@@ -366,8 +451,11 @@ def main(argv: list) -> int:
         cmd_new_kb(a[1], tenant=_opt(a, "--tenant", "10000"))
         return 0
     if a[0] == "import":
+        import time as _t
+        t0 = _t.time()
         cmd_import(a[1], to_kb=_opt(a, "--to"), new_kb=_opt(a, "--new-kb"),
                    keep_ids="--keep-ids" in a)
+        print("耗时 %.1f s" % (_t.time() - t0))
         return 0
     if a[0] == "verify":
         return 0 if cmd_verify(a[1], _opt(a, "--to"))["ok"] else 1
