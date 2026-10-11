@@ -167,7 +167,7 @@ def _page_counts() -> dict:
     rows = ke_db.psql_csv(
         "SELECT knowledge_base_id AS kb, count(*) AS n, "
         "       count(*) FILTER (WHERE page_type LIKE '%:%') AS inst "
-        "  FROM wiki_pages WHERE deleted_at IS NULL GROUP BY 1")
+        "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) GROUP BY 1")
     return {r["kb"]: {"pages": int(r["n"] or 0), "instance": int(r["inst"] or 0)} for r in rows}
 
 
@@ -616,7 +616,7 @@ def page_view(kb_id: str = "", slug: str = "", q: str = "") -> dict:
     slug = (slug or "").strip()
     if not slug and q:
         rows = ke_db.psql_csv(
-            "SELECT slug FROM wiki_pages WHERE deleted_at IS NULL AND (slug ILIKE %s OR title ILIKE %s) "
+            "SELECT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) AND (slug ILIKE %s OR title ILIKE %s) "
             " ORDER BY slug LIMIT 1" % (ke_db.sql_str("%" + q + "%"), ke_db.sql_str("%" + q + "%")))
         slug = rows[0]["slug"] if rows else ""
     if not slug:
@@ -633,7 +633,7 @@ def page_view(kb_id: str = "", slug: str = "", q: str = "") -> dict:
     peers_rows = ke_db.psql_csv(
         "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
         "       COALESCE(page_type,'') AS page_type, COALESCE(version,1) AS version "
-        "  FROM wiki_pages WHERE deleted_at IS NULL "
+        "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) "
         "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
         % ke_db.sql_str(norm_slug(slug)))
     peers = [{"context": "kb:%s" % r["kb"][:8], "kb": r["kb"], "kb_name": names.get(r["kb"], ""),
@@ -649,10 +649,10 @@ def page_view(kb_id: str = "", slug: str = "", q: str = "") -> dict:
     forbidden: list = []
     if me and kb_id:
         mine = {r["slug"] for r in ke_db.psql_csv(
-            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id = %s "
+            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) AND knowledge_base_id = %s "
             " LIMIT 5000" % ke_db.sql_str(kb_id))}
         others = {r["slug"] for r in ke_db.psql_csv(
-            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id <> %s "
+            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) AND knowledge_base_id <> %s "
             " LIMIT 5000" % ke_db.sql_str(kb_id))}
         for target in sorted(_rels(me) - mine):
             if target in others:
@@ -734,7 +734,7 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
             "       COALESCE(out_links::text,'[]') AS out_links, left(COALESCE(content,''),1500) AS head, "
             "       COALESCE(content,'') AS content, "
             "       COALESCE(version,1) AS version, COALESCE(page_metadata::text,'{}') AS meta "
-            "  FROM wiki_pages WHERE deleted_at IS NULL "
+            "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) "
             "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
             % ke_db.sql_str(key)) if "summary" in _page_columns() else []
         members_by_key[key] = rows
@@ -758,7 +758,7 @@ def concept_preview(slug: str = "", include_unknown: bool = False, limit: int = 
                 "       COALESCE(out_links::text,'[]') AS out_links, "
                 "       left(COALESCE(content,''),1500) AS head, COALESCE(content,'') AS content, "
                 "       COALESCE(version,1) AS version, COALESCE(page_metadata::text,'{}') AS meta "
-                "  FROM wiki_pages WHERE deleted_at IS NULL "
+                "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) "
                 "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
                 % ke_db.sql_str(key))
     names = {k["id"]: k["name"] for k in kb_rows()}
@@ -932,7 +932,7 @@ def rebuild_cache() -> dict:
     rows = ke_db.psql_csv(
         "SELECT slug, COALESCE(title,'') AS title, COALESCE(version,1) AS version, "
         "       COALESCE(content,'') AS content "
-        "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id = %s ORDER BY slug"
+        "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) AND knowledge_base_id = %s ORDER BY slug"
         % ke_db.sql_str(ckb)) if ckb else []
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     pairs: list = []
@@ -1176,7 +1176,7 @@ def authority_preview(slug: str, master: str = "") -> dict:
                 "page_type": r["page_type"], "version": int(r["version"] or 1)}
                for r in ke_db.psql_csv(
                    "SELECT knowledge_base_id AS kb, slug, COALESCE(page_type,'') AS page_type, "
-                   "       COALESCE(version,1) AS version FROM wiki_pages WHERE deleted_at IS NULL "
+                   "       COALESCE(version,1) AS version FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) "
                    "   AND lower(regexp_replace(slug, '\\s+', '', 'g')) = lower(%s) LIMIT 30"
                    % ke_db.sql_str(norm_slug(slug)))
                if r["kb"] not in (ckb, ont_id)]
@@ -1378,7 +1378,7 @@ def lookup(kb_ids: list[str] | None = None, q: str = "", slug: str = "", limit: 
     sql_cols = ("SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
                 "       COALESCE(page_type,'') AS page_type, COALESCE(version,1) AS version, "
                 "       COALESCE(page_metadata::text,'{}') AS meta "
-                "  FROM wiki_pages WHERE deleted_at IS NULL ")
+                "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) ")
     rows = []
     if slug:
         rows = ke_db.psql_csv(sql_cols + "AND slug = %s LIMIT %d"
@@ -1428,7 +1428,7 @@ def lookup(kb_ids: list[str] | None = None, q: str = "", slug: str = "", limit: 
     for hit in hits[:10]:
         like = "%" + '"' + str(hit["slug"]) + '"' + "%"      # out_links 是 jsonb 数组文本：匹配 "slug"
         dep = ke_db.psql_csv(
-            "SELECT knowledge_base_id AS kb, slug FROM wiki_pages WHERE deleted_at IS NULL "
+            "SELECT knowledge_base_id AS kb, slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) "
             " AND out_links::text LIKE %s LIMIT 10" % ke_db.sql_str(like))
         if dep:
             hit["depended_by"] = [{"context": "kb:%s" % d["kb"][:8], "kb": d["kb"],

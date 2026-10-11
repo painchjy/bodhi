@@ -1,0 +1,48 @@
+=== 告警码出处 ===
+tools/ke-core/ke_context.py:664:        warnings.append({"kind": "concept_page_missing", "severity": "medium",
+tools/ke-core/ke_context.py:673:        warnings.append({"kind": "same_name_no_decision", "severity": "high",
+tools/ke-core/ke_context.py:1372:    - `warnings`：如 `same_name_no_decision` = 跨库同名但**没有任何裁决**
+tools/ke-core/ke_context.py:1423:            warnings.append({"kind": "same_name_no_decision", "severity": "high", "slug": row["slug"],
+tools/ontology-mcp/server.py:3600:                            "引用它的页（`depended_by`），以及 `warnings`（如 `same_name_no_decision` = "
+tools/ontology-mcp/server.py:3615:                            "（`concept_page_missing` / `cross_kb_reference_forbidden` / `same_name_no_decision`）。"
+=== ke_context 里的 deleted_at 过滤 ===
+9:- **同名** = 跨库 `slug` **归一化后字面相同**（L1，用户口径）；
+17:    contexts()                     上下文注册表（自动派生，可被 contexts.json 覆盖）
+18:    scan(kb_ids=None, limit=200)   全库同名/同实例分组 + R0/R1/R2 建议 + ticket（写扫描报告）
+25:    python3 tools/ke-core/ke_context.py contexts
+55:CONTEXTS_FILE = STATE_DIR / "contexts.json"
+82:    """slug 归一化（判"同名"用）：NFKC + 大小写折叠 + 去空白。
+84:    **不做**同义词替换、**不去** `-`/`_`（保守：`user-account` 与 `useraccount` 算不同名，
+163:        "  FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY created_at")
+170:        "  FROM wiki_pages WHERE deleted_at IS NULL GROUP BY 1")
+183:           "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+252:        " WHERE deleted_at IS NULL AND slug LIKE 'concept/%' GROUP BY 1")
+288:# 扫描：L1（slug 同名）+ L2（类+标题同实例）→ 合并成一张候选表
+365:def contexts(refresh: bool = False) -> dict:
+366:    """上下文注册表：KB → context（自动派生；`state/context_map/contexts.json` 可覆盖 label/owner/notes）。"""
+372:    given = (overrides.get("contexts") or {}) if isinstance(overrides, dict) else {}
+387:            "concept": concept, "contexts": out,
+393:    """全库扫描：跨库 `slug` 同名（L1）+ 跨库「类 + 标题」相同（L2）→ **一张**候选表 + 建议 + ticket。
+399:    ctx = contexts()
+506:        "kb_ids": [k["id"] for k in picked], "contexts": ctx["contexts"], "concept": concept,
+542:        "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+582:    """按 **slug 同名**（归一化）在「企业共享概念模型」库里找概念页。"""
+590:            "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+597:                "note": "概念库里还没有这一页（二期 `concept/apply` 生成；同名 slug 才能被查询到）"}
+609:    """领域页 ←（**同名 slug**）→「企业共享概念模型」页 的**渲染视图**（只读）。
+612:      · 领域库**不写 uuid**、也**不互相引用**；关联完全靠"按 slug 同名查询概念库"；
+614:      · 本接口只**渲染**：概念页的标准名称/定义 + 各领域映射 + 同名领域页 + 经概念的中转关系。
+619:            "SELECT slug FROM wiki_pages WHERE deleted_at IS NULL AND (slug ILIKE %s OR title ILIKE %s) "
+636:        "  FROM wiki_pages WHERE deleted_at IS NULL "
+652:            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id = %s "
+655:            "SELECT DISTINCT slug FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id <> %s "
+661:                                         "必须经「企业共享概念模型」同名概念页转换"})
+665:                         "detail": "概念库里没有同名页 `%s`（按 slug 同名查不到）→ 无法渲染企业标准定义" % slug,
+674:                         "detail": "同名页分布在 %d 个领域上下文，且既没有企业概念页、也没有 ACL 映射"
+683:        "rule": ("领域库不写 uuid、不互相引用；关系统一按 **slug 同名** 查概念库，"
+693:    `verdict`：`equivalent`（同义 → 一张企业标准定义）/ `distinct`（同名异义 → 页首写明"同名但各领域含义不同"）。
+697:        head += ["> ⚠️ **同名异义**：本 slug 在不同领域上下文里**含义不同**（下表逐域列出）；",
+707:        default_note = ("同名同义（待复核）" if verdict == "equivalent"
+708:                        else "**同名异义**：本域含义与其他域不同（请在此列写明差异）")
+712:    head += ["", "> 本页是「企业共享概念模型」里的**企业标准概念**：领域库按 **slug 同名** 查询到它，",
+722:    - 概念页 `slug` = **与领域页同名**（用户口径：不写 uuid、靠同名 slug 查询）；

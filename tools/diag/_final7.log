@@ -1,0 +1,13 @@
+=== 提交 ===
+cc99535 ops(kb): 新增 POST /bodhi/kb-upload 原始字节上传端点 + GET /bodhi/kb-upload 上传页（UI 不支持 zip）；上传落 exports/uploads 可被 kb_import 直接读；.gitignore 加 exports/；技能补内网上传三种方式；重打包 20261010-7
+=== 包 ===
+-rwxrwxrwx 1 painchjy painchjy 591205 Oct 12 03:20 dist-delivery/bodhi2-delivery-20261010-7/bodhi2-02-mcp-server.tar.gz
+=== 包内 ===
+3
+=== 包尾 ===
+warning: in the working copy of 'tools/diag/_ttl_patch_v07.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_ttl_probe.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_verify_clean.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_xfer_verify.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/ke-core/kb_transfer.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_up_test.py', CRLF will be replaced by LF the next time Git touches it
