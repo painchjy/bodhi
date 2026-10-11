@@ -7,7 +7,7 @@
 
 ## 0. 背景（为什么需要）
 
-现状：正文有 7 条生成路径（`build_new_page` / `merge_content` / `build_pending_page` /
+现状：正文有 5 条生成路径（`build_new_page` /
 `review_apply` / `write_page` / `upsert_page` / `ke_import`）；「定义」有 2 套并存
 （`element["definition"]` 与 `bmm:definition`/`description` 数据属性）；关系有 2 条技术并存
 （图边直写 vs 正文关系行投影）；会话溯源只有 1/7 通道有。→ 同一知识"放哪、怎么渲、怎么溯源"随渠道而变。

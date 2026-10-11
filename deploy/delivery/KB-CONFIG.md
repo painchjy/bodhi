@@ -78,8 +78,11 @@ UPDATE knowledge_bases SET extract_config = '{"enabled": false}'::jsonb, updated
 不开也能用：让智能体按 **`domain_modeling` 技能分批抽**（`doc_outline` 取本批上下文 → 智能体自己比对 →
 `save_knowledge` 落库 → `extract_state` 续跑），比「整篇一次性抽取」更可控，也能指定只抽某几类/某几条关系。
 
-> 抽取结果进入"待确认合并队列"时：`list_pending_merges` 查看，`resolve_pending_merge` 决定合并/新建；
-> 阈值在工具参数里（`high`/`low`）。
+> **落库不再有「待确认合并」队列**（2026-10-10 永久取消）：一律按 `(kb, slug)` 幂等 upsert
+> （同 slug 覆盖、否则新建）。相似知识（库内近重复 / 跨库同名）由**巡检**裁决：
+> `audit_scan`（`scope=all` 已含 S1 库内近重复 ≥0.86/0.93、S2 域外同名），
+> 工具 `list_pending_merges` / `resolve_pending_merge` 与工具参数 `high`/`low` 均**已删除**。
+> 运维需要把 PG 正文按图（正本）重建时用 `rebuild_wiki_from_graph(kb_id, dry_run=true)`。
 
 ## 5. 页面与类型的约定（决定巡检是否干净）
 

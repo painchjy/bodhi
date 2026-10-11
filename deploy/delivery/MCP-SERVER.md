@@ -2,12 +2,12 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **38 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** / **多模态识别（`image_extract` 取文档内嵌图）** …）
+> 作用：给 WeKnora 提供 **37 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** / **多模态识别（`image_extract` 取文档内嵌图）** / **运维·图→正文重建（`rebuild_wiki_from_graph`）** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
 > 的零依赖子集解析（我们逐键比对过，5 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list **38 个** / skills() **6 个**）。
+> `selfcheck.py` 全绿（initialize / tools/list **37 个** / skills() **6 个**）。
 
 **结构化数据批量建模（2026-09-29/30 新增，5 个工具）**：技能负责「理解」（从用户对表结构的中文描述得出
 有哪些类/关系/键列/列→属性映射），工具负责「确定性执行」，**一次只处理一个类（含数据属性）或一条关系**：
@@ -124,7 +124,7 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 | `BODHI_CONCEPT_KB_ID` | 空 | **企业共享概念模型**知识库 id（跨库上下文映射的落点，见 `KB-CONFIG.md`）|
 | `BODHI_CONCEPT_KB_NAME` | `企业共享概念模型` | 同上（库名匹配用）|
 | `BODHI_TENANT_ID` | 空 | **写权限判定**用的调用者租户；不配且没带请求头 `X-Bodhi-Tenant` → 写路径 fail-closed 拒（读不受影响）|
-| `BODHI_SIMILARITY_MERGE` | `0` | 相似度合并：`0`=停用（一律按 `(kb,slug)` 幂等 upsert，`pending` 恒空、`merged` 表示"同 slug 覆盖"）；`1`=旧行为（相似度并页 + 待确认页）。**落库只走契约内核一条路**（`BODHI_SAVE_ENGINE` 已删除）|
+| ~~`BODHI_SIMILARITY_MERGE`~~ | — | **已删除**（2026-10-10 相似度合并永久取消）：一律按 `(kb,slug)` 幂等 upsert（`merged` = "同 slug 覆盖"）；相似知识治理走巡检 `audit_scan`（S1/S2）。**落库只走契约内核一条路**（`BODHI_SAVE_ENGINE` 已删除）|
 | `BODHI_VALIDATE_FROM_GRAPH` | `1` | 关系 domain/range 校验的**类型读**：`1`=图优先（1 次 Neo4j 替掉每条边 2 次 psql，图里没有才回落 PG）；`0`=只用 PG |
 | `BODHI_DEFER_MAINTENANCE` | `1` | 重型维护（全库目录树重建 / CRUD 矩阵）延迟到前端按需刷新（`/bodhi/folders/refresh`）；`0`=落库时同步做 |
 | `BODHI_DEBUG_ENGINE` | `0` | 内核路径内部调试打印（排障用）|
@@ -257,14 +257,22 @@ PY
 python3 /opt/bodhi2/02-mcp-server/selfcheck.py --url http://127.0.0.1:8765/mcp
 ```
 
-`selfcheck.py` 期望输出（14 个工具）：
+`selfcheck.py` 期望输出（37 个工具）：
 
 ```
 initialize  OK（session=…）
-tools/list  OK（14 个）：list_pending_merges, resolve_pending_merge, ontology_types, skills, job_status,
+tools/list  OK（37 个）：audit_scan, audit_plan, save_knowledge, doc_outline, extract_state, skills,
+                        ontology_types, job_status, rebuild_wiki_from_graph,
                         service_overview, audit_scan, audit_plan, save_knowledge, doc_outline, extract_state,
                         link_candidates, list_link_candidates, resolve_link_candidate
 skills()    OK（3 个：document_review / domain_modeling / structured_modeling）
+```
+
+> **2026-10-10 工具增删（38 → 37）**：**删除** `list_pending_merges` / `resolve_pending_merge`
+> （「相似度合并」永久取消，待确认合并页不再产生；相似知识裁决统一走 `audit_scan` 的 S1/S2）；
+> **新增**运维工具 `rebuild_wiki_from_graph(kb_id, dry_run=true)`（按图节点 `wiki_content` 重建 PG 正文）。
+> 内网智能体注册请重跑 `deploy/weknora-fork` 的 SQL（`allowed_tools` 已同步）。
+> （下文时间线里的旧条目仍会提到这两个工具，仅作历史留痕。）
 ```
 
 > **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /

@@ -12,26 +12,24 @@
 - 建模/落库（`domain_modeling` 技能的分批流程）：`doc_outline` / `save_knowledge` /
     `extract_state` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate`；
     落库半段 `save_elements`（合规校验 + 相似度匹配 → 合并/新增/待确认 + 写页/版本）不变。
-- 详设/巡检/总览/技能：`service_*`、`list_pending_merges`、`resolve_pending_merge`、
-    `ontology_types`、`skills`、`job_status`（异步任务回执）。
+- 详设/巡检/总览/技能：`service_*`、`ontology_types`、`skills`、`job_status`（异步任务回执）；
+    巡检 `audit_scan`（scope 含 S1 库内近重复 / S2 域外同名）；运维 `rebuild_wiki_from_graph`（图→PG 正文）。
 - **2026-09-22 退役**：整篇异步抽取工具（`extract_and_save` 及其状态查询 `extract_status`）
     已移除，原文留痕在 `tools/ontology-mcp/archive/async_extract_retired_2026-09-22.py.txt`。
     MCP 侧**不再持有 LLM 调用链** → `openai` 依赖随之去掉；`rdflib` 仅本体编译工具需要。
-- `list_pending_merges(kb_id)`：列出"疑似重复待确认"项。
-- `resolve_pending_merge(kb_id, pending_slug, action)`：人工裁决（merge | create）。
 - `ontology_types(model)`：返回该模块的可用类与关系（供智能体自查）。
 
-合并语义（用户口径）
---------------------
-- 相似度 `≥ high`（默认 0.90）→ **合并**：定义取更完整的一方，**追加原文证据**；
-  同名多来源会在页面里累积（一个知识多个来源）；合并是**更新**，写 `wiki_page_revisions`
-  旧版本快照 → `version+1`，**不改变 slug / 标题 / 反向链接**，可回退。
-- 相似度 `≤ low`（默认 0.75）→ **新增**页面。
-- 两者之间 → 生成一页 `ontology:PendingMerge`（slug `bodhi/pending/<hash>`），
-  由人确认后调 `resolve_pending_merge`。
+落库语义（2026-10-10 用户决策：相似度合并**永久取消**）
+------------------------------------------------------
+- 落库一律按 `(kb, slug)` 幂等 upsert：同 slug 既有活页 → **整页覆盖**（title/type/created_at 不动，
+  写 `wiki_page_revisions` 快照 + `version+1`）；否则**新建**。**不再合并、不再生成待确认页。**
+- 相似知识（库内近重复 / 跨库同名）的裁决统一走**巡检** `audit_scan`：
+  S1 = 库内近重复（同类型 ≥0.86 / 跨类型 ≥0.93 提示）；S2 = 领域上下文之外的**同名页**。
+- 历史遗留的 `ontology:PendingMerge` 页只读保留（不再新增、不再裁决）。
+- **改本体类型仍走两段式 retag**（preview → 用户确认 → apply），不在落库热路径里静默改。
 
-相似度实现
-----------
+相似度实现（**落库已不再调用**；现由巡检 `ke_audit.check_similar` 使用）
+----------------------------------------------------------------------
 默认 `lexical`：名称归一化精确匹配记 1.0，否则对「名称+定义」做**中文友好字符 3-gram 余弦**
 （稀疏向量，零依赖、离线可用）。若配置了嵌入服务（`BODHI_EMBED_BASE_URL/API_KEY/MODEL`），
 自动改用真实向量余弦（name+definition vs title+summary）。
@@ -67,8 +65,7 @@ assert len(TOOL_TAG) <= 16, "TOOL_TAG 超过 last_edit_source 的 varchar(16)"
 
 DB_CONTAINER, DB_USER, DB_NAME = "WeKnora-postgres", "postgres", "WeKnora"
 # 口令不在此内置：由 `ke_db`（env `BODHI_DB_PASSWORD` → WeKnora `.env`）提供，见下方 import。
-TYPE_PENDING = "ontology:PendingMerge"
-PENDING_PREFIX = "bodhi/pending/"
+TYPE_PENDING = "ontology:PendingMerge"   # 仅历史遗留页只读识别（2026-10-10 起不再生成）
 
 DEFAULT_HIGH, DEFAULT_LOW = 0.90, 0.75
 
@@ -803,27 +800,6 @@ def fetch_existing_pages(kb_id: str) -> list[dict]:
     return rows
 
 
-def score_element(element: dict, page: dict) -> float:
-    """名称归一化相等直接 1.0；否则 3-gram 余弦（名称权重更高）。"""
-    if normalize_name(element["name"]) == normalize_name(page["title"]):
-        return 1.0
-    for alias in page.get("aliases") or []:
-        if normalize_name(element["name"]) == normalize_name(alias):
-            return 1.0
-    name_sim = lexical_similarity(element["name"], page["title"])
-    text_sim = lexical_similarity(
-        "%s %s" % (element["name"], element.get("definition", "")),
-        "%s %s" % (page["title"], page.get("summary", "")))
-    return round(max(name_sim, 0.5 * name_sim + 0.5 * text_sim), 4)
-
-
-def pick_match(element: dict, pages: list[dict]) -> tuple[float, dict | None]:
-    best_sim, best_page = 0.0, None
-    for page in pages:
-        sim = score_element(element, page)
-        if sim > best_sim:
-            best_sim, best_page = sim, page
-    return best_sim, best_page
 
 
 def element_slug(model_key: str, element: dict) -> str:
@@ -838,26 +814,6 @@ def element_page_slug(model: dict, element: dict) -> str:
     explicit = (element.get("slug") or "").strip()
     return explicit or element_slug(model["key"], element)
 
-
-def same_type_family(a: str, b: str) -> bool:
-    """两个本体类是否「同类族」——相等、同一继承链、或**同根**（如 APIService 与 MCPService 同属 Service）。
-
-    为什么放宽到同根（2026-09-21 实测）：智能体第二次跑时把服务类型从 `APIService` 改成 `MCPService`，
-    严格继承判定认为不同族 → 各建一套页（用户看到"2 套服务"）。同根判定既能合并这类兄弟类，
-    又能挡住跨域误合并（如把 `bmm:Goal` 并进 `ea:Step`）。
-    """
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    try:
-        chain_a = list(ke_ontology.ancestors(a))   # 由近及远，末位是根
-        chain_b = list(ke_ontology.ancestors(b))
-    except Exception:  # noqa: BLE001
-        return False
-    if a in chain_b or b in chain_a:
-        return True
-    return bool(chain_a) and bool(chain_b) and chain_a[-1] == chain_b[-1]
 
 
 def _design_sections(element: dict) -> list[str]:
@@ -1080,170 +1036,10 @@ DERIVED_SECTIONS = {
 }
 
 
-def merge_content(old_content: str, element: dict, chunk_id: str, chunk_index: int,
-                  doc_meta: dict) -> tuple[str, dict]:
-    """合并：定义取更完整的一方；追加原文证据；关系行去重后追加。不动标题/类型/其它章节。"""
-    lines = old_content.splitlines()
-    first_h2 = next((i for i, line in enumerate(lines) if line.startswith("## ")), len(lines))
-    head, tail = lines[:first_h2], lines[first_h2:]
-    last_meta = max((i for i, line in enumerate(head) if line.startswith("> ")), default=0)
-    old_def = "\n".join(head[last_meta + 1:]).strip()
-    new_def = (element.get("definition") or "").strip()
-    # 报告页/显式声明「正文整体替换」的载荷：**一律以新正文为准**。
-    # 旧启发式「取更长的一方」在改版后正文更短时会静默保留旧正文（用户 2026-09-21 实测：
-    # 报告从 API 服务版改成 MCP 服务版，回执成功但正文一直没变）。
-    chosen = new_def if (element.get("replace_body") or len(new_def) > len(old_def)) else old_def
-    merged = head[:last_meta + 1] + ["", chosen, ""] + tail
-
-    evidence = ("- %s（来源：《%s》%s）" % (
-        element.get("source_text", "").strip(), doc_meta["title"],
-        (" 片段 #%d" % chunk_index) if chunk_index >= 0 else "")) if doc_meta.get("id") \
-        else ("- %s（%s）" % (element.get("source_text", "").strip(),
-                             context_meta(doc_meta.get("context"))["evidence_generated"]))
-    added_evidence = False
-    if any(line.strip() == "## 原文依据" for line in merged):
-        pos = next(i for i, line in enumerate(merged) if line.strip() == "## 原文依据")
-        end = next((i for i in range(pos + 1, len(merged)) if merged[i].startswith("## ")), len(merged))
-        existing = {squash(line) for line in merged[pos + 1:end] if line.strip()}
-        if squash(evidence) not in existing:
-            insert_at = end
-            while insert_at > pos + 1 and not merged[insert_at - 1].strip():
-                insert_at -= 1
-            merged.insert(insert_at, evidence)
-            added_evidence = True
-    else:
-        merged += ["", "## 原文依据", "", evidence, ""]
-
-    added_relations = []
-    rels = element.get("relations") or []
-    if rels and any(line.strip() == "## 本体关系" for line in merged):
-        pos = next(i for i, line in enumerate(merged) if line.strip() == "## 本体关系")
-        end = next((i for i in range(pos + 1, len(merged)) if merged[i].startswith("## ")), len(merged))
-        block = "\n".join(merged[pos + 1:end])
-        for rel in rels:
-            if rel.get("target_slug") and rel["target_slug"] in block:
-                continue
-            merged.insert(end, rel_line(rel.get("label") or rel["type"], rel["type"],
-                                       rel["target"], rel.get("target_slug") or ""))
-            added_relations.append(rel["type"])
-            end += 1
-    elif rels:
-        merged += ["", "## 本体关系", ""]
-        for rel in rels:
-            merged.append(rel_line(rel.get("label") or rel["type"], rel["type"],
-                                   rel["target"], rel.get("target_slug") or ""))
-            added_relations.append(rel["type"])
-        merged.append("")
-
-    upstream = [s for s in (element.get("upstream") or []) if s]
-    added_upstream = []
-    if upstream:
-        if any(line.strip() == "## 溯源" for line in merged):
-            pos = next(i for i, line in enumerate(merged) if line.strip() == "## 溯源")
-            end = next((i for i in range(pos + 1, len(merged)) if merged[i].startswith("## ")),
-                       len(merged))
-            existing = {squash(line) for line in merged[pos + 1:end] if line.strip()}
-            for slug in upstream:
-                item = "- 上游页面：`%s`" % slug
-                if squash(item) not in existing:
-                    merged.insert(end, item)
-                    added_upstream.append(slug)
-                    end += 1
-        else:
-            merged += ["", "## 溯源", ""] + ["- 上游页面：`%s`" % s for s in upstream] + [""]
-            added_upstream = list(upstream)
-
-    design_lines = _design_sections(element)
-    added_sections = []
-    if design_lines:
-        sections, cur = [], None
-        for ln in design_lines:
-            if ln.startswith("## "):
-                cur = [ln]
-                sections.append(cur)
-            elif cur is not None:
-                cur.append(ln)
-        have = {ln.strip() for ln in merged if ln.startswith("## ")}
-        for sec in sections:
-            title_sec = sec[0].strip()
-            if title_sec in DERIVED_SECTIONS:
-                # 派生小节（用途/输入输出/设计规范/属性/被引用/关系限定）→ **每次替换**：
-                # 它们的内容完全由本次载荷推导，"已存在就跳过"会让改设计（补属性、改 CRUD）
-                # 永远落不到已有页上（2026-09-21 实测：补 `easvc:operationRetryPolicy` 没写进去）。
-                start = next((i for i, ln in enumerate(merged) if ln.strip() == title_sec), -1)
-                if start >= 0:
-                    end = next((i for i in range(start + 1, len(merged))
-                                if merged[i].startswith("## ")), len(merged))
-                    merged = merged[:start] + list(sec) + merged[end:]
-                else:
-                    merged += [""] + list(sec)
-                added_sections.append(title_sec)
-                continue
-            if title_sec in have:
-                continue
-            merged += [""] + list(sec) + [""]
-            added_sections.append(title_sec)
-
-    post = {"definition_upgraded": bool(new_def) and len(new_def) > len(old_def),
-            "evidence_added": added_evidence, "relations_added": added_relations,
-            "upstream_added": added_upstream, "design_sections_added": added_sections}
-    return "\n".join(merged).rstrip() + "\n", post
-
 
 def union_list(old, new) -> list:
     return list(dict.fromkeys(list(old or []) + list(new or [])))
 
-
-
-
-def build_pending_page(model: dict, element: dict, candidate: dict, similarity: float,
-                       chunk_id: str, chunk_index: int, doc_meta: dict,
-                       high: float, low: float) -> dict:
-    slug = PENDING_PREFIX + hashlib.sha1(
-        ("%s|%s|%s" % (model["key"], element["type"], element["name"])).encode("utf-8")
-    ).hexdigest()[:12]
-    lines = ["# 待确认合并：%s（`%s`）" % (element["name"], element["type"]), "",
-             "> **类型**：待确认合并（`%s`）  " % TYPE_PENDING,
-             "> **相似度**：%.4f（≥%.2f 自动合并 ／ ≤%.2f 直接新增）  " % (similarity, high, low),
-             "> **候选页**：`%s`（%s，版本 %s）  " % (candidate["slug"], candidate["title"],
-                                                    candidate["version"]),
-             "> **生成**：%s（`%s`）" % (now_text(), TOOL_TAG), "",
-             "## 新要素", "",
-             "- 名称：%s" % element["name"],
-             "- 类型：%s（`%s`）" % (element["type_label"], element["type"]),
-             "- 定义：%s" % (element.get("definition") or "（无）"),
-             "- 原文依据：%s" % (element.get("source_text") or "（无）"),
-             "- 来源：《%s》%s" % (doc_meta["title"],
-                                (" 片段 #%d" % chunk_index) if chunk_index >= 0 else ""), "",
-             "## 疑似同一的存量页面", "",
-             "- %s（`%s`）" % (candidate["title"], candidate["slug"]),
-             "- 定义：%s" % (candidate.get("summary") or "（无）"), "",
-             "## 怎么裁决", "",
-             "- 合并到该页：`resolve_pending_merge` 传 `pending_slug=\"%s\", action=\"merge\"`" % slug,
-             "- 作为新页新增：`resolve_pending_merge` 传 `pending_slug=\"%s\", action=\"create\"`" % slug,
-             ""]
-    return {
-        "slug": slug, "title": "待确认合并：%s" % element["name"], "page_type": TYPE_PENDING,
-        "summary": "相似度 %.4f：新要素「%s」与已有页「%s」疑似同一，需人工裁决。"
-                   % (similarity, element["name"], candidate["title"]),
-        "content": "\n".join(lines).rstrip() + "\n",
-        "category_path": [model["label"], "待确认合并"],
-        "wiki_path": slug, "source_refs": [doc_meta["id"]],
-        "chunk_refs": [chunk_id] if chunk_id else [],
-        "out_links": [candidate["slug"]], "aliases": [],
-        "page_metadata": {"ontology": {
-            "kind": "pending_merge", "model": model["key"], "candidate_slug": candidate["slug"],
-            "similarity": similarity, "high": high, "low": low,
-            "element": {"name": element["name"], "type": element["type"],
-                        "type_label": element["type_label"],
-                        "definition": element.get("definition") or "",
-                        "source_text": element.get("source_text") or "",
-                        "relations": element.get("relations") or []},
-            "doc": {"id": doc_meta["id"], "title": doc_meta["title"],
-                    "chunk_id": chunk_id, "chunk_index": chunk_index},
-            "generator": TOOL_TAG, "created_at": now_text(),
-        }},
-    }
 
 
 def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_meta: dict,
@@ -1259,17 +1055,15 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
 
     这段逻辑原先内联在**已退役的整篇抽取工具**里（2026-09-20 原样抽出，行为逐字保留；
     抽取工具 2026-09-22 退役，本函数现由设计/建模路径 `save_knowledge` 使用）：
-    - 相似度 ≥ high：合并进存量页（定义取更完整、追加证据、关系去重、写入 merge_history）；
-    - 相似度 ≤ low 或无候选：新建页；
-    - 两者之间：生成「待确认合并」页，交人工裁决（`resolve_pending_merge`）。
+    - **按 `(kb, slug)` 幂等落库**：同 slug 既有活页 → 整页覆盖；否则新建。
+      （**相似度合并 / 待确认合并页已永久取消**，2026-10-10 用户决策；相似知识治理走巡检 `audit_scan`。）
     """
     tenant = tenant_id if tenant_id is not None else get_kb_tenant(kb_id)
     pages = fetch_existing_pages(kb_id)
-    # P0-c-2（2026-10-10 用户口径）：**先取消相似度合并** —— 落库一律按 `(kb, slug)` 幂等 upsert
-    # （同 slug 覆盖、否则新建），不再做"全文相似度比较 → 合并 / 生成待确认页"。
-    # 理由（用户原话）：相似度是"**全文比较**"的事，不是 slug 问题，不该压在落库热路径上 ——
-    # 相似度治理交给运维/巡检（`audit_*`）。`BODHI_SIMILARITY_MERGE=1` 可临时恢复旧行为。
-    merge_on = str(ke_db.env_value("BODHI_SIMILARITY_MERGE", "0")).lower() in ("1", "true", "yes")
+    # 2026-10-10（用户决策）：**相似度合并永久取消** —— `BODHI_SIMILARITY_MERGE` 开关、`pick_match`、
+    # `merge_content`、待确认合并页与其裁决工具（`list_pending_merges` / `resolve_pending_merge`）全部删除。
+    # 落库一律按 `(kb, slug)` 幂等 upsert（同 slug 覆盖、否则新建）；相似知识（库内近重复 / 跨库同名）
+    # 的裁决统一走巡检 `audit_scan`（S1/S2，见 `ke_audit.check_similar`）。
     # P0-c-2（2026-10-10）：**库里既有页的快照 —— 必须在此刻做**。
     # 下面的循环会把"本次构建的页"逐个 `pages.append(...)` 进去（65 = 32 库里行 + 33 新构建），
     # 之后再按 slug 建映射会**取到新页**而非库里那一行 → 拿不到原有的「首个版本生成」等原值
@@ -1329,18 +1123,18 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         "model": model["key"], "kb_id": kb_id, "knowledge_id": knowledge_id,
         "resolved_note": (resolved_note or "").strip(), "doc_title": doc_meta.get("title", ""),
         "elements": len(payloads), "relationships": len(checked.get("edges") or []),
-        "created": [], "merged": [], "pending": [],
+        "created": [], "merged": [],
         "violations": checked["violations"], "unmatched": checked["unmatched"],
-        "dry_run": dry_run, "thresholds": {"high": high, "low": low},
+        "dry_run": dry_run, "thresholds": {"high": high, "low": low,
+                                           "deprecated": "相似度阈值已无用途（合并永久取消）"},
         "dropped_relations": dropped_relations,
         "generated_at": now_text(),
     }
     if extra:
         summary.update(extra)
-    summary["merge"] = ({"enabled": False, "note": (
-        "相似度合并已停用（BODHI_SIMILARITY_MERGE=0）：一律按 (kb, slug) 幂等 upsert —— "
-        "同 slug 覆盖、否则新建；相似度是全文比较的事，治理走运维/巡检（audit_*）。")}
-        if not merge_on else {"enabled": True})
+    summary["merge"] = {"enabled": False, "removed": True, "note": (
+        "**相似度合并已永久取消**（2026-10-10 用户决策）：一律按 (kb, slug) 幂等 upsert —— 同 slug 覆盖、"
+        "否则新建。相似知识（库内近重复 / 跨库同名）的裁决走巡检 `audit_scan`（S1/S2）。")}
     if _doc_skipped:
         summary["skipped_document_nodes"] = [
             {"slug": k, "name": v["name"], "type": v["type"]} for k, v in sorted(_doc_skipped.items())]
@@ -1353,7 +1147,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     summary["applied"] = not dry_run
     if dry_run:
         summary["write_note"] = ("**未写库**（dry_run）：本回执只是预览。要真正落库请用**同一份载荷**、"
-                                 "`mode=\"apply\"` 重跑；`created/merged/pending` 里的 slug 在 apply 时才生效。")
+                                 "`mode=\"apply\"` 重跑；`created/merged` 里的 slug 在 apply 时才生效。")
     summary["page_versions"] = []
 
     retagged: list = []
@@ -1366,81 +1160,17 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
     # · 页 id / 存在性 / 版本由内核自己批量预读（一次 `page_info_map` 免掉逐页查询）。
     built: list = []          # 收集"已构建好"的页（element + page + action），最后交内核批量写
     for element in payloads:
-        exact = None
-        if merge_on:
-            # 幂等修正（2026-09-21）：**slug 完全相同**即同一要素（slug=模块/类/名称哈希），直接走合并；
-            # 否则旧行为会因「同名同类的页已存在」而另建一个带哈希后缀的重复页。
-            exact = next((p for p in pages if p["slug"] == element_page_slug(model, element)), None)
-        if exact is not None:
-            sim, candidate = 1.0, exact
-        elif merge_on:
-            # 同类型守卫（设计路径开启）：只在同一本体类族（相等、同一继承链，或**同根**）的页之间做
-            # 相似度合并，避免「设计节点并进报告页/需求页」这类跨类误合并（2026-09-21 沙箱实测事故）。
-            pool = ([p for p in pages if same_type_family(element["type"], p.get("page_type"))]
-                    if same_type_only else pages)
-            sim, candidate = pick_match(element, pool)
-        else:
-            # 合并已停用（P0-c-2）→ 一律走「同 slug 幂等覆盖 / 新建」分支（`candidate is None`），
-            # 顺带**跳过 `pick_match` 的全文比较**（CPU）与 `pending` 待确认页。
-            sim, candidate = 0.0, None
-        if candidate is not None and sim >= high:
-            content, post = merge_content(candidate["content"], element, element["chunk_id"],
-                                          element["chunk_index"], doc_meta)
-            source_refs = union_list(candidate.get("source_refs"),
-                                     [doc_meta["id"]] if doc_meta.get("id") else [])
-            chunk_refs = union_list(candidate.get("chunk_refs"),
-                                    [element["chunk_id"]] if element["chunk_id"] else [])
-            metadata = candidate.get("page_metadata") or {}
-            ont = metadata.setdefault("ontology", {})
-            ont.setdefault("merge_history", []).append(
-                {"at": now_text(), "doc": doc_meta["title"],
-                 "chunk_index": element["chunk_index"], "similarity": sim, **post})
-            ont["last_merge_at"] = now_text()
-            upstream = [s for s in (element.get("upstream") or []) if s]
-            if upstream:
-                des = metadata.setdefault("design", {})
-                des["upstream"] = sorted(set(list(des.get("upstream") or []) + upstream))
-                des.setdefault("generator", TOOL_TAG)
-            new_summary = (element.get("definition") or candidate.get("summary") or "")[:500]
-            built.append({"element": element, "action": "merged",
-                          "page": {**candidate, "content": content, "summary": new_summary,
-                                   "source_refs": source_refs, "chunk_refs": chunk_refs,
-                                   "page_metadata": metadata,
-                                   "slug": candidate.get("slug"),
-                                   "title": candidate.get("title") or element.get("name"),
-                                   "page_type": candidate.get("page_type") or element["type"]}})
-            summary["merged"].append({"name": element["name"], "type": element["type"],
-                                      "into": candidate["slug"], "similarity": sim, **post})
-            summary["page_versions"].append({"slug": candidate["slug"],
-                                             "before": candidate.get("version"),
-                                             "action": "merged（正文已按载荷更新）",
-                                             "applied": not dry_run})
-            # 类型变更（retag，2026-09-27 用户口径）：**不再静默改类型** —— 改类型 = 迁移 slug +
-            # 联动引用，必须走两段式（preview → 用户确认 → apply）。这里只登记"需要迁移"的清单，
-            # 回执里给出 preview 调用方式，由人确认后执行（避免智能体绕过风险确认）。
-            want_type = element["type"]
-            if element.get("retag") and candidate.get("page_type") \
-                    and candidate["page_type"] != want_type \
-                    and same_type_family(candidate["page_type"], want_type):
-                retag_queue.append({"slug": candidate["slug"], "from": candidate["page_type"],
-                                    "to": want_type, "name": element["name"], "similarity": sim})
-            candidate.update({"content": content, "summary": new_summary,
-                              "source_refs": source_refs, "chunk_refs": chunk_refs,
-                              "page_metadata": metadata})
-        elif candidate is None or sim <= low:
+        # 相似度合并**永久取消**（2026-10-10，用户决策）：不再 `pick_match`、不再 `merge_content` 追加、
+        # 不再生成「待确认合并」页。落库只有两条路径：**同 slug 既有活页 → 整页覆盖** / **新建**。
+        # 相似知识的裁决统一交给巡检 `audit_scan`（S1 库内近重复 / S2 域外同名，见 ke_audit.check_similar）。
+        sim, candidate = 0.0, None
+        if candidate is None or sim <= low:
             page = build_new_page(engine or load_engine(), model=model, element=element,
                                   chunk_id=element["chunk_id"], chunk_index=element["chunk_index"],
                                   doc_meta=doc_meta)
-            # 同 slug 已存在 → 加哈希后缀另建，**只在"相似度合并开着"时**才需要：
-            # 那时同 slug 的要素走合并分支，走到这里说明是要区分两个不同要素。
-            # **合并停用（P0-c-2）后绝不能加后缀** —— slug 就是唯一的键，同 slug = 同一页，
-            # 应当幂等覆盖（`_resolve_page_id`→existing、`sql_insert_page` 的 ON CONFLICT 守卫）。
-            # （实测回归：合并停用后若仍加后缀，会去查一个不存在的"带后缀 slug"→ 误判 created →
-            #  apply 时建出一批重复页。dry_run 复测抓到的。）
-            if merge_on and any(p["slug"] == page["slug"] for p in pages):
-                page["slug"] = "%s-%s" % (page["slug"],
-                                          hashlib.sha1(element["type"].encode()).hexdigest()[:6])
-                page["wiki_path"] = page["slug"]
+            # **slug 就是唯一的键**（相似度合并取消后）—— 同 slug = 同一页，一律幂等覆盖
+            # （内核 upsert 的 ON CONFLICT 守卫）。**绝不加哈希后缀**：实测回归证明加后缀会去查
+            # 一个不存在的"带后缀 slug"→ 误判 created → apply 时建出一批重复页。
             # 回执如实（2026-09-21 用户实测：`fetch_existing_pages` 排除 summary/index 页，报告页会走
             # 到这里；若不说清是「覆盖既有活页」，就会出现"回执说 created，用户看到的是旧正文"的错觉）。
             # 2026-10-10：判「新建 / 覆盖」用**循环前的库里快照**（`_exist_before`，来自
@@ -1470,18 +1200,6 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                           "status": "published", "in_links": [], "title": page["title"],
                           "summary": page["summary"], "aliases": page["aliases"],
                           "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
-        else:
-            page = build_pending_page(model, element, candidate, sim, element["chunk_id"],
-                                      element["chunk_index"], doc_meta, high, low)
-            built.append({"element": element, "page": page, "action": "pending"})
-            summary["pending"].append({"name": element["name"], "type": element["type"],
-                                       "pending_slug": page["slug"],
-                                       "candidate": candidate["slug"], "similarity": sim})
-            pages.append({**page, "version": 1, "knowledge_base_id": kb_id,
-                          "status": "published", "in_links": [], "title": page["title"],
-                          "summary": page["summary"], "aliases": page["aliases"],
-                          "source_refs": page["source_refs"], "chunk_refs": page["chunk_refs"]})
-
     summary["engine"] = "kernel"
     if not dry_run and built:
         if built:      # 单一写路径（legacy 单事务写已删，2026-10-10）
@@ -1547,8 +1265,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         # 否则就是"回执成功、库里没有"（历史 bug：页 id 只按 slug 派生 → upsert 更新了别库那一行）。
         # 这里把它变成**显式的失败**：`applied` 回拨为 False + missing 清单，提示不要向用户汇报成功。
         wanted = [e.get("slug") for e in summary["created"]] \
-            + [e.get("into") for e in summary["merged"]] \
-            + [e.get("pending_slug") for e in summary["pending"]]
+            + [e.get("into") for e in summary["merged"]]
         wanted = [s for s in wanted if s]
         if wanted:
             rows = psql_csv("SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s "
@@ -2694,109 +2411,7 @@ def skills(skill: str = "", model: str = "") -> dict:
 # ---------------------------------------------------------------------------
 # 待确认裁决 + 查询工具
 # ---------------------------------------------------------------------------
-def list_pending_merges(kb_id: str = "", kb_ids: list | None = None) -> dict:
-    """列出「待确认合并」项（只读）。
 
-    单库：传 `kb_id`；**多库**（会话绑了多个库）：传 `kb_ids`（`<bound_knowledge_bases>` 的 id 清单）
-    —— 逐个库查，每项带 `kb_id`/`kb_name`，不做跨库合并（同名不同义）。
-    """
-    ids = [str(x).strip() for x in (kb_ids or []) if str(x).strip()]
-    if ids:
-        merged, per = [], []
-        for raw in ids:
-            try:
-                uid, name, _note = ke_db.resolve_kb_id(raw)
-            except ValueError as exc:
-                per.append({"asked": raw, "error": str(exc)[:200]})
-                continue
-            res = list_pending_merges(uid)
-            merged += [{**item, "kb_id": uid, "kb_name": name} for item in res["items"]]
-            per.append({"kb_id": uid, "kb_name": name, "count": res["count"]})
-        return {"multi": True, "count": len(merged), "per_kb": per, "items": merged,
-                "note": "多库清单：每条都带 kb_id；裁决时请把对应 kb_id 传给 resolve_pending_merge"}
-    # 参数容错：智能体常传知识库名称（如「企业知识」）或占位符，这里先解析成真实 UUID，
-    # 否则按错误的 id 查询会返回空清单（2026-09-19 用户实测：报告 5 条待确认却查到 0 条）。
-    kb_id, _note = resolve_kb_id(kb_id)
-    rows = psql_csv(
-        "SELECT slug, title, summary, page_metadata::text AS meta, created_at "
-        "FROM wiki_pages WHERE knowledge_base_id = %s AND page_type = %s AND deleted_at IS NULL "
-        "ORDER BY created_at" % (sql_str(kb_id), sql_str(TYPE_PENDING)))
-    items = []
-    for row in rows:
-        try:
-            meta = (json.loads(row["meta"] or "{}").get("ontology") or {})
-        except json.JSONDecodeError:
-            meta = {}
-        items.append({"pending_slug": row["slug"], "title": row["title"],
-                      "candidate_slug": meta.get("candidate_slug", ""),
-                      "similarity": meta.get("similarity"), "summary": row["summary"]})
-    return {"kb_id": kb_id, "count": len(items), "items": items}
-
-
-def resolve_pending_merge(kb_id: str, pending_slug: str, action: str,
-                          kb_ids: list | None = None, confirm_kb_match: bool = False) -> dict:
-    kb_id, _note, block = resolve_write_kb(kb_id, kb_ids, confirm_kb_match)   # 写入口：唯一库 + 模糊需确认
-    if block:
-        return block
-    rows = psql_csv("SELECT id, tenant_id, page_metadata::text AS meta, source_refs::text AS refs, "
-                    "chunk_refs::text AS chunks FROM wiki_pages WHERE knowledge_base_id = %s "
-                    "AND slug = %s AND deleted_at IS NULL" % (sql_str(kb_id), sql_str(pending_slug)))
-    if not rows:
-        raise RuntimeError("待确认页不存在：%s" % pending_slug)
-    meta = (json.loads(rows[0]["meta"] or "{}").get("ontology") or {})
-    element = meta.get("element") or {}
-    doc = meta.get("doc") or {}
-    tenant_id = int(rows[0]["tenant_id"])
-    doc_meta = {"id": doc.get("id", ""), "title": doc.get("title", "")}
-    chunk_id, chunk_index = doc.get("chunk_id", ""), int(doc.get("chunk_index", -1))
-    statements: list[str] = []
-    id_strats: list[dict] = []
-    result = {"pending_slug": pending_slug, "action": action}
-
-    if action == "merge":
-        target = meta.get("candidate_slug", "")
-        page_rows = fetch_existing_pages(kb_id)
-        target_page = next((p for p in page_rows if p["slug"] == target), None)
-        if target_page is None:
-            raise RuntimeError("候选页已不存在：%s" % target)
-        content, post = merge_content(target_page["content"], element, chunk_id, chunk_index, doc_meta)
-        metadata = target_page.get("page_metadata") or {}
-        metadata.setdefault("ontology", {}).setdefault("merge_history", []).append(
-            {"at": now_text(), "doc": doc_meta["title"], "manual": True,
-             "pending_slug": pending_slug, **post})
-        statements.append(sql_update_page(
-            target_page, content, (element.get("definition") or target_page["summary"])[:500],
-            union_list(target_page.get("source_refs"), [doc_meta["id"]] if doc_meta["id"] else []),
-            union_list(target_page.get("chunk_refs"), [chunk_id] if chunk_id else []),
-            metadata))
-        result.update({"into": target, **post})
-    elif action == "create":
-        engine = load_engine()
-        model = engine.pick_model(engine.load_index(engine.DEFAULT_INDEX), meta.get("model", "bmm"))
-        page = build_new_page(engine, model, element, chunk_id, chunk_index, doc_meta)
-        if any(p["slug"] == page["slug"] for p in fetch_existing_pages(kb_id)):
-            page["slug"] = "%s-%s" % (page["slug"], hashlib.sha1(pending_slug.encode()).hexdigest()[:6])
-            page["wiki_path"] = page["slug"]
-        statements.append(sql_insert_page(page, kb_id, tenant_id, strategies=id_strats))
-        result.update({"created": page["slug"]})
-    else:
-        raise RuntimeError("action 只能是 merge 或 create")
-
-    statements.append("DELETE FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s;"
-                      % (sql_str(kb_id), sql_str(pending_slug)))
-    psql("BEGIN;\n" + "\n".join(statements) + "\nCOMMIT;\n", stdin=True)
-    if id_strats:
-        result["id_strategy"] = id_strats
-        _warn_noncanonical_ids(id_strats)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# 服务详细设计：CRUD 矩阵（跨页聚合，确定性渲染 —— 不靠 LLM 排版）
-# ---------------------------------------------------------------------------
-CRUD_SECTION = "## CRUD 矩阵"
-CRUD_ORDER = ("C", "R", "U", "D")
-_ATTR_VALUE = re.compile(r"^- (?P<name>[^（=]+?)(?:（[^）]*）)?\s*=\s*(?P<value>.+?)\s*$")
 
 
 def _page_slug_by_title(kb_id: str, title: str) -> str:
@@ -3318,7 +2933,7 @@ JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 
 
-DETAIL_KEYS = ("created", "merged", "pending", "violations", "unmatched")
+DETAIL_KEYS = ("created", "merged", "violations", "unmatched")
 
 
 def _job_brief(result: dict) -> dict:
@@ -3364,38 +2979,6 @@ def job_status(job_id: str = "") -> dict:
 
 def tool_definitions() -> list[dict]:
     return [
-        {
-            "name": "list_pending_merges",
-            "description": "列出「待确认合并」项（相似度处于两个阈值之间，需人工裁决）。",
-            "inputSchema": {"type": "object",
-                            "properties": {"kb_id": {"type": "string"},
-                    "kb_ids": {"type": "array", "items": {"type": "string"},
-                               "description": ("会话里绑定的知识库 id 清单（`<bound_knowledge_bases>` 原样传）。"
-                                               "**写操作**：>1 个且未传 kb_id 会被拒（要求用户指明）；"
-                                               "恰好 1 个时等价于显式指定。**读操作**：多库一起查")},
-                            },
-                            "required": []},
-        },
-        {
-            "name": "resolve_pending_merge",
-            "description": "对一条「待确认合并」做裁决：action=merge 合并到候选页，action=create 作为新页新增。",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"kb_id": {"type": "string"},
-                               "pending_slug": {"type": "string"},
-                               "action": {"type": "string", "enum": ["merge", "create"]},
-                    "kb_ids": {"type": "array", "items": {"type": "string"},
-                               "description": ("会话里绑定的知识库 id 清单（`<bound_knowledge_bases>` 原样传）。"
-                                               "**写操作**：>1 个且未传 kb_id 会被拒（要求用户指明）；"
-                                               "恰好 1 个时等价于显式指定。**读操作**：多库一起查")},
-                    "confirm_kb_match": {"type": "boolean",
-                                        "description": ("模糊匹配（uuid 前缀 / 名称包含）命中唯一库时的**二次确认**："
-                                                        "true 才允许写；精确匹配（完整 uuid / 精确库名）不需要")},
-                },
-
-                "required": ["kb_id", "pending_slug", "action"],
-            },
-        },
         {
             "name": "ontology_types",
             "description": ("返回某本体模型的可用类与关系（含 domain/range），供核对类型是否合法。"
@@ -3458,6 +3041,18 @@ def tool_definitions() -> list[dict]:
                 "title": {"type": "string", "description": "总览页标题（默认 IT 服务详细设计总览）"},
                 "preview_lines": {"type": "integer", "description": "预览返回的 markdown 行数（默认 25）"},
             }, "required": ["kb_id"]},
+        },
+        {
+            "name": "rebuild_wiki_from_graph",
+            "description": ("**运维 · 图→wiki 全量重建**：按图节点的 `wiki_content` 重写 PG 正文"
+                            "（**正本是图、正文是派生**）。用于正文被误改/丢失后的**恢复**；"
+                            "图节点无 `wiki_content` 的页（index/原生页）不动；关系只在图里、不回写正文。"
+                            "`dry_run=true`（默认）只报影响面。**改类型/迁移 slug 不走这里**（走两段式 retag）。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"kb_id": {"type": "string"},
+                               "dry_run": {"type": "boolean", "description": "默认 true 只报影响面"}},
+                "required": ["kb_id"]},
         },
         {
             "name": "audit_scan",
@@ -4120,6 +3715,28 @@ def context_authority_apply(action: str, slug: str, master: str = "", kb: str = 
     return {"error": "action 只能是 decide / pull"}
 
 
+def rebuild_wiki_from_graph(kb_id: str = "", dry_run: bool = True) -> dict:
+    """**运维 · 图→wiki 全量重建**：按图节点的 `wiki_content` 重写 PG `wiki_pages.content`。
+
+    用途（2026-10-10 纳入运维）：**正本是图、正文是派生** —— PG 正文被误改/丢失而图仍完整时，
+    用它把正文从图恢复。图节点没有 `wiki_content` 的页（index / 原生页）**不动**；
+    关系只在图里、不回写正文（重建后出入链清空）。
+    `dry_run=True`（默认）只报影响面。**改本体类型 / 迁移 slug 不走这里**（仍走两段式 retag）。
+    """
+    import ke_graph as _kg  # noqa: PLC0415
+    kid = (kb_id or "").strip()
+    if not kid:
+        return {"ok": False, "reason": "缺少 kb_id"}
+    real_kb, note = resolve_kb_id(kid)
+    res = _kg.rebuild_kb_wiki(real_kb, dry_run=bool(dry_run))
+    out = {"ok": True, "kb_id": real_kb, "kb_note": note, "dry_run": bool(dry_run),
+           "note": "图→PG 正文重建（运维恢复手段）；关系只在图里，正文不写回关系；"
+                   "图节点无 wiki_content 的页保持不动"}
+    if isinstance(res, dict):
+        out.update(res)
+    return out
+
+
 def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
                max_findings: int = 50) -> dict:
     """**只读**巡检（`ke_audit.audit` 的入口）。
@@ -4279,12 +3896,7 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     _reset_request_cache()
     if name == "job_status":
         return job_status(str(args.get("job_id", "")))
-    if name == "list_pending_merges":
-        return list_pending_merges(str(args.get("kb_id", "")), args.get("kb_ids") or None)
-    if name == "resolve_pending_merge":
-        return resolve_pending_merge(str(args["kb_id"]), str(args["pending_slug"]),
-                                     str(args["action"]), kb_ids=args.get("kb_ids") or None,
-                                     confirm_kb_match=bool(args.get("confirm_kb_match")))
+    # （原 `list_pending_merges` / `resolve_pending_merge` 两个工具已随「相似度合并永久取消」删除，2026-10-10）
     if name == "ontology_types":
         return ontology_types(str(args["model"]), str(args.get("focus", "")),
                               args.get("classes") or None, args.get("relations") or None,
@@ -4297,6 +3909,8 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return service_overview_tool(str(args["kb_id"]), False,
                                      str(args.get("slug", "")), str(args.get("title", "")),
                                      int(args.get("preview_lines", 25)))
+    if name == "rebuild_wiki_from_graph":
+        return rebuild_wiki_from_graph(str(args.get("kb_id", "")), bool(args.get("dry_run", True)))
     if name == "audit_scan":
         return audit_scan(str(args.get("kb_id", "")), args.get("kb_ids") or None,
                           str(args.get("scope", "all")), int(args.get("max_findings", 50)))
@@ -4517,7 +4131,7 @@ def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = N
     """
     try:
         summary = result if isinstance(result, dict) else {}
-        keys = ("applied", "created", "merged", "pending", "violations", "unmatched", "retract",
+        keys = ("applied", "created", "merged", "violations", "unmatched", "retract",
                 "retract_planned", "crud_matrix", "report_page", "page_versions", "count",
                 "catalog", "id", "name", "error", "how_to_use", "source", "note",
                 "images_found", "images", "by_document",
@@ -5386,23 +5000,11 @@ class MCPHandler(BaseHTTPRequestHandler):
             html = render_graph_page(params.get("kb_id", ""), params.get("model", ""), view)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             return
-        if path in ("/bodhi/pending", "/bodhi/pending.json"):
-            params = dict(urlparse.parse_qsl(parsed.query))
-            try:
-                data = list_pending_merges(params.get("kb_id", ""))
-                self._json(data, 200, {"Access-Control-Allow-Origin": "*"})
-            except Exception as exc:  # noqa: BLE001
-                self._json({"error": str(exc)}, 400, {"Access-Control-Allow-Origin": "*"})
-            return
-        if path in ("/bodhi/resolve", "/bodhi/resolve.json"):
-            params = dict(urlparse.parse_qsl(parsed.query))
-            try:
-                data = resolve_pending_merge(params.get("kb_id", ""), params.get("slug", ""),
-                                             params.get("action", ""))
-                self._json(data, 200, {"Access-Control-Allow-Origin": "*"})
-            except Exception as exc:  # noqa: BLE001
-                print("[mcp] /bodhi/resolve 失败：%s" % exc)
-                self._json({"error": str(exc)}, 400, {"Access-Control-Allow-Origin": "*"})
+        # （原 `/bodhi/pending`、`/bodhi/resolve`（待确认合并的查/裁决）已随「相似度合并永久取消」删除，
+        #  2026-10-10；相似知识治理改走巡检 `audit_scan` S1/S2。）
+        if path in ("/bodhi/pending", "/bodhi/pending.json", "/bodhi/resolve", "/bodhi/resolve.json"):
+            self._json({"error": "待确认合并已废弃（2026-10-10）：相似知识治理走 audit_scan（S1/S2）"},
+                       410, {"Access-Control-Allow-Origin": "*"})
             return
         # 本实现不使用服务端主动推送（GET SSE），按规范返回 405 即可
         self._json({"jsonrpc": "2.0", "id": None,

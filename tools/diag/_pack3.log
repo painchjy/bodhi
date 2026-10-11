@@ -1,0 +1,34 @@
+   bodhi2-02-mcp-server.tar.gz              0.6 MB
+   bodhi2-03-manual.tar.gz                  3.6 MB
+== 4/6 顶层：只放 MANUAL.md（总指引）+ 清单
+== 5/6 清理临时目录
+== 6/6 完成：/mnt/c/Users/PHJY/source/bodhi2/dist-delivery/bodhi2-delivery-20261010-3
+   MANIFEST.json                         0.00 MB
+   MANUAL.md                             0.01 MB
+   README.md                             0.00 MB
+   SHA256SUMS                            0.00 MB
+   bodhi2-01-frontend.tar.gz             0.06 MB
+   bodhi2-02-mcp-server.tar.gz           0.56 MB
+   bodhi2-03-manual.tar.gz               3.60 MB
+
+bodhi2-01-frontend.tar.gz        0.06 MB  sha256=9a87ffb8b682eb0e01731af5c18c7f348f700c35fb317cb9ec714ce70f58a400
+bodhi2-02-mcp-server.tar.gz      0.54 MB  sha256=1a205079ebdd6bcbd757da78f669b422ac22843f61c6c331bea6a6b6c2c2f214
+bodhi2-03-manual.tar.gz          3.43 MB  sha256=8fee75bff347d2d60f93a32492017937af3f6b37d0bb6e0289097e62ec6952ab
+
+9a87ffb8b682eb0e01731af5c18c7f348f700c35fb317cb9ec714ce70f58a400  bodhi2-01-frontend.tar.gz
+1a205079ebdd6bcbd757da78f669b422ac22843f61c6c331bea6a6b6c2c2f214  bodhi2-02-mcp-server.tar.gz
+8fee75bff347d2d60f93a32492017937af3f6b37d0bb6e0289097e62ec6952ab  bodhi2-03-manual.tar.gz
+
+02 包文件数 = 90
+tools/diag 是否被打进 02 = False （应为 False）
+
+=== 关键改动是否进包 ===
+  BODHI_SAVE_ENGINE 已删（应为 0）         命中 3  !!   MCP-SERVER.md, .env.example
+  bulk_write（P0-c-3）                 命中 3  OK   tools/ontology-mcp/server.py, tools/ke-core/ke_pages.py
+  spec_from_page（适配器）                命中 1  OK   tools/ke-core/ke_pages.py
+  purge_orphan_kb_nodes              命中 1  OK   tools/ke-core/ke_graph.py
+  orphan_graph_nodes（巡检 kind）        命中 3  OK   MCP-SERVER.md, tools/ontology-mcp/server.py
+  info_from_graph（校验读走图）             命中 1  OK   tools/ke-core/ke_graph.py
+  project_page 已删（应为 0）              命中 0  OK   
+  sql_insert_page 已删（应为 0）           命中 0  OK   
+  skipped_document_nodes（方案 a）       命中 1  OK   tools/ontology-mcp/server.py

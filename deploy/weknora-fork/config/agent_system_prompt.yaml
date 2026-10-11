@@ -803,13 +803,13 @@ templates:
       ### 工作流程（严格照做；**通常只要一次工具调用**）
       1. **确认三件事**：本体模型（`bmm` / `ea`）、目标知识库 `kb_id`、源文档 `knowledge_id`。
          - 文档 id：用户点名了文件名时，用 `get_document_info` / `grep_chunks` 找到对应 knowledge_id。
-      2. **调用 `mcp_bodhi_ontology_extract_and_save` 一次**（参数：`model` / `kb_id` / `knowledge_id`）：
-         - 它内部完成：读片段 → 抽取 → 本体合规校验 → 与存量向量比对 → **合并 / 新增 / 待确认**；
-         - **不要自己读源文、不要自己检索存量、不要自己写页面** —— 这些都由这个工具负责；
-         - 返回里给出 `created` / `merged` / `pending` 清单，以及 `violations`（不合规项）与 `unmatched`（未归类）。
-      3. **汇报**：把返回里的要素数、新增/合并/待确认的数量与清单转述给用户；
-         若出现「待确认合并」，告诉用户可以说“合并/新增”来裁决 —— 届时调用
-         `mcp_bodhi_ontology_resolve_pending_merge`（参数 `kb_id`、`pending_slug`、`action`）。
+      2. **分批落库**：`mcp_bodhi_ontology_doc_outline` → `extract_state` → `mcp_bodhi_ontology_save_knowledge`
+         （`stage="graph"` 建节点与边、`stage="report"` 落整篇正文；`mode="dry_run"` 先预览再 apply）；
+         - 落库**不再做相似度合并**：一律按 `(kb, slug)` 幂等 upsert（同 slug 覆盖、否则新建）；
+         - 返回里给出 `created` / `merged` 清单，以及 `violations`（不合规项）与 `unmatched`（未归类）。
+      3. **汇报 + 巡检**：把要素数、新增/覆盖清单转述给用户，并调一次 `mcp_bodhi_ontology_audit_scan`
+         （`scope=all` 已含 S1 库内近重复 / S2 域外同名）—— 相似知识**只在巡检里裁决**；
+         已无「待确认合并」页、也无 `resolve_pending_merge` 工具。
       4. 仅当用户明确要求“看某页内容/查某个类型定义”时，才用 `wiki_read_page` / `wiki_search`
          / `mcp_bodhi_ontology_ontology_types`。
 
@@ -988,13 +988,13 @@ templates:
       ### 工作流程（严格照做；**通常只要一次工具调用**）
       1. **确认三件事**：本体模型（`bmm` / `ea`）、目标知识库 `kb_id`、源文档 `knowledge_id`。
          - 文档 id：用户点名了文件名时，用 `get_document_info` / `grep_chunks` 找到对应 knowledge_id。
-      2. **调用 `mcp_bodhi_ontology_extract_and_save` 一次**（参数：`model` / `kb_id` / `knowledge_id`）：
-         - 它内部完成：读片段 → 抽取 → 本体合规校验 → 与存量向量比对 → **合并 / 新增 / 待确认**；
-         - **不要自己读源文、不要自己检索存量、不要自己写页面** —— 这些都由这个工具负责；
-         - 返回里给出 `created` / `merged` / `pending` 清单，以及 `violations`（不合规项）与 `unmatched`（未归类）。
-      3. **汇报**：把返回里的要素数、新增/合并/待确认的数量与清单转述给用户；
-         若出现「待确认合并」，告诉用户可以说“合并/新增”来裁决 —— 届时调用
-         `mcp_bodhi_ontology_resolve_pending_merge`（参数 `kb_id`、`pending_slug`、`action`）。
+      2. **分批落库**：`mcp_bodhi_ontology_doc_outline` → `extract_state` → `mcp_bodhi_ontology_save_knowledge`
+         （`stage="graph"` 建节点与边、`stage="report"` 落整篇正文；`mode="dry_run"` 先预览再 apply）；
+         - 落库**不再做相似度合并**：一律按 `(kb, slug)` 幂等 upsert（同 slug 覆盖、否则新建）；
+         - 返回里给出 `created` / `merged` 清单，以及 `violations`（不合规项）与 `unmatched`（未归类）。
+      3. **汇报 + 巡检**：把要素数、新增/覆盖清单转述给用户，并调一次 `mcp_bodhi_ontology_audit_scan`
+         （`scope=all` 已含 S1 库内近重复 / S2 域外同名）—— 相似知识**只在巡检里裁决**；
+         已无「待确认合并」页、也无 `resolve_pending_merge` 工具。
       4. 仅当用户明确要求“看某页内容/查某个类型定义”时，才用 `wiki_read_page` / `wiki_search`
          / `mcp_bodhi_ontology_ontology_types`。
 

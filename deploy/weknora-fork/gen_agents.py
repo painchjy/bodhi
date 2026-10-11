@@ -102,8 +102,8 @@ MODELER_TOOLS = [
     "mcp_bodhi_ontology_doc_outline", "mcp_bodhi_ontology_extract_state",
     "mcp_bodhi_ontology_link_candidates", "mcp_bodhi_ontology_list_link_candidates",
     "mcp_bodhi_ontology_resolve_link_candidate",
-    "mcp_bodhi_ontology_list_pending_merges", "mcp_bodhi_ontology_resolve_pending_merge",
     "mcp_bodhi_ontology_save_knowledge",
+    "mcp_bodhi_ontology_rebuild_wiki_from_graph",
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
     "mcp_bodhi_ontology_service_overview",
     # 改本体类型（2026-09-27）：**两段式** —— 先 retag_preview（只读）把影响面+风险念给用户，

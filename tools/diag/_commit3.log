@@ -1,1 +1,10 @@
 warning: in the working copy of 'tools/diag/_archive.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_docscan.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_pkgcheck.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_recon.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tools/diag/_sim_check.py', CRLF will be replaced by LF the next time Git touches it
+=== 结果 ===
+4f596cf feat(audit): 巡检新增 S1 近重复/S2 域外同名（相似度治理入口）+ audit_scan 描述与 scope 同步
+22d208e docs: 归档历史讨论/一次性稿到 docs/archive（9 份：handoff/session-handoff/doc-cleanup/structured-import-plan/ontology-rebuild-analysis/ontology-refactor-ea-bmm/ontology-modeling-recommendation/knowledge-ops-strategy/bodhi-ops-audit）
+4ede298 docs(ke): 落库性能文档重写为「当前实现」(467→80 行, 删历史讨论/方案/排期/未采用提议) + 修正契约 §8 写序(页先于边) + _bulk_write_pages 标注已接线
+14

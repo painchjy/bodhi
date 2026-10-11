@@ -1,0 +1,5 @@
+        # 相似度合并**永久取消**（2026-10-10，用户决策）：不再 `pick_match`、不再 `merge_content` 追加、
+        # 不再生成「待确认合并」页。落库只有两条路径：**同 slug 既有活页 → 整页覆盖** / **新建**。
+        # 相似知识的裁决统一交给巡检 `audit_scan`（S1 库内近重复 / S2 域外同名，见 ke_audit.check_similar）。
+        sim, candidate = 0.0, None
+        if candidate is None or sim <= low:

@@ -20,8 +20,9 @@
 
 - **无 wiki→图 投影**：关系只由图边承载（正文不再有「本体关系」小节），图一律由写路径直写；
   存量重建只用 `rebuild_kb_graph`（**保留边**、只重建节点/属性）。
-- **无相似度合并**（`BODHI_SIMILARITY_MERGE=0`）：一律按 `(kb, slug)` 幂等 upsert；`pending` 恒空，
-  `merged` 含义 = "同 slug 覆盖"。相似度是**全文比较**的事，治理走运维/巡检（`audit_*`）。
+- **无相似度合并**（`BODHI_SIMILARITY_MERGE` 开关**已删除**，2026-10-10 永久取消）：一律按 `(kb, slug)`
+  幂等 upsert；`merged` 含义 = "同 slug 覆盖"。相似知识（库内近重复 / 跨库同名）的裁决只在**巡检**做
+  （`audit_scan` 的 S1/S2）；`pick_match` / `merge_content` / 待确认合并页与两个裁决工具均已删除。
 - **文档类必须有正文**：本体 `render_mode(page_type)=document` 的节点（设计单/建议/评测/安装指引/报告…）
   在 graph 阶段**未带 `wiki_content` 一律跳过**（回执 `skipped_document_nodes` + note），
   应改用 `stage="report"` 落整篇正文（同 slug 幂等覆盖）。
@@ -52,7 +53,8 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `BODHI_SIMILARITY_MERGE` | `0` | 相似度合并：`0` 停用（幂等 upsert）｜`1` 旧行为（并页 + 待确认页） |
+| ~~`BODHI_SIMILARITY_MERGE`~~ | — | **已删除**（相似度合并永久取消）：一律 `(kb, slug)` 幂等 upsert |
+| `BODHI_ONTOLOGY_KB_ID` / `BODHI_CONCEPT_KB_ID` | env | 治理库（唯一权威；工具回执回 `kb_note`） |
 | `BODHI_VALIDATE_FROM_GRAPH` | `1` | 关系 domain/range 的类型读：图优先（PG 兜底） |
 | `BODHI_DEFER_MAINTENANCE` | `1` | 目录树/CRUD 矩阵延迟到前端按需刷新 |
 | `BODHI_DEBUG_ENGINE` | `0` | 内核 spec 构建的内部打印（排障用） |
