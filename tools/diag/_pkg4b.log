@@ -1,0 +1,30 @@
+=== fork 目录 ===
+__pycache__
+apply.sh
+archive
+baseline
+build_frontend.sh
+config
+delete_wiki_pages.sh
+deploy_frontend.sh
+doc_gc_install.sh
+enable_sandbox.sh
+frontend
+gen_agents.py
+gen_frontend_types.py
+push_agent_prompts.py
+refresh_ontology_kb.sh
+register_native_skills.py
+stack_ctl.sh
+=== 谁引用 agents.sql ===
+deploy/weknora-fork/archive/README.md:9:| `fix_agent_mcp.py` | 修 agent 配置里的 MCP 服务器指向/工具白名单 | 一次性修复；agent 配置现由生成器统一产出 | `gen_agents.py`（读 `artifacts/prompts/*` 生成 agents.sql / prompt yaml） |
+deploy/weknora-fork/gen_agents.py:13:    python deploy/weknora-fork/gen_agents.py            # 只生成 SQL（config/agents.sql）
+deploy/weknora-fork/gen_agents.py:18:- `config/agents.sql` 是**本次运行**的产物：带 `--only ops` 时文件里只有 ops 的行（不会动 bmm/ea）。
+deploy/weknora-fork/gen_agents.py:35:OUT_SQL = CONFIG / "agents.sql"
+=== 03 包内 seed SQL 是否含已删工具 ===
+/tmp/pkg3/03-manual/sql/agents.sql
+=== 是否含新工具 ===
+=== 02 包内 agents 相关 ===
+/tmp/pkg4/02-mcp-server/tools/ontology-mcp/server.py
+/tmp/pkg4/02-mcp-server/MCP-SERVER.md
+/tmp/pkg4/02-mcp-server/.env.example

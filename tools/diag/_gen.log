@@ -1,0 +1,44 @@
+=== artifacts/prompts 里的旧文案 ===
+=== gen_agents.py 头部 ===
+"""给 WeKnora 建「本体知识提取」智能体（BMM / EA）—— 从已有智能体克隆 config 再覆盖。
+
+为什么这样做（见 docs/weknora-fork.md §10.13）
+--------------------------------------------
+- agent-type preset（`agent_type_presets.yaml`）只是**编辑器里的模板**：前端
+  `stores/editorResources.ts -> AgentEditorModal.vue` 才用它，**不会出现在智能体列表**；
+- 运行时用的是 `custom_agents.config.system_prompt`（**提示词全文**），
+  见 `session_agent_qa.go:360`：`if config.SystemPrompt != "" { UseCustomSystemPrompt = true }`；
+- 所以直接把提示词文本 + 工具集写进 `custom_agents` 就能得到一个**开箱可用的智能体**。
+
+用法
+----
+    python deploy/weknora-fork/gen_agents.py            # 只生成 SQL（config/agents.sql）
+    python deploy/weknora-fork/gen_agents.py --apply    # 生成并执行（写入 WeKnora 库）
+
+注意
+----
+- `config/agents.sql` 是**本次运行**的产物：带 `--only ops` 时文件里只有 ops 的行（不会动 bmm/ea）。
+- **别用全量重跑覆盖 bmm/ea 的提示词**：它们的精简版归 `set_agent_prompt_lean.py` 管；
+  运维智能体只跑 `--only ops`（id `bodhi-kb-ops`，不在 `bodhi-ontology-%` 里，不被精简脚本误伤）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import pathlib
+import subprocess
+import sys
+import yaml
+
+HERE = pathlib.Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+CONFIG = HERE / "config"
+OUT_SQL = CONFIG / "agents.sql"
+
+TEMPLATE_IDS = {"bmm": "ontology_extract_agent_bmm", "ea": "ontology_extract_agent_ea",
+                "ops": "knowledge_ops_agent", "design": "ea_overview_design_agent",
+                "modeler": "skill_modeler_agent", "dev": "skill_development_agent"}
+NAMES = {"bmm": "本体知识提取 · BMM 业务动机模型", "ea": "本体知识提取 · EA 企业架构",
+=== apply.sh 里怎么落库 ===
+51:docker exec WeKnora-app sh -lc 'grep -c "ontology_extract_agent_" /app/config/prompt_templates/agent_system_prompt.yaml' 2>&1 | sed 's/^/    /'
