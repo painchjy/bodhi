@@ -1401,7 +1401,8 @@ def check_governance_rest(ctx: dict, rep: Report, mine: list) -> None:
 # P2：计划(只读) → 人工确认 → 执行（**硬删**；用户 2026-09-20 口径：不得自动修）
 # ---------------------------------------------------------------------------
 PURGE_KINDS = ("no_source_pages", "deleted_source_pages", "mixed_source_refs",
-               "soft_deleted_rows", "orphan_revisions", "orphan_graph_nodes")
+               "soft_deleted_rows", "orphan_revisions", "orphan_graph_nodes",
+               "deleted_kb_residue")
 FIX_KINDS = ("dangling_edges", "dup_edges")
 INIT_KINDS = ("init_wiki", "init_graph")
 ALL_KINDS = INIT_KINDS + PURGE_KINDS + FIX_KINDS
@@ -1418,6 +1419,10 @@ KIND_HELP = {
     "orphan_graph_nodes": ("图库对账：**全库**孤儿实例节点（对应知识库已删/软删）→ 删（含其边）；"
                            "WeKnora 删库只删 PG 记录，不删图 ⇒ 此项让巡检清理与图库一致"
                            "（`all` 已包含；也可单独 kinds=orphan_graph_nodes 跑）"),
+    "deleted_kb_residue": ("**已软删知识库的 PG 残留**（页/目录/版本快照/问题项）→ 硬删（全库动作）；"
+                           "删库只软删 `knowledge_bases` 行，页仍在 PG 里 ⇒ 此项与 `orphan_graph_nodes`"
+                           "配成一套（PG 侧 + 图侧）。**只处理已软删的库**，活库不受影响"
+                           "（2026-10-12 用户口径：运维核实后可处理数据；`all` 已包含）"),
 }
 PLAN_DIR = HERE.parents[1] / "logs" / "audit"
 
@@ -1916,6 +1921,17 @@ def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 
                 return {"ok": True, "dry_run": True, "kb": {"id": kb, "name": kname},
                         "mode": "orphan_graph_nodes", "permission": acl.get("mode"),
                         "orphan_graph_nodes": orphan_out}
+        # 2026-10-12：**已软删库的 PG 残留**（与上面的图侧配成一套）。同为**全库动作** →
+        # 独立成一种 mode，直接做完就返回（不掺进"本库动作清单/计划指纹"那条路径）。
+        if "deleted_kb_residue" in _kn:
+            import kb_transfer as _kbx  # noqa: PLC0415
+            _ids = [r["kb_id"] for r in _kbx.purge_scan()]
+            residue = _kbx.cmd_purge(_ids, dry_run=dry_run)
+            return {"ok": True, "dry_run": dry_run, "kb": {"id": kb, "name": kname},
+                    "mode": "deleted_kb_residue", "permission": acl.get("mode"),
+                    "deleted_kb_residue": residue,
+                    "hint": ("图侧孤儿节点用 kinds=orphan_graph_nodes（两者配成一套）；"
+                             "只处理**已软删**的库，活库不受影响")}
     if slugs:
         targets = [s for s in dict.fromkeys(slugs) if s]
         existing = [r["slug"] for r in ke_db.psql_csv(

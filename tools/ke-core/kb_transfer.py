@@ -479,6 +479,71 @@ def cmd_verify(src: str, dst: str) -> dict:
     return {"ok": ok, "detail": rep}
 
 
+# ============================================================ ⑤ 硬删（核实后处理数据）
+def purge_scan(kb_ids: list[str] | None = None) -> list[dict]:
+    """列出**可硬删的残留**：已软删知识库 + 其活页/目录/版本/图节点计数。
+
+    口径（2026-10-12 用户）：**已软删的库**，其内容（PG 页/目录/版本 + Neo4j 节点）默认不再参与
+    同名扫描与渲染（`ke_context` 已按"活库"过滤），但**数据仍在** → 需要清理时用本函数核对、
+    再由 `cmd_purge` 处理。**只列软删库**（活库不会被误删）。
+    """
+    ids = [k for k in (kb_ids or []) if k]
+    where = ("AND kb.id IN (%s)" % ", ".join(sql_lit(k) for k in ids)) if ids else ""
+    rows = q_json(
+        "SELECT kb.id AS kb_id, COALESCE(kb.name,'') AS name, kb.deleted_at::text AS deleted_at, "
+        "  (SELECT count(*) FROM wiki_pages p WHERE p.knowledge_base_id = kb.id) AS pages_all, "
+        "  (SELECT count(*) FROM wiki_pages p WHERE p.knowledge_base_id = kb.id AND p.deleted_at IS NULL) AS pages_live, "
+        "  (SELECT count(*) FROM wiki_folders f WHERE f.knowledge_base_id = kb.id) AS folders, "
+        "  (SELECT count(*) FROM wiki_page_revisions r WHERE r.knowledge_base_id = kb.id) AS revisions, "
+        "  (SELECT count(*) FROM wiki_page_issues i WHERE i.knowledge_base_id = kb.id) AS issues "
+        "FROM knowledge_bases kb WHERE kb.deleted_at IS NOT NULL %s ORDER BY kb.created_at" % where)
+    out = []
+    for r in rows:
+        nodes = 0
+        try:
+            nodes = int((ke_neo4j.query("MATCH (n:BodhiInstance) WHERE n.kb_id = $kb "
+                                        "RETURN count(n) AS c", {"kb": r["kb_id"]}) or [{}])[0].get("c") or 0)
+        except Exception:  # noqa: BLE001
+            nodes = -1
+        r["graph_nodes"] = nodes
+        out.append(r)
+    return out
+
+
+def cmd_purge(kb_ids: list[str], dry_run: bool = True, drop_kb_row: bool = False) -> dict:
+    """**硬删**这些知识库的内容（PG 页/目录/版本/问题 + Neo4j 节点）；可选连 `knowledge_bases` 行一起删。
+
+    安全约束：**只处理已软删的库**（`deleted_at IS NOT NULL`）；活库一律拒（除非先软删）。
+    `dry_run=True` 只列影响面（默认）。`drop_kb_row=True` 时连库行一起删（默认 False=保留库行）。
+    """
+    plan = purge_scan(kb_ids)
+    if not plan:
+        print("没有可硬删的库（只处理**已软删**的库；活库请先软删）")
+        return {"ok": True, "kb_ids": [], "dry_run": dry_run, "items": []}
+    print("%s：%d 个已软删库的残留" % ("dry-run（未写）" if dry_run else "硬删", len(plan)))
+    for r in plan:
+        print("  %s  %-16s 页(全部/活)=%s/%s 目录=%s 版本=%s 问题=%s 图节点=%s"
+              % (r["kb_id"][:8], (r["name"] or "（空名）")[:14], r["pages_all"], r["pages_live"],
+                 r["folders"], r["revisions"], r["issues"], r["graph_nodes"]))
+    res = {"ok": True, "dry_run": dry_run, "items": plan, "deleted": {}}
+    if dry_run:
+        return res
+    ids = [r["kb_id"] for r in plan]
+    for table in ("wiki_page_revisions", "wiki_pages", "wiki_folders", "wiki_page_issues"):
+        for kid in ids:
+            q("DELETE FROM %s WHERE knowledge_base_id = %s" % (table, sql_lit(kid)))
+    for kid in ids:
+        try:
+            ke_neo4j.query("MATCH (n:BodhiInstance) WHERE n.kb_id = $kb DETACH DELETE n", {"kb": kid})
+        except Exception as exc:  # noqa: BLE001
+            print("  !! 图删除失败 %s：%s" % (kid[:8], str(exc)[:80]))
+    if drop_kb_row:
+        q("DELETE FROM knowledge_bases WHERE id IN (%s)" % ", ".join(sql_lit(k) for k in ids))
+    res["deleted"] = {"kb_ids": ids, "drop_kb_row": drop_kb_row}
+    print("硬删完成：%d 个库的内容已清（库行%s）" % (len(ids), "已删" if drop_kb_row else "保留"))
+    return res
+
+
 # ============================================================ CLI
 def _opt(argv: list, name: str, default: str = "") -> str:
     return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) else default
@@ -501,6 +566,14 @@ def main(argv: list) -> int:
         cmd_import(a[1], to_kb=_opt(a, "--to"), new_kb=_opt(a, "--new-kb"),
                    keep_ids="--keep-ids" in a)
         print("耗时 %.1f s" % (_t.time() - t0))
+        return 0
+    if a[0] == "purge":
+        ids = [x for x in a[1:] if not x.startswith("--")]
+        cmd_purge(ids, dry_run=("--apply" not in a), drop_kb_row=("--drop-kb-row" in a))
+        return 0
+    if a[0] == "purge-scan":
+        for r in purge_scan([x for x in a[1:] if not x.startswith("--")]):
+            print(json.dumps(r, ensure_ascii=False))
         return 0
     if a[0] == "verify":
         return 0 if cmd_verify(a[1], _opt(a, "--to"))["ok"] else 1
