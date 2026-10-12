@@ -25,14 +25,39 @@
 # =====================================================================
 set -uo pipefail
 
+# --- 前置自检（2026-10-12 新增）-------------------------------------------
+# 现象：Windows/WSL 重启后跑本脚本报 `permission denied ... /var/run/docker.sock`。
+# 原因：docker 组没有成员（套接字是 root:docker 660）。修法与判定都放这里，
+#       宁可**明确失败**，也不要点着 root-only 命令静默失败后面还报"成功"。
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+  # 探测必须用**白名单内的命令**（deploy/bodhi-ops.sudoers），否则 NOPASSWD 不匹配
+  if sudo -n systemctl is-active bodhi-mcp.service >/dev/null 2>&1 \
+     || sudo -n systemctl is-active docker >/dev/null 2>&1; then SUDO="sudo"
+  else echo "！非 root 且无免密 sudo：root-only 步骤会失败 —— 建议 sudo bash $0 $*"; fi
+fi
+if docker info >/dev/null 2>&1; then
+  :
+else
+  cat >&2 <<'EOT'
+!! 连不上 docker（permission denied 或 daemon 未起）。修复：
+   1) 加入 docker 组： sudo usermod -aG docker $USER      # 本机已给 painchjy 配好
+   2) **重开 WSL 会话**（关终端重进）—— 组变更只对新登录会话生效
+   3) daemon 未起： sudo systemctl start docker
+   自检：docker info
+EOT
+  exit 1
+fi
+
 WK=${WK_DEPLOY_DIR:-/mnt/c/Users/PHJY/source/WeKnora}
 BODHI=${BODHI_REPO_DIR:-/mnt/c/Users/PHJY/source/bodhi2}
 COMPOSE=(-f docker-compose.yml)
 [ -f "$BODHI/deploy/docker-compose.weknora.yml" ] && COMPOSE+=(-f "$BODHI/deploy/docker-compose.weknora.yml")
 export BODHI_DEPLOY_DIR="$BODHI/deploy"
 export BODHI_NEO4J_CYPHER_DIR="$BODHI/artifacts/neo4j"
-KB_BIZ=dbc2528f-611b-48da-9a71-d7c93975adb4
-KB_ONT=08810cbd-af86-48d1-bd25-3b2c338e3d68
+# 知识库 id：允许 env 覆盖；默认**动态解析**（清理/重建后 id 会变，写死会误报，见 2026-10-12）
+KB_BIZ="${BODHI_KB_BIZ:-}"
+KB_ONT="${BODHI_KB_ONT:-}"
 
 step() { echo; echo "== $* =="; }
 # 数据库口令：env → WeKnora `.env`（**脚本里不写死口令**）
@@ -43,7 +68,7 @@ MCP() { curl -s -m 15 -X POST http://localhost:8765/mcp -H 'Content-Type: applic
 
 do_up() {
   step "1/6 docker 引擎"
-  systemctl is-active docker >/dev/null 2>&1 || systemctl start docker
+  systemctl is-active docker >/dev/null 2>&1 || $SUDO systemctl start docker
   sleep 2
   docker version --format 'engine {{.Server.Version}}' || { echo "!! docker 起不来"; exit 1; }
 
@@ -60,7 +85,8 @@ do_up() {
   done
 
   step "4/6 本体提取 / MCP 服务（systemd）"
-  systemctl enable --now bodhi-mcp.service >/dev/null 2>&1
+  $SUDO systemctl enable bodhi-mcp.service >/dev/null 2>&1 || echo "  ! enable 失败（需 root）"
+  $SUDO systemctl restart bodhi-mcp.service 2>&1 | tail -2
   sleep 3
   echo "  $(systemctl is-active bodhi-mcp.service) / $(systemctl show bodhi-mcp.service -p MainPID --value)"
 
@@ -71,6 +97,11 @@ do_up() {
 }
 
 do_status() {
+  # 动态解析知识库 id（可用环境变量固定：BODHI_KB_BIZ / BODHI_KB_ONT）
+  [ -n "$KB_BIZ" ] || KB_BIZ=$(PG "SELECT id FROM knowledge_bases WHERE deleted_at IS NULL AND name LIKE '%企业知识%' ORDER BY created_at LIMIT 1;" | tail -1)
+  [ -n "$KB_ONT" ] || KB_ONT=$(PG "SELECT id FROM knowledge_bases WHERE deleted_at IS NULL AND name LIKE '%本体%' ORDER BY created_at LIMIT 1;" | tail -1)
+  printf '  kb_biz=%s  kb_ont=%s\n' "${KB_BIZ:-?}" "${KB_ONT:-?}"
+
   step "容器"
   docker compose -f "$WK/docker-compose.yml" ps --format '{{.Name}} | {{.State}} | {{.Status}}' 2>/dev/null | head -10
 
@@ -94,7 +125,7 @@ do_status() {
   printf '  补丁 chunk(BodhiGraphTab): %s\n' "$(docker exec WeKnora-frontend sh -c "grep -l 'BodhiGraphTab' /usr/share/nginx/html/assets/*.js 2>/dev/null | wc -l" 2>/dev/null || echo '?')"
   printf '  经前端反代 /bodhi/graph  : '
   curl -s -o /dev/null -m 25 -w '%{http_code} (%{size_download}B)\n' "http://localhost/bodhi/graph?kb_id=$KB_BIZ&model=bmm"
-  printf '  经前端反代 /bodhi/pending: '
+  printf '  经前端反代 /bodhi/pending（**已移除**，期望 410）: '
   curl -s -o /dev/null -m 20 -w '%{http_code} (%{size_download}B)\n' "http://localhost/bodhi/pending?kb_id=$KB_BIZ"
 
   step "知识库内容"
@@ -114,7 +145,7 @@ case "${1:-up}" in
   # 前端自建镜像的切换与验收（只在改了 Vue 补丁后才需要 build_frontend.sh 重建）
   fe)     bash "$BODHI/deploy/weknora-fork/deploy_frontend.sh" deploy ;;
   fe-check) bash "$BODHI/deploy/weknora-fork/deploy_frontend.sh" check ;;
-  down)   step "停止"; systemctl stop bodhi-mcp.service 2>/dev/null; \
+  down)   step "停止"; $SUDO systemctl stop bodhi-mcp.service 2>/dev/null; \
           cd "$WK" && docker compose "${COMPOSE[@]}" --profile neo4j stop 2>&1 | tail -8; \
           echo "  （数据卷保留；再次 up 即可）" ;;
   *)      echo "用法: $0 [up|status|logs|fe|fe-check|down]"; exit 1 ;;

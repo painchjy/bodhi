@@ -19,4 +19,7 @@
 *.mjs text eol=lf
 *.conf text eol=lf
 *.template text eol=lf
+# 2026-10-12 补：sudoers 片段也要 LF（CRLF 会让 visudo 报 garbage at end of line，
+# 即使文件权限/内容都对也不好排查）。见 deploy/bodhi-ops.sudoers。
+*.sudoers text eol=lf
 

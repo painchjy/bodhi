@@ -1,0 +1,13 @@
+# bodhi 运维免密（2026-10-12 重启后加固）：只放开这几个 systemctl，避免 wsl-up.sh
+# 里 root-only 步骤静默失败；docker 权限走 docker 组（usermod -aG docker painchjy）。
+# 注意：sudoers 必须 **LF** 换行（CRLF 会报 garbage at end of line）；安装用
+#   sudo install -m 440 deploy/bodhi-ops.sudoers /etc/sudoers.d/bodhi-ops && \
+#   sudo sed -i 's/\r$//' /etc/sudoers.d/bodhi-ops && sudo visudo -cf /etc/sudoers.d/bodhi-ops
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl start docker
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active docker
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl enable bodhi-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl start bodhi-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl restart bodhi-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl stop bodhi-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl status bodhi-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bodhi-mcp.service
