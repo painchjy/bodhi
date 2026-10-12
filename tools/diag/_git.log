@@ -1,0 +1,7 @@
+=== lock ===
+ls: cannot access '.git/index.lock': No such file or directory
+=== git 进程 ===
+=== wsl-up 进程 ===
+2415 bash -lc cd /mnt/c/Users/PHJY/source/bodhi2 && (echo === lock ===; ls -la .git/index.lock 2>&1; echo === git 进程 ===; pgrep -a git | head -5; echo === wsl-up 进程 ===; pgrep -af wsl-up | head -5; echo === 待提交 ===; git --no-pager status --porcelain | head -20) > tools/diag/_git.log 2>&1; cat tools/diag/_git.log
+2426 bash -lc cd /mnt/c/Users/PHJY/source/bodhi2 && (echo === lock ===; ls -la .git/index.lock 2>&1; echo === git 进程 ===; pgrep -a git | head -5; echo === wsl-up 进程 ===; pgrep -af wsl-up | head -5; echo === 待提交 ===; git --no-pager status --porcelain | head -20) > tools/diag/_git.log 2>&1; cat tools/diag/_git.log
+=== 待提交 ===

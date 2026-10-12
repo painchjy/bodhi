@@ -1474,6 +1474,7 @@ def main() -> int:
     p_prev.add_argument("slug", nargs="?", default="", help="只预览某个 slug 组；省略=按最近一次扫描的 equivalent 组")
     p_prev.add_argument("--include-unknown", action="store_true")
     p_prev.add_argument("--allow-distinct", action="store_true", help="把同名异义（distinct）组也纳入")
+    p_prev.add_argument("--limit", type=int, default=50, help="最多列几组（默认 50）")
     p_app = sub.add_parser("concept-apply", help="**写**：把某同名组落成概念页（需 ticket + 风险 + 写权限）")
     p_app.add_argument("slug")
     p_app.add_argument("--ticket", default="")
@@ -1511,7 +1512,8 @@ def main() -> int:
     p_apull.add_argument("--actor", default="")
     p_apull.add_argument("--tenant", type=int, default=None)
     p_apull.add_argument("--apply", action="store_true", help="不带则只预览")
-    p_print = ap.add_argument("--print", type=int, default=6000, help="打印字符上限")
+    p_print = ap.add_argument("--print", type=int, default=0,
+                              help="打印字符上限（0=不截断，默认；截断会破坏 JSON，见 stderr 提示）")
     for _p in list(sub.choices.values()):        # 所有子命令都接受 --print（写法随意）
         _p.add_argument("--print", dest="print", type=int, default=int(p_print.default),
                         help="打印字符上限（也可写在子命令前）")
@@ -1526,7 +1528,7 @@ def main() -> int:
         out = page_view(args.kb_id or "", slug=args.slug, q=args.q)
     elif args.cmd == "concept-preview":
         out = concept_preview(args.slug or "", include_unknown=bool(args.include_unknown),
-                              allow_distinct=bool(args.allow_distinct))
+                              limit=int(args.limit), allow_distinct=bool(args.allow_distinct))
     elif args.cmd == "concept-apply":
         out = concept_apply(args.slug, ticket=args.ticket,
                             acknowledge_risks=[x.strip() for x in (args.ack or "").split(",") if x.strip()],
@@ -1555,7 +1557,15 @@ def main() -> int:
     else:
         kb_ids = [x.strip() for x in (args.kb_ids or "").split(",") if x.strip()]
         out = lookup(kb_ids or None, q=args.q, slug=args.slug)
-    print(json.dumps(out, ensure_ascii=False, indent=2)[:int(args.print)])
+    text = json.dumps(out, ensure_ascii=False, indent=2)
+    cap = int(args.print)
+    if cap and len(text) > cap:
+        # 2026-10-12：静默截断曾导致「concept-preview 只显示 2 组」的误判（10977B≈6000 中文字）。
+        # 截断只截 **stdout**，并且必须在 stderr 明确告知，否则 JSON 不完整会被当成事实。
+        sys.stderr.write("！输出被 --print %d 截断（实际 %d 字符）→ JSON 不完整，"
+                         "请去掉 --print 或调大它\n" % (cap, len(text)))
+        text = text[:cap]
+    print(text)
     return 0
 
 

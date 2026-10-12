@@ -1,0 +1,65 @@
+=== visudo 校验 ===
+/etc/sudoers.d/bodhi-ops: parsed OK
+=== painchjy 免密 sudo ===
+sudo: interactive authentication is required
+=== 以 painchjy 实跑 wsl-up.sh up ===
+！非 root 且无免密 sudo：root-only 步骤会失败 —— 建议 sudo bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh up
+
+== 1/6 docker 引擎 ==
+engine 29.1.3
+
+== 2/6 WeKnora 全栈（profile neo4j） ==
+ Container WeKnora-app  Running
+ Container WeKnora-frontend  Running
+ Container WeKnora-postgres  Waiting
+ Container WeKnora-docreader  Waiting
+ Container WeKnora-postgres  Healthy
+ Container WeKnora-docreader  Healthy
+ Container WeKnora-app  Waiting
+ Container WeKnora-app  Healthy
+
+== 3/6 等 postgres / app 就绪 ==
+  app=healthy postgres=healthy
+
+== 4/6 本体提取 / MCP 服务（systemd） ==
+  ! enable 失败（需 root）
+Failed to restart bodhi-mcp.service: Access denied as the requested operation requires interactive authentication. However, interactive authentication has not been enabled by the calling program.
+See system logs and 'systemctl status bodhi-mcp.service' for details.
+  active / 1269
+
+== 5/6 重启 frontend（nginx 缓存 app IP，必做） ==
+  frontend restarted
+
+== 容器 ==
+WeKnora-app | running | Up 36 seconds (healthy)
+WeKnora-docreader | running | Up 36 seconds (healthy)
+WeKnora-frontend | running | Up 6 seconds
+WeKnora-neo4j | running | Up 36 seconds
+WeKnora-postgres | running | Up 36 seconds (healthy)
+WeKnora-redis | running | Up 36 seconds
+
+== systemd 服务 ==
+  docker     : active
+  bodhi-mcp  : active (enabled=enabled)
+
+== HTTP ==
+  /health                -> 200
+  /api/v1/agents         -> 401
+  MCP tools/list         -> ontology_types, skills, job_status, service_overview, kb_export, kb_import, rebuild_wiki_from_graph, audit_scan, audit_plan, save_knowledge, link_source_session, audit_kb, recategorize, import_probe, import_plan, import_apply, import_state, import_refresh, audit_purge, rules_of_policy, graph_query, reference_lookup, image_extract, review_apply, doc_outline, extract_state, link_candidates, list_link_candidates, resolve_link_candidate, retag_preview, retag_apply, retag_rollback, context_scan, context_lookup, context_page, context_concept_apply, context_concept_rollback, context_authority, context_authority_apply
+
+== 前端（自建镜像，见 docs/weknora-fork.md §11） ==
+  image                    : weknora-ui:bodhi2
+  nginx location /bodhi/   : 1
+  补丁 chunk(BodhiGraphTab): 1
+  经前端反代 /bodhi/graph  : 200 (246B)
+  经前端反代 /bodhi/pending: 410 (99B)
+
+== 知识库内容 ==
+  企业知识     : pages=0 revisions=0
+  企业本体模型 : pages=170
+
+MARKER_WSL_UP_DONE
+/mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh: line 146: syntax error near unexpected token `;;'
+/mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh: line 146: `          echo "  （数据卷保留；再次 up 即可）" ;;'
+=== 结果 ===
+1

@@ -1,0 +1,21 @@
+scan=cs-20261012-122746.json
+stats={"kb_count": 4, "pages_scanned": 215, "candidates": 18, "suppressed": 0, "equivalent": 9, "distinct": 0, "unknown": 9, "auto_distinct_eligible": 0}
+cand             verdict    score  涉及上下文:slug
+cand:b53f667cd8  equivalent 0.961  技术方案评审领域模型:bmm/operativebusinessrule/技术架构开源软件适用规则  +  测试:bmm/operativebusinessrule/技术架构开源软件适用规则
+cand:3f55de99dd  equivalent 0.955  技术方案评审领域模型:bmm/operativebusinessrule/技术方案文档结构规范  +  测试:bmm/operativebusinessrule/技术方案文档结构规范
+cand:235d1c29e3  equivalent 0.952  技术方案评审领域模型:bmm/operativebusinessrule/技术方案章节裁剪规则  +  测试:bmm/operativebusinessrule/技术方案章节裁剪规则
+cand:e0b1e3d5bd  equivalent 0.941  技术方案评审领域模型:bmm/operativebusinessrule/技术架构系统隔离原则  +  测试:bmm/operativebusinessrule/技术架构系统隔离原则
+cand:763bf3c4c0  equivalent 0.939  技术方案评审领域模型:bmm/operativebusinessrule/应用架构系统边界原则  +  测试:bmm/operativebusinessrule/应用架构系统边界原则
+cand:1538ecbc16  equivalent 0.917  技术方案评审领域模型:bmm/goal/确保技术方案评审质量  +  测试:bmm/goal/确保技术方案评审质量
+cand:b1c7dc777d  equivalent 0.908  技术方案评审领域模型:bmm/operativebusinessrule/合理性行动方案合理性  +  测试:bmm/operativebusinessrule/合理性行动方案合理性
+cand:dc87acbe44  equivalent 0.908  技术方案评审领域模型:bmm/goal/提高技术方案评审效率  +  测试:bmm/goal/提高技术方案评审效率
+cand:0ccb4e9203  equivalent 0.906  技术方案评审领域模型:bmm/objective/企业重点评审规则严格遵守  +  测试:bmm/objective/企业重点评审规则严格遵守
+cand:1d3004cb1b  unknown    0.897  技术方案评审领域模型:bmm/businesspolicy/部署架构设计原则  +  测试:bmm/businesspolicy/部署架构设计原则
+cand:04b978150c  unknown    0.894  技术方案评审领域模型:bmm/businesspolicy/技术方案模板规范  +  测试:bmm/businesspolicy/技术方案模板规范
+cand:d53c966e16  unknown    0.889  技术方案评审领域模型:bmm/businesspolicy/技术架构设计原则  +  测试:bmm/businesspolicy/技术架构设计原则
+cand:81d1863da8  unknown    0.889  技术方案评审领域模型:bmm/businesspolicy/技术方案合理性评审  +  测试:bmm/businesspolicy/技术方案合理性评审
+cand:b3c3d794bf  unknown    0.887  技术方案评审领域模型:bmm/businesspolicy/应用架构设计原则  +  测试:bmm/businesspolicy/应用架构设计原则
+cand:3498f4e82e  unknown    0.885  技术方案评审领域模型:bmm/operativebusinessrule/部署架构最低部署和灾备要求  +  测试:bmm/operativebusinessrule/部署架构最低部署和灾备要求
+cand:d89f6f3d34  unknown    0.876  技术方案评审领域模型:bmm/internalinfluencer/技术方案评审周期长  +  测试:bmm/internalinfluencer/技术方案评审周期长
+cand:092d5d243a  unknown    0.837  企业知识管理领域:agent/skill/文档评审  +  技术方案评审领域模型:agent/skill/文档评审
+cand:7d7907e0b9  unknown    0.787  技术方案评审领域模型:bmm/businessprocess/技术方案评审流程  +  测试:bmm/businessprocess/技术方案评审流程

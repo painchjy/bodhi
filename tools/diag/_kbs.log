@@ -1,0 +1,4 @@
+=== 活库体检 ===
+tools/diag/_kbs.sh: line 13: syntax error: unexpected end of file from `{' command on line 4
+=== wsl-up.sh 语法 ===
+SYNTAX_OK

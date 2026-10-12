@@ -1,0 +1,38 @@
+=== cache-rebuild ===
+{
+  "ok": true,
+  "cache": "state/context_map/mappings.json",
+  "stats": {
+    "concept_pages": 3,
+    "pairs": 0,
+    "kb_caches": 0
+  },
+  "note": "领域库零写入；缓存可随时重建"
+}
+=== 缓存头 ===
+{
+  "version": 1,
+  "kind": "cache",
+  "built_at": "2026-10-12 12:15:18 +0800",
+  "concept_kb": {
+    "id": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+    "name": "企业共享概念模型",
+    "source": "env",
+    "concept_pages": 0
+  },
+  "generated_from": [
+    {
+      "kb": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+      "slug": "bmm/offering/手机银行服务",
+      "version": 4,
+      "hash": "sha1:732069c3e25038f3be653d5c9fbc8a0217abbf75"
+    },
+    {
+      "kb": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+      "slug": "ea/businessentity/手机号码",
+      "version": 4,
+      "hash": "sha1:4640e5688a1d43c1ff0
+=== 巡检 ===
+checks = {'C4': 1} | findings = 1
+RAW findings: [{"check": "C4", "severity": "medium", "subject": "neo4j", "detail": "218/218 个 BodhiInstance 节点没有任何溯源（knowledge_id/source_doc 均为空）", "fix_hint": "按实例层口径补溯源或清掉（CLI 抽取路径才会写）", "fixable": false}]
+RAW keys: ['kb_id', 'kb_name', 'scope', 'generated_at', 'kb_id_note', 'graph_orphans', 'summary', 'totals', 'findings', 'data', 'note']

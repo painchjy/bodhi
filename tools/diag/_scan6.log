@@ -1,0 +1,218 @@
+{
+  "scan_id": "cs-20261012-122746",
+  "ticket": "970e08a841af8b8417693502f602f894a59a5e80",
+  "generated_at": "2026-10-12 12:27:46 +0800",
+  "method": "ctx-v1（R0 完全一致 / R1 结构同构 / R2 3-gram 文本相似；一期不含 LLM）",
+  "kb_ids": [
+    "6effde80-3ad0-46a1-92b2-76d695e0b58f",
+    "7efad3eb-762a-4981-9164-cd3b3a226bd4",
+    "12ccea38-f388-432c-8683-e0201a15dcaa",
+    "a7f31b49-3906-4df8-bc46-096370615371"
+  ],
+  "contexts": {
+    "kb:08810cbd": {
+      "key": "kb:08810cbd",
+      "label": "企业本体模型",
+      "kb_id": "08810cbd-af86-48d1-bd25-3b2c338e3d68",
+      "tenant_id": "10000",
+      "kind": "ontology",
+      "pages": 170,
+      "instance_pages": 169
+    },
+    "kb:1c642607": {
+      "key": "kb:1c642607",
+      "label": "鞍山初级",
+      "kb_id": "1c642607-a5da-45e6-aebf-1eac7596b30e",
+      "tenant_id": "10000",
+      "kind": "biz",
+      "pages": 1,
+      "instance_pages": 0
+    },
+    "kb:afcd1c2e": {
+      "key": "kb:afcd1c2e",
+      "label": "企业共享概念模型",
+      "kb_id": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+      "tenant_id": "10000",
+      "kind": "concept",
+      "pages": 4,
+      "instance_pages": 3
+    },
+    "kb:7efad3eb": {
+      "key": "kb:7efad3eb",
+      "label": "技术方案评审领域模型",
+      "kb_id": "7efad3eb-762a-4981-9164-cd3b3a226bd4",
+      "tenant_id": "10000",
+      "kind": "biz",
+      "pages": 67,
+      "instance_pages": 66
+    },
+    "kb:12ccea38": {
+      "key": "kb:12ccea38",
+      "label": "技术方案评审任务知识库",
+      "kb_id": "12ccea38-f388-432c-8683-e0201a15dcaa",
+      "tenant_id": "10000",
+      "kind": "biz",
+      "pages": 31,
+      "instance_pages": 30
+    },
+    "kb:6effde80": {
+      "key": "kb:6effde80",
+      "label": "企业知识管理领域",
+      "kb_id": "6effde80-3ad0-46a1-92b2-76d695e0b58f",
+      "tenant_id": "10000",
+      "kind": "biz",
+      "pages": 66,
+      "instance_pages": 65
+    },
+    "kb:a7f31b49": {
+      "key": "kb:a7f31b49",
+      "label": "测试",
+      "kb_id": "a7f31b49-3906-4df8-bc46-096370615371",
+      "tenant_id": "10000",
+      "kind": "biz",
+      "pages": 59,
+      "instance_pages": 58
+    }
+  },
+  "concept": {
+    "id": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+    "name": "企业共享概念模型",
+    "source": "env",
+    "concept_pages": 0
+  },
+  "skipped_kb_ids": [
+    "08810cbd-af86-48d1-bd25-3b2c338e3d68",
+    "afcd1c2e-0ff3-41c9-8dde-01f136b8a072"
+  ],
+  "stats": {
+    "kb_count": 4,
+    "pages_scanned": 215,
+    "candidates": 18,
+    "suppressed": 0,
+    "equivalent": 9,
+    "distinct": 0,
+    "unknown": 9,
+    "auto_distinct_eligible": 0
+  },
+  "candidates": [
+    {
+      "id": "cand:b53f667cd8",
+      "matched_by": [
+        "slug",
+        "class+title"
+      ],
+      "pages": [
+        {
+          "context": "kb:7efad3eb",
+          "kb": "7efad3eb-762a-4981-9164-cd3b3a226bd4",
+          "kb_name": "技术方案评审领域模型",
+          "slug": "bmm/operativebusinessrule/技术架构开源软件适用规则",
+          "title": "技术架构-开源软件适用规则",
+          "page_type": "bmm:OperativeBusinessRule",
+          "version": 5,
+          "hash": "sha1:9871ff784be8685f885fcaaea9012eefdd2537ff",
+          "same_as": {}
+        },
+        {
+          "context": "kb:a7f31b49",
+          "kb": "a7f31b49-3906-4df8-bc46-096370615371",
+          "kb_name": "测试",
+          "slug": "bmm/operativebusinessrule/技术架构开源软件适用规则",
+          "title": "技术架构-开源软件适用规则",
+          "page_type": "bmm:OperativeBusinessRule",
+          "version": 1,
+          "hash": "sha1:555bed1cb82e2735f804c806541b56ed8896edfe",
+          "same_as": {}
+        }
+      ],
+      "signals": {
+        "title_equal": true,
+        "same_page_type": true,
+        "definition_sim": 0.9131,
+        "rel_signature_sim": 1.0
+      },
+      "verdict_suggestion": "equivalent",
+      "confidence": 0.9609,
+      "why": {
+        "reason": "R1/R2 综合分 ≥ 0.90",
+        "score": 0.9609
+      },
+      "auto_eligible": false,
+      "concept_slug_hint": "bmm/operativebusinessrule/技术架构-开源软件适用规则",
+      "concept_kb": {
+        "id": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+        "name": "企业共享概念模型",
+        "source": "env",
+        "concept_pages": 0
+      },
+      "auto_action": "",
+      "required_risks": [
+        "search_merge_semantics"
+      ]
+    },
+    {
+      "id": "cand:3f55de99dd",
+      "matched_by": [
+        "slug",
+        "class+title"
+      ],
+      "pages": [
+        {
+          "context": "kb:7efad3eb",
+          "kb": "7efad3eb-762a-4981-9164-cd3b3a226bd4",
+          "kb_name": "技术方案评审领域模型",
+          "slug": "bmm/operativebusinessrule/技术方案文档结构规范",
+          "title": "技术方案文档结构规范",
+          "page_type": "bmm:OperativeBusinessRule",
+          "version": 5,
+          "hash": "sha1:71dac55fdedc75cb54be82e5aee06e38117445a5",
+          "same_as": {}
+        },
+        {
+          "context": "kb:a7f31b49",
+          "kb": "a7f31b49-3906-4df8-bc46-096370615371",
+          "kb_name": "测试",
+          "slug": "bmm/operativebusinessrule/技术方案文档结构规范",
+          "title": "技术方案文档结构规范",
+          "page_type": "bmm:OperativeBusinessRule",
+          "version": 1,
+          "hash": "sha1:c2aec191324cd821ad0a6f11fd0fceaa47d4b31f",
+          "same_as": {}
+        }
+      ],
+      "signals": {
+        "title_equal": true,
+        "same_page_type": true,
+        "definition_sim": 0.8994,
+        "rel_signature_sim": 1.0
+      },
+      "verdict_suggestion": "equivalent",
+      "confidence": 0.9547,
+      "why": {
+        "reason": "R1/R2 综合分 ≥ 0.90",
+        "score": 0.9547
+      },
+      "auto_eligible": false,
+      "concept_slug_hint": "bmm/operativebusinessrule/技术方案文档结构规范",
+      "concept_kb": {
+        "id": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+        "name": "企业共享概念模型",
+        "source": "env",
+        "concept_pages": 0
+      },
+      "auto_action": "",
+      "required_risks": [
+        "search_merge_semantics"
+      ]
+    },
+    {
+      "id": "cand:235d1c29e3",
+      "matched_by": [
+        "slug",
+        "class+title"
+      ],
+      "pages": [
+        {
+          "context": "kb:7efad3eb",
+          "kb": "7efad3eb-762a-4981-9164-cd3b3a226bd4",
+          "kb_name": "技术方案评审

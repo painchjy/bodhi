@@ -1,0 +1,81 @@
+== 概念库页清单 ==
+bmm/offering/手机银行服务 v4 len=658 title=手机银行服务
+ea/businessentity/手机号码 v4 len=652 title=手机号码
+ea/businessentity/登录凭据 v5 len=1023 title=登录凭据
+index v1 len=91 title=Index
+== 正文（前 2600 字）==
+### bmm/offering/手机银行服务 (v4)
+## 标准定义
+
+面向个人客户交付的手机银行渠道服务（含账户签约、转账类服务、理财与基金等）。标准定义。
+
+### 各领域定义摘录
+
+- **领域知识库-测试1**（`bmm/offering/手机银行服务`）：面向个人客户交付的手机银行渠道服务（含账户签约、转账类服务、理财与基金等）。
+- **企业知识**（`bmm/offering/手机银行服务`）：客户在手机上可使用的银行服务，通过注册、实名、签约后开通
+
+## 各领域映射
+
+| 上下文 | 页 slug | 类 | 版本 | 结论 | 说明 |
+|---|---|---|---|---|---|
+| 领域知识库-测试1 | `bmm/offering/手机银行服务` | bmm:Offering | 3 | unknown | **同名异义**：本域含义与其他域不同（请在此列写明差异） |
+| 企业知识 | `bmm/offering/手机银行服务` | bmm:Offering | 2 | unknown | **同名异义**：本域含义与其他域不同（请在此列写明差异） |
+
+> 本页是「企业共享概念模型」里的**企业标准概念**：领域库按 **slug 同名** 查询到它，
+> 领域库之间**不直接引用**，跨域关系一律**经本页转换**（docs/context-mapping-plan.md §13.11）。
+> 本页的「各领域映射」表是**映射关系的事实源**；`state/context_map/*.json` 只是它的缓存。
+### ea/businessentity/手机号码 (v4)
+## 标准定义
+
+客户手机号码，作为登录凭据（渠道账号）。已修订，各领域须确认相关性
+
+### 各领域定义摘录
+
+- **领域知识库-测试1**（`ea/businessentity/手机号码`）：客户手机号码，渠道登录凭据；未解绑前一个号码只绑定一个用户。
+- **FD案例沙箱-手机银行**（`ea/businessentity/手机号码`）：客户手机号码，作为登录凭据（渠道账号）。
+
+## 各领域映射
+
+| 上下文 | 页 slug | 类 | 版本 | 结论 | 说明 |
+|---|---|---|---|---|---|
+| 领域知识库-测试1 | `ea/businessentity/手机号码` | ea:BusinessEntity | 4 | unknown | **同名同义**：含义相同 |
+| FD案例沙箱-手机银行 | `ea/businessentity/手机号码` | ea:BusinessEntity | 6 | unknown | **同名异义**：本域含义与其他域不同（请在此列写明差异） |
+
+> 本页是「企业共享概念模型」里的**企业标准概念**：领域库按 **slug 同名** 查询到它，
+> 领域库之间**不直接引用**，跨域关系一律**经本页转换**（docs/context-mapping-plan.md §13.11）。
+> 本页的「各领域映射」表是**映射关系的事实源**；`state/context_map/*.json` 只是它的缓存。
+### ea/businessentity/登录凭据 (v5)
+## 标准定义
+
+登录密码／生物特征等渠道凭据。
+
+### 各领域定义摘录
+
+- **领域知识库-测试1**（`ea/businessentity/登录凭据`）：登录密码／生物特征等渠道凭据，本地校验，不进客户主数据。
+- **FD案例沙箱-手机银行**（`ea/businessentity/登录凭据`）：登录密码／生物特征等渠道凭据。
+
+## 权威与副本
+
+| 上下文 | 角色 | 页 slug | 类 | 说明 |
+|---|---|---|---|---|
+| 领域知识库-测试1 | replica（副本，只读） | `ea/businessentity/登录凭据` | ea:BusinessEntity | 其它领域**只能从权威复制**（`authority_pull`），不得自行修改 |
+| FD案例沙箱-手机银行 | **master**（权威） | `ea/businessentity/登录凭据` | ea:BusinessEntity | 该领域是权威：副本从这里复制 |
+
+> 权威=**唯一可编辑**的领域；副本页正文只能由 `authority_pull` 从权威复制（版本化可回退）。
+> 副本自述写在副本页的 `page_metadata.authority`（同库写入）；本表由 `authority-decide` 维护。
+## 各领域映射
+
+| 上下文 | 页 slug | 类 | 版本 | 结论 | 说明 |
+|---|---|---|---|---|---|
+| 领域知识库-测试1 | `ea/businessentity/登录凭据` | ea:BusinessEntity | 3 | equivalent | 同名同义（待复核） |
+| FD案例沙箱-手机银行 | `ea/businessentity/登录凭据` | ea:BusinessEntity | 6 | equivalent | 同名同义（待复核） |
+
+> 本页是「企业共享概念模型」里的**企业标准概念**：领域库按 **slug 同名** 查询到它，
+> 领域库之间**不直接引用**，跨域关系一律**经本页转换**（docs/context-mapping-plan.md §13.11）。
+> 本页的「各领域映射」表是**映射关系的事实源**；`state/context_map/*.json` 只是它的缓存。
+
+### index (v1)
+# Wiki Index
+
+This is the index page. It will be automatically updated as pages are added.
+

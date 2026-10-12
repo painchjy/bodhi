@@ -1,0 +1,50 @@
+INSTALLED
+/etc/sudoers.d/bodhi-ops:3:62: syntax error: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl start docker
+                                                             ^
+/etc/sudoers.d/bodhi-ops:4:74: syntax error: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl enable bodhi-mcp.service
+                                                                         ^
+/etc/sudoers.d/bodhi-ops:5:73: syntax error: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl start bodhi-mcp.service
+                                                                        ^
+/etc/sudoers.d/bodhi-ops:6:75: syntax error: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl restart bodhi-mcp.service
+                                                                          ^
+/etc/sudoers.d/bodhi-ops:7:72: syntax error: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl stop bodhi-mcp.service
+                                                                       ^
+/etc/sudoers.d/bodhi-ops:8:74: syntax error: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl status bodhi-mcp.service
+                                                                         ^
+visudo: invalid sudoers file
+=== painchjy 免密 sudo 验证 ===
+/etc/sudoers.d/bodhi-ops:3:62: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl start docker
+                                                             ^
+/etc/sudoers.d/bodhi-ops:4:74: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl enable bodhi-mcp.service
+                                                                         ^
+/etc/sudoers.d/bodhi-ops:5:73: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl start bodhi-mcp.service
+                                                                        ^
+/etc/sudoers.d/bodhi-ops:6:75: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl restart bodhi-mcp.service
+                                                                          ^
+/etc/sudoers.d/bodhi-ops:7:72: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl stop bodhi-mcp.service
+                                                                       ^
+/etc/sudoers.d/bodhi-ops:8:74: garbage at end of line
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl status bodhi-mcp.service
+                                                                         ^
+sudo: interactive authentication is required
+Client:
+ Version:    29.1.3
+vigorous_goldberg
+WeKnora-frontend
+WeKnora-app
+WeKnora-docreader
+bodhi2-ontology-bootstrap
+WeKnora-postgres
+WeKnora-redis
+WeKnora-neo4j

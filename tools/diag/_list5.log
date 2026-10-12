@@ -1,0 +1,21 @@
+stats={"pages": 18, "new": 18, "update": 0, "skipped": 0} ticket=81cdfade017106efd1076481d2e8e01be2b31c32
+slug                                                     page_type                  exists required_risks
+agent/skill/文档评审                                         agent:Skill                False  -
+bmm/businesspolicy/应用架构设计原则                              bmm:BusinessPolicy         False  -
+bmm/businesspolicy/技术方案合理性评审                             bmm:BusinessPolicy         False  -
+bmm/businesspolicy/技术方案模板规范                              bmm:BusinessPolicy         False  -
+bmm/businesspolicy/技术架构设计原则                              bmm:BusinessPolicy         False  -
+bmm/businesspolicy/部署架构设计原则                              bmm:BusinessPolicy         False  -
+bmm/businessprocess/技术方案评审流程                             bmm:BusinessProcess        False  -
+bmm/goal/提高技术方案评审效率                                      bmm:Goal                   False  -
+bmm/goal/确保技术方案评审质量                                      bmm:Goal                   False  -
+bmm/internalinfluencer/技术方案评审周期长                         bmm:InternalInfluencer     False  -
+bmm/objective/企业重点评审规则严格遵守                               bmm:Objective              False  -
+bmm/operativebusinessrule/合理性行动方案合理性                     bmm:OperativeBusinessRule  False  -
+bmm/operativebusinessrule/应用架构系统边界原则                     bmm:OperativeBusinessRule  False  -
+bmm/operativebusinessrule/技术方案文档结构规范                     bmm:OperativeBusinessRule  False  -
+bmm/operativebusinessrule/技术方案章节裁剪规则                     bmm:OperativeBusinessRule  False  -
+bmm/operativebusinessrule/技术架构开源软件适用规则                   bmm:OperativeBusinessRule  False  -
+bmm/operativebusinessrule/技术架构系统隔离原则                     bmm:OperativeBusinessRule  False  -
+bmm/operativebusinessrule/部署架构最低部署和灾备要求                  bmm:OperativeBusinessRule  False  -
+skipped=[]

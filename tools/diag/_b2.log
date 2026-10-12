@@ -66,3 +66,41 @@ The following paths are ignored by one of your .gitignore files:
 state
 hint: Use -f if you really want to add them.
 hint: Disable this message with "git config set advice.addIgnoredFile false"
+  本体库种子：170 页 {'index': 1, 'ontology:Module': 4, 'ontology:Class': 49, 'ontology:Property': 53, 'ontology:Relation': 62, 'ontology:LightDoc': 1} → /tmp/bodhi-seed-5ilbzke_/seed/ontology_kb_pages.sql
+     bodhi-ea-modeler 脱敏：knowledge_bases → 留空（装完在界面里绑）；model_id → 删除（继承内置智能体的有效模型）；mcp_services → 占位符
+     bodhi-kb-ops 脱敏：knowledge_bases → 留空（装完在界面里绑）；model_id → 删除（继承内置智能体的有效模型）；mcp_services → 占位符；sandbox_config_id → 删除（沙箱配置不随包交付）
+  智能体/MCP SQL → /tmp/bodhi-seed-5ilbzke_/sql（['bodhi-ea-modeler', 'bodhi-kb-ops']）
+== 1/6 刷新 DB 种子（本体模型库页面 + 智能体/MCP 登记）
+      $ /opt/bodhi-venv/bin/python3 /mnt/c/Users/PHJY/source/bodhi2/tools/delivery/export_db.py --ontology-kb 08810cbd-af86-48d1-bd25-3b2c338e3d68 --agents --out /tmp/bodhi-seed-5ilbzke_
+== 2/6 暂存三个包
+      $ docker save -o /tmp/weknora-ui-bodhi2.tar weknora-ui:bodhi2
+   ontology/：跳过与 sources/ 内容相同的出厂副本 BMM完整版.ttl、BPMN完整版.ttl、智能体开发完整版.ttl（真源只带一份）
+   去重断言通过：171 个文件，无任何内容重复
+      01-frontend        17 个文件
+      02-mcp-server      95 个文件
+      03-manual          59 个文件
+   ID 断言通过：3 个 SQL 文件里无写死 UUID（仅保留 MCP 服务自身 id）
+   编译产物断言通过：26 个文件，ontology_index.json 在
+== 3/6 打 tar.gz（可复现：同内容 → 同哈希）
+   bodhi2-01-frontend.tar.gz               37.3 MB
+   bodhi2-02-mcp-server.tar.gz              0.6 MB
+   bodhi2-03-manual.tar.gz                  3.7 MB
+== 4/6 顶层：只放 MANUAL.md（总指引）+ 清单
+== 5/6 清理临时目录
+== 6/6 完成：/mnt/c/Users/PHJY/source/bodhi2/dist-delivery/bodhi2-delivery-20261010-9
+   MANIFEST.json                         0.00 MB
+   MANUAL.md                             0.01 MB
+   README.md                             0.00 MB
+   SHA256SUMS                            0.00 MB
+   bodhi2-01-frontend.tar.gz            37.32 MB
+   bodhi2-02-mcp-server.tar.gz           0.59 MB
+   bodhi2-03-manual.tar.gz               3.68 MB
+=== 提交 ===
+13b1ff5 ops(purge): 硬删连带归档悬空映射(B): mappings.json pairs 归档到 detached 消除巡检 G3; 新增 kb_transfer mappings 子命令; 补 REPO 定义
+=== 产物 ===
+-rwxrwxrwx 1 painchjy painchjy    12286 Oct  9 23:54 MANUAL.md
+-rwxrwxrwx 1 painchjy painchjy     2130 Oct 12 06:42 README.md
+-rwxrwxrwx 1 painchjy painchjy      276 Oct 12 06:42 SHA256SUMS
+-rwxrwxrwx 1 painchjy painchjy 37324324 Oct 12 06:42 bodhi2-01-frontend.tar.gz
+-rwxrwxrwx 1 painchjy painchjy   593715 Oct 12 06:42 bodhi2-02-mcp-server.tar.gz
+-rwxrwxrwx 1 painchjy painchjy  3680892 Oct 12 06:42 bodhi2-03-manual.tar.gz

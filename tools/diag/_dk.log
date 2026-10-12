@@ -1,0 +1,15 @@
+=== root id ===
+uid=0(root) gid=0(root) groups=0(root)
+=== socket ===
+srw-rw---- 1 root docker 0 Oct 12 08:45 /var/run/docker.sock
+=== docker group ===
+docker:x:106:
+=== uid1000 ===
+painchjy:x:1000:1000::/home/painchjy:/bin/bash
+=== dockerd proc ===
+286 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+=== systemd docker ===
+active
+enabled
+=== docker info as root ===
+29.1.3
