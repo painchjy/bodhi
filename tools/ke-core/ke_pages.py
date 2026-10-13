@@ -417,8 +417,19 @@ def _attr_meta(page_type: str, key: str) -> dict:
     return {}
 
 
+ATTR_SECTION = "## 属性（数据属性）"
+
+
 def render_attributes_section(page_type: str, attributes: dict, skip_keys=()) -> list[str]:
-    """§4：数据属性 → `## 属性（数据属性）` + `### 名称（prefixed，range）`\\n<值>；值 >150 字截断。"""
+    """§4：数据属性 → `## 属性（数据属性）` + `### 名称（prefixed，range）`\\n<值>。
+
+    **标题式 + 不截断**（2026-10-13 用户口径，方案 D）：
+    - 属性名作**标题**、值紧随其下；**不再用 `名字 = 值` 一行式**（老 `=` 格式只在**读**侧兼容，
+      见契约 §4.3 双读；**写**一律走本函数）；
+    - `ATTR_RENDER_LIMIT = 0` ⇒ 值**不截断**：正文只是这个值的**只读渲染**；
+    - 事实源 = `page_metadata.ontology.attributes` + 图节点属性；改值走 `set_page_attributes()`
+      /「数据属性」面板，**改正文不会回写**（ke_review 的读路径不解析正文）。
+    """
     skip = {str(k).split(":")[-1] for k in (skip_keys or [])}
     rows: list[str] = []
     for key, value in (attributes or {}).items():
@@ -436,7 +447,181 @@ def render_attributes_section(page_type: str, attributes: dict, skip_keys=()) ->
         if ATTR_RENDER_LIMIT and len(val) > ATTR_RENDER_LIMIT:
             val = val[:ATTR_RENDER_LIMIT].rstrip() + "……（完整内容见「数据属性」面板）"
         rows += ["### %s" % title, "", val, ""]
-    return (["## 属性（数据属性）", ""] + rows) if rows else []
+    return ([ATTR_SECTION, ""] + rows) if rows else []
+
+
+def _first_para_before_attr(content: str) -> str:
+    """取「## 属性（数据属性）」段**之前**的首段实质正文（判断"首段=定义属性"用）。"""
+    head: list[str] = []
+    for ln in (content or "").splitlines():
+        if ln.strip() == ATTR_SECTION:
+            break
+        head.append(ln)
+    for raw in head:
+        s = raw.strip()
+        if not s or s.startswith("#") or s.startswith(">"):
+            continue
+        return s
+    return ""
+
+
+def _attr_key_canonical(key: str, props: dict) -> str:
+    """把 `ruleReference` / `bmm:ruleReference` 归一到本体面里的规范写法（用本体里的键名）。"""
+    raw = str(key or "").strip()
+    if not raw:
+        return ""
+    local = raw.split(":")[-1].lower()
+    for name in props or {}:
+        if str(name).split(":")[-1].lower() == local:
+            return str(name)
+    return raw
+
+
+def _attrs_seed_from_content(page_type: str, content: str, props: dict) -> dict:
+    """老页的种子：元数据 `attributes` 为空时，从正文属性段读现值（标题式 / `=` 式**双读**）。"""
+    try:
+        parsed = _kg._attrs_from_content(content) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict = {}
+    for k, v in parsed.items():
+        ck = _attr_key_canonical(k, props)
+        if str(v or "").strip():
+            out[ck] = str(v).strip()
+    return out
+
+
+def replace_attr_section(content: str, page_type: str, attributes: dict, skip_keys=()) -> str:
+    """把正文里「## 属性（数据属性）」**整段替换**成当前渲染口径（标题式、不截断）。
+
+    - 只动这一段：其它小节（`## 原文依据` / `## 被引用` / `## 本体关系` …）与手写正文原样保留；
+    - 原来没有该段 → 插到「## 原文依据」**之前**（没有就追加到末尾）；
+    - 渲染结果为空（属性全空）→ 删掉整段。
+    """
+    lines = (content or "").rstrip().splitlines()
+    section = render_attributes_section(page_type, attributes, skip_keys=skip_keys)
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == ATTR_SECTION), -1)
+    if start >= 0:
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        out = lines[:start] + (section + [""] if section else []) + lines[end:]
+    else:
+        ins = next((i for i, ln in enumerate(lines) if ln.startswith(EVIDENCE_SECTION)), -1)
+        out = (lines[:ins] + section + [""] + lines[ins:]) if ins >= 0 \
+            else (lines + (["", ""] + section if section else []))
+    text = "\n".join(out).rstrip() + "\n"
+    return re.sub(r"\n{4,}", "\n\n\n", text)          # 换段后可能多出空行，压一下
+
+
+def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
+                        dry_run: bool = True, sync_folders: bool = False) -> dict:
+    """**改一页的数据属性**（方案 D 的写口，2026-10-13 用户口径）。
+
+    口径与**渲染模式**绑定（模式由本体给：`ke_ontology.render_mode`）：
+      · **entity 模式**：正文是**只读渲染**、数据属性是**事实源** ⇒ 只接受这类页；
+      · **document / report 模式**：**以正文为主** ⇒ 拒改（回执明确"请直接改正文"）。
+
+    规则：
+    - 键必须该 `page_type` 在本体面里声明过的**数据属性**（与 `ontology_types` 同一份元数据）；
+      未声明的键一律拒，并把可用键（`<本体键>（<本地名>）`）列全；
+    - 值：字符串；**空串 / None = 删除该键**；
+    - 写三处保持一致：① PG `page_metadata.ontology.attributes` ② 图节点属性
+      ③ **重渲染正文的属性段**（标题式、不截断）；
+    - 幂等：值与正文都没变 → 零写入；写前 `wiki_page_revisions` 快照 + `version+1`（可回退）；
+    - **默认 `dry_run=True`**（只看 diff 不写）。
+    """
+    import json  # noqa: PLC0415
+
+    rows = ke_db.psql_csv(
+        "SELECT title, COALESCE(page_type,'') AS page_type, COALESCE(version,1) AS version, "
+        "       COALESCE(content,'') AS content, COALESCE(page_metadata::text,'{}') AS meta, "
+        "       COALESCE(summary,'') AS summary "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if not rows:
+        return {"ok": False, "slug": slug, "error": "页面不存在：%s/%s" % (kb_id[:8], slug)}
+    row = rows[0]
+    page_type, cur_ver = row["page_type"], int(row["version"] or 1)
+    content = row["content"]
+    try:
+        meta = json.loads(row["meta"] or "{}")
+    except Exception:  # noqa: BLE001
+        meta = {}
+    onto = dict(meta.get("ontology") or {})
+    mode = ke_ontology.render_mode(page_type)
+    if mode != "entity":
+        return {"ok": False, "slug": slug, "mode": mode,
+                "error": "该页渲染模式是 %s：只有 entity 模式（数据属性可编辑）走本入口；"
+                         "document/report 类**以正文为主**，请直接改正文" % mode}
+    props = ke_ontology.data_properties_for(page_type) or {}
+    if not props:
+        return {"ok": False, "slug": slug, "page_type": page_type,
+                "error": "本体面里取不到 %s 的数据属性（确认 page_type 正确、本体模型/图可用）" % page_type}
+    allowed = {str(name).split(":")[-1].lower(): str(name) for name in props}
+    base = dict(onto.get("attributes") or {})
+    seeded = False
+    if not base:                                   # 老页：元数据空 → 用正文属性段做种子（不丢现值）
+        base = _attrs_seed_from_content(page_type, content, props)
+        seeded = bool(base)
+    merged, changed, unknown = dict(base), [], []
+    for k, v in (patch or {}).items():
+        local = str(k).split(":")[-1].lower()
+        if local not in allowed:
+            unknown.append(str(k))
+            continue
+        ckey = allowed[local]
+        val = "" if v is None else str(v).strip()
+        if val:
+            if merged.get(ckey) != val:
+                changed.append(ckey)
+            merged[ckey] = val
+        elif ckey in merged:
+            changed.append(ckey)
+            merged.pop(ckey, None)
+    if unknown:
+        return {"ok": False, "slug": slug, "page_type": page_type, "unknown_keys": unknown,
+                "error": "这些键不是 %s 的数据属性：%s" % (page_type, "、".join(unknown)),
+                "allowed": sorted("%s（%s）" % (allowed[k], k) for k in allowed)}
+
+
+    # 定义键若已是首段（entity 渲染），属性段里必须跳过 —— 否则一处两写（契约 §4.4）
+    first = _first_para_before_attr(content)
+    skip = [k for k, v in merged.items()
+            if str(k).split(":")[-1].lower() == "definition" and first
+            and str(v or "").strip() == first.strip()]
+    new_content = replace_attr_section(content, page_type, merged, skip_keys=skip)
+    content_changed = (new_content != content)
+    if not changed and not content_changed:
+        return {"ok": True, "applied": False, "slug": slug, "mode": mode,
+                "reason": "无变化（值与正文都未改）", "keys_changed": [],
+                "before_version": cur_ver, "after_version": cur_ver}
+    result = {"ok": True, "applied": False, "dry_run": bool(dry_run), "slug": slug, "mode": mode,
+              "keys_changed": changed, "content_changed": content_changed,
+              "seeded_from_content": seeded, "before_version": cur_ver, "after_version": cur_ver + 1,
+              "attributes": merged, "content_preview": new_content[:900]}
+    if dry_run:
+        return result
+    # ① 图节点（属性 + 正文）—— 契约 §8「图本优先」
+    graph = {"ok": True}
+    try:
+        _kg.upsert_node(kb_id, slug, row["title"], page_type, attributes=merged,
+                        wiki_content=new_content)
+    except Exception as exc:  # noqa: BLE001
+        graph = {"ok": False, "reason": str(exc)[:180]}
+    # ② PG：快照（旧版）→ version+1；content / page_metadata 一起更新（可回退）
+    onto2 = dict(onto)
+    onto2.update({"model": (page_type.split(":", 1)[0] if page_type else onto2.get("model")),
+                  "class": page_type or onto2.get("class"), "name": row["title"],
+                  "attributes": merged})
+    meta2 = dict(meta)
+    meta2["ontology"] = onto2
+    res = upsert_page(kb_id, slug, row["title"], page_type, new_content, summary=row["summary"],
+                      tag="bodhi-attr-edit", metadata=meta2, sync_folders=sync_folders,
+                      preloaded={"exists": True, "version": cur_ver})
+    result.update({"applied": True, "graph": graph, "actor": actor,
+                   "after_version": res.get("after_version") or (cur_ver + 1),
+                   "note": "事实源 = page_metadata.ontology.attributes + 图节点属性；"
+                           "正文属性段按「标题式」重渲染（只读渲染，别改正文）"})
+    return result
 
 
 def _contract_head(spec: dict) -> list[str]:

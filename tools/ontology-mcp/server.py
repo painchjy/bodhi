@@ -850,16 +850,10 @@ def _design_sections(element: dict) -> list[str]:
         lines.append("")
     attributes = element.get("attributes") or {}
     if attributes:
-        # 本体当 schema：属性名（中文标签，range）由本体元数据渲染，不靠调用方排版
-        known = ke_ontology.data_properties_for(element.get("type") or "")
-        lines += ["## 属性（数据属性）", ""]
-        for name, value in attributes.items():
-            meta = known.get(name) or {}
-            suffix = ""
-            if meta:
-                rng = ke_ontology.short_iri(meta.get("range_literal") or "")
-                suffix = "（%s%s）" % (meta.get("label") or "", ("，%s" % rng) if rng else "")
-            lines.append("- %s%s = %s" % (name, suffix, value))
+        # 本体当 schema：属性名（中文标签，prefixed，range）由本体元数据渲染，不靠调用方排版。
+        # 2026-10-13（方案 D）：**统一走内核渲染器** —— 标题式（`### 名称（prefixed，range）` + 值）、
+        # 值不截断；旧的 `- 名称（标签，range） = 值` 一行式**不再写**（只在读侧兼容，契约 §4.3）。
+        lines += ke_pages.render_attributes_section(element.get("type") or "", attributes)
         lines.append("")
     # 边限定属性（如 `easvc:crudKind` = CRUD 种类）：单独小节，**不动 `## 本体关系` 的行格式**
     # （那行的语法被 ke_pages 解析成 out_links/in_links，改语法会连带审计与反向边）。
