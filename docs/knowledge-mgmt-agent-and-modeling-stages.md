@@ -117,7 +117,6 @@
 
 **环境**：沙箱 = `ontology/sources` 复制到仓库内临时目录 → 按 §1.2 改 TTL → 用**真编译器** `compile_all(out_dir=沙箱)`；
 复算用**编译产物的 `parents`**（已跨模块解析）+ **TTL 里 `wikiContent` 的 domain**；另跑一次**生产 Neo4j 只读**对照。
-脚本：`tools/diag/_exp_inherit.py`（日志 `tools/diag/_exp_inherit.log`、`tools/diag/_live.log`）。
 
 | 检查点 | 基线（现状） | **改动后（继承）** |
 |---|---|---|
