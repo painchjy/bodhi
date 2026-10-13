@@ -1,6 +1,0 @@
-COMPILE_OK
-① 上传页 GET：HTTP 200，1562 字节，含表单=True
-② 上传 POST：HTTP 200  ok=True  saved=/mnt/c/Users/PHJY/source/bodhi2/exports/uploads/kb-xfer3.zip  bytes=145358
-   import.ok=True  target=cb375482-e386-4864-a9fa-79eb797fe1db
-   counts={"kb_id": "cb375482-e386-4864-a9fa-79eb797fe1db", "folders": 25, "pages": 67, "revisions": 131, "issues": 0, "graph_nodes": 66, "graph_edges": 182, "edge_types": 26}
-   verify_ok=True  verify={"pages": true, "links": true, "folders": true, "revisions": true, "nodes": true, "edges": true}

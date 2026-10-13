@@ -1,6 +1,0 @@
-=== log ===
-9f003e5 ontology: 业务实体->业务对象(合并用户手改)+activityUsesDataObject；新增 bpmn:Role 与 taskHasRole（角色=概念+关系）；删 taskRole/taskMeans；bmm 新增 TechnicalReviewReport（评审报告跟踪问题，替代 Issue）
-7539a14 ontology(bpmn): 新增 BPMN 模块（Activity/Task/DataObject + 活动↔业务流程/任务→规则/活动→报告/活动→实体）；Task 按用户口径（角色·目标·手段，不分子类）；去业务属性；agent 侧一条 agentAssistsActivity；已编译+purge 重投影，B5 清零
-4143dc4 ontology(报告类型): 加 bmm:Report 基类 + bmm:RequirementAnalysisReport(需求分析报告/需求规格说明书) + agent:EvaluationPlan(评测方案)；4 个既有报告类改继承 bmm:Report；bmm:Assessment 摘 wiki_content 改纯 entity（已编译+Neo4j重投影+live 抽查通过）
-=== 工作区剩余文件数 ===
-11

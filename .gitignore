@@ -55,3 +55,13 @@ docs/cases/技术方案评审/*.jpeg
 docs/cases/技术方案评审/*.png
 docs/cases/技术方案评审/*.xlsx
 docs/cases/技术方案评审/*.xls
+
+# ------------------------------------------------------------
+# 仓库内诊断脚本与运行日志（tools/diag，2026-10-13 用户口径）
+# 该目录会落 LLM 原始回执/大件日志（曾达 GB 级，导致 push 被 remote 拒绝：
+#   remote: fatal: pack is corrupted (SHA1 mismatch)）。
+# 结论：只在本机留档，不入版本库、不进交付包（见 tools/delivery/pack_release.py）。
+# 注意：目录本身在本地保留；如需入库，请先沟通——不要直接 `git add -f`。
+# ------------------------------------------------------------
+tools/diag/
+
