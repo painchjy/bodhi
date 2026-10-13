@@ -163,12 +163,26 @@ def kb_rows() -> list[dict]:
         "  FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY created_at")
 
 
-def _page_counts() -> dict:
+def kb_page_stats() -> dict:
+    """所有活库的页数统计：`{kb_id: {"pages", "instance", "concept_pages"}}`（**一次 psql**）。
+
+    性能口径（2026-10-13）：每次 `psql` 都是一个 `docker exec` 子进程（本机实测 ≈ 350ms），
+    而 `scan()` 过去为「库清单 / 库页数 / 概念页数」各打一次固定查询 —— 现在合并成一次，
+    概念页数（`slug LIKE 'concept/%'`）也一并带出，供 `concept_kb()` 复用（不再单独查一遍）。
+    """
     rows = ke_db.psql_csv(
         "SELECT knowledge_base_id AS kb, count(*) AS n, "
-        "       count(*) FILTER (WHERE page_type LIKE '%:%') AS inst "
+        "       count(*) FILTER (WHERE page_type LIKE '%:%') AS inst, "
+        "       count(*) FILTER (WHERE slug LIKE 'concept/%') AS concept "
         "  FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id IN (SELECT id FROM knowledge_bases WHERE deleted_at IS NULL) GROUP BY 1")
-    return {r["kb"]: {"pages": int(r["n"] or 0), "instance": int(r["inst"] or 0)} for r in rows}
+    return {r["kb"]: {"pages": int(r["n"] or 0), "instance": int(r["inst"] or 0),
+                      "concept_pages": int(r["concept"] or 0)} for r in rows}
+
+
+def _page_counts() -> dict:
+    """`{kb: {pages, instance}}`（对外口径不变；底层与概念页计数共用一次查询）。"""
+    return {kb: {"pages": v["pages"], "instance": v["instance"]}
+            for kb, v in kb_page_stats().items()}
 
 
 def load_pages(kb_id: str, limit: int = 5000) -> list[dict]:
@@ -187,6 +201,41 @@ def load_pages(kb_id: str, limit: int = 5000) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError("读页失败（%s）：%s" % (kb_id[:8], exc))
     return rows[:int(limit)]
+
+
+def load_pages_many(kb_ids: list[str], limit: int = 5000) -> dict:
+    """**一次 SQL** 取多个库的页 → `{kb_id: [page, ...]}`（= 逐库 `load_pages(kb, limit)` 的并集）。
+
+    性能口径（2026-10-13）：`scan()` 过去对每个库各打一次 `psql`（4 库 = 4 次往返 ≈ 1.4s）。
+    这里用 `row_number() OVER (PARTITION BY knowledge_base_id ORDER BY slug)` 保持
+    「**每库**按 slug 升序取前 limit 条」的原口径，一次全部取回；返回的每行字段与
+    `load_pages()` 完全一致（不外泄 `kb`/`rn` 两个内部列）。
+    """
+    ids = [k for k in (kb_ids or []) if k]
+    out: dict = {k: [] for k in ids}
+    if not ids:
+        return out
+    cols = _page_columns()
+    summary = "COALESCE(summary,'')" if "summary" in cols else "''"
+    sql = ("SELECT t.kb, t.slug, t.title, t.page_type, t.summary, t.meta, t.out_links, "
+           "       t.head, t.version, t.updated_at FROM ("
+           "  SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS title, "
+           "         COALESCE(page_type,'') AS page_type, %s AS summary, "
+           "         COALESCE(page_metadata::text,'{}') AS meta, "
+           "         COALESCE(out_links::text,'[]') AS out_links, "
+           "         left(COALESCE(content,''), 1500) AS head, COALESCE(version,1) AS version, "
+           "         COALESCE(updated_at::text,'') AS updated_at, "
+           "         row_number() OVER (PARTITION BY knowledge_base_id ORDER BY slug) AS rn "
+           "    FROM wiki_pages WHERE knowledge_base_id IN (%s) AND deleted_at IS NULL) t "
+           " WHERE t.rn <= %d ORDER BY t.kb, t.slug"
+           % (summary, ", ".join(ke_db.sql_str(k) for k in ids), int(limit)))
+    try:
+        rows = ke_db.psql_csv(sql)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("读页失败（%s）：%s" % (",".join(k[:8] for k in ids), exc))
+    for row in rows:
+        out.setdefault(row.pop("kb", ""), []).append(row)
+    return out
 
 
 def _json_load_str(text, default):
@@ -239,18 +288,20 @@ def _meta_dict(page: dict) -> dict:
 # ---------------------------------------------------------------------------
 # 上下文注册表 + 认「企业共享概念模型」库
 # ---------------------------------------------------------------------------
-def concept_kb(kbs: list[dict] | None = None) -> dict:
+def concept_kb(kbs: list[dict] | None = None, stats: dict | None = None) -> dict:
     """认「企业共享概念模型」库：env → `wiki_config.bodhi_concept_kb` → 库名 → 内容探测。
 
     与 `ke_ontology.resolve_ontology_kb` 同款套路（换库不用改代码/不用重建前端）。
+
+    `stats`（`kb_page_stats()` 的返回值）可由调用方**预先取好传进来** —— 这样同一轮逻辑里
+    就不用为「概念页数」再单独打一次库（每次 `psql` ≈ 350ms）。
     """
     kbs = kbs if kbs is not None else kb_rows()
     env_id = (ke_db.env_value("BODHI_CONCEPT_KB") or ke_db.env_value("BODHI_CONCEPT_KB_ID")).strip()
     env_name = (ke_db.env_value("BODHI_CONCEPT_KB_NAME") or CONCEPT_DEFAULT_NAME).strip()
-    rows = ke_db.psql_csv(
-        "SELECT knowledge_base_id AS kb, count(*) AS n FROM wiki_pages "
-        " WHERE deleted_at IS NULL AND slug LIKE 'concept/%' GROUP BY 1")
-    pages = {r["kb"]: int(r["n"] or 0) for r in rows}
+    if stats is None:
+        stats = kb_page_stats()
+    pages = {kb: int(v.get("concept_pages") or 0) for kb, v in stats.items()}
 
     def _mk(kb: dict, source: str) -> dict:
         return {"id": kb["id"], "name": kb["name"], "source": source,
@@ -362,12 +413,19 @@ def _unrelated_pairs() -> set:
     return out
 
 
-def contexts(refresh: bool = False) -> dict:
-    """上下文注册表：KB → context（自动派生；`state/context_map/contexts.json` 可覆盖 label/owner/notes）。"""
-    kbs = kb_rows()
-    counts = _page_counts()
-    concept = concept_kb(kbs)
-    ont_id = (ke_ontology.resolve_ontology_kb().get("id") or "")
+def contexts(refresh: bool = False, kbs: list[dict] | None = None, stats: dict | None = None,
+             ontology: str | None = None) -> dict:
+    """上下文注册表：KB → context（自动派生；`state/context_map/contexts.json` 可覆盖 label/owner/notes）。
+
+    `kbs` / `stats` / `ontology` 是**给调用方省往返的口子**：`scan()` 已经把这些取过一次
+    （`kb_page_stats()` 一次查完库清单+页数），传进来就不用再各打一次库（每次 ≈ 350ms）。
+    不传 = 与过去完全一致的取数方式（另外多回一个 `ontology` 字段，纯新增）。
+    """
+    kbs = kbs if kbs is not None else kb_rows()
+    stats = stats if stats is not None else kb_page_stats()
+    counts = stats
+    concept = concept_kb(kbs, stats=stats)
+    ont_id = ontology if ontology is not None else (ke_ontology.resolve_ontology_kb().get("id") or "")
     overrides = _json_load(CONTEXTS_FILE, {}) or {}
     given = (overrides.get("contexts") or {}) if isinstance(overrides, dict) else {}
     out: dict = {}
@@ -384,8 +442,40 @@ def contexts(refresh: bool = False) -> dict:
         out[key] = entry
     return {"version": 1, "generated_at": ke_db.now_text(),
             "source": "derived+overrides" if given else "derived",
-            "concept": concept, "contexts": out,
+            "concept": concept, "ontology": ont_id, "contexts": out,
             "overrides_file": str(CONTEXTS_FILE.relative_to(REPO)) if CONTEXTS_FILE.exists() else ""}
+
+
+def _resolve_kb_arg(raw: str, kbs: list[dict]) -> tuple[str, str, str]:
+    """`scan()` 的 kb_id 参数解析：**先用已取到的库清单在内存里做精确匹配**
+    （完整 UUID / 唯一 UUID 前缀 / 归一化库名完全相等），命中不了再回落
+    `ke_db.resolve_kb_id()`（模糊匹配 + 报错清单那一套**原样保留**）。
+
+    为什么要这样：`resolve_kb_id()` 每次调用都重打一遍 `knowledge_bases`（≈ 350ms/次），
+    而 `scan()` 为了别的目的已经取过库清单了 —— 4 个库参数就白花 ≈ 1.4s。
+    返回值第三个元素（note）与 `resolve_kb_id` 同文案。
+    """
+    key = (raw or "").strip()
+
+    def _norm(text: str) -> str:
+        return re.sub(r"[\s\u3000]+", "", text or "")
+
+    if re.fullmatch(r"[0-9a-fA-F-]{36}", key):
+        hit = [k for k in kbs if k["id"].lower() == key.lower()]
+        if hit:
+            return hit[0]["id"], hit[0]["name"], ""
+    elif re.fullmatch(r"[0-9a-fA-F-]{4,35}", key):
+        hit = [k for k in kbs if k["id"].lower().startswith(key.lower())]
+        if len(hit) == 1:
+            return (hit[0]["id"], hit[0]["name"],
+                    "（kb_id「%s」按 UUID 前缀解析为 %s）" % (key, hit[0]["id"]))
+    elif key:
+        want = _norm(key)
+        hit = [k for k in kbs if _norm(k["name"]) == want]
+        if len(hit) == 1:
+            return (hit[0]["id"], hit[0]["name"],
+                    "（kb_id「%s」按名称解析为 %s）" % (key, hit[0]["id"]))
+    return ke_db.resolve_kb_id(key)          # 模糊/多命中/不存在 → 原实现（含报错清单）
 
 
 def scan(kb_ids: list[str] | None = None, limit: int = 200, page_limit: int = 5000,
@@ -396,26 +486,34 @@ def scan(kb_ids: list[str] | None = None, limit: int = 200, page_limit: int = 50
     **不参与分组**的两个库：本体模型库（`ontology:*` 投影页）与「企业共享概念模型」库
     （后者是候选的**落点**，不是候选本身）。
     """
-    ctx = contexts()
+    # 性能口径（2026-10-13）：元数据**只取一次**、库参数**先在内存里解析**、页**一次读完**。
+    # 过去 scan 自己还会重复打库（`kb_rows` + `resolve_ontology_kb` 各再来一遍）、每个库参数
+    # 各打一次 `resolve_kb_id`、每个库再各打一次 `load_pages` —— 实测 8.4s 里 99% 是
+    # `docker exec psql` 的往返（1 次 ≈ 350ms），现在从 16 次降到 6 次。
+    kbs = kb_rows()
+    stats = kb_page_stats()
+    ont = ke_ontology.resolve_ontology_kb()
+    ctx = contexts(kbs=kbs, stats=stats, ontology=ont.get("id") or "")
     concept = ctx["concept"]
-    all_kbs = kb_rows()
+    all_kbs = kbs
     if kb_ids:
         picked: list = []
         for raw in kb_ids:
             try:
-                kid, name, _note = ke_db.resolve_kb_id(raw)
+                kid, name, _note = _resolve_kb_arg(raw, kbs)
             except Exception as exc:  # noqa: BLE001
                 raise ValueError("知识库解析失败：%s" % exc)
             picked.append({"id": kid, "name": name})
     else:
         picked = [{"id": k["id"], "name": k["name"]} for k in all_kbs]
-    skip = {concept.get("id") or "", ke_ontology.resolve_ontology_kb().get("id") or ""}
+    skip = {concept.get("id") or "", ont.get("id") or ""}
     picked = [k for k in picked if k["id"] and k["id"] not in skip]
 
     pages_by_kb: dict = {}
     scanned = 0
+    rows_by_kb = load_pages_many([k["id"] for k in picked], page_limit)
     for kb in picked:
-        rows = [p for p in load_pages(kb["id"], page_limit) if _is_instance(p["page_type"])]
+        rows = [p for p in rows_by_kb.get(kb["id"], []) if _is_instance(p["page_type"])]
         pages_by_kb[kb["id"]] = rows
         scanned += len(rows)
 

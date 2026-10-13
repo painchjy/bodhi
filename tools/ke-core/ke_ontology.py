@@ -746,18 +746,26 @@ ONTOLOGY_MIN_PAGES = 10
 
 
 def _kb_candidates() -> list[dict]:
-    """所有知识库 + 各自的 `ontology:*` 页数（一次两条只读查询，库里库数很少）。"""
+    """所有知识库 + 各自的 `ontology:*` 页数（**一次只读查询**，库里库数很少）。
+
+    性能口径（2026-10-13）：原来「库清单 + 页数聚合」是两条独立 SQL → 两次 `docker exec psql`
+    （本机实测 ≈ 350ms/次），LEFT JOIN 后合并成一条；`resolve_ontology_kb()` 被高频调用
+    （每次 `contexts()` / `scan()` 都会走一遍），省下的是固定的往返开销。
+    """
     rows = ke_db.psql_csv(
-        "SELECT id, name, COALESCE(wiki_config::text, '{}') AS wiki_config "
-        "FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY created_at")
-    counts = {r["kb"]: int(r["n"] or 0) for r in ke_db.psql_csv(
-        "SELECT knowledge_base_id AS kb, count(*) AS n FROM wiki_pages "
-        "WHERE deleted_at IS NULL AND page_type LIKE 'ontology:%' GROUP BY 1")}
+        "SELECT kb.id AS id, kb.name AS name, "
+        "       COALESCE(kb.wiki_config::text, '{}') AS wiki_config, "
+        "       COALESCE(oc.n, 0) AS pages "
+        "  FROM knowledge_bases kb "
+        "  LEFT JOIN (SELECT knowledge_base_id AS kb, count(*) AS n FROM wiki_pages "
+        "              WHERE deleted_at IS NULL AND page_type LIKE 'ontology:%' GROUP BY 1) oc "
+        "    ON oc.kb = kb.id "
+        " WHERE kb.deleted_at IS NULL ORDER BY kb.created_at")
     out = []
     for r in rows:
         wiki = r["wiki_config"] or "{}"
         out.append({"id": r["id"], "name": r["name"] or "",
-                    "pages": counts.get(r["id"], 0),
+                    "pages": int(r["pages"] or 0),
                     "marked": ('"%s"' % ONTOLOGY_MARK_KEY) in wiki and "true" in wiki})
     return out
 
