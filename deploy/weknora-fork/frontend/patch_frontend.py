@@ -174,7 +174,8 @@ def patch_wikibrowser(fe: pathlib.Path) -> None:
     # 脚本：状态与函数（紧跟 PENDING_TAB 声明之后；⚠️ 用 ref/computed，函数在调用时才求值）
     text = replace_maybe(
         text,
-        "const PENDING_TAB = PENDING_MERGE_TYPE\n"
+        "const WIKI_FOLDERS_REFRESHED = new Set<string>()\n",
+        "const WIKI_FOLDERS_REFRESHED = new Set<string>()\n"
         "// 目录刷新（2026-10-05 用户口径）：普通库 = 层级 0–5（缺省 1）；**本体模型库也提供刷新**，\n"
         "// 但**不显示/不使用层级参数**（它的目录由本体投影维护）→ 只调 /bodhi/folders/refresh。\n"
         "const folderDepth = ref<number>(1)\n"
