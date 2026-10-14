@@ -633,10 +633,12 @@ def page_attributes(kb_id: str, slug: str) -> dict:
             "（HTTP `POST /bodhi/page/attributes`）或 `page_attributes_set` 工具；不要改正文。"
             if mode == "entity" else
             "%s 模式：**以正文为主**，数据属性不参与判定 → 要改请直接改正文。" % mode)
+    allowed = []
+    for k, meta in props.items():                      # 面板要显示「中文标签（本体键）」
+        allowed.append("%s（%s）" % ((meta or {}).get("label") or str(k), str(k)))
     return {"ok": True, "kb_id": kb_id, "slug": slug, "title": row["title"], "page_type": page_type,
             "version": int(row["version"] or 1), "mode": mode, "editable": (mode == "entity"),
-            "attributes": attrs, "source": source,
-            "allowed": ["%s（%s）" % (str(k), str(k).split(":")[-1]) for k in props],
+            "attributes": attrs, "source": source, "allowed": allowed,
             "rendered": in_body, "in_meta": in_meta, "in_graph": in_graph, "drift": drift, "hint": hint}
 
 
