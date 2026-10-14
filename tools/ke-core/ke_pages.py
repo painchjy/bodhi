@@ -418,6 +418,10 @@ def _attr_meta(page_type: str, key: str) -> dict:
 
 
 ATTR_SECTION = "## 属性（数据属性）"
+# 从**图节点**取"属性值"时要排除的簿记字段（它们是节点自身的元数据/标题，不是数据属性取值）：
+# 实测踩到：`name` 既是节点属性又是 bmm 的数据属性 → 会凭空渲染出一行「### 名称」，属噪音。
+_GRAPH_NODE_INTERNAL = ("slug", "kb_id", "tenant_id", "page_type", "wiki_content", "module",
+                        "name", "englishName")
 
 
 def render_attributes_section(page_type: str, attributes: dict, skip_keys=()) -> list[str]:
@@ -479,6 +483,7 @@ def _attr_key_canonical(key: str, props: dict) -> str:
 
 def _attrs_seed_from_content(page_type: str, content: str, props: dict) -> dict:
     """老页的种子：元数据 `attributes` 为空时，从正文属性段读现值（标题式 / `=` 式**双读**）。"""
+    import ke_graph as _kg  # noqa: PLC0415  懒导入（ke_pages ↔ ke_graph 有环）
     try:
         parsed = _kg._attrs_from_content(content) or {}
     except Exception:  # noqa: BLE001
@@ -488,6 +493,41 @@ def _attrs_seed_from_content(page_type: str, content: str, props: dict) -> dict:
         ck = _attr_key_canonical(k, props)
         if str(v or "").strip():
             out[ck] = str(v).strip()
+    return out
+
+
+def _attrs_from_graph(kb_id: str, slug: str, props: dict) -> dict:
+    """从**图节点属性**读数据属性（图是"事实源"的另一处）。
+
+    为什么要它：本机实测 —— 领域规则页 `page_metadata.ontology.attributes` 是**空的**，值只在
+    图节点属性里（`ruleImplementation/ruleReference/...`，键是**本地名**、不带模块前缀）。
+    老页做属性编辑时若只读元数据，会把"图上明明有的值"当成不存在（改一个键就把其它键抹掉）。
+    """
+    pairs: list = []                                   # [(本地名, 本体键)]
+    for key in (props or {}):
+        local = str(key).split(":")[-1]
+        if local in _GRAPH_NODE_INTERNAL:              # 跳过节点簿记字段（见常量注释）
+            continue
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", local) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*",
+                                                                          str(key).split(":")[0]):
+            pairs.append((local, str(key)))
+    if not pairs:
+        return {}
+    import ke_graph as _kg  # noqa: PLC0415  懒导入（ke_pages ↔ ke_graph 有环，本模块一律函数内导入）
+    ret = ", ".join("n.`%s` AS c%d" % (local, i) for i, (local, _k) in enumerate(pairs))
+    try:
+        rows = _kg._run("MATCH (n:BodhiInstance {kb_id:$kb, slug:$s}) RETURN %s LIMIT 1" % ret,
+                        {"kb": kb_id, "s": slug})
+    except Exception:  # noqa: BLE001  图不可用 → 交给调用方回落其它来源
+        return {}
+    if not rows:
+        return {}
+    row = rows[0] or {}
+    out: dict = {}
+    for i, (_local, key) in enumerate(pairs):
+        val = row.get("c%d" % i)
+        if val not in (None, ""):
+            out[key] = str(val)
     return out
 
 
@@ -510,6 +550,60 @@ def replace_attr_section(content: str, page_type: str, attributes: dict, skip_ke
             else (lines + (["", ""] + section if section else []))
     text = "\n".join(out).rstrip() + "\n"
     return re.sub(r"\n{4,}", "\n\n\n", text)          # 换段后可能多出空行，压一下
+
+
+def page_attributes(kb_id: str, slug: str) -> dict:
+    """**读**一页的数据属性现值（只读；前端「数据属性」面板 + 自检用）。
+
+    - `attributes`：事实源现值（元数据 → 图节点属性 → 正文属性段，`source` 标出实际用的那一处）；
+    - `editable`：**只有 entity 模式**为真；document/report 模式**以正文为主**（面板应转成只读提示）；
+    - `allowed`：该类声明过的全部数据属性（`<本体键>（<本地名>）`），面板据此列可编辑项；
+    - `rendered` / `in_meta` / `in_graph`：三处现值（正文段 / 元数据 / 图）；
+    - `drift`：**三处不一致**的键清单（面板据此提醒"该刷新了"）。
+    """
+    import json  # noqa: PLC0415
+
+    rows = ke_db.psql_csv(
+        "SELECT title, COALESCE(page_type,'') AS page_type, COALESCE(version,1) AS version, "
+        "       COALESCE(content,'') AS content, COALESCE(page_metadata::text,'{}') AS meta "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if not rows:
+        return {"ok": False, "slug": slug, "error": "页面不存在：%s/%s" % (kb_id[:8], slug)}
+    row = rows[0]
+    page_type = row["page_type"]
+    try:
+        meta = json.loads(row["meta"] or "{}")
+    except Exception:  # noqa: BLE001
+        meta = {}
+    onto = meta.get("ontology") or {}
+    props = ke_ontology.data_properties_for(page_type) or {}
+    mode = ke_ontology.render_mode(page_type)
+
+    def _norm(data: dict) -> dict:
+        return {_attr_key_canonical(k, props): str(v).strip()
+                for k, v in (data or {}).items() if str(v or "").strip()}
+
+    in_meta = _norm((onto.get("attributes") or {}))
+    in_graph = _norm(_attrs_from_graph(kb_id, slug, props))
+    in_body = _norm(_attrs_seed_from_content(page_type, row["content"], props))
+    if in_meta:
+        attrs, source = in_meta, "meta"
+    elif in_graph:
+        attrs, source = in_graph, "graph"
+    else:
+        attrs, source = in_body, ("content" if in_body else "none")
+    drift = sorted({k for k in set(in_meta) | set(in_graph) | set(in_body)
+                    if not (in_meta.get(k) == in_graph.get(k) == in_body.get(k))})
+    hint = ("entity 模式：正文是**只读渲染**、数据属性是**事实源** → 改值走「数据属性」面板"
+            "（HTTP `POST /bodhi/page/attributes`）或 `page_attributes_set` 工具；不要改正文。"
+            if mode == "entity" else
+            "%s 模式：**以正文为主**，数据属性不参与判定 → 要改请直接改正文。" % mode)
+    return {"ok": True, "kb_id": kb_id, "slug": slug, "title": row["title"], "page_type": page_type,
+            "version": int(row["version"] or 1), "mode": mode, "editable": (mode == "entity"),
+            "attributes": attrs, "source": source,
+            "allowed": ["%s（%s）" % (str(k), str(k).split(":")[-1]) for k in props],
+            "rendered": in_body, "in_meta": in_meta, "in_graph": in_graph, "drift": drift, "hint": hint}
 
 
 def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
@@ -557,11 +651,17 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
         return {"ok": False, "slug": slug, "page_type": page_type,
                 "error": "本体面里取不到 %s 的数据属性（确认 page_type 正确、本体模型/图可用）" % page_type}
     allowed = {str(name).split(":")[-1].lower(): str(name) for name in props}
-    base = dict(onto.get("attributes") or {})
-    seeded = False
-    if not base:                                   # 老页：元数据空 → 用正文属性段做种子（不丢现值）
-        base = _attrs_seed_from_content(page_type, content, props)
-        seeded = bool(base)
+    # 种子（老页元数据可能为空！本机实测：规则页 `ontology.attributes = {}`，值只在图/正文里）：
+    #   ① 元数据（新页，机器口径）→ ② **图节点属性** → ③ 正文属性段（双读）
+    base, seeded_from = dict(onto.get("attributes") or {}), ""
+    if base:
+        seeded_from = "meta"
+    else:
+        base = _attrs_from_graph(kb_id, slug, props)
+        seeded_from = "graph" if base else ""
+        if not base:
+            base = _attrs_seed_from_content(page_type, content, props)
+            seeded_from = "content" if base else ""
     merged, changed, unknown = dict(base), [], []
     for k, v in (patch or {}).items():
         local = str(k).split(":")[-1].lower()
@@ -583,6 +683,14 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
                 "allowed": sorted("%s（%s）" % (allowed[k], k) for k in allowed)}
 
 
+    # ⚠️ 护栏（2026-10-13，dry-run 实测踩到）：三处都读不到值时，`replace_attr_section` 会把**整段删掉**
+    # —— 那是数据丢失，不是"迁移"。所以：**空 patch 且结果为空 → 直接中止**；只有调用方
+    # 显式用 patch 传了键（哪怕全给空值 = 明确要清空）才继续。
+    if not merged and not patch:
+        return {"ok": False, "slug": slug, "mode": mode, "seeded_from": seeded_from,
+                "error": "三处都没读到数据属性（元数据 / 图节点属性 / 正文属性段 皆空或读失败）："
+                         "已中止，避免把正文属性段清空。先确认图可用（`graph_query` 能查到该节点）、"
+                         "或改用 patch 显式给出要写的键值。"}
     # 定义键若已是首段（entity 渲染），属性段里必须跳过 —— 否则一处两写（契约 §4.4）
     first = _first_para_before_attr(content)
     skip = [k for k, v in merged.items()
@@ -596,11 +704,12 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
                 "before_version": cur_ver, "after_version": cur_ver}
     result = {"ok": True, "applied": False, "dry_run": bool(dry_run), "slug": slug, "mode": mode,
               "keys_changed": changed, "content_changed": content_changed,
-              "seeded_from_content": seeded, "before_version": cur_ver, "after_version": cur_ver + 1,
+              "seeded_from": seeded_from, "before_version": cur_ver, "after_version": cur_ver + 1,
               "attributes": merged, "content_preview": new_content[:900]}
     if dry_run:
         return result
     # ① 图节点（属性 + 正文）—— 契约 §8「图本优先」
+    import ke_graph as _kg  # noqa: PLC0415  懒导入（ke_pages ↔ ke_graph 有环）
     graph = {"ok": True}
     try:
         _kg.upsert_node(kb_id, slug, row["title"], page_type, attributes=merged,

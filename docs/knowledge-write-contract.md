@@ -78,9 +78,18 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 - 标题行：`### <中文标签>（<prefixed>）`（标签/range 由本体元数据渲染）；
 - 值：**原样 markdown**（可多行），紧随其后，块之间空一行。
 
-### 4.2 渲染长度上限 = **150 字**
-- 渲染进正文的值 > 150 字 → **截断**：`<前 150 字>……（完整内容见「数据属性」面板）`；
-- 完整值仍在 `attributes`（→ 图节点属性 + `page_metadata`），**由前端「数据属性」面板打开查看**（面板是后续前端项）。
+### 4.2 渲染长度：**不截断**（2026-10-13 用户口径）
+- 数据属性值**原样渲染进正文**（可多行 markdown）；`ATTR_RENDER_LIMIT = 0` ⇒ 早前的
+  「> 150 字截断 + 请到『数据属性』面板看完整值」**已取消**（值与正文一致，模型/人不再看到半句话）；
+- 事实源仍是 `attributes`（→ 图节点属性 + `page_metadata`）；正文是它的**只读渲染**。
+
+### 4.2.1 编辑入口（**方案 D**，2026-10-13 用户口径）
+| 渲染模式 | 谁说了算 | 怎么改 |
+|---|---|---|
+| **entity**（一般本体知识：规则/服务/实体…） | **数据属性是事实源**；正文**只读渲染** | 「数据属性」面板 → `POST /bodhi/page/attributes`（或 MCP `page_attributes_set`、CLI `ke_pages.set_page_attributes`）；**三处同写**（PG `page_metadata.ontology.attributes` + 图节点属性 + 正文属性段重渲染），幂等、写前快照、`version+1`。**改正文不生效**（读路径不解析正文） |
+| **document / report**（评审报告/需求分析/评测结果…） | **正文是事实源** | 直接改正文；数据属性只作结构化摘要，**不参与判定**（`page_attributes_set` 对这类页**明确拒改**） |
+- 只读：`GET /bodhi/page/attributes?kb_id=&slug=` → `attributes`（现值）+ `source`（meta/graph/content）
+  + `editable`（仅 entity 为真）+ `allowed`（该类可编辑属性）+ `drift`（三处不一致的键）。
 
 ### 4.3 解析（双读兼容）
 渲染格式改了，**同步改 3 个解析器**，且兼容旧 `- 名称 = 值`：
@@ -88,6 +97,8 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 - `server.detail_attributes`
 - `ke_audit.data_attrs`
 新格式按「`### 名称` 起、到下一个 `###`/`## ` 止」为一条属性（值可多行/含 markdown）。
+**读侧**（`ke_review.rules_of_policy` / 文档评审 / 巡检）**不解析正文**，只读**元数据 `attributes` +
+图节点属性**（entity 的事实源，见 §4.2.1）；正文解析器（下面 3 个）只服务**展示/落图/巡检比对**。
 
 ### 4.4 定义不重复
 `definition_key` 指定的键**只出现在正文首段**，**属性段里跳过它**（消除"首段一份、属性段又一份"）。

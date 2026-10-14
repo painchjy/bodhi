@@ -38,8 +38,8 @@
 
 | 步 | 动作 | 验收（不通过就别往下走）|
 |---|---|---|
-| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（38 个）` |
-| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 38 个 |
+| **1** | 部署 MCP 服务（`bodhi2-02`）—— 容器方式最省事 | `selfcheck.py` 输出 `tools/list OK（40 个）` |
+| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL），URL 用容器 DNS `http://bodhi-mcp:8765/mcp` | 平台 → MCP 服务里能看到 `bodhi_ontology`，工具 40 个 |
 | **3** | 导入本体模型知识库（`bodhi2-03`：**种子导入**最省事；或用 02 包的编译器按 TTL 重新生成）| 页数 **178**（类 50 / 本体关系 83 / **数据属性 36** / 模块 6 / 轻量版 2 / 索引 1）|
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
 | **5** | 替换前端（`bodhi2-01`）+ 挂载 nginx 模板 | `deploy_frontend.sh check` 全绿；类型下拉能看到 `easvc:*` |
@@ -107,7 +107,7 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 
 | # | 检查 | 期望 |
 |---|---|---|
-| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（38 个）` + `skills() OK（3 个）` |
+| 1 | `selfcheck.py --url http://…:8765/mcp` | `tools/list OK（40 个）` + `skills() OK（3 个）` |
 | 2 | 智能体一轮只读任务 | `logs/mcp_calls_*.log` 有 `skills`/`audit_scan` 记录（模型侧工具数见 `AGENTS-SQL.md`） |
 | 3 | 本体模型库 | **178 页**（类 50 / 本体关系 83 / **数据属性 36** / 模块 6 / 轻量版 2 / 索引 1）；目录每模块下只有「数据属性」「本体关系」；`curl <mcp>/bodhi/ontology/models` 返回 5 个模型 |
 | 4 | 业务库上传+抽取 | 页面类型都在本体里，且**有溯源**（`source_refs` 非空 **或** 图上已挂 `bmm:sourceSession` 会话边）|

@@ -2,7 +2,7 @@
 """bodhi2 MCP 服务自检（只读）：握手 → tools/list → skills()。
 
 用法：
-    python3 selfcheck.py [--url http://127.0.0.1:8765/mcp] [--expect-tools 38]
+    python3 selfcheck.py [--url http://127.0.0.1:8765/mcp] [--expect-tools 40]
 
 只依赖标准库；不写任何数据。退出码：0 全通，1 有失败项。
 """
@@ -43,8 +43,8 @@ def rpc(url: str, method: str, params: dict | None, session: str = "", rpc_id: i
 def main() -> int:
     ap = argparse.ArgumentParser(description="bodhi2 MCP 自检（只读）")
     ap.add_argument("--url", default="http://127.0.0.1:8765/mcp")
-    ap.add_argument("--expect-tools", type=int, default=38,
-                    help="期望的工具个数（2026-09-29：24 = 22 + context_authority/context_authority_decide/pull 系列）")
+    ap.add_argument("--expect-tools", type=int, default=40,
+                    help="期望的工具个数（2026-10-13：40 = 上一版 39 + `page_attributes_set`（数据属性写口，方案 D））")
     args = ap.parse_args()
     ok = True
 

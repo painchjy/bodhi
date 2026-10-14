@@ -3390,6 +3390,24 @@ def tool_definitions() -> list[dict]:
                 "required": ["kb_id", "policy"]},
         },
         {
+            "name": "page_attributes_set",
+            "description": ("**改一页的数据属性（方案 D，写）**：entity 模式的知识页 —— 正文是**只读渲染**、"
+                            "数据属性是**事实源**。给 `patch`（键=本体数据属性，可带/不带模块前缀；"
+                            "空串 = 删键），本工具**三处同写**：`page_metadata.ontology.attributes` + "
+                            "图节点属性 + 正文属性段（**标题式**重渲染，不截断）。"
+                            "只接受 **entity 渲染模式**的页；报告/文档类（document）**以正文为主**会被拒"
+                            "（请直接改正文）。键必须是该类本体面声明过的数据属性，否则拒并列出可用键。"
+                            "幂等；写前快照 + `version+1`（可回退）；**默认 `dry_run=true`**（只回 diff）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "slug": {"type": "string"},
+                "patch": {"type": "object",
+                          "description": "要改的数据属性 `{键: 值}`（键可带本体前缀）；值为空串 = 删键"},
+                "actor": {"type": "string", "description": "操作者（记进回执；面板/人/智能体）"},
+                "dry_run": {"type": "boolean", "description": "默认 true：只回 diff，不写库"}},
+                "required": ["kb_id", "slug", "patch"]},
+        },
+        {
             "name": "graph_query",
             "description": ("**文档评审·图检索（只读）**：执行**只读** Cypher（MATCH/OPTIONAL MATCH/WITH/UNWIND/RETURN 开头），"
                             "写操作与存储过程调用一律拒；自动补 LIMIT（默认 200，上限 1000）。"
@@ -4065,6 +4083,14 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     if name == "image_extract":
         return image_extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
                              int(args.get("figure_no", 0) or 0))
+    if name == "page_attributes_set":
+        _pa_dry = args.get("dry_run", True)
+        if isinstance(_pa_dry, str):
+            _pa_dry = _pa_dry.strip().lower() not in ("0", "false", "no", "off", "")
+        return ke_pages.set_page_attributes(str(args.get("kb_id", "")), str(args.get("slug", "")),
+                                            args.get("patch") or {},
+                                            actor=str(args.get("actor", "")),
+                                            dry_run=bool(_pa_dry))
     if name == "rules_of_policy":
         return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
                                          int(args.get("limit", 300) or 300))
@@ -4622,6 +4648,13 @@ class MCPHandler(BaseHTTPRequestHandler):
             "/bodhi/page/type":
                 lambda b: ke_pages.set_page_type(b.get("kb_id", ""), b.get("slug", ""),
                                                  b.get("page_type", "")),
+            # 数据属性写口（方案 D，2026-10-13）：**只改数据属性**（entity 模式页）；
+            # `dry_run=1`（默认）只回 diff。三处同写：PG 元数据 + 图节点属性 + 正文属性段（标题式）。
+            "/bodhi/page/attributes":
+                lambda b: ke_pages.set_page_attributes(b.get("kb_id", ""), b.get("slug", ""),
+                                                       b.get("patch") or {},
+                                                       actor=str(b.get("actor", "")),
+                                                       dry_run=bool(b.get("dry_run", True))),
             "/bodhi/delete":
                 lambda b: ke_pages.delete_pages(b.get("kb_id", ""), b.get("slugs") or [],
                                                 bool(b.get("dry_run"))),
@@ -4785,6 +4818,17 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json(ke_ontology.classes(), 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/ontology/classes 失败：%s" % exc)
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
+        if path.startswith("/bodhi/page/attributes"):
+            # 数据属性**读**口（方案 D，2026-10-13，只读）：前端「数据属性」面板用 ——
+            # 回 `attributes`（事实源现值）、`source`（meta/graph/content）、`editable`（仅 entity）、
+            # `allowed`（该类可编辑属性）、`drift`（三处不一致的键）。
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                self._json(ke_pages.page_attributes(str(params.get("kb_id", "")),
+                                                    str(params.get("slug", ""))), 200, self.CORS)
+            except Exception as exc:  # noqa: BLE001
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path.startswith("/bodhi/ontology/relation-types"):
