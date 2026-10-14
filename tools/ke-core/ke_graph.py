@@ -74,7 +74,11 @@ def _attrs_from_content(content: str) -> dict[str, str]:
         if s.startswith("### "):
             _flush()
             head = s[4:].strip()
-            m = re.search(r"[`(（]([A-Za-z_][\w]*:[A-Za-z_][\w]*)[`）)]", head)
+            # 宽容匹配标题里的「prefixed:name」（2026-10-13 修）：新渲染是
+            # `### 参考规范细则（bmm:ruleReference，xsd:string）` —— 键后面跟的是 `，`，
+            # 旧正则要求紧跟 `` ` ``/`）` ⇒ 匹配失败后退化成 `head.split(":")[-1]`，
+            # 键名会变成 `string）`（实测踩到：正文段整段解析成 1 个假键）。
+            m = re.search(r"([A-Za-z_]\w*:[A-Za-z_]\w*)", head)
             cur_key = (m.group(1) if m else head).split(":")[-1]
             continue
         mo = re.match(r"^-\s*([A-Za-z_][\w:]*)\b[^\n=]*=\s*(.+?)\s*$", s)

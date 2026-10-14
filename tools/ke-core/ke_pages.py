@@ -531,6 +531,30 @@ def _attrs_from_graph(kb_id: str, slug: str, props: dict) -> dict:
     return out
 
 
+def _keys_in_section(content: str) -> list[str]:
+    """按**出现顺序**列出「## 属性（数据属性）」段里的键（标题式取 `prefixed`；旧一行式取 `=` 前的名字）。"""
+    out: list[str] = []
+    inside = False
+    for raw in (content or "").splitlines():
+        s = raw.strip()
+        if s == ATTR_SECTION:
+            inside = True
+            continue
+        if inside and s.startswith("## "):
+            break
+        if not inside:
+            continue
+        if s.startswith("### "):
+            m = re.search(r"([A-Za-z_]\w*:[A-Za-z_]\w*)", s[4:])
+            if m:
+                out.append(m.group(1))
+        else:
+            m = re.match(r"^-\s*(?:bmm:)?([A-Za-z_][\w:]*)\b[^\n=]*=", s)
+            if m:
+                out.append(m.group(1))
+    return out
+
+
 def replace_attr_section(content: str, page_type: str, attributes: dict, skip_keys=()) -> str:
     """把正文里「## 属性（数据属性）」**整段替换**成当前渲染口径（标题式、不截断）。
 
@@ -539,7 +563,17 @@ def replace_attr_section(content: str, page_type: str, attributes: dict, skip_ke
     - 渲染结果为空（属性全空）→ 删掉整段。
     """
     lines = (content or "").rstrip().splitlines()
-    section = render_attributes_section(page_type, attributes, skip_keys=skip_keys)
+    # 顺序口径（2026-10-13）：**先按正文现有顺序**排（保持历史/人工顺序，避免"只换了顺序也写一版"），
+    # 新增键按传入顺序追加 —— 这样重跑替换是**逐字幂等**的（dry-run 会报 `正文会变=False`）。
+    ordered: dict = {}
+    for local in [k.split(":")[-1].lower() for k in _keys_in_section(content)]:
+        for k, v in (attributes or {}).items():
+            if str(k).split(":")[-1].lower() == local and k not in ordered:
+                ordered[k] = v
+                break
+    for k, v in (attributes or {}).items():
+        ordered.setdefault(k, v)
+    section = render_attributes_section(page_type, ordered, skip_keys=skip_keys)
     start = next((i for i, ln in enumerate(lines) if ln.strip() == ATTR_SECTION), -1)
     if start >= 0:
         end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
