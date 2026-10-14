@@ -872,7 +872,6 @@ def patch_wikibrowser_v10_retag(fe: pathlib.Path) -> None:
     path.write_text(text, encoding="utf-8")
     print("  WikiBrowser.vue v10 完成（%d 字节）" % len(text.encode("utf-8")))
     patch_wikibrowser_v12_context_panel(fe)
-    patch_wikibrowser_v13_attributes_panel(fe)      # 方案 D：数据属性面板（放在 v12 之后：锚点/import 已就位）
 
 
 def patch_wikibrowser_v12_context_panel(fe: pathlib.Path) -> None:
@@ -913,48 +912,6 @@ def patch_wikibrowser_v12_context_panel(fe: pathlib.Path) -> None:
 
     path.write_text(text, encoding="utf-8")
     print("  WikiBrowser.vue v12 完成（跨库上下文面板）")
-
-
-def patch_wikibrowser_v13_attributes_panel(fe: pathlib.Path) -> None:
-    """v13（2026-10-13，方案 D）：wiki 阅读页加「数据属性」面板（entity 可编辑 / document 只读）。
-
-    口径（用户拍板）：**entity 渲染模式**的知识 —— **数据属性是事实源、正文是只读渲染**；
-    改值走本面板，写路径**三处同写**（`page_metadata.ontology.attributes` + 图节点属性 +
-    正文属性段重渲染）。**document / report 模式以正文为主** → 面板只读并提示"请直接改正文"。
-
-    数据源：`GET/POST /bodhi/page/attributes`（MCP 端点，同源反代；写默认 `dry_run`，
-    面板**先预演再写**）。组件 `BodhiAttributesPanel.vue` 自包含；本补丁只做三件事：
-    拷组件 + import + 挂一行标签（放在「跨库上下文」之前、沿用 v7 的锚点注释）。
-    """
-    shutil.copy2(HERE / "BodhiAttributesPanel.vue",
-                 fe / "src" / "views" / "knowledge" / "wiki" / "BodhiAttributesPanel.vue")
-    print("  + src/views/knowledge/wiki/BodhiAttributesPanel.vue（数据属性面板）")
-
-    path = fe / "src" / "views" / "knowledge" / "wiki" / "WikiBrowser.vue"
-    text = path.read_text(encoding="utf-8")
-    if "BodhiAttributesPanel" not in text:
-        text = replace_once(
-            text,
-            "import BodhiContextPanel from './BodhiContextPanel.vue'",
-            "import BodhiContextPanel from './BodhiContextPanel.vue'\n"
-            "import BodhiAttributesPanel from './BodhiAttributesPanel.vue'",
-            "WikiBrowser.vue import（数据属性面板）")
-        text = replace_once(
-            text,
-            "              <!-- bodhi2 v6（需求 2）：本体关系维护（出边可改、入边只读） -->\n",
-            "              <!-- bodhi2 v13（方案 D）：**数据属性是事实源**；entity 模式可编辑\n"
-            "                   （正文只读渲染），document/report 模式以正文为主 → 面板只读。\n"
-            "                   写路径三处同写：页面元数据 + 图节点属性 + 正文属性段 -->\n"
-            "              <BodhiAttributesPanel v-if=\"selectedPage && !editingPage\"\n"
-            "                :knowledge-base-id=\"props.knowledgeBaseId\" :slug=\"selectedPage.slug\"\n"
-            "                :page-type=\"ontologySourceType(selectedPage)\" />\n"
-            "              <!-- bodhi2 v6（需求 2）：本体关系维护（出边可改、入边只读） -->\n",
-            "WikiBrowser.vue 挂载（数据属性面板）")
-    else:
-        print("  - 已应用：WikiBrowser.vue 数据属性面板")
-
-    path.write_text(text, encoding="utf-8")
-    print("  WikiBrowser.vue v13 完成（数据属性面板）")
 
 
 def patch_wikibrowser_v7(fe: pathlib.Path) -> None:
@@ -1522,9 +1479,8 @@ def patch_version_badge_last(fe: pathlib.Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="给 WeKnora 前端打本体感知补丁")
     parser.add_argument("--fe", required=True, help="前端源码目录（构建副本）")
-    parser.add_argument("--only", default="", choices=["", "v6", "v13"],
-                        help="只重打某一处补丁（树已打过补丁时用；v6 = 知识库页「上传本体文件」入口，"
-                             "v13 = wiki 阅读页「数据属性」面板（方案 D））")
+    parser.add_argument("--only", default="", choices=["", "v6"],
+                        help="只重打某一处补丁（树已打过补丁时用；v6 = 知识库页「上传本体文件」入口）")
     args = parser.parse_args()
     fe = pathlib.Path(args.fe)
     if not (fe / "src" / "views" / "knowledge" / "wiki" / "WikiBrowser.vue").is_file():
@@ -1540,15 +1496,6 @@ def main() -> int:
         print("  + src/views/knowledge/wiki/BodhiOntologyUpload.vue")
         patch_knowledgebase_v6(fe)
         print("== 完成（only=v6）==")
-        return 0
-
-    if args.only == "v13":
-        # 「只重打一处」维护模式（2026-10-13，方案 D）：树已打过补丁、又没有干净副本时，
-        # 单独补「数据属性」面板（拷组件 + import + 挂标签）；不动其它补丁。
-        print("== only=v13：只重打「数据属性面板」（不动其它补丁） ==")
-        (fe / "src" / "views" / "knowledge" / "wiki").mkdir(parents=True, exist_ok=True)
-        patch_wikibrowser_v13_attributes_panel(fe)
-        print("== 完成（only=v13）==")
         return 0
 
     # 幂等保护（2026-09-19 踩坑）：部分补丁的 new 里包含 old 锚点，判据
