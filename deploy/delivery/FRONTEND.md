@@ -14,7 +14,7 @@
 | **本体图谱 tab** | `components/bodhi/BodhiGraphTab.vue` 等 | 知识库里第三个 tab：按本体模型渲染图谱（节点=wiki 页、边=本体关系），支持按类型过滤 |
 | **类型可视化** | `utils/ontologyTypes.ts`（**55 个类型**） | 类型彩色圆点 + 悬停中文类名；列表视图同样显示徽标；新增 `easvc:*`（服务详设）与 `bmm:MainSystem/SubSystem/HardwareAsset`（2026-09-29 EA 瘦身后）类型 |
 | **本体关系维护面板** | `components/bodhi/BodhiRelationsPanel.vue` | 阅读页右侧：出边可改/可删、入边只读；调 MCP 的 `/bodhi/relations*` |
-| **数据属性面板**（补丁 v13，2026-10-13 方案 D） | `components/bodhi/BodhiAttributesPanel.vue` | 阅读页：**entity 模式**的数据属性**可编辑**（三处同写：页面元数据 + 图节点属性 + 正文属性段），**document/report 模式只读**并提示"以正文为主"；**先预演再写**；调 `GET/POST /bodhi/page/attributes` |
+| **数据属性面板**（补丁 v13，方案 D；2026-10-15 更新） | `components/bodhi/BodhiAttributesPanel.vue` | 阅读页：数据属性**可编辑**（**不再按 entity/document 区分**：有属性就能改，非法键由写口拒绝）；两个按钮：**「编辑」**（预演 → 确认写入）与**「以摘要为准同步」**（把 WeKnora 原生「定义」框 = PG `summary` 写进**元数据 + 图**，**不含正文**）；三处同写 = 页面元数据 + 图节点属性 + `summary`（**正文不再渲染定义**）；调 `GET/POST /bodhi/page/attributes`（`sync_from_summary: true`）；**本体模型库只读**（页面/接口一律拒绝，提示改 TTL 走加载编译）|
 | **版本徽标位置** | `views/knowledge/wiki/WikiBrowser.vue`（补丁 v10） | 列表行 `v3` 徽标放在**标题之后**（放前面会让各行标题起始位置不齐，用户 2026-09-21 反馈）；`tools/delivery/patch_version_badge.py` 可对已有源码单独归一化（幂等）|
 | **类型下拉（编辑页）** | `src/bodhi/typeMigration.ts`（补丁 `patch_wikibrowser_v10_retag`） | 改**本体类型 = 迁移页面**：保存时先 `POST /bodhi/page/retag/preview` 算影响面（新 slug / 引用处数 / 预计违规 / 风险 / ticket）→ **弹确认框** → `POST /bodhi/page/retag/apply`（带 ticket + 风险确认）。取消则不改；不适用迁移的页自动退回旧通道（`/bodhi/page/type`，只改类型） |
 | **上传自动生成 wiki 开关** | 知识库头部 | 打开后上传文档自动进 wiki 抽取流程 |

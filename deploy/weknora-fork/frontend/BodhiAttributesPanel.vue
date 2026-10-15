@@ -4,7 +4,9 @@
       <span class="bodhi-attr-title">数据属性</span>
       <span class="bodhi-attr-sub">{{ pageType || data.page_type }}</span>
       <span class="bodhi-attr-spacer" />
-      <t-button v-if="canEditNow" size="small" variant="outline" theme="primary" @click="openEdit">编辑</t-button>
+      <!-- 2026-10-15 用户口径：**不做可编辑判断**，总是显示（非法键由后端写口拒绝） -->
+      <t-button size="small" variant="outline" theme="primary" @click="openEdit">编辑</t-button>
+      <t-button size="small" variant="outline" :loading="syncing" @click="syncFromSummary">以摘要为准同步</t-button>
       <t-button size="small" variant="text" :loading="loading" @click="reload">刷新</t-button>
     </div>
 
@@ -24,6 +26,8 @@
       <div class="bodhi-attr-tip">
         事实源＝数据属性；正文是该值的**只读渲染**。保存会**三处同写**：页面元数据 + 图节点属性 + 正文属性段。
         <b>留空 / 点「清空」＝删除该属性</b>。
+        与 WeKnora 原生「定义」框同步的键（<code>skos:definition</code>）：改完会**一起写 <code>summary</code>**
+        （即编辑弹窗里的「定义」），并在正文首段保留定义原文。
       </div>
       <div v-for="(f, i) in fields" :key="i" class="bodhi-attr-field">
         <div class="bodhi-attr-field-head">
@@ -76,6 +80,7 @@ const loading = ref(false)
 const error = ref('')
 const dlg = ref(false)
 const saving = ref(false)
+const syncing = ref(false)
 const previewing = ref(false)
 const previewText = ref('')
 const fields = ref<any[]>([])
@@ -162,6 +167,24 @@ async function preview() {
   } catch (e: any) {
     previewText.value = '预演失败：' + String(e?.message || e)
   } finally { previewing.value = false }
+}
+
+async function syncFromSummary() {
+  // 「以摘要为准同步」（2026-10-15 用户口径）：把 WeKnora 原生「定义」框（PG `summary`）
+  // 写进数据属性的 **元数据 + 图节点**（**不含正文**）。
+  syncing.value = true
+  try {
+    const r = await api('/bodhi/page/attributes', {
+      method: 'POST',
+      body: JSON.stringify({ kb_id: props.knowledgeBaseId, slug: props.slug, patch: {},
+                             sync_from_summary: true, dry_run: false, actor: '前端·以摘要为准同步' }),
+    })
+    if (!r.ok) throw new Error(String(r.error || '同步失败'))
+    MessagePlugin.success(r.applied === false ? '已一致，无需同步' : `已同步（v${r.after_version}）`)
+    await reload()
+  } catch (e: any) {
+    MessagePlugin.error('同步失败：' + String(e?.message || e))
+  } finally { syncing.value = false }
 }
 
 async function apply() {
