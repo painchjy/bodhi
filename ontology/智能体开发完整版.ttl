@@ -312,15 +312,6 @@
     rdfs:range xsd:string ;
     rdfs:comment "为何先用挡板（如『依赖存量系统、投产周期长』）" .
 
-:metricName rdf:type owl:DatatypeProperty ;
-    rdfs:label "指标名称"@zh ;
-    rdfs:domain :Metric ;
-    rdfs:range xsd:string .
-
-:metricValue rdf:type owl:DatatypeProperty ;
-    rdfs:label "指标值"@zh ;
-    rdfs:domain :Metric ;
-    rdfs:range xsd:string .
 
 :runAt rdf:type owl:DatatypeProperty ;
     rdfs:label "评测时间"@zh ;

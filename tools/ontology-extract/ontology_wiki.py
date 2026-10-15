@@ -202,6 +202,17 @@ class WikiBuilder:
         self.seen: set[str] = set()
         # 全部属性定义（对象 + 数据）来自 Neo4j；用于类页的「属性定义」小节与属性页
         self.properties = _neo4j_properties()
+        # 2026-10-15（跨模块继承展示）：属性 → 所属模块 + 扁平属性表。
+        # 类页要列出"继承自 X"的属性，X 可能是**别的模块**的类（如 agent:Advice ← bmm:Report），
+        # 那些属性的「属性定义页」slug 必须按**属性自己的模块**生成，否则链接悬空。
+        self.prop_module: dict[str, str] = {}
+        self.props_flat: list[dict] = []
+        for _mod, _plist in (self.properties or {}).items():
+            for _p in _plist:
+                _q = dict(_p)
+                _q["_module"] = _mod
+                self.props_flat.append(_q)
+                self.prop_module.setdefault(_q.get("prefixed") or _q.get("name") or "", _mod)
         self.generated_at = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
     # --- 解析辅助 ---------------------------------------------------------
@@ -329,27 +340,78 @@ class WikiBuilder:
                     for s in (rel.get("domain") or []):
                         out_slugs.append(self.class_slug_of(s))
                 lines.append("")
-        own_props = [p for p in self.properties.get(module["key"], [])
-                     if name in (p.get("domains") or [])]
-        if own_props:
-            lines += ["## 属性定义（%d 个，含数据属性）" % len(own_props), ""]
-            for prop in own_props:
+        # 属性定义（2026-10-15 用户口径）：**分「自身 / 继承」×「对象属性 / 数据属性」**；
+        # **继承跨模块**（祖先闭包走 `self.class_index`，它覆盖全部模块）。
+        props_all = self.props_flat or self.properties.get(module["key"], [])
+
+        def _pick(owner: str) -> list:
+            return [p for p in props_all if owner in (p.get("domains") or [])]
+
+        own = _pick(name)
+        anc_chain, cursor = [], list(parents)
+        while cursor:
+            a = cursor.pop(0)
+            if a in anc_chain:
+                continue
+            anc_chain.append(a)
+            found = self.class_index.get(a)
+            cursor += list(((found[1] if found else {}) or {}).get("parents") or [])
+        own_keys = {p.get("prefixed") for p in own}
+        seen_keys = set(own_keys)
+        inh: dict[str, list] = {}
+        for a in anc_chain:
+            got = []
+            for p in _pick(a):
+                k = p.get("prefixed")
+                if k in seen_keys:                      # 同一属性只列一次（就近的祖先优先）
+                    continue
+                seen_keys.add(k)
+                got.append(p)
+            if got:
+                inh[a] = got
+
+        def _emit(items: list) -> list:
+            out = []
+            for prop in items:
+                pmod = prop.get("_module") or module["key"]     # 属性自己的模块（跨模块继承时≠当前模块）
                 if prop.get("ranges"):
                     target = "→ " + "、".join(self.class_link(r) for r in prop["ranges"])
                 elif prop.get("kind") == "DatatypeProperty":
-                    target = "→ 字面量（数据属性）"
+                    target = "→ 字面量"
                 else:
                     target = "→ ?（未声明 range）"
-                lines.append("- %s %s%s" % (self.property_link(module["key"], prop), target,
-                                            ("  — " + prop["comment"][:60]) if prop.get("comment") else ""))
-                # 出边：对象属性 → 关系页；数据属性 → 属性页（对象属性不再建属性页，否则悬空）
+                out.append("- %s %s%s" % (self.property_link(pmod, prop), target,
+                                          ("  — " + prop["comment"][:60]) if prop.get("comment") else ""))
+                # 出边：对象属性 → 关系页；数据属性 → 属性页
                 if prop.get("kind") == "ObjectProperty":
                     rel_slug = self.relation_slug_of(prop.get("prefixed") or prop.get("name") or "")
                     if rel_slug:
                         out_slugs.append(rel_slug)
                 else:
-                    out_slugs.append(self.property_slug_of(module["key"], prop))
-            lines.append("")
+                    out_slugs.append(self.property_slug_of(pmod, prop))
+            return out
+
+        dat_own = [p for p in own if p.get("kind") != "ObjectProperty"]
+        obj_own = [p for p in own if p.get("kind") == "ObjectProperty"]
+        dat_inh = {a: [p for p in v if p.get("kind") != "ObjectProperty"] for a, v in inh.items()}
+        obj_inh = {a: [p for p in v if p.get("kind") == "ObjectProperty"] for a, v in inh.items()}
+        if own or inh:
+            lines += ["## 数据属性", ""]
+            if dat_own:
+                lines += ["### 自身（%d）" % len(dat_own), ""] + _emit(dat_own) + [""]
+            for a, v in dat_inh.items():
+                if v:
+                    lines += ["### 继承自 %s（%d）" % (self.class_link(a), len(v)), ""] + _emit(v) + [""]
+            if not dat_own and not any(dat_inh.values()):
+                lines += ["（无）", ""]
+            lines += ["## 对象属性", ""]
+            if obj_own:
+                lines += ["### 自身（%d）" % len(obj_own), ""] + _emit(obj_own) + [""]
+            for a, v in obj_inh.items():
+                if v:
+                    lines += ["### 继承自 %s（%d）" % (self.class_link(a), len(v)), ""] + _emit(v) + [""]
+            if not obj_own and not any(obj_inh.values()):
+                lines += ["（无）", ""]
 
         if cls.get("restriction_count"):
             lines += ["## 约束", "", "- 该类的 OWL 限制（restriction）数量：%d" % cls["restriction_count"], ""]
@@ -958,8 +1020,20 @@ def project(pages: list[dict], kb_id: str) -> str:
     if not row.strip():
         raise SystemExit("知识库不存在：%s" % kb_id)
     tenant_id = int(row.strip().splitlines()[0])
+    # 2026-10-15 修（`duplicate key … wiki_pages_pkey` 事故，根因是"投影写页不幂等"）：
+    #   ① **按本批 slug 先删**（不管 `last_edit_source` 是谁写的）—— 本体页一旦被用户/面板/迁移工具
+    #      改过，`last_edit_source` 就不再是 `ontology-wiki`，旧实现只按 tag 删 → 删不掉 →
+    #      而 `page_id_for()` 是**确定性 uuid5** → INSERT 撞主键 ✗（连 index/总览这些 model 为空的页
+    #      也不在 `purge_model` 的 model 过滤范围里）。
+    #   ② INSERT 一律 `ON CONFLICT (id) DO UPDATE`（幂等；即使有"slug 变过但 id 未变"的历史行也不炸）。
+    #   ③ 仍保留 tag 级删除，用于清理"本轮不再产出"的过期页。
+    batch_list = ", ".join(sql_str(p["slug"]) for p in pages) or "''"
     out = ["-- 由 tools/ontology-extract/ontology_wiki.py 生成（本体模型知识库）",
            "BEGIN;",
+           "DELETE FROM wiki_page_revisions WHERE knowledge_base_id = %s AND slug IN (%s);"
+           % (sql_str(kb_id), batch_list),
+           "DELETE FROM wiki_pages WHERE knowledge_base_id = %s AND slug IN (%s);"
+           % (sql_str(kb_id), batch_list),
            "DELETE FROM wiki_pages WHERE knowledge_base_id = %s AND last_edit_source = %s;"
            % (sql_str(kb_id), sql_str(TOOL_TAG))]
     for page in pages:
@@ -973,8 +1047,14 @@ def project(pages: list[dict], kb_id: str) -> str:
             sql_json(page.get("out_links") or []), sql_json(page["page_metadata"]),
             sql_json([page["title"]]), "1", sql_str(TOOL_TAG), sql_str(""),
         ]
-        out.append("INSERT INTO wiki_pages (%s) VALUES (%s);"
-                   % (", ".join(PAGE_COLUMNS), ", ".join(values)))
+        out.append(
+            "INSERT INTO wiki_pages (%s) VALUES (%s) ON CONFLICT (id) DO UPDATE SET "
+            "slug = EXCLUDED.slug, title = EXCLUDED.title, page_type = EXCLUDED.page_type, "
+            "content = EXCLUDED.content, summary = EXCLUDED.summary, "
+            "category_path = EXCLUDED.category_path, wiki_path = EXCLUDED.wiki_path, "
+            "depth = EXCLUDED.depth, page_metadata = EXCLUDED.page_metadata, "
+            "last_edit_source = EXCLUDED.last_edit_source;"
+            % (", ".join(PAGE_COLUMNS), ", ".join(values)))
     out.append("COMMIT;")
     sql = "\n".join(out) + "\n"
     LOG_DIR.mkdir(parents=True, exist_ok=True)

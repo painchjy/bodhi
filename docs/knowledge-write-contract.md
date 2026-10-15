@@ -87,9 +87,21 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 | 渲染模式 | 谁说了算 | 怎么改 |
 |---|---|---|
 | **entity**（一般本体知识：规则/服务/实体…） | **数据属性是事实源**；正文**只读渲染** | 「数据属性」面板 → `POST /bodhi/page/attributes`（或 MCP `page_attributes_set`、CLI `ke_pages.set_page_attributes`）；**三处同写**（PG `page_metadata.ontology.attributes` + 图节点属性 + 正文属性段重渲染），幂等、写前快照、`version+1`。**改正文不生效**（读路径不解析正文） |
-| **document / report**（评审报告/需求分析/评测结果…） | **正文是事实源** | 直接改正文；数据属性只作结构化摘要，**不参与判定**（`page_attributes_set` 对这类页**明确拒改**） |
+| **document / report**（评审报告/需求分析/评测结果…） | **正文是事实源** | 直接改正文；数据属性（若有）**同样可改**并三处同写（2026-10-15 起不再按模式拒改），但**判定只读正文** |
+| **本体模型库**（`ontology:*` 页） | **只读**（由加载编译生成） | 任何写口（`save_knowledge` / `set_page_attributes` / 设计页写入）**一律拒绝**，回执提示改 `ontology/*.ttl` 后走**加载编译**（`ke_admin.load_model` / 前端「上传本体文件」） |
 - 只读：`GET /bodhi/page/attributes?kb_id=&slug=` → `attributes`（现值）+ `source`（meta/graph/content）
-  + `editable`（仅 entity 为真）+ `allowed`（该类可编辑属性）+ `drift`（三处不一致的键）。
+  + `editable`（2026-10-15 起**恒为真**，是否可改由写口按本体/键校验）+ `allowed`（该类可编辑属性）+ `drift`。
+
+### 4.2.2 定义（`skos:definition`）与 PG `summary` 同步（**2026-10-15 用户口径**）
+| 规则 | 说明 |
+|---|---|
+| 键 | 定义统一用 **`skos:definition`**（SKOS 标准注释属性，编译白名单 `PLATFORM_ANNOTATION_IRIS`；**无 domain ⇒ 全类可用**，不给类逐个声明、不 import skos）；备注用 `skos:note` |
+| 三处 | **PG `summary`（WeKnora 原生「定义」框）↔ `page_metadata.ontology.attributes` ↔ 图节点属性**；`summary` 恒为定义值 |
+| 正文 | **不渲染定义**（`SUMMARY_SYNC_LOCALS` 让 `render_attributes_section()` 跳过定义键）——正文只渲染**其它**数据属性的取值 |
+| 写口 | 面板「编辑」（预演 → 确认写入）改 `summary + 元数据 + 图`；面板「**以摘要为准同步**」= `POST /bodhi/page/attributes {sync_from_summary: true}` → 把 `summary` 写进元数据 + 图（**不含正文**） |
+| 漂移 | `drift` = 元数据/图/正文三处不一致的键 **∪** `summary` 非空却与定义键不一致（含"三处都没有"）；本体页不参与该比对（其 `summary` 就是类 `rdfs:comment`） |
+| 报告判定 | 渲染模式 = **是否 `bmm:Report` 子类**（不再看 `wikiContent` 的 domain）；`document` → 正文为主，`entity` → 数据属性为主 |
+| 本体页展示 | 本体类页正文的「属性定义」小节**分「自身 / 继承自 X」×「数据属性 / 对象属性」**（祖先闭包**跨模块**）；本体页**不展示实例属性** |
 
 ### 4.3 解析（双读兼容）
 渲染格式改了，**同步改 3 个解析器**，且兼容旧 `- 名称 = 值`：

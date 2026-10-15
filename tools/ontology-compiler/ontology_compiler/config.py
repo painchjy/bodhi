@@ -53,6 +53,12 @@ NS: dict[str, str] = {
     "bmmfd": "http://example.org/bodhi/ext/bmmfd#",
     # 跨模块共享的注解命名空间：expertRole 等（见 docs/weknora-fork.md §8.5）
     "bodhi": "http://example.org/bodhi#",
+    # **平台级谓词白名单的命名空间**（2026-10-15 用户口径 · 方案 2）：
+    #   `skos:definition`（定义）/`skos:note`（备注）像 `rdfs:label`/`rdfs:comment` 一样**直接用**——
+    #   不 import、不给每个类声明数据属性；登记本命名空间后，`prefix_map` 才能把它们渲染成
+    #   `skos:definition`（否则会被兜底成模块前缀，与 `bmm:definition` 撞名 → 静默丢失）。
+    #   只涉及这两个谓词（见 PLATFORM_PREDICATES），**不引入 skos 其它内容**。
+    "skos": "http://www.w3.org/2004/02/skos/core#",
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
@@ -72,6 +78,19 @@ RDF_TYPE = RDF + "type"
 # 跨模块共享注解：专家角色（写在各模块 owl:Ontology 上，编译器读入后下发到 WeKnora fork）
 # 见 docs/weknora-fork.md §8.5；改角色请改 TTL，不要改代码。
 EXPERT_ROLE = NS["bodhi"] + "expertRole"
+
+# --------------------------------------------------------------------------
+# **平台级注释属性白名单**（2026-10-15 用户口径 · 方案 2）
+#   `skos:definition`（定义）/ `skos:note`（备注）本身就是 **owl:AnnotationProperty** ——
+#   类与实例都可用的注释属性，**没有 domain/range**。口径：**保持其标准语义不变**
+#   （TTL 里绝不改写成 `owl:DatatypeProperty`），只在编译器侧"当平台属性纳入"：
+#     · 产物里带上它们（连 TTL 里补的中文 `rdfs:label`）→ 面板 / 抽取提示词能显示「定义 / 备注」；
+#     · **不写 domain** ⇒ 内核 `ke_ontology.data_properties_for()` 走 `not domains` 分支
+#       （该函数 docstring：*"domains 为空…视为全局可用"*）→ **所有类都能用**，无需逐类声明；
+#     · 只涉及这两个 IRI，**不引入 skos 其它内容**。
+# --------------------------------------------------------------------------
+SKOS = NS["skos"]
+PLATFORM_ANNOTATION_IRIS = (SKOS + "definition", SKOS + "note")
 
 # 保留词：不作为业务类参与编译
 RESERVED_CLASSES = frozenset({OWL_THING, OWL + "Nothing", RDFS + "Resource", RDFS + "Class"})

@@ -34,6 +34,7 @@ from ontology_compiler.config import (
     RDF_TYPE,
     RDFS,
     RESERVED_CLASSES,
+    PLATFORM_ANNOTATION_IRIS,
     XSD,
     ModuleSpec,
     build_modules,
@@ -68,6 +69,8 @@ RDFS_SUBCLASS = URIRef(RDFS + "subClassOf")
 RDFS_SUBPROPERTY = URIRef(RDFS + "subPropertyOf")
 RDFS_DOMAIN = URIRef(RDFS + "domain")
 RDFS_RANGE = URIRef(RDFS + "range")
+# 平台级注释属性白名单用（2026-10-15 · 方案 2）：`owl:AnnotationProperty` 默认不参与编译
+OWL_ANNOTATION_PROPERTY = URIRef(OWL + "AnnotationProperty")
 
 OWL_CLASS = URIRef(OWL + "Class")
 OWL_OBJECT_PROPERTY = URIRef(OWL + "ObjectProperty")
@@ -121,6 +124,14 @@ def build_prefix_map(modules: dict[str, ModuleSpec]) -> dict[str, str]:
         if not spec.namespace.endswith(("#", "/")):
             prefix_map[spec.namespace + "#"] = spec.prefix
             prefix_map[spec.namespace + "/"] = spec.prefix
+    # **平台级谓词白名单的命名空间**（2026-10-15 · 方案 2）：必须**显式登记** ——
+    # 下面那段只扫各 TTL **文件头 40 行**的 `@prefix`，而 `sources/bmm.ttl` 里的
+    # `@prefix skos:` 写在文件中部（>40 行）→ 扫不到 → `skos:definition` 会被兜底成
+    # 模块前缀（撞名 `bmm:definition`）而**静默丢失**（实测：label_map 里 0 命中）。
+    # 只登记命名空间（不含其它 skos 内容）→ 产物里只会出现白名单里的那两个谓词。
+    for _key in ("skos",):
+        if NS.get(_key):
+            prefix_map.setdefault(NS[_key], _key)
     for spec in modules.values():
         for path in spec.files:
             try:
@@ -451,6 +462,10 @@ def extract_classes(
 PROPERTY_KINDS: dict[str, str] = {
     str(OWL_OBJECT_PROPERTY): "object",
     str(OWL_DATATYPE_PROPERTY): "datatype",
+    # 平台级注释属性白名单（2026-10-15 · 方案 2）：`owl:AnnotationProperty` 默认**不参与编译**，
+    # 但白名单里的两个（`skos:definition` / `skos:note`）要当"平台属性"纳入 —— 它们没有
+    # domain/range（注释属性语义），内核据 `not domains` 判定为**全局可用**。
+    str(OWL_ANNOTATION_PROPERTY): "annotation",
 }
 
 
@@ -469,6 +484,11 @@ def extract_properties(
         for subject in sorted(set(module_graph.subjects(RDF_TYPE, URIRef(rdf_type))), key=str):
             if not isinstance(subject, URIRef):
                 continue
+            if kind == "annotation":                     # 只放行白名单（其余注释属性照旧跳过）
+                if str(subject) not in PLATFORM_ANNOTATION_IRIS:
+                    continue
+                kind = "datatype"                        # 编译层按数据属性落库；**不写 domain**
+                                                         # ⇒ 内核按"全局可用"处理（见 config 注释）
             characteristics = sorted(
                 name
                 for predicate, name in CHARACTERISTIC_PREDICATES.items()

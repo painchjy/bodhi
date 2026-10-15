@@ -318,17 +318,14 @@ def render_mode(type_name: str, meta: dict[str, dict] | None = None) -> str:
     if not key:
         return "entity"
     try:
-        props = data_properties().get("properties") or {}
         chain = set(ancestors(key, meta))
     except Exception:  # noqa: BLE001  本体读不到 → 安全回落 entity
         return "entity"
-    for name, info in props.items():
-        local = str(name).split(":")[-1].replace("_", "").lower()
-        if local != "wikicontent":
-            continue
-        domains = set((info or {}).get("domains") or [])
-        if domains and (chain & domains):
-            return "document"
+    # 2026-10-15 用户口径：**报告判定 = 是否是 `bmm:Report` 的子类**（不再看 `wikiContent` 的 domain）。
+    # 理由：报告类已统一 `rdfs:subClassOf bmm:Report`（bmm.ttl 基类 + agent.ttl 的 4 个报告类），
+    # 一处判定即可；`wikiContent` 的 domain 仍是"有整篇正文"的语义声明，但不再承担模式判定。
+    if key == "bmm:Report" or "bmm:Report" in chain:
+        return "document"
     return "entity"
 
 
@@ -819,6 +816,35 @@ def resolve_ontology_kb(asked: str = "") -> dict:
     return {"id": (hit or {}).get("id", ""), "name": (hit or {}).get("name", ""),
             "source": source or "none", "pages": int((hit or {}).get("pages", 0)),
             "note": (hit or {}).get("note", ""), "candidates": cands}
+
+
+def is_ontology_kb(kb_id: str) -> bool:
+    """该知识库是不是**本体模型库**。
+
+    口径（2026-10-15 用户）：**本体模型库只能通过"加载编译"更新** ——
+    任何"写知识 / 改属性 / 改页"的入口对本体库都必须**拒绝**。
+    判定复用现成解析链：env `BODHI_ONTOLOGY_KB_ID` → `wiki_config.bodhi_ontology_kb`
+    → 库名（默认「企业本体模型」）→ 内容探测（`ontology:*` 页数）。
+    """
+    if not kb_id:
+        return False
+    try:
+        rep = ontology_kb_report(kb_id)
+        if (rep.get("asked") or {}).get("is_ontology_kb"):
+            return True
+        det = rep.get("ontology_kb") or {}
+        return bool(det.get("id")) and str(det.get("id")) == str(kb_id)
+    except Exception:  # noqa: BLE001  本体读不到时按"不是本体库"处理（不阻塞普通库）
+        return False
+
+
+def assert_writable_kb(kb_id: str, action: str = "写知识") -> None:
+    """拒绝**对本体的直接写入**（本体库只读；改它请改 `ontology/*.ttl` 后走加载编译）。"""
+    if is_ontology_kb(kb_id):
+        raise ValueError(
+            "本体模型库（%s…）**只读**：不能用「%s」直接改它的内容 —— "
+            "请改 `ontology/*.ttl`（或前端「上传本体文件」）后走**加载编译**（`load_model`）。"
+            % (str(kb_id)[:8], action))
 
 
 def ontology_kb_report(asked: str = "") -> dict:

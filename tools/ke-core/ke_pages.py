@@ -417,7 +417,25 @@ def _attr_meta(page_type: str, key: str) -> dict:
     return {}
 
 
+def _summary_sync_key(props: dict) -> str:
+    """与 PG `summary` 同步的那个数据属性键（本地名 ∈ `SUMMARY_SYNC_LOCALS`，如 `skos:definition`）。
+
+    用途（2026-10-14 用户口径）：WeKnora 原生编辑框的「定义」= `wiki_pages.summary`；
+    本体侧对应 `skos:definition` ⇒ 读（`page_attributes`）与写（`set_page_attributes`）都要带上它。
+    该类没声明该键时也返回 `skos:definition`（面板/接口照样能显示这一处值）。
+    """
+    for name in (props or {}):
+        if str(name).split(":")[-1].lower() in SUMMARY_SYNC_LOCALS:
+            return str(name)
+    return "skos:definition"
+
+
 ATTR_SECTION = "## 属性（数据属性）"
+# 与 PG `summary` 同步的键（**本地名**，2026-10-14 用户口径）：
+#   `skos:definition` ↔ WeKnora 原生编辑框里的「定义」（就是 `wiki_pages.summary`），
+#   所以**正文属性段不再重复渲染**它（正文里由首段承载，见 `set_page_attributes` / `render_entity_content`）。
+SUMMARY_SYNC_LOCALS = ("definition",)
+
 # 从**图节点**取"属性值"时要排除的簿记字段（它们是节点自身的元数据/标题，不是数据属性取值）：
 # 实测踩到：`name` 既是节点属性又是 bmm 的数据属性 → 会凭空渲染出一行「### 名称」，属噪音。
 _GRAPH_NODE_INTERNAL = ("slug", "kb_id", "tenant_id", "page_type", "wiki_content", "module",
@@ -438,7 +456,7 @@ def render_attributes_section(page_type: str, attributes: dict, skip_keys=()) ->
     rows: list[str] = []
     for key, value in (attributes or {}).items():
         short = str(key).split(":")[-1]
-        if short in skip:
+        if short in skip or short.lower() in SUMMARY_SYNC_LOCALS:
             continue
         val = str(value if value is not None else "").strip()
         if not val:
@@ -599,7 +617,8 @@ def page_attributes(kb_id: str, slug: str) -> dict:
 
     rows = ke_db.psql_csv(
         "SELECT title, COALESCE(page_type,'') AS page_type, COALESCE(version,1) AS version, "
-        "       COALESCE(content,'') AS content, COALESCE(page_metadata::text,'{}') AS meta "
+        "       COALESCE(content,'') AS content, COALESCE(page_metadata::text,'{}') AS meta, "
+        "       COALESCE(summary,'') AS summary "
         "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
         % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
     if not rows:
@@ -618,37 +637,67 @@ def page_attributes(kb_id: str, slug: str) -> dict:
         return {_attr_key_canonical(k, props): str(v).strip()
                 for k, v in (data or {}).items() if str(v or "").strip()}
 
+    _raw_meta_keys = {str(k) for k in (onto.get("attributes") or {})}   # 规范化前的键（含 skos:definition）
     in_meta = _norm((onto.get("attributes") or {}))
     in_graph = _norm(_attrs_from_graph(kb_id, slug, props))
     in_body = _norm(_attrs_seed_from_content(page_type, row["content"], props))
+    # ④ `summary`（WeKnora 原生「定义」框）——2026-10-15 用户口径：**不再当取值兜底**
+    #   （否则会把"摘要里有、知识里没有"误判成一致 = 假一致）；它只参与 **drift 比对** 与写侧同步。
+    skey = next((k for k in sorted(_raw_meta_keys)     # 页面实际在用的"定义键"优先（如 skos:definition）
+                 if str(k).split(":")[-1].lower() in SUMMARY_SYNC_LOCALS), "")
+    skey = skey or _summary_sync_key(props)
+    sval = str(row.get("summary") or "").strip()
+    in_summary = {skey: sval} if (skey and sval) else {}
     if in_meta:
         attrs, source = in_meta, "meta"
     elif in_graph:
         attrs, source = in_graph, "graph"
     else:
         attrs, source = in_body, ("content" if in_body else "none")
-    drift = sorted({k for k in set(in_meta) | set(in_graph) | set(in_body)
-                    if not (in_meta.get(k) == in_graph.get(k) == in_body.get(k))})
-    hint = ("entity 模式：正文是**只读渲染**、数据属性是**事实源** → 改值走「数据属性」面板"
-            "（HTTP `POST /bodhi/page/attributes`）或 `page_attributes_set` 工具；不要改正文。"
-            if mode == "entity" else
-            "%s 模式：**以正文为主**，数据属性不参与判定 → 要改请直接改正文。" % mode)
+    # drift：**三处现值**互比；另外**摘要必须与定义键一致** —— 摘要非空而三处缺该键，
+    # 或三处现值与摘要不同 → 都算 drift（这样"摘要里有、知识里没有"不再被当成一致）。
+    _MISS = object()
+    drift = []
+    for k in set(in_meta) | set(in_graph) | set(in_body):
+        vals = {d.get(k, _MISS) for d in (in_meta, in_graph, in_body)}
+        vals.discard(_MISS)
+        if len(vals) > 1:
+            drift.append(k)
+    if sval and not str(page_type).startswith("ontology:"):
+        known = {d[skey] for d in (in_meta, in_graph, in_body) if skey in d}
+        if known != {sval}:
+            drift.append(skey)
+    drift = sorted(set(drift))
+    hint = ("数据属性 = 事实源（三处同写：元数据 + 图节点 + 正文属性段）；"
+            "与原生「定义」框同步的键（%s）同时写 `summary`。"
+            "改值走「数据属性」面板（HTTP `POST /bodhi/page/attributes`）或 `page_attributes_set`；不要改正文。"
+            % skey)
     allowed = []
     for k, meta in props.items():                      # 面板要显示「中文标签（本体键）」
         allowed.append("%s（%s）" % ((meta or {}).get("label") or str(k), str(k)))
+    for k in sorted(set(attrs) | set(in_meta) | set(in_summary) | set(_raw_meta_keys)):  # 页上已有也列出来
+        if not any(k == a.rsplit("（", 1)[-1].rstrip("）") for a in allowed):
+            allowed.append("%s（%s）" % (_attr_meta(page_type, k).get("label") or str(k), str(k)))
     return {"ok": True, "kb_id": kb_id, "slug": slug, "title": row["title"], "page_type": page_type,
-            "version": int(row["version"] or 1), "mode": mode, "editable": (mode == "entity"),
-            "attributes": attrs, "source": source, "allowed": allowed,
-            "rendered": in_body, "in_meta": in_meta, "in_graph": in_graph, "drift": drift, "hint": hint}
+            "version": int(row["version"] or 1), "mode": mode,
+            "editable": True,                  # 2026-10-15 用户口径：**不再判断**（面板一律可编辑；
+                                               # 非法键由写口 `set_page_attributes` 拒绝）
+            "attributes": attrs, "source": source, "allowed": allowed, "summary_key": skey,
+            "rendered": in_body, "in_meta": in_meta, "in_graph": in_graph, "in_summary": in_summary,
+            "drift": drift, "hint": hint}
 
 
 def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
-                        dry_run: bool = True, sync_folders: bool = False) -> dict:
+                        dry_run: bool = True, sync_folders: bool = False,
+                        sync_from_summary: bool = False) -> dict:
     """**改一页的数据属性**（方案 D 的写口，2026-10-13 用户口径）。
 
-    口径与**渲染模式**绑定（模式由本体给：`ke_ontology.render_mode`）：
-      · **entity 模式**：正文是**只读渲染**、数据属性是**事实源** ⇒ 只接受这类页；
-      · **document / report 模式**：**以正文为主** ⇒ 拒改（回执明确"请直接改正文"）。
+    口径（2026-10-14 用户口径，取代 2026-10-13 的"仅 entity"）：
+      · **任何模式都可改**：只要该 `page_type` 在本体面里声明过数据属性，就走本入口
+        （document/report 页若声明了属性同样可编辑；没声明属性的类没有可改项，自然引导改正文）；
+      · **与原生「定义」框同步**：本地名 ∈ `SUMMARY_SYNC_LOCALS`（`skos:definition`）的键
+        ↔ `wiki_pages.summary`（WeKnora 编辑弹窗的「定义」框），**写属性时一起写 `summary`**，
+        并在正文首段保留定义原文（属性段不重复渲染该键）。
 
     规则：
     - 键必须该 `page_type` 在本体面里声明过的**数据属性**（与 `ontology_types` 同一份元数据）；
@@ -671,6 +720,8 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
         return {"ok": False, "slug": slug, "error": "页面不存在：%s/%s" % (kb_id[:8], slug)}
     row = rows[0]
     page_type, cur_ver = row["page_type"], int(row["version"] or 1)
+    # 本体模型库只读（2026-10-15 用户口径）：数据属性修改属于"直接改本体库内容" → 拒绝
+    ke_ontology.assert_writable_kb(kb_id, "「数据属性」修改")
     content = row["content"]
     try:
         meta = json.loads(row["meta"] or "{}")
@@ -678,15 +729,17 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
         meta = {}
     onto = dict(meta.get("ontology") or {})
     mode = ke_ontology.render_mode(page_type)
-    if mode != "entity":
-        return {"ok": False, "slug": slug, "mode": mode,
-                "error": "该页渲染模式是 %s：只有 entity 模式（数据属性可编辑）走本入口；"
-                         "document/report 类**以正文为主**，请直接改正文" % mode}
+    # 2026-10-14 用户口径：**不再按渲染模式拒改**（document/report 页若有数据属性，同样可编辑）。
     props = ke_ontology.data_properties_for(page_type) or {}
     if not props:
         return {"ok": False, "slug": slug, "page_type": page_type,
                 "error": "本体面里取不到 %s 的数据属性（确认 page_type 正确、本体模型/图可用）" % page_type}
     allowed = {str(name).split(":")[-1].lower(): str(name) for name in props}
+    # 沿用历史键（2026-10-14）：**页上已有的属性键一律可改** —— 本体面还没声明（如 TTL 尚未加
+    # `skos:definition`）或键名换代（`bmm:definition`→`skos:definition`）时，面板/工具照样能编辑它。
+    _seed_now = dict(onto.get("attributes") or {})
+    for k in (_seed_now or _attrs_from_graph(kb_id, slug, props) or {}):
+        allowed.setdefault(str(k).split(":")[-1].lower(), str(k))
     # 种子（老页元数据可能为空！本机实测：规则页 `ontology.attributes = {}`，值只在图/正文里）：
     #   ① 元数据（新页，机器口径）→ ② **图节点属性** → ③ 正文属性段（双读）
     base, seeded_from = dict(onto.get("attributes") or {}), ""
@@ -699,6 +752,17 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
             base = _attrs_seed_from_content(page_type, content, props)
             seeded_from = "content" if base else ""
     merged, changed, unknown = dict(base), [], []
+    if sync_from_summary:
+        # 「以摘要为准同步」按钮的后端（2026-10-15 用户口径）：PG `summary` → 定义键的
+        # **元数据 + 图节点属性**（**不含正文**：正文只展示"其它数据属性的取值"）。
+        _sval = str(row["summary"] or "").strip()
+        _skey_now = next((k for k in merged
+                          if str(k).split(":")[-1].lower() in SUMMARY_SYNC_LOCALS), "") \
+            or _summary_sync_key(props)
+        if _sval:
+            if merged.get(_skey_now) != _sval:
+                changed.append(_skey_now)
+            merged[_skey_now] = _sval
     for k, v in (patch or {}).items():
         local = str(k).split(":")[-1].lower()
         if local not in allowed:
@@ -706,6 +770,11 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
             continue
         ckey = allowed[local]
         val = "" if v is None else str(v).strip()
+        for other in [k for k in merged                          # 同"本地名"只留一个键：
+                      if str(k) != ckey                          # 避免 `skos:definition` 与 `bmm:definition` 并存
+                      and str(k).split(":")[-1].lower() == local]:
+            merged.pop(other, None)
+            changed.append(other)
         if val:
             if merged.get(ckey) != val:
                 changed.append(ckey)
@@ -727,19 +796,29 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
                 "error": "三处都没读到数据属性（元数据 / 图节点属性 / 正文属性段 皆空或读失败）："
                          "已中止，避免把正文属性段清空。先确认图可用（`graph_query` 能查到该节点）、"
                          "或改用 patch 显式给出要写的键值。"}
-    # 定义键若已是首段（entity 渲染），属性段里必须跳过 —— 否则一处两写（契约 §4.4）
-    first = _first_para_before_attr(content)
-    skip = [k for k, v in merged.items()
-            if str(k).split(":")[-1].lower() == "definition" and first
-            and str(v or "").strip() == first.strip()]
-    new_content = replace_attr_section(content, page_type, merged, skip_keys=skip)
+    # 2026-10-15 用户口径（两处修正）：
+    #   ① **正文不再渲染定义**：`render_attributes_section()` 已按 `SUMMARY_SYNC_LOCALS` 跳过定义键；
+    #      这里也**不再把定义写进首段** —— 旧逻辑"值不在正文就插一行"会让摘要每改一次正文多一行 ✗，
+    #      而没有 `## 属性（数据属性）` 段的页又插不进去 ✗ → 同一操作两种现象（已修）。
+    #   ② **`summary` 同步只覆盖 元数据 + 图节点**，不动正文（正文只展示其它数据属性的取值）。
+    skey = next((k for k in merged                      # 页面实际在用的"定义键"优先
+                 if str(k).split(":")[-1].lower() in SUMMARY_SYNC_LOCALS), "") or _summary_sync_key(props)
+    new_summary = row["summary"]
+    if skey:
+        sval = str(merged.get(skey) or "").strip()
+        if sval:
+            new_summary = sval
+    new_content = content if sync_from_summary else replace_attr_section(content, page_type, merged)
     content_changed = (new_content != content)
-    if not changed and not content_changed:
+    summary_changed = (new_summary != (row["summary"] or ""))
+    if not changed and not content_changed and not summary_changed:
         return {"ok": True, "applied": False, "slug": slug, "mode": mode,
-                "reason": "无变化（值与正文都未改）", "keys_changed": [],
+                "reason": "无变化（值 / 正文 / summary 都未改）", "keys_changed": [],
                 "before_version": cur_ver, "after_version": cur_ver}
     result = {"ok": True, "applied": False, "dry_run": bool(dry_run), "slug": slug, "mode": mode,
               "keys_changed": changed, "content_changed": content_changed,
+              "summary_changed": summary_changed, "summary_key": skey,
+              "summary_preview": str(new_summary or "")[:80],
               "seeded_from": seeded_from, "before_version": cur_ver, "after_version": cur_ver + 1,
               "attributes": merged, "content_preview": new_content[:900]}
     if dry_run:
@@ -759,7 +838,7 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
                   "attributes": merged})
     meta2 = dict(meta)
     meta2["ontology"] = onto2
-    res = upsert_page(kb_id, slug, row["title"], page_type, new_content, summary=row["summary"],
+    res = upsert_page(kb_id, slug, row["title"], page_type, new_content, summary=new_summary,
                       tag="bodhi-attr-edit", metadata=meta2, sync_folders=sync_folders,
                       preloaded={"exists": True, "version": cur_ver})
     result.update({"applied": True, "graph": graph, "actor": actor,

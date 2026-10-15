@@ -155,11 +155,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:label "产品"@zh ;
     rdfs:comment "具体产品，一种可交付的对外交付物"@zh .
 
-### 14.5 即将到期的产品 ExpiringProduct
-:ExpiringProduct rdf:type owl:Class ;
-    rdfs:subClassOf :Product ;
-    rdfs:label "即将到期的产品"@zh ;
-    rdfs:comment "即将到期的产品"@zh .
 
 ### 14.6 业务服务 BusinessService
 :BusinessService rdf:type owl:Class ;
@@ -324,6 +319,12 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "一个行动方案可以包含其他行动方案"@zh .
 
 ### 业务政策与业务规则
+:includesBusinessPolicy rdf:type owl:ObjectProperty ;
+    rdfs:label "包含业务政策"@zh ;
+    rdfs:domain :BusinessPolicy ;
+    rdfs:range :BusinessPolicy ;
+    rdfs:comment "一个业务政策可以包含其他业务政策"@zh .
+
 :isBasisFor rdf:type owl:ObjectProperty ;
     rdfs:label "是...的基础"@zh ;
     rdfs:domain :BusinessPolicy ;
@@ -454,26 +455,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 # 四、数据属性（Datatype Properties）
 # ============================================================
 
-:name rdf:type owl:DatatypeProperty ;
-    rdfs:label "名称"@zh ;
-    rdfs:domain owl:Thing ;
-    rdfs:range xsd:string .
-
-:englishName rdf:type owl:DatatypeProperty ;
-    rdfs:label "英文名称"@zh ;
-    rdfs:domain owl:Thing ;
-    rdfs:range xsd:string .
-
-:definition rdf:type owl:DatatypeProperty ;
-    rdfs:label "定义"@zh ;
-    rdfs:domain owl:Thing ;
-    rdfs:range xsd:string .
-
-:description rdf:type owl:DatatypeProperty ;
-    rdfs:label "描述"@zh ;
-    rdfs:domain owl:Thing ;
-    rdfs:range xsd:string .
-
 :CourseOfActionlevel rdf:type owl:DatatypeProperty ;
     rdfs:label "级别"@zh ;
     rdfs:domain :CourseOfAction ;
@@ -487,7 +468,7 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "内部或外部影响因素的具体分类，如'假设'、'竞争者'等" .
 
 
-### IT 资产 / 系统属性（2026-09-29 新增；「英文名称」「描述/功能简介」复用本文件的 englishName / description）
+### IT 资产 / 系统属性（2026-09-29 新增；「英文名称」「描述/功能简介」复用本文件的 label / comment）
 :systemNo rdf:type owl:DatatypeProperty ;
     rdfs:label "系统编号"@zh ;
     rdfs:domain :ITAsset ;
@@ -587,7 +568,7 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 :KnowledgeSession rdf:type owl:Class ;
     rdfs:label "知识会话"@zh ;
     rdfs:comment "与智能体的一次会话，是知识产生与变化的统一来源。会话起始页只保存基本信息（会话编号/名称/智能体名称/租户名称/初始问题/开始时间/权威库）；上下文过长且一组高相关知识已确认更新完成时可新开分页，各分页共享同一会话编号与名称；会话分页与其产出的知识必须在同一个知识库；跨库时会话起始页每库各一份副本，以初始库为权威。"@zh ;
-    rdfs:subClassOf owl:Thing .
+    rdfs:subClassOf :Report .
 
 ### 33. 会话属性（起始页基本信息）与溯源定位
 :sessionNo rdf:type owl:DatatypeProperty ;
@@ -595,11 +576,6 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:domain :KnowledgeSession ;
     rdfs:range xsd:string ;
     rdfs:comment "会话唯一编号，如 'S-20261001-01'；同一会话的各分页共享同一编号" .
-
-:sessionName rdf:type owl:DatatypeProperty ;
-    rdfs:label "会话名称"@zh ;
-    rdfs:domain :KnowledgeSession ;
-    rdfs:range xsd:string .
 
 :agentName rdf:type owl:DatatypeProperty ;
     rdfs:label "智能体名称"@zh ;
@@ -610,6 +586,25 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:label "租户名称"@zh ;
     rdfs:domain :KnowledgeSession ;
     rdfs:range xsd:string .
+
+# ============================================================
+# 平台级通用数据属性（2026-10-15 用户口径）
+#   用标准词表属性承载「定义 / 备注」，取代 bmm:definition / bmm:description：
+#     · `skos:definition` ↔ WeKnora 原生编辑弹窗的「定义」框（= PG `wiki_pages.summary`，双向同步）
+#     · `rdfs:comment`    ↔ 「备注 / 补充说明」
+#   两者 `rdfs:domain owl:Thing` ⇒ 依 `ke_ontology._GLOBAL_DOMAINS`（owl:Thing / rdfs:Resource）
+#   规则，**所有类都可用**（与旧 `bmm:name`/`bmm:definition` 的声明方式一致）。
+#   说明：`rdfs:comment` 同时仍作本体里类/属性的**注解**使用；这里额外把它声明为可编辑的数据属性。
+# ============================================================
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+skos:definition rdf:type owl:AnnotationProperty ;
+    rdfs:label "定义"@zh ;
+    rdfs:comment "概念/实例的界定。**SKOS 标准注释属性**——只补中文标签，不改语义。"@zh .
+
+skos:note rdf:type owl:AnnotationProperty ;
+    rdfs:label "备注"@zh ;
+    rdfs:comment "补充说明/备注。**SKOS 标准注释属性**——只补中文标签。"@zh .
 
 :initialQuestion rdf:type owl:DatatypeProperty ;
     rdfs:label "初始问题"@zh ;

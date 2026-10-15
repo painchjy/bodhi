@@ -1953,6 +1953,13 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
     kb_id, kb_note, block = resolve_write_kb(kb_id, kb_ids, confirm_kb_match)
     if block:
         return block
+    # 本体模型库只读（2026-10-15 用户口径）：`save_knowledge` 不能直接改本体库内容（
+    # 本体库只能靠"加载编译"更新：改 ontology/*.ttl → 前端「上传本体文件」/ load_model）
+    if ke_ontology.is_ontology_kb(kb_id):
+        return {"ok": False, "kb_id": kb_id, "refused": "ontology_kb_readonly",
+                "error": ("本体模型库（%s…）**只读**：不能用 `save_knowledge` 直接改它的内容 —— "
+                          "请改 `ontology/*.ttl` 后走**加载编译**（前端「上传本体文件」或 `load_model`）。"
+                          % str(kb_id)[:8])}
     ctx = context_meta(context)
     engine = load_engine()
     model_obj = engine.pick_model(engine.load_index(engine.DEFAULT_INDEX), model)
@@ -4654,7 +4661,10 @@ class MCPHandler(BaseHTTPRequestHandler):
                 lambda b: ke_pages.set_page_attributes(b.get("kb_id", ""), b.get("slug", ""),
                                                        b.get("patch") or {},
                                                        actor=str(b.get("actor", "")),
-                                                       dry_run=bool(b.get("dry_run", True))),
+                                                       dry_run=bool(b.get("dry_run", True)),
+                                                       # 「以摘要为准同步」按钮（2026-10-15 用户口径）：
+                                                       # 把 PG `summary` 写进定义键的 元数据 + 图节点（**不含正文**）
+                                                       sync_from_summary=bool(b.get("sync_from_summary", False))),
             "/bodhi/delete":
                 lambda b: ke_pages.delete_pages(b.get("kb_id", ""), b.get("slugs") or [],
                                                 bool(b.get("dry_run"))),

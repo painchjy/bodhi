@@ -170,6 +170,8 @@ def write_page(kb_id: str, kind: str, title: str, *, content: str = "",
       这样图谱里能出边、能被 `ke_audit` 体检；纯汇总页可用 `summary`。
     """
     kb_id, _kb_name, _note = ke_db.resolve_kb_id(kb_id)
+    # 本体模型库只读（2026-10-15 用户口径）：设计页写入属于"直接改本体库内容" → 拒绝
+    ke_ontology.assert_writable_kb(kb_id, "设计页写入（write_page）")
     kind = (kind or "").strip()
     title = (title or "").strip()
     if not title:
