@@ -515,7 +515,10 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
     category_path = [kb_name or "批量建模", label]
     return {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s" % (kb, slug))),
             "slug": slug, "title": title, "page_type": page_type, "content": content,
-            "summary": (attributes.get("bmm:description") or title)[:200],
+            # 2026-10-15（单一写核）：**summary 一律由核心派生** —— 调用方不得自拼。
+            # 旧实现用 `bmm:description`（键已废）/ 标题拼，会在"建关系/合并"这一步把上游写对的
+            # summary 覆盖掉（实测事故：技术方案评审策略页 summary 变成第三段文字 ✗）。
+            "summary": ke_pages.derive_summary(page_type, attributes, title)[:500],
             "aliases": aliases, "metadata": metadata,
             "category_path": category_path,
             # `wiki_path` 供**前端目录树显示**：口径与 `ke_pages.upsert_page` 一致（目录路径/标题），
@@ -585,6 +588,11 @@ def _extra_set(title: str, aliases: list, metadata: dict, page_type: str, summar
     `wiki_path`/`category_path` 也要覆盖：标题变了（如新增中文名称列）若不同步，
     目录树里会一直显示旧标题 —— 2026-09-30 用户实测"目录缺失/不一致"。
     """
+    # 2026-10-15（单一写核）：**更新路径的 summary 不得由调用方自拼**（曾经传 title ✗ → 覆盖了
+    # 上游写对的定义值）。统一走核心派生；当页没有定义/备注时回落到调用方给的值（如报告摘要），
+    # 语义保持。⚠️ 本体模型库的页不走本函数（由"加载页"独立生成，严格隔离）。
+    summary = ke_pages.derive_summary(
+        page_type, ((metadata or {}).get("ontology") or {}).get("attributes") or {}, summary)
     extra = (", title = %s, summary = %s, page_type = %s, aliases = %s::jsonb, page_metadata = %s::jsonb"
              % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
                 ke_db.sql_json(aliases), ke_db.sql_json(metadata)))

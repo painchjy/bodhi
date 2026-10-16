@@ -280,11 +280,42 @@ def _uniq_str(seq) -> list:
     return out
 
 
+def derive_summary(page_type: str, attributes: dict, fallback: str = "") -> str:
+    """**实例页 `summary` 的唯一派生入口**（2026-10-15 用户口径：所有写路径共用一套核心）。
+
+    规则（仅**实例知识**）：
+        `skos:definition` → `bmm:definition`（定义）非空 ⇒ 用它；
+        否则 `skos:note` → `bmm:description`（备注）非空 ⇒ 用它；
+        再否则回落到 `fallback`（调用方给的事实，如标题 / 报告摘要）。
+
+    ⚠️ **本体模型库的页不由此函数管**：本体页的 `summary` 是 `rdfs:comment`，由"加载页"
+    （`ontology_wiki.py` + `ke_admin.load_model` 那条链）独立生成 —— 两条链**严格隔离**，
+    本函数及其调用方都不得触碰本体模型知识的维护方法。
+    """
+    attrs = {str(k): v for k, v in (attributes or {}).items()}
+    for key in ("skos:definition", "bmm:definition"):
+        val = str(attrs.get(key) or "").strip()
+        if val:
+            return val
+    for key in ("skos:note", "bmm:description"):
+        val = str(attrs.get(key) or "").strip()
+        if val:
+            return val
+    return str(fallback or "").strip()
+
+
 def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                 summary: str = "", tag: str = "bodhi-cxt-edit",
                 metadata: dict | None = None, sync_folders: bool = True,
                 source_refs: list | None = None, chunk_refs: list | None = None,
                 preloaded: dict | None = None) -> dict:
+    # ── 实例页 summary 护栏（2026-10-15 用户口径：单一写核）────────────────────────────
+    #   属性里有定义键时**强制以定义值为准**，忽略调用方传入的 summary —— 任何写路径
+    #   （save_elements / ke_import 合并 / 设计页 / 面板 / 以摘要为准同步）都绕不过这一层，
+    #   口径不可能再分叉。⚠️ 本体模型库页不走本函数（它们由"加载页"独立生成，严格隔离）。
+    _carrier_attrs = ((metadata or {}).get("ontology") or {}).get("attributes") or {}
+    if _carrier_attrs:
+        summary = derive_summary(page_type, _carrier_attrs, summary)
     """**建或改**一页（概念页/映射页专用；2026-09-28）。
 
     - 已存在 → 走 `_apply_content_update`（快照旧版 → content/version+1），

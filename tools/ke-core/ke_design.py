@@ -172,6 +172,12 @@ def write_page(kb_id: str, kind: str, title: str, *, content: str = "",
     kb_id, _kb_name, _note = ke_db.resolve_kb_id(kb_id)
     # 本体模型库只读（2026-10-15 用户口径）：设计页写入属于"直接改本体库内容" → 拒绝
     ke_ontology.assert_writable_kb(kb_id, "设计页写入（write_page）")
+    # 实例页 summary 统一由核心派生（2026-10-15 单一写核）：属性里有定义键 ⇒ 以定义值为准，
+    # 忽略调用方传入的 summary —— 本体模型库的页不走这里（严格隔离）。
+    import ke_pages as _kp_design  # noqa: PLC0415
+    _attrs_design = ((metadata or {}).get("ontology") or {}).get("attributes") or {}
+    if _attrs_design:
+        summary = _kp_design.derive_summary(page_type, _attrs_design, summary)
     kind = (kind or "").strip()
     title = (title or "").strip()
     if not title:
