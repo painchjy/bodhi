@@ -104,6 +104,7 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 | 本体页展示 | 本体类页正文的「属性定义」小节**分「自身 / 继承自 X」×「数据属性 / 对象属性」**（祖先闭包**跨模块**）；本体页**不展示实例属性** |
 | **单一写核**（2026-10-15/16） | 实例页 `summary` **只由 `ke_pages.derive_summary()` 派生**（定义 → 备注 → 回落），并在写口**强制**：`ke_pages.upsert_page()` 内置护栏（属性里有定义键 ⇒ 忽略调用方传的 summary），`write_knowledge*` / `_bulk_write_pages()` / 设计页 / 面板 / 以摘要为准同步**同此一处**；`ke_import` 的批量导入亦走该核心（其更新路径曾用 title 覆盖 ✗ 已修）。**本体模型库的 `summary`（= `rdfs:comment`）不在其列** —— 由"加载页"（`ontology_wiki.py` + `ke_admin.load_model`）独立生成，两条链**严格隔离**、互不复用 |
 | **别名规则**（2026-10-16） | 前端「标题下方的别名标签」（上游 `WikiBrowser.vue` 的 `selectedPage.aliases`）：实例页 `aliases` **只由 `ke_pages.derive_aliases()` 派生** —— ① 属性里的 `rdfs:label` / `skos:altLabel`（注释属性，**谁用谁算别名**，不分本体/实例）；② 本体标记 **`bodhi:aliasKey true`** 的属性值（如 `bmm:systemAbbr` 主/子系统简称）；③ 页面**已有**值（并集保留）；**排除与标题同名**的值；上限 8。写口同上（`upsert_page` / `_bulk_write_pages`）。**不引入 `bodhi:alias`**：别名一律「标记 + 已有属性」；待办 = 编译器把标记带进模型 + `ke_ontology.alias_keys()` |
+| **建模口径：系统已管理的数据不本体化**（2026-10-16） | 由**外部系统维护/查询**的数据（如「开源软件清单」由 **IT 工作平台**维护）**不进本体** ✗（既不建"类+实例集合"，也不建专用数据属性）：改为 **`bpmn:DataObject` 实例** ✓ —— **属性清单**写在页的 `skos:definition`、**测试样例数据**写在 `skos:note`；查询由**挡板**（`agent:Stub`）提供，**挡板的输出就是该 DataObject** ✓，与外部系统对接后**换正式接口、挡板下线** ✓。判定类规则（如"开源软件必须在认证清单内且版本一致"）因此变成"**抽取值 vs 接口/清单的集合比对**" ✓（不依赖大模型猜 ✗）。权威性由结构推导：`DataObject --dataObjectBelongsToTask--> Task --taskImplementedBySubSystem--> SubSystem` ✓ |
 
 ### 4.3 解析（双读兼容）
 渲染格式改了，**同步改 3 个解析器**，且兼容旧 `- 名称 = 值`：
