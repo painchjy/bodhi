@@ -29,6 +29,14 @@ ARTIFACT_SCHEMA_VERSION = "1.1"
 # 不做成随机/忽略：产物里的 generated_at 是追溯信息，默认必须写真实时间。
 GENERATED_AT_ENV = "BODHI_GENERATED_AT"
 
+# **别名标记**（2026-10-16 用户口径）：TTL 里 `?prop bodhi:aliasKey true` ⇒
+#   该属性在任何页上的**值进 `wiki_pages.aliases`**（前端 wiki 阅读页**标题下方的「别名」标签**）。
+#   注意：**只加这一个标记，不新增 `bodhi:alias` 实例属性** —— 别名一律「标记 + 已有属性」表达。
+#   标准注释属性同样可标（已标：`rdfs:label` / `skos:altLabel`）；数据属性按需标（如 `bmm:systemAbbr`）。
+#   消费方：编译产物 `ontology_index.json` 的 `alias_keys`（顶层=全局；`models[].alias_keys`=本模块）
+#   → 内核 `ke_pages.derive_aliases()`（经 `ke_ontology.alias_keys()`）。
+ALIAS_KEY = "http://example.org/bodhi#aliasKey"
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ONTOLOGY_DIR = REPO_ROOT / "ontology"
 EXTENSIONS_DIR = ONTOLOGY_DIR / "extensions"

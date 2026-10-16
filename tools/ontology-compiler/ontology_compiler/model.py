@@ -152,6 +152,8 @@ class OntProperty(Term):
     sub_property_of: str | None = None
     characteristics: list[str] = field(default_factory=list)
     restrictions: list[Restriction] = field(default_factory=list)
+    # `?self bodhi:aliasKey true` ⇒ 该属性的值进页面 `aliases`（见 config.ALIAS_KEY）
+    alias_key: bool = False
 
     @property
     def is_object(self) -> bool:
@@ -194,6 +196,9 @@ class OntologyBundleView:
     source_files: dict[str, list[str]]
     # 模块 -> 专家角色（读自各模块 owl:Ontology 上的 bodhi:expertRole，见 config.EXPERT_ROLE）
     expert_roles: dict[str, str] = field(default_factory=dict)
+    # **别名键**（读自 TTL 的 `bodhi:aliasKey true`，见 config.ALIAS_KEY）：值为真即进页面 `aliases`。
+    #   含**全局**标记（如 `rdfs:label` / `skos:altLabel` —— 它们不是模块属性，只在此列出）。
+    alias_keys: list[str] = field(default_factory=list)
 
     # ---- 基本集合 --------------------------------------------------------
     def all_properties(self) -> list[OntProperty]:

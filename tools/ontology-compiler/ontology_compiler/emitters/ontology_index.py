@@ -163,6 +163,10 @@ def model_entry(bundle, view, prefix_map: dict[str, str]) -> dict:
             "restrictions": sum(len(c.restrictions) for c in view.classes),
             "cross_module_bridges": len(bridges),
         },
+        # **别名键**（2026-10-16）：本模块里被 `bodhi:aliasKey true` 标记的数据属性
+        #   —— 该属性的值进页面 `aliases`（前端标题下方的「别名」标签）；全局键见顶层 `alias_keys`
+        "alias_keys": [p.prefixed for p in view.data_properties
+                       if getattr(p, "alias_key", False)],
         # 页面类型候选 = 本模块声明的类（含枚举类；fork 侧按 is_enum 过滤）
         "classes": entries,
         "legend": legend,
@@ -186,6 +190,9 @@ def build_index(bundle, views) -> dict:
         "generated_at": bundle.generated_at,
         "namespace": dict(bundle.prefix_map),
         "module_order": list(order),
+        # **全局别名键**（2026-10-16）：`rdfs:label` / `skos:altLabel` 这类（任何页都算别名）；
+        #   模块内被标记的属性在 `models[].alias_keys`；消费方见 `ke_ontology.alias_keys()`
+        "alias_keys": list(getattr(bundle, "alias_keys", []) or []),
         "totals": {
             "modules": len(order),
             "classes": sum(len(v.classes) for v in views.values()),

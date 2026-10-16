@@ -496,6 +496,8 @@ def extract_properties(
             )
             inverse = combined.value(subject, OWL_INVERSE_OF)
             sub_property = combined.value(subject, RDFS_SUBPROPERTY)
+            # `?prop bodhi:aliasKey true` ⇒ 该属性的值进页面 aliases（前端标题下方的「别名」标签）
+            alias_key = _truthy(combined.value(subject, URIRef(_alias_key_iri())))
             properties.append(
                 OntProperty(
                     iri=str(subject),
@@ -517,6 +519,7 @@ def extract_properties(
                     inverse_of=str(inverse) if isinstance(inverse, URIRef) else None,
                     sub_property_of=str(sub_property) if isinstance(sub_property, URIRef) else None,
                     characteristics=characteristics,
+                    alias_key=alias_key,
                 )
             )
     return properties
@@ -541,6 +544,60 @@ def resolved_generated_at(explicit: str | None = None) -> str:
         return explicit.strip()
     pinned = environ.get(GENERATED_AT_ENV)
     return pinned.strip() if pinned and pinned.strip() else utcnow_iso()
+
+
+def _alias_key_iri() -> str:
+    """`bodhi:aliasKey` 的完整 IRI（延迟导入 config，避免与 config 形成导入环）。"""
+    from ontology_compiler.config import ALIAS_KEY  # noqa: PLC0415
+    return ALIAS_KEY
+
+
+def _truthy(node) -> bool:
+    """布尔注解取值：字面量 `true` / `1` / `yes` 为真（`bodhi:aliasKey true`）。"""
+    if node is None:
+        return False
+    return str(node).strip().lower() in ("true", "1", "yes")
+
+
+# 标准注解前缀（模块 `prefix_map` 里通常没有它们；`bodhi:aliasKey` 也标了 `rdfs:label`/`skos:altLabel`）
+_STD_PREFIXES: dict[str, str] = {
+    "http://www.w3.org/2000/01/rdf-schema#": "rdfs",
+    "http://www.w3.org/2004/02/skos/core#": "skos",
+    "http://www.w3.org/2002/07/owl#": "owl",
+    "http://example.org/bodhi#": "bodhi",
+}
+
+
+def _std_prefixed(iri: str, prefix_map: dict[str, str]) -> str:
+    """IRI → 前缀名（标准前缀优先，其次模块前缀，最后原样返回）。"""
+    for ns, prefix in _STD_PREFIXES.items():
+        if iri.startswith(ns):
+            return "%s:%s" % (prefix, iri[len(ns):])
+    for ns, prefix in sorted(prefix_map.items(), key=lambda kv: -len(kv[0])):
+        if iri.startswith(ns):
+            return "%s:%s" % (prefix, iri[len(ns):])
+    return iri
+
+
+def extract_alias_keys(combined: Graph, prefix_map: dict[str, str]) -> list[str]:
+    """读**全局**别名键：TTL 里 `?prop bodhi:aliasKey true`。
+
+    为什么单独抽取：`rdfs:label` / `skos:altLabel` 这类标准注释属性**不是模块属性**
+    （不会被编译成 `OntProperty`），但用户口径（2026-10-16）要求"实例层用了就是别名"，
+    因此把它们列在 bundle 顶层，再进产物 `ontology_index.json` 的顶层 `alias_keys`。
+    模块内被标记的数据属性走 `extract_properties()`（`OntProperty.alias_key`），进 `models[].alias_keys`。
+    """
+    predicate = URIRef(_alias_key_iri())
+    found: list[str] = []
+    for subject, value in combined.subject_objects(predicate):
+        if not isinstance(subject, URIRef):
+            continue
+        if not _truthy(value):                       # 显式 `false` 不算
+            continue
+        name = _std_prefixed(str(subject), prefix_map)
+        if name not in found:
+            found.append(name)
+    return found
 
 
 def extract_expert_roles(graphs: dict[str, Graph], mods: dict[str, ModuleSpec]) -> dict[str, str]:
@@ -598,6 +655,14 @@ def load_ontology(
         object_properties=object_properties,
         data_properties=data_properties,
         restrictions=restrictions,
+        # **全局**别名键：只留"不是本编译产物里的属性"的那些（如 `rdfs:label` / `skos:altLabel`）；
+        # 模块属性（如 `bmm:systemAbbr`）已由 `OntProperty.alias_key` 记在 `models[].alias_keys`，
+        # 不在全局重复（否则会对**所有**类的页都生效）。
+        alias_keys=[
+            name for name in extract_alias_keys(combined, prefix_map)
+            if name not in {p.prefixed for p in list(object_properties.values())
+                            + list(data_properties.values())}
+        ],
         generated_at=resolved_generated_at(generated_at),
         source_files=source_files,
         expert_roles=extract_expert_roles(graphs, mods),

@@ -89,6 +89,35 @@ def module_label(module_key: str) -> str:
     return module_key
 
 
+def alias_keys(page_type: str = "") -> list[str]:
+    """**别名键**（2026-10-16 用户口径）：值为真即进页面 `aliases`（前端标题下方的「别名」标签）。
+
+    来源 = 编译产物 `artifacts/weknora/ontology_index.json`（TTL 里的 `bodhi:aliasKey true`）：
+      · 顶层 `alias_keys`   —— **全局**标记，如 `rdfs:label` / `skos:altLabel`（任何页都算别名）；
+      · `models[].alias_keys` —— 本模块里被标记的属性，如 `bmm:systemAbbr`（主/子系统简称）。
+    只读；随 `index_data()` 的指纹缓存自动刷新（重编译后无需重启进程）。
+    本体侧未编译/未实现时返回空列表 ⇒ 内核只用内置键（fail-open）。
+    """
+    data = index_data() or {}
+    out: list[str] = [str(x) for x in (data.get("alias_keys") or []) if str(x).strip()]
+    model_key = ""
+    for model in (data.get("models") or []):
+        for cls in (model.get("classes") or []):
+            if cls.get("name") == page_type:
+                model_key = model.get("key") or ""
+                break
+        if model_key:
+            break
+    if model_key:
+        for model in (data.get("models") or []):
+            if model.get("key") == model_key:
+                for x in (model.get("alias_keys") or []):
+                    s = str(x).strip()
+                    if s and s not in out:
+                        out.append(s)
+    return out
+
+
 def module_short(module_key: str) -> str:
     """**模块短名**（TTL `bodhi:shortName`；未知则回退 label → key）。
 
