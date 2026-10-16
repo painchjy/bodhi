@@ -436,13 +436,42 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                     if preloaded.get("exists") else [])
     else:
         existing = ke_db.psql_csv(
-            "SELECT COALESCE(version,1) AS version FROM wiki_pages "
+            "SELECT COALESCE(version,1) AS version, COALESCE(page_type,'') AS page_type, "
+            "       COALESCE(category_path::text,'[]') AS cat "
+            "  FROM wiki_pages "
             " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
             % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
     extra = (", title = %s, summary = %s, page_type = %s, "
              "page_metadata = COALESCE(page_metadata, '{}'::jsonb) || %s::jsonb"
              % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
                 ke_db.sql_json(metadata or {})))
+    # ── 目录三列（2026-10-16 用户口径：面板改类型/标题后，目录列必须跟上）────────────────
+    #   `category_path` 由本体类推导 → `depth = len(category_path)` → `wiki_path = 目录/标题`。
+    #   规则（**保住用户选的层级**）：
+    #     · `page_type` **没变** → 保留现存 `category_path`（含 `recategorize` 选过的层级），只按它重算
+    #       `depth`/`wiki_path`（标题改了目录树里就不能再显示旧标题 —— 2026-09-30 实测口径）；
+    #     · `page_type` **变了** → 按当前本体重算 `category_path`（默认两层形态「模块短名/顶层大类」）。
+    #   批量路径（`preloaded`，无 page_type 预读）不动这三列 —— 由 `_bulk_write_pages` 自己写 ✓。
+    _old_pt = ""
+    _old_cat: list = []
+    if existing:
+        _old_pt = str(existing[0].get("page_type") or "")
+        try:
+            import json as _json   # noqa: PLC0415
+            _old_cat = _json.loads(existing[0].get("cat") or "[]")
+        except Exception:  # noqa: BLE001
+            _old_cat = []
+    if _old_pt and _old_pt == page_type:
+        _cat = _old_cat
+    else:
+        try:
+            _cat = ke_ontology.category_path(page_type) or []
+        except Exception:  # noqa: BLE001
+            _cat = _old_cat
+    if _cat:
+        extra += (", category_path = %s::jsonb, depth = %d, wiki_path = %s"
+                  % (ke_db.sql_json(_cat), len(_cat),
+                     ke_db.sql_str("/".join([str(x) for x in _cat] + [title]))))
     # 来源列（2026-10-09 内核缺口修复）：UPDATE 走**并集**，绝不丢已继承的来源。
     if source_refs is not None:
         extra += (", source_refs = COALESCE((SELECT jsonb_agg(DISTINCT v) FROM "
@@ -472,13 +501,8 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                             % ke_db.sql_str(kb_id))
     if not kb:
         raise ValueError("知识库不存在：%s" % kb_id)
-    # 本体分类目录（2026-09-29 用户口径：概念库也要「和领域模型一样有本体分类目录」）：
-    #   `category_path` 由本体类推导（大类链），`wiki_path` 供前端目录树显示 —— 全部**派生**，不靠人维护。
-    try:
-        import json as _json
-        cat = ke_ontology.category_path(page_type) or []
-    except Exception:  # noqa: BLE001
-        cat = []
+    # 本体分类目录由**上面的目录三列**统一派生（2026-10-16 起 INSERT/UPDATE 共用同一份取值）。
+    cat = _cat or []
     cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
             "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path, "
             "source_refs, chunk_refs, aliases")
