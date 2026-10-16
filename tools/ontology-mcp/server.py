@@ -4321,11 +4321,44 @@ SERVER_VERSION = "0.1.0"
 #   重算 category_path 前缀 → upsert 目录 → 把页挂到最深一级 → prune 掉不在计划里的空目录。
 #   前端进入 wiki tab / 切库时先调本接口（`/bodhi/folders/refresh?kb_id=…`）再拉目录。
 # ---------------------------------------------------------------------------
+def _realign_wiki_paths(kb_id: str) -> int:
+    """把该库**已存在**页的 `wiki_path` 对齐成「目录路径/标题」（存量修复，**幂等**）。
+
+    ⚠️ 为什么放进「刷新目录」（2026-10-16 用户口径）：`wiki_path` 是**派生的显示串**
+    （= `"/".join(category_path + [title])`，供前端目录树显示），但历史上有页被写成 **slug**
+    （旧批量导入 / 手工 SQL）→ 前端"目录能列出、展开取不到页"（`TROUBLESHOOTING` §目录缺失/不一致）。
+    刷新目录是用户**唯一会手工触发**的维护动作，顺手对齐 ⇒ 用户点一次就修好，且**不会**改
+    `category_path` / 目录层级 / 正文 / `slug`（那是 `recategorize` 的职责）。
+    `category_path` 为空的页跳过（无目录可派生）。
+    """
+    try:
+        rows = psql_csv(
+            "WITH t AS ("
+            "  SELECT slug, COALESCE(wiki_path,'') AS old_wp,"
+            "         array_to_string(ARRAY(SELECT jsonb_array_elements_text(category_path))"
+            "                         || ARRAY[COALESCE(title,'')], '/') AS new_wp"
+            "    FROM wiki_pages"
+            "   WHERE knowledge_base_id = %s AND deleted_at IS NULL"
+            "     AND jsonb_array_length(COALESCE(category_path,'[]'::jsonb)) > 0) "
+            "UPDATE wiki_pages p SET wiki_path = t.new_wp, updated_at = now()"
+            "  FROM t WHERE p.knowledge_base_id = %s AND p.slug = t.slug AND t.old_wp <> t.new_wp"
+            " RETURNING p.slug"
+            % (sql_str(kb_id), sql_str(kb_id)))
+        return len(rows)
+    except Exception as exc:  # noqa: BLE001  修复失败不影响刷新目录本身
+        print("[mcp] wiki_path 对齐失败：%s" % exc)
+        return -1
+
+
 def refresh_folders(kb_id: str = "", force: bool = False) -> dict:
     kid = (kb_id or "").strip()
     if not kid:
         return {"ok": False, "reason": "缺少 kb_id"}
     kb_id, note = resolve_kb_id(kid)
+    # 2026-10-16（用户口径）：刷新目录**顺带把 `wiki_path` 对齐**成「目录路径/标题」——
+    #   存量 `wiki_path = slug` 的页（前端"目录能列出、展开取不到页"）在这里被修好，幂等；
+    #   只看 `wiki_path`，不动 category_path/层级/正文/slug。产物字段：`paths_fixed`。
+    paths_fixed = _realign_wiki_paths(kb_id)
     row = psql_csv(
         "SELECT COALESCE(max(updated_at)::text,'') AS pages, "
         "COALESCE((SELECT max(updated_at)::text FROM wiki_folders WHERE knowledge_base_id = %s "
@@ -4335,6 +4368,7 @@ def refresh_folders(kb_id: str = "", force: bool = False) -> dict:
     pages_at = ((row[0].get("pages") if row else "") or "")
     folders_at = ((row[0].get("folders") if row else "") or "")
     out = {"ok": True, "kb_id": kb_id, "kb_note": note, "refreshed": False,
+           "paths_fixed": paths_fixed,
            "stale": bool(force or (pages_at > folders_at)),
            "max_page_updated_at": pages_at, "max_folder_updated_at": folders_at}
     if not out["stale"]:
