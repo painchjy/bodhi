@@ -715,34 +715,10 @@ rdfs:label bodhi:aliasKey true .
 skos:altLabel bodhi:aliasKey true .
 :systemAbbr bodhi:aliasKey true .
 
-# ============================================================
-# ### 39. 软件产品与认证清单（2026-10-16 · R1）
-#   为什么建它（用户口径）：规则「技术架构-开源软件适用规则」要判"适用开源软件必须在中心
-#   认证清单范围内（包括版本号）"⇒ 需要**可集合比对**的本体对象（否则只能让大模型看表格猜 ✗）：
-#     · 类 `:SoftwareProduct`（IT 资产）+ 数据属性 `softwareName` / `softwareVersion` /
-#       `certificationStatus`（**受控取值**：已认证｜未认证｜待定，逐字取用，不得另建知识页）；
-#     · 认证清单 = 该类**实例集合**（如「MySQL 8.0.32」且 `certificationStatus=已认证`）。
-#   判定：文档表格抽出的 (名称, 版本) 集合 ⊆ 清单实例集合 ⇒ 缺失/版本不符=违规（附逐字证据）✓
-# ============================================================
-:SoftwareProduct rdf:type owl:Class ;
-    rdfs:label "软件产品"@zh ;
-    rdfs:comment "可用于技术方案的软件产品（含版本）：中心认证清单的载体。规则「技术架构-开源软件适用规则」按 (名称,版本) 与清单实例做集合比对。"@zh ;
-    rdfs:subClassOf :ITAsset .
-
-:softwareName rdf:type owl:DatatypeProperty ;
-    rdfs:label "软件名称"@zh ;
-    rdfs:domain :SoftwareProduct ;
-    rdfs:range xsd:string ;
-    rdfs:comment "软件产品名称（与清单实例逐字一致才可判合规）"@zh .
-
-:softwareVersion rdf:type owl:DatatypeProperty ;
-    rdfs:label "软件版本"@zh ;
-    rdfs:domain :SoftwareProduct ;
-    rdfs:range xsd:string ;
-    rdfs:comment "版本号（逐字比对，含补丁位；版本不符=违规）"@zh .
-
-:certificationStatus rdf:type owl:DatatypeProperty ;
-    rdfs:label "认证状态"@zh ;
-    rdfs:domain :SoftwareProduct ;
-    rdfs:range xsd:string ;
-    rdfs:comment "中心认证状态。**受控取值（逐字取用，不得另建知识页）**：已认证｜未认证｜待定。"@zh .
+# ------------------------------------------------------------
+# 口径（2026-10-16 用户裁定）：**系统已管理的数据不本体化** ✗
+#   「开源软件清单」由 **IT 工作平台**维护/查询 ⇒ 它是 **DataObject 实例**（非本体类 ✗）：
+#     · 属性写在 DataObject 页的 `skos:definition`；测试样例写在 `skos:note`；
+#     · 查询由**挡板**提供（挡板输出 = 该 DataObject），对接后换正式接口 ✓。
+#   本文件不再新增 SoftwareProduct / softwareName / softwareVersion / certificationStatus。
+# ------------------------------------------------------------
