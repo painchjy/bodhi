@@ -102,6 +102,8 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 | 漂移 | `drift` = 元数据/图/正文三处不一致的键 **∪** `summary` 非空却与定义键不一致（含"三处都没有"）；本体页不参与该比对（其 `summary` 就是类 `rdfs:comment`） |
 | 报告判定 | 渲染模式 = **是否 `bmm:Report` 子类**（不再看 `wikiContent` 的 domain）；`document` → 正文为主，`entity` → 数据属性为主 |
 | 本体页展示 | 本体类页正文的「属性定义」小节**分「自身 / 继承自 X」×「数据属性 / 对象属性」**（祖先闭包**跨模块**）；本体页**不展示实例属性** |
+| **单一写核**（2026-10-15/16） | 实例页 `summary` **只由 `ke_pages.derive_summary()` 派生**（定义 → 备注 → 回落），并在写口**强制**：`ke_pages.upsert_page()` 内置护栏（属性里有定义键 ⇒ 忽略调用方传的 summary），`write_knowledge*` / `_bulk_write_pages()` / 设计页 / 面板 / 以摘要为准同步**同此一处**；`ke_import` 的批量导入亦走该核心（其更新路径曾用 title 覆盖 ✗ 已修）。**本体模型库的 `summary`（= `rdfs:comment`）不在其列** —— 由"加载页"（`ontology_wiki.py` + `ke_admin.load_model`）独立生成，两条链**严格隔离**、互不复用 |
+| **别名规则**（2026-10-16） | 前端「标题下方的别名标签」（上游 `WikiBrowser.vue` 的 `selectedPage.aliases`）：实例页 `aliases` **只由 `ke_pages.derive_aliases()` 派生** —— ① 属性里的 `rdfs:label` / `skos:altLabel`（注释属性，**谁用谁算别名**，不分本体/实例）；② 本体标记 **`bodhi:aliasKey true`** 的属性值（如 `bmm:systemAbbr` 主/子系统简称）；③ 页面**已有**值（并集保留）；**排除与标题同名**的值；上限 8。写口同上（`upsert_page` / `_bulk_write_pages`）。**不引入 `bodhi:alias`**：别名一律「标记 + 已有属性」；待办 = 编译器把标记带进模型 + `ke_ontology.alias_keys()` |
 
 ### 4.3 解析（双读兼容）
 渲染格式改了，**同步改 3 个解析器**，且兼容旧 `- 名称 = 值`：
@@ -179,7 +181,11 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 - **W1 缺会话溯源**：非会话/非本体模型页缺 `bmm:sourceSession` 边 → medium；
 - **W2 属性段格式不合规**：`## 属性（数据属性）` 非 `### 名称` 格式（旧页豁免/双读）→ low；
 - **W3 报告页正文为空**：`mode=document` 类的页 `content` 为空 → high；
-- **W4 定义重复**：首段与属性段出现同一 `definition_key` → low。
+- **W4 定义重复**：首段与属性段出现同一 `definition_key` → low；
+- **W5 摘要漂移（清单，供人工核查）**：`summary` 与定义不同（medium）／`summary` 空但有定义·备注（low）
+  → 用面板 **「编辑」保存一次**（经内核护栏回到定义值）修复，**不批量处理**；
+- **W7 别名同名噪音（清单）**：`aliases` 里含与标题同名的标签（旧 `save_elements` 默认 `[name]`）→ low，
+  存量**先保留**，重新写入时内核不再产生（W6 属本体编译器的 `owl:inverseOf` 检查，勿混用）。
 
 ---
 

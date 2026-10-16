@@ -1801,6 +1801,74 @@ def apply_plan(kb_id: str, plan_id: str, confirm: bool = False, page_limit: int 
 # ---------------------------------------------------------------------------
 # 编排 + CLI
 # ---------------------------------------------------------------------------
+def check_summary_drift(ctx: dict, rep: Report) -> None:
+    """W5/W6 摘要·别名一致性**清单**（2026-10-16 用户口径：只列清单，供人工核查处理，不批量修）。
+
+    - **W5** `summary` 口径（单一写核 `ke_pages.derive_summary()`）：
+        ① `summary` 与**定义**（`skos:definition`/`bmm:definition`）不一致；
+        ② `summary` **为空**但属性里有定义/备注（面板「编辑」保存一次即回填）。
+    - **W6 别名占位（本工具不用；本体编译器已占用 W6=owl:inverseOf 未成对）** → 别名同名噪音用 **W7**：
+      别名（`aliases`）里含**与标题同名**的标签（旧 `save_elements` 默认 `[name]` 的噪音；
+      内核新写不再产生，存量按用户口径**先保留**）。
+
+    ⚠️ **本体模型库跳过**（本体页 `summary` = `rdfs:comment`，由"加载页"独立生成 —— 严格隔离）。
+    """
+    if ctx.get("kb_id") == ctx.get("ontology_kb"):
+        return
+    import json as _json  # noqa: PLC0415
+
+    # **一次预读本库真实数据**（不赌 `load_pages` 的列：实测它不带 summary/元数据 → 会整库误报）
+    def _rows() -> dict:
+        try:
+            rs = ke_db.psql_csv(
+                "SELECT slug, COALESCE(title,'') AS title, COALESCE(summary,'') AS summary, "
+                "       COALESCE(page_metadata::text,'{}') AS meta, "
+                "       COALESCE(aliases::text,'[]') AS aliases "
+                "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL"
+                % ke_db.sql_str(ctx["kb_id"]))
+        except Exception:  # noqa: BLE001
+            rs = []
+        return {str(r.get("slug") or ""): r for r in rs}
+
+    live = _rows()
+
+    def _alist(txt) -> list:
+        try:
+            got = _json.loads(txt or "[]")
+            return got if isinstance(got, list) else []
+        except Exception:  # noqa: BLE001  兼容 text[] 形态 `{a,b}`
+            return [x.strip().strip('"') for x in str(txt or "").strip("{}").split(",") if x.strip()]
+
+    for p in ctx["pages"]:
+        if not _is_instance(p.get("page_type") or ""):
+            continue
+        slug = p.get("slug") or ""
+        r = live.get(slug) or {}
+        try:
+            meta = _json.loads(r.get("meta") or "{}")
+        except Exception:  # noqa: BLE001
+            meta = {}
+        a = ((meta or {}).get("ontology") or {}).get("attributes") or {}
+        dfn = next((str(a.get(k) or "").strip() for k in ("skos:definition", "bmm:definition")
+                    if str(a.get(k) or "").strip()), "")
+        note = next((str(a.get(k) or "").strip() for k in ("skos:note", "bmm:description")
+                     if str(a.get(k) or "").strip()), "")
+        s = str(r.get("summary") or p.get("summary") or "").strip()
+        if dfn and s != dfn:
+            rep.add("W5", "medium", slug,
+                    "summary 与定义不一致（定义=%r … / summary=%r …）" % (dfn[:40], s[:40]),
+                    "面板「编辑」保存一次 ⇒ 经内核护栏回到定义值")
+        elif not s and (dfn or note):
+            rep.add("W5", "low", slug,
+                    "summary 为空但有%s —— 可按定义/备注回填" % ("定义" if dfn else "备注"),
+                    "面板「编辑」保存一次即回填（或「以摘要为准同步」反方向建定义）")
+        al = _alist(r.get("aliases"))
+        t = str(r.get("title") or p.get("title") or "").strip()
+        if t and t in [str(x).strip() for x in al]:
+            rep.add("W7", "low", slug, "别名里含与标题同名的标签（旧路径默认值噪音）",
+                    "存量先保留；内核重新写入时不再产生同名别名")
+
+
 def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
           page_limit: int = 5000) -> dict:
     """只读一致性巡检（**不写任何数据**）。
@@ -1833,6 +1901,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
             rep.add("C2", "low", kb_id, "来源统计失败：%s" % exc, "检查 ke_docs / 数据库")
     if scope in ("all", "wiki"):
         check_wiki_graph(ctx, rep)
+        check_summary_drift(ctx, rep)      # W5/W6 摘要·别名一致性清单（只列，供人工核查）
     if scope in ("all", "model"):
         check_graph_model(ctx, rep)
         check_ontology_artifacts(ctx, rep)

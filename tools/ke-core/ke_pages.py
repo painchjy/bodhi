@@ -304,6 +304,70 @@ def derive_summary(page_type: str, attributes: dict, fallback: str = "") -> str:
     return str(fallback or "").strip()
 
 
+# ── 别名（aliases）规则（2026-10-16 用户口径）──────────────────────────────────────
+#   前端渲染位置：wiki 阅读页**标题下方的一排「别名」标签**
+#   （上游 `WikiBrowser.vue`：`selectedPage.aliases` + i18n `aliases: '别名'`）—— 纯展示 + 供模糊检索。
+#   规则（**不区分本体页/实例页**，来源驱动）：
+#     ① 页面属性里的**注释类别名**：`rdfs:label` / `skos:altLabel`
+#        （本体里已声明为 `owl:AnnotationProperty`；实例层若用了，就是别名的作用 —— 用户口径）；
+#     ② 被本体标记 `bodhi:aliasKey true` 的**数据属性**的值（如 `bmm:systemAbbr` 主/子系统简称）；
+#     ③ 页面**已有** aliases（并集保留，不丢历史）；
+#   排除：与**标题相同**的值（同名标签是旧 `save_elements` 默认 `[name]` 留下的噪音）、空串、重复值。
+#   ⚠️ 不引入 `bodhi:alias` 实例属性：别名一律用「标记 + 已有属性」表达（用户口径）。
+ALIAS_KEYS = ("rdfs:label", "skos:altLabel")     # 内置别名键（标准词表，本体已声明为注释属性）
+ALIAS_KEY_MARKER = "bodhi:aliasKey"              # 本体里标记"此属性的值进 aliases"
+ALIAS_MAX = 8                                    # 标签上限，防标题下方刷屏
+
+
+def _ontology_alias_keys(page_type: str) -> tuple:
+    """本体模型里被 `bodhi:aliasKey true` 标记的属性键（如 `bmm:systemAbbr`）。
+
+    走 `ke_ontology.alias_keys()`；本体侧尚未实现（或模型未编译）时**静默回落到空元组**，
+    只用内置的 `ALIAS_KEYS` —— 核心不因本体侧进度而不可用（fail-open，与 summary 护栏同风格）。
+    """
+    try:
+        import ke_ontology as _ko  # noqa: PLC0415
+        return tuple(_ko.alias_keys(page_type) or ())
+    except Exception:  # noqa: BLE001
+        return ()
+
+
+def derive_aliases(attributes: dict, title: str = "", page_type: str = "",
+                   keep=(), alias_keys=None, max_items: int = ALIAS_MAX) -> list:
+    """**实例页 `aliases` 的唯一派生入口**（与 `derive_summary` 并列，同一个写口）。
+
+    返回：去重后的别名列表（已剔除标题同名值/空值，最多 `max_items` 个）。
+    `alias_keys` 显式给出时用它（便于测试/本体侧直接传）；否则向 `ke_ontology` 取标记键。
+    """
+    keys = list(ALIAS_KEYS)
+    if alias_keys is None:
+        alias_keys = _ontology_alias_keys(page_type)
+    keys += [str(k) for k in (alias_keys or []) if str(k) not in keys]
+    t = str(title or "").strip()
+    attrs = {str(k): v for k, v in (attributes or {}).items()}
+    out: list = []
+    for key in keys:
+        raw = attrs.get(key)
+        vals = raw if isinstance(raw, (list, tuple)) else ([raw] if raw is not None else [])
+        for one in vals:
+            s = str(one or "").strip()
+            if s and s != t and s not in out:
+                out.append(s)
+    for one in (keep or []):
+        s = str(one or "").strip()
+        if s and s != t and s not in out:
+            out.append(s)
+    return out[:max_items]
+
+
+def _page_aliases(x: dict) -> list:
+    """批量写项 → 别名（与 `upsert_page` 同一入口；`page_metadata.ontology.attributes` 里取依据）。"""
+    attrs = ((x.get("metadata") or {}).get("ontology") or {}).get("attributes") or {}
+    keep = [str(v).strip() for v in (x.get("aliases") or []) if str(v or "").strip()]
+    return derive_aliases(attrs, title=x.get("title") or "", page_type=x.get("page_type") or "",
+                          keep=keep)
+
+
 def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                 summary: str = "", tag: str = "bodhi-cxt-edit",
                 metadata: dict | None = None, sync_folders: bool = True,
@@ -316,6 +380,10 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     _carrier_attrs = ((metadata or {}).get("ontology") or {}).get("attributes") or {}
     if _carrier_attrs:
         summary = derive_summary(page_type, _carrier_attrs, summary)
+    # ── 实例页 aliases 护栏（2026-10-16 用户口径：别名规则进内核）────────────────────
+    #   别名 = 属性派生（rdfs:label / skos:altLabel / 本体标记 bodhi:aliasKey 的属性值）；
+    #   写入时与**页面已有别名**并集（旧值不清）、**排除与标题同名**的值（旧路径噪音）。
+    _alias_derived = derive_aliases(_carrier_attrs, title=title, page_type=page_type)
     """**建或改**一页（概念页/映射页专用；2026-09-28）。
 
     - 已存在 → 走 `_apply_content_update`（快照旧版 → content/version+1），
@@ -362,6 +430,11 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
         extra += (", chunk_refs = COALESCE((SELECT jsonb_agg(DISTINCT v) FROM "
                   "jsonb_array_elements_text(COALESCE(chunk_refs,'[]'::jsonb) || %s::jsonb) AS t(v)),"
                   " '[]'::jsonb)" % ke_db.sql_json(_uniq_str(chunk_refs)))
+    if _alias_derived:
+        # 别名与旧值**并集**（存量先保留口径：不因写入而丢历史别名）
+        extra += (", aliases = COALESCE((SELECT jsonb_agg(DISTINCT v) FROM "
+                  "jsonb_array_elements_text(COALESCE(aliases,'[]'::jsonb) || %s::jsonb) AS t(v)),"
+                  " '[]'::jsonb)" % ke_db.sql_json(_alias_derived))
     if existing:
         before = int(existing[0]["version"] or 1)
         _apply_content_update(kb_id, slug, content, tag, extra_set=extra)
@@ -386,19 +459,20 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
         cat = []
     cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
             "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path, "
-            "source_refs, chunk_refs")
+            "source_refs, chunk_refs, aliases")
     # 2026-10-10（用户口径）：wiki→图 投影已彻底移除 —— INSERT 只去关系小节，图由写路径直写。
     import ke_graph as _kg
     content = _kg.strip_relation_sections(content)
     vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, %s, "
-            "%s::jsonb, %d, %s, %s::jsonb, %s::jsonb"
+            "%s::jsonb, %d, %s, %s::jsonb, %s::jsonb, %s::jsonb"
             % (int(kb[0]["tenant_id"] or 0), ke_db.sql_str(kb_id), ke_db.sql_str(slug),
                ke_db.sql_str(title), ke_db.sql_str(page_type), ke_db.sql_str(content),
                ke_db.sql_str(summary), ke_db.sql_json(metadata or {}),
                ke_db.sql_str(tag), ke_db.sql_json(cat), len(cat),
                ke_db.sql_str("/".join([str(x) for x in cat] + [title])),
                ke_db.sql_json(_uniq_str(source_refs)),
-               ke_db.sql_json(_uniq_str(chunk_refs))))
+               ke_db.sql_json(_uniq_str(chunk_refs)),
+               ke_db.sql_json(_alias_derived)))
     ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\nCOMMIT;\n" % (cols, vals), stdin=True)
     if sync_folders:
         _sync_folders(kb_id)
@@ -1322,17 +1396,18 @@ def _bulk_write_pages(kb_id: str, items: list, tenant_id, tag: str) -> dict:
     if news:
         cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
                 "out_links, page_metadata, version, last_edit_source, category_path, depth, "
-                "wiki_path, source_refs, chunk_refs")
+                "wiki_path, source_refs, chunk_refs, aliases")
         rows = ", ".join(
             "(gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, "
-            "%s, %s::jsonb, %d, %s, %s::jsonb, %s::jsonb)"
+            "%s, %s::jsonb, %d, %s, %s::jsonb, %s::jsonb, %s::jsonb)"
             % (int(tenant_id or 0), ke_db.sql_str(kb_id), ke_db.sql_str(x["slug"]),
                ke_db.sql_str(x["title"]), ke_db.sql_str(x["page_type"]), ke_db.sql_str(x["content"]),
                ke_db.sql_str(x.get("summary") or ""), ke_db.sql_json(x.get("metadata") or {}),
                ke_db.sql_str(tag), ke_db.sql_json(x.get("category_path") or []),
                len(x.get("category_path") or []), ke_db.sql_str(x.get("wiki_path") or ""),
                ke_db.sql_json(_uniq_str(x.get("source_refs"))),
-               ke_db.sql_json(_uniq_str(x.get("chunk_refs")))) for x in news)
+               ke_db.sql_json(_uniq_str(x.get("chunk_refs"))),
+               ke_db.sql_json(_page_aliases(x))) for x in news)
         ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES %s;\nCOMMIT;\n" % (cols, rows),
                    stdin=True)
         out["inserted"] = len(news)
@@ -1340,14 +1415,15 @@ def _bulk_write_pages(kb_id: str, items: list, tenant_id, tag: str) -> dict:
         # 快照：逐条 `_snapshot_stmt` 拼（与单页版**逐字一致**）；与下面的 UPDATE 同一事务
         snap = "\n".join(_snapshot_stmt(kb_id, x["slug"], tag) for x in olds)
         vals = ", ".join(
-            "(%s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %d, %s, %s::jsonb, %s::jsonb)"
+            "(%s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %d, %s, %s::jsonb, %s::jsonb, %s::jsonb)"
             % (ke_db.sql_str(x["slug"]), ke_db.sql_str(x["content"]),
                ke_db.sql_str(x["title"]), ke_db.sql_str(x.get("summary") or ""),
                ke_db.sql_json(x.get("metadata") or {}), ke_db.sql_str(tag),
                ke_db.sql_json(x.get("category_path") or []), len(x.get("category_path") or []),
                ke_db.sql_str(x.get("wiki_path") or ""),
                ke_db.sql_json(_uniq_str(x.get("source_refs"))),
-               ke_db.sql_json(_uniq_str(x.get("chunk_refs")))) for x in olds)
+               ke_db.sql_json(_uniq_str(x.get("chunk_refs"))),
+               ke_db.sql_json(_page_aliases(x))) for x in olds)
         upd = (
             "UPDATE wiki_pages p SET content = v.content, title = v.title, summary = v.summary, "
             "page_metadata = COALESCE(p.page_metadata, '{}'::jsonb) || v.metadata::jsonb, "
@@ -1359,9 +1435,12 @@ def _bulk_write_pages(kb_id: str, items: list, tenant_id, tag: str) -> dict:
             "  '[]'::jsonb), "
             "chunk_refs = COALESCE((SELECT jsonb_agg(DISTINCT e) FROM "
             "  jsonb_array_elements_text(COALESCE(p.chunk_refs,'[]'::jsonb) || v.cr::jsonb) AS t(e)), "
+            "  '[]'::jsonb), "
+            "aliases = COALESCE((SELECT jsonb_agg(DISTINCT e) FROM "
+            "  jsonb_array_elements_text(COALESCE(p.aliases,'[]'::jsonb) || v.al::jsonb) AS t(e)), "
             "  '[]'::jsonb) "
             "FROM (VALUES %s) AS v(slug, content, title, summary, metadata, tag, cat, depth, wp, "
-            "refs, cr) "
+            "refs, cr, al) "
             "WHERE p.knowledge_base_id = %s AND p.slug = v.slug AND p.deleted_at IS NULL;"
             % (vals, ke_db.sql_str(kb_id)))
         ke_db.psql("BEGIN;\n%s\n%s\nCOMMIT;\n" % (snap, upd), stdin=True)
