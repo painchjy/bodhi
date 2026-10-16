@@ -3397,6 +3397,26 @@ def tool_definitions() -> list[dict]:
                 "required": ["kb_id", "policy"]},
         },
         {
+            "name": "rules_of_task",
+            "description": ("**任务·取规则契约（只读，推荐用这个取规则）**：给一个**任务**（`bpmn:Task` 的 "
+                            "slug/标题片段），返回该任务**真正绑定的规则**（图边 `bpmn:taskExecutesRule`）"
+                            "**及其判定口径全量**：`implementation`（实现方式）、`knowledgeNeed`（所需知识）、"
+                            "`scope`（适用范围）、`enforcement`（级别）、`reference`、`needs_extract`"
+                            "（是否需先做知识抽取：由实现方式/所需知识判定）、`strategies`（所属策略，"
+                            "`isDerivedFrom` 出边）、`required_fields`（结论最小契约：结论枚举/证据/严重度/规则出处）、"
+                            "`source`（每条规则的**出处**，如 `graph:taskExecutesRule`）。"
+                            "另回任务自身：`definition` + `dataobjects`（`taskUsesDataObject`：输入/输出）+ "
+                            "`roles`（`taskHasRole`）。整包带 `hash` 指纹 ⇒ **可反假断言**"
+                            "（改了规则属性，字段与 hash 必变）。"
+                            "⚠️ 与 `rules_of_policy` 的区别：后者只回\"策略→规则清单\"、**不带判定口径**，"
+                            "智能体会只能回去看文档复原 ✗ —— 取规则请优先用本工具。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "task": {"type": "string", "description": "任务页（bpmn:Task）的 slug 片段或标题片段"},
+                "limit": {"type": "integer"}},
+                "required": ["kb_id", "task"]},
+        },
+        {
             "name": "page_attributes_set",
             "description": ("**改一页的数据属性（方案 D，写）**：entity 模式的知识页 —— 正文是**只读渲染**、"
                             "数据属性是**事实源**。给 `patch`（键=本体数据属性，可带/不带模块前缀；"
@@ -4098,6 +4118,11 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                             args.get("patch") or {},
                                             actor=str(args.get("actor", "")),
                                             dry_run=bool(_pa_dry))
+    if name == "rules_of_task":
+        # 2026-10-16（用户口径）：**按任务取规则契约**（图边 taskExecutesRule + 页面属性真读；
+        # 带 needs_extract 分流 / required_fields / source 出处 / hash 指纹 ⇒ 反假断言可验）
+        return ke_review.rules_of_task(str(args.get("kb_id", "")), str(args.get("task", "")),
+                                       int(args.get("limit", 300) or 300))
     if name == "rules_of_policy":
         return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
                                          int(args.get("limit", 300) or 300))
