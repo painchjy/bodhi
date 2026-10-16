@@ -97,6 +97,103 @@ def _bmm_rule_class_closure() -> list:
         return []
 
 
+def rules_of_task(kb_id: str = "", task: str = "", limit: int = 300) -> dict:
+    """**按任务取规则契约（只读）** —— 取代"按策略取清单"的旧口径（`rules_of_policy` 只回清单、
+    不带判定口径 ⇒ 智能体只能回去"看文档复原"✗）。
+
+    数据来源（**真读图边 + 页面属性，不猜**）：
+      · 任务的 `bpmn:taskExecutesRule` **图边**（`ke_graph.relations_of`）→ 规则清单；
+      · 规则页属性：`bmm:ruleImplementation` / `bmm:knowledgeNeed` / `bmm:ruleScope` /
+        `bmm:enforcementLevel` / `bmm:ruleReference`；`skos:definition`/`skos:note` 兜底定义；
+      · 任务页自身：`skos:definition` 摘要 + `taskUsesDataObject`（输入/输出）+ `taskHasRole`（角色）；
+      · 规则所属策略：规则页 `bmm:isDerivedFrom` 出边。
+
+    回执带 **`source`（每条规则的出处，如 `graph:taskExecutesRule`）** 与 **`hash`（整包稳定指纹）**
+    —— 供"**反假断言**"：改动任一条规则的属性，字段与 `hash` 必须跟着变（证明不是大模型复原 ✗）。
+    """
+    import hashlib
+    import json as _json
+    import ke_db as _db
+    import ke_graph as _kg
+
+    kb, kb_name, _note = _db.resolve_kb_id(kb_id)
+    q = (task or "").strip()
+    if not q:
+        raise ValueError("rules_of_task 需要 task（任务页 slug 片段或标题片段）")
+    trows = _db.psql_csv(
+        "SELECT slug, COALESCE(title,'') AS title, "
+        "       COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+        "   AND page_type = 'bpmn:Task' AND (slug LIKE %s OR title LIKE %s) LIMIT 5"
+        % (_db.sql_str(kb), _db.sql_str("%%%s%%" % q), _db.sql_str("%%%s%%" % q)))
+    if not trows:
+        raise ValueError("找不到任务页（bpmn:Task，slug/标题含 %r）" % q)
+    task_slug = trows[0]["slug"]
+
+    def _edges(slug: str) -> list:
+        try:
+            r = _kg.relations_of(kb, slug)
+        except Exception:  # noqa: BLE001
+            return []
+        return (r or {}).get("out") or []
+
+    task_edges = _edges(task_slug)
+    rule_slugs = [e.get("target_slug") for e in task_edges
+                  if e.get("type") == "bpmn:taskExecutesRule" and e.get("target_slug")]
+    dataobjects = [{"slug": e.get("target_slug"), "title": e.get("target_title"),
+                    "type": e.get("type")} for e in task_edges
+                   if e.get("type") == "bpmn:taskUsesDataObject"]
+    roles = [{"slug": e.get("target_slug"), "title": e.get("target_title")} for e in task_edges
+             if e.get("type") == "bpmn:taskHasRole"]
+
+    rules: list = []
+    if rule_slugs:
+        lst = ", ".join(_db.sql_str(s) for s in rule_slugs)
+        for r in _db.psql_csv(
+                "SELECT slug, COALESCE(title,'') AS title, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleImplementation','') AS impl, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:knowledgeNeed','') AS need, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleScope','') AS scope, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:enforcementLevel','') AS lvl, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleReference','') AS ref, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
+                " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s) "
+                " ORDER BY slug" % (_db.sql_str(kb), lst)):
+            impl, need = str(r["impl"] or ""), str(r["need"] or "")
+            # A/B 类分流（口径）：实现方式写"知识提取"或声明了所需知识 ⇒ 需先抽取事实
+            needs_extract = bool(need) or ("知识提取" in impl)
+            strategies = [{"slug": e.get("target_slug"), "title": e.get("target_title"),
+                           "type": e.get("type")} for e in _edges(r["slug"])
+                          if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor")]
+            rules.append({
+                "slug": r["slug"], "title": r["title"],
+                "definition": str(r["dfn"] or r["note"] or "")[:400],
+                "implementation": impl, "knowledgeNeed": need, "scope": str(r["scope"] or ""),
+                "enforcement": str(r["lvl"] or ""), "reference": str(r["ref"] or ""),
+                "needs_extract": needs_extract,
+                "strategies": strategies,
+                "required_fields": {          # 结论的最小契约（技能按它输出，避免各写各的 ✗）
+                    "conclusion": "合规｜违规｜不适用｜待澄清（逐字枚举）",
+                    "evidence": "原文证据（逐字摘录，可回溯）",
+                    "severity": "高｜中｜低（违规时必填）",
+                    "rule_ref": "本规则的 slug（出处）",
+                },
+                "source": "graph:taskExecutesRule",
+            })
+    payload = {"task": task_slug, "rules": rules}
+    return {"ok": True, "kb": {"id": kb, "name": kb_name},
+            "task": {"slug": task_slug, "title": trows[0]["title"], "definition": trows[0]["dfn"][:400],
+                     "dataobjects": dataobjects, "roles": roles},
+            "rules": rules[:int(limit or 300)],
+            "counts": {"rules": len(rules),
+                       "needs_extract": sum(1 for x in rules if x["needs_extract"]),
+                       "direct_judge": sum(1 for x in rules if not x["needs_extract"])},
+            "read_from": "neo4j(graph edges) + pg(page attributes)",
+            "hash": hashlib.sha256(_json.dumps(payload, ensure_ascii=False,
+                                               sort_keys=True).encode("utf-8")).hexdigest()[:16]}
+
+
 def rules_of_policy(kb_id: str = "", policy: str = "", limit: int = 300) -> dict:
     """列出某业务策略下的业务规则（只读）。`policy` 可用 slug 片段 / 标题片段。"""
     kb, kb_name, _note = ke_db.resolve_kb_id(kb_id)
