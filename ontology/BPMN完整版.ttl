@@ -124,3 +124,36 @@
 
 # 模块短名（目录名/列表名；≤16 字符，导入时校验）
 <http://example.org/bpmn> bodhi:shortName "BPMN流程模型" .
+
+# ============================================================
+# 2026-10-16（用户口径）：活动/任务/业务对象/系统的骨架关系
+#   · activityContainsTask        活动包含任务（原来缺）
+#   · taskUsesDataObject          任务的输入/输出（读写）
+#   · dataObjectBelongsToTask     **权威维护**：数据对象归属哪个任务（从 DataObject 出发）
+#   · taskImplementedBySubSystem  任务由哪个系统实现 ⇒ 与上一条合起来推导
+#       「数据对象 → 归属任务 → 实现系统 = 唯一权威来源」，其它系统只能经 taskUsesDataObject 作**副本**
+#     （这是后续架构管控的基础结构；不用任何 sourceOfTruth 标记）
+# ============================================================
+:activityContainsTask a owl:ObjectProperty ;
+    rdfs:label "活动包含任务"@zh ;
+    rdfs:domain :Activity ;
+    rdfs:range :Task ;
+    rdfs:comment "活动下的任务（活动=一组任务；任务的规则绑定见 taskExecutesRule）"@zh .
+
+:taskUsesDataObject a owl:ObjectProperty ;
+    rdfs:label "任务读写业务对象"@zh ;
+    rdfs:domain :Task ;
+    rdfs:range :DataObject ;
+    rdfs:comment "任务的输入/输出（读写）。**不代表权威**：权威由 dataObjectBelongsToTask + taskImplementedBySubSystem 推导"@zh .
+
+:dataObjectBelongsToTask a owl:ObjectProperty ;
+    rdfs:label "业务对象归属任务"@zh ;
+    rdfs:domain :DataObject ;
+    rdfs:range :Task ;
+    rdfs:comment "**权威维护关系**：业务对象（正本）归属哪个任务；与 taskImplementedBySubSystem 合起来给出唯一权威系统。每个对象**恰有一个**归属任务"@zh .
+
+:taskImplementedBySubSystem a owl:ObjectProperty ;
+    rdfs:label "任务实现系统"@zh ;
+    rdfs:domain :Task ;
+    rdfs:range bmm:SubSystem ;
+    rdfs:comment "任务由哪个系统实现/承载（如『问题管理』由 IT 工作平台承载）⇒ 该任务归属对象的权威系统"@zh .

@@ -694,3 +694,23 @@ skos:note rdf:type owl:AnnotationProperty ;
     rdfs:label "技术方案评审报告"@zh ;
     rdfs:comment "技术方案评审活动的产出：汇总智能体/专家提出的问题与处置（同意·否决·自建）并给出评审结论；多轮评审更新同一份。**替代「评审问题」独立概念的跟踪载体。**"@zh ;
     rdfs:subClassOf :Report .
+
+# ============================================================
+# 别名标记 `bodhi:aliasKey`（2026-10-16 用户口径）
+#   **只加这一个标记，不新增 `bodhi:alias` 实例属性**：
+#   标在**属性**上（值 `true`）⇒ 该属性在任何页上的**值进 `wiki_pages.aliases`**
+#   （= 前端 wiki 阅读页**标题下方那一排「别名」标签**；给 WeKnora 的 alias 用）。
+#   ① 标准注释属性同样可以标（用户口径：`rdfs:label` / `skos:altLabel` 都是别名）：
+#        `rdfs:label bodhi:aliasKey true .` / `skos:altLabel bodhi:aliasKey true .`
+#   ② 数据属性同理 —— 需要哪个属性充当别名，就在它下面加一行标记：
+#        `:systemAbbr bodhi:aliasKey true .`（主/子系统**简称** ⇒ 自动成为该页别名）
+#   核心侧读取：`ke_pages.derive_aliases()`（内置 `rdfs:label`/`skos:altLabel` +
+#   `ke_ontology.alias_keys(page_type)` 取本标记；本体侧未实现时静默回落，不阻塞写入）。
+# ============================================================
+bodhi:aliasKey rdf:type owl:AnnotationProperty ;
+    rdfs:label "别名标记"@zh ;
+    rdfs:comment "标在属性上（值 true）⇒ 该属性的值进页面 aliases（前端标题下方的别名标签）。"@zh .
+
+rdfs:label bodhi:aliasKey true .
+skos:altLabel bodhi:aliasKey true .
+:systemAbbr bodhi:aliasKey true .
