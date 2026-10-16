@@ -504,12 +504,12 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     # 本体分类目录由**上面的目录三列**统一派生（2026-10-16 起 INSERT/UPDATE 共用同一份取值）。
     cat = _cat or []
     cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
-            "out_links, page_metadata, version, last_edit_source, category_path, depth, wiki_path, "
-            "source_refs, chunk_refs, aliases")
+            "out_links, in_links, page_metadata, version, last_edit_source, category_path, depth, "
+            "wiki_path, source_refs, chunk_refs, aliases")
     # 2026-10-10（用户口径）：wiki→图 投影已彻底移除 —— INSERT 只去关系小节，图由写路径直写。
     import ke_graph as _kg
     content = _kg.strip_relation_sections(content)
-    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, %s, "
+    vals = ("gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, '[]'::jsonb, %s::jsonb, 1, %s, "
             "%s::jsonb, %d, %s, %s::jsonb, %s::jsonb, %s::jsonb"
             % (int(kb[0]["tenant_id"] or 0), ke_db.sql_str(kb_id), ke_db.sql_str(slug),
                ke_db.sql_str(title), ke_db.sql_str(page_type), ke_db.sql_str(content),
