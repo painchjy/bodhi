@@ -1830,7 +1830,8 @@ def check_summary_drift(ctx: dict, rep: Report) -> None:
             rs = ke_db.psql_csv(
                 "SELECT slug, COALESCE(title,'') AS title, COALESCE(summary,'') AS summary, "
                 "       COALESCE(page_metadata::text,'{}') AS meta, "
-                "       COALESCE(aliases::text,'[]') AS aliases "
+                "       COALESCE(aliases::text,'[]') AS aliases, "
+                "       COALESCE(in_links::text,'[]') AS inl, COALESCE(out_links::text,'[]') AS outl "
                 "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL"
                 % ke_db.sql_str(ctx["kb_id"]))
         except Exception:  # noqa: BLE001
@@ -1874,6 +1875,14 @@ def check_summary_drift(ctx: dict, rep: Report) -> None:
         if t and t in [str(x).strip() for x in al]:
             rep.add("W7", "low", slug, "别名里含与标题同名的标签（旧路径默认值噪音）",
                     "存量先保留；内核重新写入时不再产生同名别名")
+        # W9（2026-10-16 用户口径）：关系的正本**只在 Neo4j**；PG 的 in_links/out_links 是**废弃列，
+        #   应恒空**（核心写口 `_apply_content_update` / `_bulk_write_pages` 都强制写 '[]' ✓）。
+        #   非空 ⇒ 说明还有**旧路径**在写这两列（历史"正文投影/重算 in_links"的残留 ✗）→ 只列清单。
+        if (r.get("inl") or "[]") not in ("[]", "") or (r.get("outl") or "[]") not in ("[]", ""):
+            rep.add("W9", "low", slug,
+                    "in_links/out_links 非空（应为废弃恒空 ✗）：in=%s out=%s"
+                    % (str(r.get("inl"))[:40], str(r.get("outl"))[:40]),
+                    "关系正本在图；这两列由核心写口强制清空 —— 保留观察，勿手工重算 in_links")
 
 
 def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
