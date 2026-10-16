@@ -527,24 +527,14 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
             "last_edit_source": tag, "out_links": []}
 
 
-PAGE_COLUMNS = ("id, tenant_id, knowledge_base_id, slug, title, page_type, status, content, summary, "
-                "parent_slug, folder_id, category_path, wiki_path, depth, sort_order, source_refs, "
-                "chunk_refs, in_links, out_links, page_metadata, aliases, version, last_edit_source, "
-                "last_editor_id")
-
-
-def _insert_stmt(kb: str, tenant_id: str, page: dict, actor: str) -> str:
-    values = [ke_db.sql_str(page["id"]), str(int(tenant_id)), ke_db.sql_str(kb),
-              ke_db.sql_str(page["slug"]), ke_db.sql_str(page["title"]), ke_db.sql_str(page["page_type"]),
-              ke_db.sql_str("published"), ke_db.sql_str(page["content"]), ke_db.sql_str(page["summary"]),
-              ke_db.sql_str(""), ke_db.sql_str(""), ke_db.sql_json(page["category_path"]),
-              ke_db.sql_str(page["slug"]), str(len(page["category_path"])), "0",
-              ke_db.sql_json([]), ke_db.sql_json([]), ke_db.sql_json([]),
-              ke_db.sql_json(page["out_links"]), ke_db.sql_json(page["metadata"]),
-              ke_db.sql_json(page["aliases"]), "1", ke_db.sql_str(page["last_edit_source"]),
-              ke_db.sql_str(actor)]
-    return ("INSERT INTO wiki_pages (%s) VALUES (%s) ON CONFLICT DO NOTHING;"
-            % (PAGE_COLUMNS, ", ".join(values)))
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 2026-10-16（**收编完成**）：本文件不再自拼写页 SQL。
+#   旧的 `PAGE_COLUMNS` / `_insert_stmt`（INSERT）与 `_extra_set`（UPDATE 的列）**已删除** ——
+#   插入与更新统一走核心 `ke_pages._bulk_write_pages`（24 列与旧 `PAGE_COLUMNS` 逐列对齐，
+#   `id` 仍用 uuid5 派生、`ON CONFLICT DO NOTHING` 仍幂等）。
+#   回退办法：`git log -p -- tools/ke-core/ke_import.py` 取旧实现（提交信息含"收编 ke_import"）。
+# ---------------------------------------------------------------------------
 
 
 def _find_entry(ticket: str) -> tuple[dict, str, dict]:
@@ -581,27 +571,7 @@ def _upsert_relation_lines(content: str, lines: list) -> tuple[str, int]:
     return "\n".join(merged), len(added)
 
 
-def _extra_set(title: str, aliases: list, metadata: dict, page_type: str, summary: str,
-               wiki_path: str = "", category_path: list | None = None) -> str:
-    """更新已存在页时要一并覆盖的列（正文由 `_apply_content_update` 写）。
 
-    `wiki_path`/`category_path` 也要覆盖：标题变了（如新增中文名称列）若不同步，
-    目录树里会一直显示旧标题 —— 2026-09-30 用户实测"目录缺失/不一致"。
-    """
-    # 2026-10-15（单一写核）：**更新路径的 summary 不得由调用方自拼**（曾经传 title ✗ → 覆盖了
-    # 上游写对的定义值）。统一走核心派生；当页没有定义/备注时回落到调用方给的值（如报告摘要），
-    # 语义保持。⚠️ 本体模型库的页不走本函数（由"加载页"独立生成，严格隔离）。
-    summary = ke_pages.derive_summary(
-        page_type, ((metadata or {}).get("ontology") or {}).get("attributes") or {}, summary)
-    extra = (", title = %s, summary = %s, page_type = %s, aliases = %s::jsonb, page_metadata = %s::jsonb"
-             % (ke_db.sql_str(title), ke_db.sql_str(summary), ke_db.sql_str(page_type),
-                ke_db.sql_json(aliases), ke_db.sql_json(metadata)))
-    if wiki_path:
-        extra += ", wiki_path = %s" % ke_db.sql_str(wiki_path)
-    if category_path is not None:
-        extra += (", category_path = %s::jsonb, depth = %d"
-                  % (ke_db.sql_json(category_path), len(category_path)))
-    return extra
 
 
 # ---------------------------------------------------------------------------
@@ -652,7 +622,7 @@ def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
         created = updated = skipped = 0
         items = list(entities.items())
         for offset in range(0, len(items), CHUNK):
-            stmts = []
+            batch_items: list = []
             for value, row in items[offset:offset + CHUNK]:
                 slug = page_slug(page_type, value)
                 title = render_title(entry.get("title"), row, value, {"label": label})
@@ -664,26 +634,26 @@ def apply(ticket: str, actor: str = "cli:import", tenant: int | None = None,
                 content = _merge_relation_section(existing.get(slug) or "", content)
                 aliases = [str(row.get(c) or "").strip() for c in (entry.get("aliases") or [])]
                 aliases = [a for a in aliases if a]
-                if slug in existing:
-                    if existing[slug].strip() == content.strip():
-                        skipped += 1
-                        continue
-                    meta = _page_row(kb, data.get("kb_name"), page_type, label, slug, title, content,
-                                     aliases, row, source, tag)["metadata"]
-                    cat = [data.get("kb_name") or "批量建模", label]
-                    ke_pages._apply_content_update(
-                        kb, slug, content, tag,
-                        _extra_set(title, aliases, meta, page_type, title,
-                                   wiki_path="/".join([str(x) for x in cat] + [title]),
-                                   category_path=cat))
-                    updated += 1
+                if slug in existing and existing[slug].strip() == content.strip():
+                    skipped += 1                     # 幂等：正文没变 → 不动版本（与旧实现一致）
                     continue
+                # 2026-10-16（**收编**）：一律走核心 `ke_pages._bulk_write_pages` —— 本文件不再自拼 SQL。
+                #   核心侧统一：`summary` 派生（单一写核）／`aliases` 派生（别名规则）／
+                #   更新走 快照+版本+1（与 `_apply_content_update` 同一语义）／`id` 用 **uuid5 派生**
+                #   （巡检 D5 认它）／`ON CONFLICT DO NOTHING`（幂等）。
                 page = _page_row(kb, data.get("kb_name"), page_type, label, slug, title, content,
                                  aliases, row, source, tag)
-                stmts.append(_insert_stmt(kb, tenant_id, page, actor))
-            if stmts:
-                ke_db.psql("BEGIN;\n" + "\n".join(stmts) + "\nCOMMIT;")
-                created += len(stmts)
+                # 与旧 `_insert_stmt` **逐列等价**的显式列（其余列由核心写 `DEFAULT`，即库默认）
+                page.update({"exists": slug in existing, "tenant_id": tenant_id,
+                             "status": "published", "parent_slug": "", "folder_id": "",
+                             "sort_order": 0, "in_links": [], "editor_id": actor})
+                batch_items.append(page)
+                if slug in existing:
+                    updated += 1
+                else:
+                    created += 1
+            if batch_items:
+                ke_pages._bulk_write_pages(kb, batch_items, tenant_id, tag)
         pruned = 0
         if prune if prune is not None else entry.get("prune"):
             keep = [page_slug(page_type, v) for v in entities]

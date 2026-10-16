@@ -360,6 +360,28 @@ def derive_aliases(attributes: dict, title: str = "", page_type: str = "",
     return out[:max_items]
 
 
+def _sql_id(x: dict) -> str:
+    """INSERT 的 `id`：给了就用（批量建模走 **uuid5 派生**，巡检 D5 认它），没给就让库侧随机。"""
+    return ke_db.sql_str(x["id"]) if x.get("id") else "gen_random_uuid()::text"
+
+
+def _opt_sql(x: dict, key: str, kind: str = "text") -> str:
+    """**可选列**：传了就写值，没传就写 SQL 关键字 `DEFAULT`（PostgreSQL 允许在 `VALUES` 里用）。
+
+    ⚠️ 为什么用 `DEFAULT` 而不是"照抄 legacy 的常量"：现有调用方（面板 / 会话 / 设计页）**本来不写**
+    这些列、靠库默认 —— 若核心统一写常量，等于把它们的写入行为一起改了。用 `DEFAULT` 则
+    **老调用方零变化**，而 `ke_import`（收编后）传什么就写什么（与它自有 INSERT 逐列等价）。
+    """
+    if key not in x or x.get(key) is None:
+        return "DEFAULT"
+    val = x.get(key)
+    if kind == "jsonb":
+        return "%s::jsonb" % ke_db.sql_json(val)
+    if kind == "int":
+        return str(int(val))
+    return ke_db.sql_str(val)
+
+
 def _page_aliases(x: dict) -> list:
     """批量写项 → 别名（与 `upsert_page` 同一入口；`page_metadata.ontology.attributes` 里取依据）。"""
     attrs = ((x.get("metadata") or {}).get("ontology") or {}).get("attributes") or {}
@@ -1394,22 +1416,33 @@ def _bulk_write_pages(kb_id: str, items: list, tenant_id, tag: str) -> dict:
     olds = [x for x in items if x.get("exists")]
     out = {"inserted": 0, "updated": 0}
     if news:
-        cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, content, summary, "
-                "out_links, page_metadata, version, last_edit_source, category_path, depth, "
-                "wiki_path, source_refs, chunk_refs, aliases")
+        # 2026-10-16（收编 `ke_import`）：列清单与 legacy `PAGE_COLUMNS` **逐列对齐**（24 列）。
+        #   新增列全部走 `_opt_sql`/`_sql_id`：**没传就写 `DEFAULT`** ⇒ 老调用方（面板/会话/设计页）
+        #   行为零变化；`ke_import` 委派后传什么写什么（uuid5 派生 id、status='published'、
+        #   parent_slug/folder_id=''、sort_order=0、in_links=[]、last_editor_id=actor）。
+        #   `ON CONFLICT DO NOTHING` 一并加：批量建模幂等（同 slug 重跑不再是硬错；老路径靠它）。
+        cols = ("id, tenant_id, knowledge_base_id, slug, title, page_type, status, content, summary, "
+                "parent_slug, folder_id, category_path, wiki_path, depth, sort_order, source_refs, "
+                "chunk_refs, in_links, out_links, page_metadata, aliases, version, last_edit_source, "
+                "last_editor_id")
         rows = ", ".join(
-            "(gen_random_uuid()::text, %d, %s, %s, %s, %s, %s, %s, '[]'::jsonb, %s::jsonb, 1, "
-            "%s, %s::jsonb, %d, %s, %s::jsonb, %s::jsonb, %s::jsonb)"
-            % (int(tenant_id or 0), ke_db.sql_str(kb_id), ke_db.sql_str(x["slug"]),
-               ke_db.sql_str(x["title"]), ke_db.sql_str(x["page_type"]), ke_db.sql_str(x["content"]),
-               ke_db.sql_str(x.get("summary") or ""), ke_db.sql_json(x.get("metadata") or {}),
-               ke_db.sql_str(tag), ke_db.sql_json(x.get("category_path") or []),
-               len(x.get("category_path") or []), ke_db.sql_str(x.get("wiki_path") or ""),
+            "(%s, %d, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %d, %s, %s::jsonb, "
+            "%s::jsonb, %s, '[]'::jsonb, %s::jsonb, %s::jsonb, 1, %s, %s)"
+            % (_sql_id(x), int(x.get("tenant_id") or tenant_id or 0), ke_db.sql_str(kb_id),
+               ke_db.sql_str(x["slug"]), ke_db.sql_str(x["title"]), ke_db.sql_str(x["page_type"]),
+               _opt_sql(x, "status"), ke_db.sql_str(x["content"]),
+               ke_db.sql_str(x.get("summary") or ""),
+               _opt_sql(x, "parent_slug"), _opt_sql(x, "folder_id"),
+               ke_db.sql_json(x.get("category_path") or []), ke_db.sql_str(x.get("wiki_path") or ""),
+               len(x.get("category_path") or []), _opt_sql(x, "sort_order", "int"),
                ke_db.sql_json(_uniq_str(x.get("source_refs"))),
                ke_db.sql_json(_uniq_str(x.get("chunk_refs"))),
-               ke_db.sql_json(_page_aliases(x))) for x in news)
-        ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES %s;\nCOMMIT;\n" % (cols, rows),
-                   stdin=True)
+               _opt_sql(x, "in_links", "jsonb"),
+               ke_db.sql_json(x.get("metadata") or {}),
+               ke_db.sql_json(_page_aliases(x)),
+               ke_db.sql_str(tag), _opt_sql(x, "editor_id")) for x in news)
+        ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES %s ON CONFLICT DO NOTHING;\nCOMMIT;\n"
+                   % (cols, rows), stdin=True)
         out["inserted"] = len(news)
     if olds:
         # 快照：逐条 `_snapshot_stmt` 拼（与单页版**逐字一致**）；与下面的 UPDATE 同一事务
