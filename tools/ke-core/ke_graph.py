@@ -599,14 +599,66 @@ def update_edge(kb_id: str, slug: str, target_slug: str, new_rel_type: str = "",
 
 
 def delete_edge(kb_id: str, slug: str, target_slug: str, rel_type: str = "") -> dict:
-    """删本页出边（可只删某类）。"""
-    if rel_type:
-        _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r:`%s`]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
-             "DELETE r" % _etyp(rel_type), {"kb": kb_id, "s": slug, "t": target_slug})
+    """删本页出边（可只删某类）。**关系维护的唯一删除口**（`ke_pages.delete_relation` 只是薄封装）。
+
+    2026-10-16（用户口径 · 关系收拢到核心）两处加固：
+      ① **回执必须说实话**：先 `count` 再删 ⇒ 回 `deleted` / `changed = deleted > 0`
+         （旧实现删 0 条也回 `changed: True` ✗ —— 删没删掉看不出来，实测踩过）；
+      ② **入参防呆**：`(slug, target_slug, rel_type)` 三个字符串连排，极易把"关系类型"错放进
+         `target_slug`（我这次就是这么错的 ✗）⇒ 若 `target_slug` 含 `:` 或 `rel_type` 含 `/`，
+         一律 `ValueError`（**宁可报错，也不静默删 0 条** ✗）。
+    """
+    ts = (target_slug or "").strip()
+    rt = (rel_type or "").strip()
+    if ":" in ts:
+        raise ValueError("target_slug 看起来是关系类型（含 ':'）：%r；参数顺序应为 "
+                         "delete_edge(kb_id, slug, target_slug, rel_type)" % ts)
+    if "/" in rt:
+        raise ValueError("rel_type 看起来是 slug（含 '/'）：%r；参数顺序应为 "
+                         "delete_edge(kb_id, slug, target_slug, rel_type)" % rt)
+    n = 0
+    if rt:
+        rows = _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r:`%s`]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                    "RETURN count(r) AS n" % _etyp(rt), {"kb": kb_id, "s": slug, "t": ts})
+        n = int((rows[0].get("n") if rows else 0) or 0)
+        if n:
+            _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r:`%s`]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                 "DELETE r" % _etyp(rt), {"kb": kb_id, "s": slug, "t": ts})
     else:
-        _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(b:BodhiInstance {kb_id:$kb, slug:$t}) DELETE r",
-             {"kb": kb_id, "s": slug, "t": target_slug})
-    return {"changed": True, "action": "delete", "slug": slug, "version": 1, "relations": relations_of(kb_id, slug)}
+        rows = _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                    "RETURN count(r) AS n", {"kb": kb_id, "s": slug, "t": ts})
+        n = int((rows[0].get("n") if rows else 0) or 0)
+        if n:
+            _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(b:BodhiInstance {kb_id:$kb, slug:$t}) "
+                 "DELETE r", {"kb": kb_id, "s": slug, "t": ts})
+    return {"changed": n > 0, "action": "delete", "deleted": n, "slug": slug,
+            "target_slug": ts, "rel_type": rt, "relations": relations_of(kb_id, slug)}
+
+
+def delete_edges_of(kb_id: str, slug: str, inbound: bool = True, outbound: bool = True) -> dict:
+    """删某页的**全部出边（+ 入边）** —— 硬删页时的级联清理（`ke_audit.purge` 改调本函数）。
+
+    为什么要有它（2026-10-16 用户口径）：本体实例关系**只有 Neo4j 有**，PG 的 `in_links`/`out_links`
+    是废弃列；所以"删页级联删关系"必须**删图边**，不能再走"重算 in_links / 清 out_links"的旧路径 ✗。
+    幂等：返回实际删除条数 `deleted_out` / `deleted_in`。
+    """
+    d_out = d_in = 0
+    if outbound:
+        rows = _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(:BodhiInstance) "
+                    "RETURN count(r) AS n", {"kb": kb_id, "s": slug})
+        d_out = int((rows[0].get("n") if rows else 0) or 0)
+        if d_out:
+            _run("MATCH (a:BodhiInstance {kb_id:$kb, slug:$s})-[r]->(:BodhiInstance) DELETE r",
+                 {"kb": kb_id, "s": slug})
+    if inbound:
+        rows = _run("MATCH (:BodhiInstance)-[r]->(b:BodhiInstance {kb_id:$kb, slug:$s}) "
+                    "RETURN count(r) AS n", {"kb": kb_id, "s": slug})
+        d_in = int((rows[0].get("n") if rows else 0) or 0)
+        if d_in:
+            _run("MATCH (:BodhiInstance)-[r]->(b:BodhiInstance {kb_id:$kb, slug:$s}) DELETE r",
+                 {"kb": kb_id, "s": slug})
+    return {"ok": True, "slug": slug, "deleted_out": d_out, "deleted_in": d_in,
+            "changed": bool(d_out or d_in)}
 
 
 def instance_graph(kb_id: str, model: str = "", types=None, limit: int = 300) -> dict:
