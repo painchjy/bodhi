@@ -1537,7 +1537,14 @@ def _delete_orphan_revisions(kb_id: str) -> dict:
 
 
 def _apply_edge_edits(kb_id: str, page: dict, drop_lines: list) -> dict:
-    """按行号删掉正文里的关系行（快照 + 版本+1 + 重算 out_links/in_links）。"""
+    """按行号删掉**正文里的关系行**（快照 + 版本+1；正文重写走核心 `ke_pages.rewrite_page_content`，
+    `out_links`/`in_links` 由核心强制写 `'[]'`——**不再重算** ✗，旧 docstring 已过期 ✓）。
+
+    ⚠️ **已知缺口（2026-10-16，待收拢）**：关系**正本在图**，本函数只删了正文行 ⇒ **图边还在** ✗。
+    正确改法（下一轮）：计划侧从图读边（`ke_graph.relations_of`）产出 **(slug, target_slug, rel_type)**
+    三元组，本函数按三元组调 `ke_graph.delete_edge`（整页清空用 `ke_graph.delete_edges_of` ✓）；
+    正文行删除仅作**显示同步** ✓（幂等：边已删则 `deleted=0` ✓）。
+    """
     drop = {int(i) for i in drop_lines}
     lines = [line for i, line in enumerate((page["content"] or "").splitlines()) if i not in drop]
     new_content = "\n".join(lines).rstrip() + "\n"
