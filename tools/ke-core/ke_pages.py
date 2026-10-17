@@ -209,10 +209,13 @@ def _snapshot_stmt(kb_id: str, slug: str, tag: str) -> str:
 
 
 def _apply_content_update(kb_id: str, slug: str, content: str, tag: str,
-                          extra_set: str = "") -> str:
-    """快照 + 更新正文（**先图后 wiki**，2026-10-05 M3 统一写路径）：
-    ① 先抽取正文里的本体关系；② 正文去掉「本体关系/被引用」小节；③ 出入链置空（不再维护）；
-    ④ 落库后把关系投影到图实例（失败不阻断写库）。"""
+                          extra_set: str = "", title: str = "", page_type: str = "",
+                          attributes: dict | None = None) -> str:
+    """快照 + 更新正文（**图 → PG**，2026-10-17 用户口径统一）：
+
+    ① **图先写**：正文（+属性）写图节点；**失败即中止** ✓（不产生"PG 新 / 图旧"的半成品 ✗）
+    ② 再落 PG：快照旧版 → content/version+1（`extra_set` 里带 title/summary/属性等 ✓）
+    """
     replica_guard(kb_id, slug, tag)      # 副本页禁止本地修改（pull 通道除外）
     import ke_graph  # noqa: PLC0415  懒导入避免 ke_pages ↔ ke_graph 环
     # 2026-10-10（用户口径）：**wiki→图 投影已彻底移除** ——
@@ -220,6 +223,22 @@ def _apply_content_update(kb_id: str, slug: str, content: str, tag: str,
     # 图一律由写路径直写：`upsert_node`/`upsert_nodes_batch`、`add_edge`/`add_edges_batch`、
     # `ensure_instances`；存量重建只用 `ke_graph.rebuild_kb_graph`（它**保留边**、只重建节点/属性）。
     content = ke_graph.strip_relation_sections(content)
+    # ① 图先写（缺 title/page_type 时读一次 PG —— 只为了不把节点 name 写坏 ✓）
+    if not title or not page_type:
+        _row = ke_db.psql_csv(
+            "SELECT COALESCE(title,'') AS t, COALESCE(page_type,'') AS pt FROM wiki_pages "
+            " WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+            % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+        if _row:
+            title = title or str(_row[0].get("t") or "")
+            page_type = page_type or str(_row[0].get("pt") or "")
+    try:
+        ke_graph.upsert_node(kb_id, slug, title, page_type,
+                             attributes=(attributes if attributes is not None else None),
+                             wiki_content=content)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("图节点写入失败，已中止 PG 更新（契约 §8 图本优先）：%s" % str(exc)[:180])
+    # ② 再落 PG
     stmts = [_snapshot_stmt(kb_id, slug, tag),
              "UPDATE wiki_pages SET content = %s, out_links = '[]'::jsonb, in_links = '[]'::jsonb, "
              "version = version + 1, updated_at = now(), last_edit_source = '%s'%s "
@@ -488,7 +507,9 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                   " '[]'::jsonb)" % ke_db.sql_json(_alias_derived))
     if existing:
         before = int(existing[0]["version"] or 1)
-        _apply_content_update(kb_id, slug, content, tag, extra_set=extra)
+        _apply_content_update(kb_id, slug, content, tag, extra_set=extra,
+                              title=title, page_type=page_type,
+                              attributes=_attrs_for_graph)
         if sync_folders:
             _sync_folders(kb_id)
         return {"slug": slug, "created": False, "before_version": before, "after_version": before + 1,
@@ -990,7 +1011,8 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
         _kg.upsert_node(kb_id, slug, row["title"], page_type, attributes=merged,
                         wiki_content=new_content)
     except Exception as exc:  # noqa: BLE001
-        graph = {"ok": False, "reason": str(exc)[:180]}
+        # 2026-10-17 用户口径 ✓：图写不成 ⇒ **不更新 PG** ✓（fail-closed，避免半成品 ✗）
+        raise RuntimeError("图节点写入失败，已中止 PG 更新（契约 §8 图本优先）：%s" % str(exc)[:180])
     # ② PG：快照（旧版）→ version+1；content / page_metadata 一起更新（可回退）
     onto2 = dict(onto)
     onto2.update({"model": (page_type.split(":", 1)[0] if page_type else onto2.get("model")),
@@ -1581,16 +1603,18 @@ def write_knowledge_batch(kb_id: str, specs: list, *, dry_run: bool = False,
             errors.append({"title": spec.get("title"), "error": str(exc)[:200]})
     edges_written, edge_errors = 0, []
     # ③-0 图节点：**一条 UNWIND** 统一写（P3-0d）——旧路径每节点 1 次 Neo4j（40 节点 ≈ 3 s）
+    _graph_batch_ok = True
     if not dry_run and _node_rows:
         try:
             _kg.upsert_nodes_batch(kb_id, _node_rows)
         except Exception as exc:  # noqa: BLE001
+            _graph_batch_ok = False       # 2026-10-17：图批写失败 ⇒ **跳过 PG 批写** ✓（fail-closed）
             edge_errors.append({"scope": "upsert_nodes_batch", "error": str(exc)[:160]})
     # ③-0b PG 页：**一次批量写**（P0-c-3，2026-10-10）—— 旧路径每页一个小事务
     #      （31 页 ≈ 31 × ~250ms ≈ 8 s，正是 apply 的主成本）；`_bulk_write_pages` = 新建一条
     #      多行 INSERT + 更新一条事务（快照 INSERT..SELECT + UPDATE..FROM(VALUES)），整批 **2 次 psql**。
     bulk_write = None
-    if not dry_run and items:
+    if not dry_run and items and _graph_batch_ok:
         try:
             bulk_write = _bulk_write_pages(kb_id, items, _kb_tenant, TAG_CONTRACT)
         except Exception as exc:  # noqa: BLE001
