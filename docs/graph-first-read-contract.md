@@ -96,7 +96,13 @@ subprocess.run(cmd, ..., stdin=subprocess.DEVNULL)   # 必须 ✗ 否则非交�
    ```
    > 这条检查正是"图为主、PG 可重建"的**验收断言** ✓：图 PG 一致 ⇒ 任一来源都能重建另一份 ✓。
 
-## 9. 读路径的"来源"必须回执
+4. **属性值必须是标量/字符串** ✗→✓：`ke_graph._attrs_of()` 只搬**字符串**属性 ⇒
+   `verdicts={"符合":3,…}` 这类 **dict 值会被丢弃** ✗（重建也搬不回来 ✗）。
+   ⇒ 写核前把对象 `json.dumps` 成字符串 ✓（或改 `_attrs_of` 支持标量+序列化 ✓，待办）。
+5. **W10 的假阳性陷阱**（已修 ✓）：PG 侧对象属性经 `psql_csv` 回来的是 **Python 对象** ✗，
+   `str(dict)` 得到单引号 repr ✗，与图上的 JSON 字符串 `{"a":1}` ✗ 永不相等 ⇒
+   `_norm()` 必须先按对象 `json.dumps(sort_keys)` ✓ 再比 ✓。
+
 所有契约/计划都必须带 `source`（`graph:BodhiInstance` / `pg:page_metadata` ✓）与 `hash` ✓：
 - 一旦某条走了 PG 降级 ✓ ⇒ 说明图缺数据 ✗ ⇒ 触发 `rebuild_kb_graph` ✓ 而不是长期靠降级 ✓。
 

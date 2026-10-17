@@ -1839,15 +1839,26 @@ def check_graph_pg_drift(ctx: dict, rep: Report) -> None:
     skip = {"kb", "slug", "pt", "module", "name", "wc", "tenant", "page_type", "tenant_id"}
 
     def _norm(s) -> str:
-        """比较前规范化：JSON 值统一 `sort_keys` + 无空格 ⇒ 消除 `[1,2]` vs `[1, 2]` 假阳性 ✓"""
+        """比较前规范化：dict/list 直接 dumps ✓；JSON 文本统一 `sort_keys`+无空格 ✓；
+        兼容 Python repr（单引号 `{'a': 1}` ✗ —— psql 侧非字符串属性会以对象返回 ✓）。"""
+        import ast as _ast  # noqa: PLC0415
+        import json as _j  # noqa: PLC0415
+        if isinstance(s, (dict, list, tuple)):
+            return _j.dumps(s, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                            default=str)
         t = ("" if s is None else str(s)).strip()
-        if not t or t[0] not in "[{":
-            return t
-        try:
-            import json as _j  # noqa: PLC0415
-            return _j.dumps(_j.loads(t), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        except Exception:  # noqa: BLE001
-            return t
+        if not t:
+            return ""
+        if t[0] in "[{(":                    # 可能是 JSON ✓ 也可能是 Python repr ✗
+            try:
+                return _j.dumps(_j.loads(t), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            except Exception:  # noqa: BLE001
+                try:
+                    return _j.dumps(_ast.literal_eval(t), ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":"), default=str)
+                except Exception:  # noqa: BLE001
+                    return t
+        return t
 
     drift, no_node = [], []
     for i in range(0, len(slugs), 200):
