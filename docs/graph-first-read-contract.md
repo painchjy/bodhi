@@ -71,7 +71,35 @@ subprocess.run(cmd, ..., stdin=subprocess.DEVNULL)   # 必须 ✗ 否则非交�
 | `ke_db.psql_csv("SELECT 1")`（仅 PG 路径） | < 300 ms | **214 ms** ✓ |
 （WSL 原生、`docker exec` 形态；Windows 直跑约 2–3×，属跨边界开销 ✓）
 
-## 7. 何时**必须**用 PG（例外清单）
+## 8. 一致性：属性只在写核里改（禁 raw SQL ✗）
+**现象（2026-10-17 实测）**：领域库 6 条规则的 `knowledgeNeed` / `ruleImplementation`
+**图 PG 全不一致** ✗ ——
+
+| 规则 | PG | 图（改前） |
+|---|---|---|
+| 技术架构-开源软件适用规则 | 725 字 JSON ✓ | 19 字旧文本 ✗ |
+| 部署架构-最低部署和灾备要求 | 1037 字 JSON ✓ | 82 字旧文本 ✗ |
+
+原因：这些属性曾用 `ke_db.psql("UPDATE wiki_pages SET page_metadata=…")` **直接改 PG** ✗，
+绕过了写核（`ke_pages.upsert_page` → `upsert_node(attributes=…)`）⇒ 图停在旧值 ✗。
+
+**规则**：
+1. **改页面属性一律走写核**（`ke_pages.upsert_page` / `ke_graph.upsert_node`）✓；raw SQL 只允许读 ✓
+   （例外：`ke_graph.rebuild_kb_graph` 这类"从 PG 反向重建图"的运维动作 ✓）
+2. **发现漂移**：跑一次 `ke_graph.rebuild_kb_graph(kb_id)` ✓（只重建节点/属性 ✓ **保留边** ✓）
+   —— 本次修复后 `不一致 0 / 6` ✓
+3. **回归检查**（10 行，建议纳入巡检）：
+   ```python
+   pg  = {slug: pg_attr("bmm:knowledgeNeed")}    # SELECT page_metadata->…
+   gr  = {slug: node_attr("knowledgeNeed")}     # MATCH (n:BodhiInstance) RETURN n.knowledgeNeed
+   assert all((pg[s] or "") == (gr.get(s) or "") for s in pg)   # 必须 0 差异 ✓
+   ```
+   > 这条检查正是"图为主、PG 可重建"的**验收断言** ✓：图 PG 一致 ⇒ 任一来源都能重建另一份 ✓。
+
+## 9. 读路径的"来源"必须回执
+所有契约/计划都必须带 `source`（`graph:BodhiInstance` / `pg:page_metadata` ✓）与 `hash` ✓：
+- 一旦某条走了 PG 降级 ✓ ⇒ 说明图缺数据 ✗ ⇒ 触发 `rebuild_kb_graph` ✓ 而不是长期靠降级 ✓。
+
 1. 需要 `version` / `deleted_at` / 软删过滤 ✓
 2. 需要 `page_metadata` 全量（含非属性段 ✓）
 3. 图服务不可用（降级 ✓）
