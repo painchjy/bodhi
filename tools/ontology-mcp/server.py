@@ -3417,6 +3417,21 @@ def tool_definitions() -> list[dict]:
                 "required": ["kb_id", "task"]},
         },
         {
+            "name": "rules_resolve",
+            "description": ("**按步骤解析规则（只读，推荐用这个）**：任务由**步骤**组成，每步自选解析方式 —— "
+                            "`direct:<slug>[,<slug>…]` 直接指定；`policy:<策略名/slug片段>` 经策略**递归解析**"
+                            "（`isDerivedFrom` 入边 + `includesBusinessPolicy` 出边，支持策略包含策略）；"
+                            "`ask` **只回可选范围**（策略清单）由用户定；`task:<任务>` 兼容旧行为（= `rules_of_task`）；"
+                            "`path:` 预留。回执统一：`resolved_by` + `rules[…]`（含 `needs_extract` / "
+                            "`required_fields` / `source` / `strategies`）+ `hash`（可断言）。"
+                            "⚠️ 取规则请优先用本工具：它不假设\"任务=一组规则\"，而是**按步骤**解析。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "领域库（规则/策略/任务都在这里）"},
+                "spec": {"type": "string", "description": "direct:<slug,…> | policy:<策略> | ask | task:<任务> | path:…"},
+                "limit": {"type": "integer"}},
+                "required": ["kb_id", "spec"]},
+        },
+        {
             "name": "page_attributes_set",
             "description": ("**改一页的数据属性（方案 D，写）**：entity 模式的知识页 —— 正文是**只读渲染**、"
                             "数据属性是**事实源**。给 `patch`（键=本体数据属性，可带/不带模块前缀；"
@@ -4118,6 +4133,10 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                             args.get("patch") or {},
                                             actor=str(args.get("actor", "")),
                                             dry_run=bool(_pa_dry))
+    if name == "rules_resolve":
+        # 2026-10-16（用户口径）：**按步骤解析规则**（direct/policy 递归/ask/task 兼容/path 预留）
+        return ke_review.rules_resolve(str(args.get("kb_id", "")), str(args.get("spec", "")),
+                                       int(args.get("limit", 300) or 300))
     if name == "rules_of_task":
         # 2026-10-16（用户口径）：**按任务取规则契约**（图边 taskExecutesRule + 页面属性真读；
         # 带 needs_extract 分流 / required_fields / source 出处 / hash 指纹 ⇒ 反假断言可验）
