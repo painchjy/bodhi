@@ -118,6 +118,86 @@ def alias_keys(page_type: str = "") -> list[str]:
     return out
 
 
+def ontology_paths(from_class: str, to_class: str, max_hops: int = 3, limit: int = 50) -> dict:
+    """**类 → 类 的通路枚举**（只读，用编译产物 `relations[].domain/range`）。
+
+    为什么需要它（用户口径 2026-10-16）：检索"已知节点 → 关联知识"时，**不要用跳数反复试** ✗ ——
+    先在**本体模型**里把"源类 → 目标类"的**全部通路**枚举出来：
+      · 唯一通路 ⇒ 直接按它查实例 ✓；
+      · 多条通路 ⇒ 交用户**选一条**或**取并集** ✓；
+      · 无通路 ⇒ 返回"可用类型 + 近似建议"，请用户再明确源/目标类型 ✓（不直接报错 ✗）。
+
+    两个必须注意的点：
+      ① **关系可能互为逆**（如 `bmm:isDerivedFrom` ↔ `bmm:isBasisFor`）⇒ 两个方向都要能走，
+         回执里用 `dir` 标出是"正向 / 反向使用" ✓；
+      ② **策略可包含策略**（`bmm:includesBusinessPolicy`）⇒ 通路可能更长/更多，故按 `max_hops` 枚举。
+
+    返回：
+        {"from","to","paths":[{"hops","seq":[rel,..],"classes":[..],"dirs":["fwd|rev",..],"display"}],
+         "count","truncated","max_hops"}
+    """
+    data = index_data() or {}
+    adj: dict = {}
+    for model in (data.get("models") or []):
+        for rel in (model.get("relations") or []):
+            name = str(rel.get("name") or "")
+            if not name:
+                continue
+            for dom in (rel.get("domain") or []):
+                for rng in (rel.get("range") or []):
+                    if not dom or not rng:
+                        continue
+                    adj.setdefault(dom, []).append((rng, name, "fwd"))
+                    adj.setdefault(rng, []).append((dom, name, "rev"))   # 反向同样可走 ✓
+
+    src = str(from_class or "").strip()
+    dst = str(to_class or "").strip()
+    if not src or not dst:
+        raise ValueError("ontology_paths 需要 from_class 与 to_class")
+    if src == dst:
+        return {"from": src, "to": dst, "paths": [], "count": 0, "truncated": False,
+                "max_hops": max_hops, "note": "源=目标，无需通路"}
+
+    found: list = []
+
+    def _dfs(node: str, visited: set, seq: list) -> None:
+        if len(found) >= int(limit):
+            return
+        for nxt, rel, direction in adj.get(node, []):
+            if nxt in visited:
+                continue
+            step = (rel, nxt, direction)
+            if nxt == dst:
+                found.append(list(seq) + [step])
+                if len(found) >= int(limit):
+                    return
+                continue
+            if len(seq) + 1 >= int(max_hops):
+                continue
+            _dfs(nxt, visited | {nxt}, seq + [step])
+
+    _dfs(src, {src}, [])
+    found.sort(key=lambda p: (len(p), "".join(x[0] for x in p)))
+    paths = []
+    for seq in found:
+        paths.append({
+            "hops": len(seq),
+            "seq": [x[0] for x in seq],
+            "dirs": [x[2] for x in seq],
+            "classes": [src] + [x[1] for x in seq],
+            "display": " —".join([src] + ["[%s%s]→ %s" % ("%s" % x[0], "" if x[2] == "fwd" else "(反向)",
+                                                            x[1]) for x in seq]),
+        })
+    out = {"from": src, "to": dst, "paths": paths, "count": len(paths),
+           "truncated": len(found) >= int(limit), "max_hops": int(max_hops)}
+    if not paths:
+        # 无通路 ⇒ 给出"近似建议"（同行/同类最近可达），请用户再明确源/目标类型 ✓
+        reach = sorted({n for n, _r, _d in adj.get(src, [])})[:12]
+        out["hint"] = ("没有 ≤%d 跳的通路：请再明确源类/目标类（或先补一条关系）。"
+                       "源类可直接到达的类示例：%s" % (max_hops, "、".join(reach) or "（无）"))
+    return out
+
+
 def module_short(module_key: str) -> str:
     """**模块短名**（TTL `bodhi:shortName`；未知则回退 label → key）。
 
