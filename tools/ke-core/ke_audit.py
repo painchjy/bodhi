@@ -1837,12 +1837,26 @@ def check_graph_pg_drift(ctx: dict, rep: Report) -> None:
     if not g:
         return
     skip = {"kb", "slug", "pt", "module", "name", "wc", "tenant", "page_type", "tenant_id"}
+
+    def _norm(s) -> str:
+        """比较前规范化：JSON 值统一 `sort_keys` + 无空格 ⇒ 消除 `[1,2]` vs `[1, 2]` 假阳性 ✓"""
+        t = ("" if s is None else str(s)).strip()
+        if not t or t[0] not in "[{":
+            return t
+        try:
+            import json as _j  # noqa: PLC0415
+            return _j.dumps(_j.loads(t), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except Exception:  # noqa: BLE001
+            return t
+
     drift, no_node = [], []
     for i in range(0, len(slugs), 200):
         chunk = slugs[i:i + 200]
         for r in ke_db.psql_csv(
                 "SELECT slug, page_metadata->'ontology'->'attributes' AS a FROM wiki_pages "
-                " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s)"
+                " WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                "   AND COALESCE(page_type,'') <> 'index' AND slug NOT LIKE '%%/index' "
+                "   AND slug IN (%s)"
                 % (ke_db.sql_str(kb), ", ".join(ke_db.sql_str(s) for s in chunk))):
             slug = str(r.get("slug"))
             if slug not in g:
@@ -1862,7 +1876,7 @@ def check_graph_pg_drift(ctx: dict, rep: Report) -> None:
                     continue
                 pv = ("" if v is None else str(v)).strip()
                 gv = ("" if g[slug].get(key) is None else str(g[slug].get(key))).strip()
-                if pv != gv:
+                if _norm(v) != _norm(g[slug].get(key)):
                     diffs.append(key)
             if diffs:
                 drift.append((slug, diffs))
