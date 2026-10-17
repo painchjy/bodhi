@@ -142,23 +142,37 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
         if not hits:
             raise ValueError("找不到策略（含 %r）；现有策略：%s"
                              % (arg, "、".join(x["t"] for x in _pols())))
-        slugs, seen, queue = [], set(), [hits[0]["slug"]]
-        while queue:                              # 策略可包含策略 ⇒ 递归 ✓
-            pol = queue.pop(0)
-            if pol in seen:
-                continue
-            seen.add(pol)
-            try:
-                rel = _kg.relations_of(kb, pol) or {}
-            except Exception:  # noqa: BLE001
-                rel = {}
-            for e in (rel.get("in") or []):        # 规则 --isDerivedFrom--> 策略
-                if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor") and e.get("source_slug"):
-                    if e["source_slug"] not in slugs:
-                        slugs.append(e["source_slug"])
-            for e in (rel.get("out") or []):       # 策略 --includesBusinessPolicy--> 策略
-                if e.get("type") == "bmm:includesBusinessPolicy" and e.get("target_slug"):
-                    queue.append(e["target_slug"])
+        root = hits[0]["slug"]
+        slugs = []
+        try:                             # **一次** Cypher：策略闭包（includes 递归）+ 指向它的规则 ✓
+            import ke_neo4j as _neo
+            rr = _neo.query(
+                "MATCH (p:BodhiInstance {kb_id:$kb, slug:$pol}) "
+                "OPTIONAL MATCH (p)-[:`bmm:includesBusinessPolicy`*0..4]->(q:BodhiInstance {kb_id:$kb}) "
+                "WITH collect(DISTINCT coalesce(q.slug, p.slug)) AS pols "
+                "MATCH (r:BodhiInstance {kb_id:$kb})-[e]->(x:BodhiInstance {kb_id:$kb}) "
+                "WHERE x.slug IN pols AND type(e) IN ['bmm:isDerivedFrom','bmm:isBasisFor'] "
+                "RETURN DISTINCT r.slug AS slug",
+                {"kb": kb, "pol": root}, timeout=8)
+            slugs = [str(x.get("slug")) for x in (rr or []) if x.get("slug")]
+        except Exception:                # noqa: BLE001  图不可用 ⇒ 逐条回溯（慢但可用）
+            seen, queue = set(), [root]
+            while queue:
+                pol = queue.pop(0)
+                if pol in seen:
+                    continue
+                seen.add(pol)
+                try:
+                    rel = _kg.relations_of(kb, pol) or {}
+                except Exception:        # noqa: BLE001
+                    rel = {}
+                for e in (rel.get("in") or []):        # 规则 --isDerivedFrom--> 策略
+                    if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor") and e.get("source_slug"):
+                        if e["source_slug"] not in slugs:
+                            slugs.append(e["source_slug"])
+                for e in (rel.get("out") or []):       # 策略 --includesBusinessPolicy--> 策略
+                    if e.get("type") == "bmm:includesBusinessPolicy" and e.get("target_slug"):
+                        queue.append(e["target_slug"])
         rules = _rule_contracts(kb, slugs, kb_name)
         resolved_by = "policy"
     elif kind == "ask":
@@ -181,41 +195,80 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
 
 
 def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
-    """规则页 → 统一契约（与 `rules_of_task` 的字段一致 ✓）。"""
+    """规则页 → 统一契约（与 `rules_of_task` 的字段一致 ✓）。
+
+    **图本优先**（2026-10-16 用户口径 ✓）：规则属性（`ruleImplementation` / `knowledgeNeed` /
+    `enforcementLevel` / `ruleScope` / `ruleReference`）与出边（`isDerivedFrom` 等）**都在图节点上**
+    （写路径 `ke_pages` → `ke_graph.upsert_node(attributes=…)` 去前缀写入 ✓），
+    所以**一次 Cypher** 取全；仅当图不可用、或该 slug 在图上一条属性都没有时，才降级 PG ✓。
+    """
     import ke_graph as _kg
 
-    if not slugs:
+    want = [str(s).strip() for s in (slugs or []) if str(s).strip()]
+    if not want:
         return []
-    lst = ", ".join(ke_db.sql_str(s) for s in slugs)
+
+    g = {}
+    try:
+        import ke_neo4j as _neo
+        for r in _neo.query(
+                "MATCH (n:BodhiInstance {kb_id:$kb}) WHERE n.slug IN $slugs "
+                "OPTIONAL MATCH (n)-[rel]->(m:BodhiInstance {kb_id:$kb}) "
+                "RETURN n.slug AS slug, n.name AS title, n.definition AS dfn, "
+                "       n.ruleImplementation AS impl, n.knowledgeNeed AS need, "
+                "       n.enforcementLevel AS lvl, n.ruleScope AS scope, "
+                "       n.ruleReference AS ref, n.note AS note, "
+                "       collect(DISTINCT {t: type(rel), s: m.slug}) AS outs",
+                {"kb": kb_id, "slugs": want}, timeout=6) or []:
+            g[str(r.get("slug") or "")] = r
+    except Exception:  # noqa: BLE001  图不可用 ⇒ 全部下降级 PG
+        g = {}
+
+    miss = [s for s in want
+            if not (g.get(s) and (g[s].get("impl") or g[s].get("need") or g[s].get("lvl")))]
+    pg = {}
+    if miss:                                   # 正常应为 0 条（属性都在图上 ✓）
+        for r in ke_db.psql_csv(
+                "SELECT slug, COALESCE(title,'') AS title, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleImplementation','') AS impl, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:knowledgeNeed','') AS need, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleScope','') AS scope, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:enforcementLevel','') AS lvl, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleReference','') AS ref, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
+                " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s) "
+                " ORDER BY slug" % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(s) for s in miss))):
+            pg[str(r["slug"])] = r
+
     out = []
-    for r in ke_db.psql_csv(
-            "SELECT slug, COALESCE(title,'') AS title, "
-            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleImplementation','') AS impl, "
-            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:knowledgeNeed','') AS need, "
-            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleScope','') AS scope, "
-            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:enforcementLevel','') AS lvl, "
-            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleReference','') AS ref, "
-            "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
-            "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
-            " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s) "
-            " ORDER BY slug" % (ke_db.sql_str(kb_id), lst)):
-        impl, need = str(r["impl"] or ""), str(r["need"] or "")
-        try:
-            pol = [e.get("target_slug") for e in ((_kg.relations_of(kb_id, r["slug"]) or {}).get("out") or [])
-                   if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor")]
-        except Exception:  # noqa: BLE001
-            pol = []
-        out.append({"slug": r["slug"], "title": r["title"],
-                    "definition": str(r["dfn"] or r["note"] or "")[:400],
-                    "implementation": impl, "knowledgeNeed": need, "scope": str(r["scope"] or ""),
-                    "enforcement": str(r["lvl"] or ""), "reference": str(r["ref"] or ""),
+    for slug in sorted(want):
+        r = g.get(slug) or pg.get(slug) or {}
+        impl, need = str(r.get("impl") or ""), str(r.get("need") or "")
+        if slug in g:
+            pols = [e.get("s") for e in (r.get("outs") or [])
+                    if e.get("s") and e.get("t") in ("bmm:isDerivedFrom", "bmm:isBasisFor")]
+            src = "graph:BodhiInstance"
+        else:
+            try:
+                pols = [e.get("target_slug")
+                        for e in ((_kg.relations_of(kb_id, slug) or {}).get("out") or [])
+                        if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor")]
+            except Exception:  # noqa: BLE001
+                pols = []
+            src = "pg:page_metadata"
+        pols = [p for i, p in enumerate(pols) if p and p not in pols[:i]]
+        out.append({"slug": slug, "title": str(r.get("title") or ""),
+                    "definition": str(r.get("dfn") or r.get("note") or "")[:400],
+                    "implementation": impl, "knowledgeNeed": need, "scope": str(r.get("scope") or ""),
+                    "enforcement": str(r.get("lvl") or ""), "reference": str(r.get("ref") or ""),
                     "needs_extract": bool(need) or ("知识提取" in impl),
-                    "strategies": pol,
+                    "strategies": pols,
                     "required_fields": {"conclusion": "合规｜违规｜不适用｜待澄清（逐字枚举）",
                                         "evidence": "原文证据（逐字摘录，可回溯）",
                                         "severity": "高｜中｜低（违规时必填）",
                                         "rule_ref": "本规则的 slug（出处）"},
-                    "source": "graph:taskExecutesRule"})
+                    "source": src})
     return out
 
 
@@ -242,16 +295,6 @@ def rules_of_task(kb_id: str = "", task: str = "", limit: int = 300) -> dict:
     q = (task or "").strip()
     if not q:
         raise ValueError("rules_of_task 需要 task（任务页 slug 片段或标题片段）")
-    trows = _db.psql_csv(
-        "SELECT slug, COALESCE(title,'') AS title, "
-        "       COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn "
-        "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
-        "   AND page_type = 'bpmn:Task' AND (slug LIKE %s OR title LIKE %s) LIMIT 5"
-        % (_db.sql_str(kb), _db.sql_str("%%%s%%" % q), _db.sql_str("%%%s%%" % q)))
-    if not trows:
-        raise ValueError("找不到任务页（bpmn:Task，slug/标题含 %r）" % q)
-    task_slug = trows[0]["slug"]
-
     def _edges(slug: str) -> list:
         try:
             r = _kg.relations_of(kb, slug)
@@ -259,59 +302,58 @@ def rules_of_task(kb_id: str = "", task: str = "", limit: int = 300) -> dict:
             return []
         return (r or {}).get("out") or []
 
-    task_edges = _edges(task_slug)
-    rule_slugs = [e.get("target_slug") for e in task_edges
-                  if e.get("type") == "bpmn:taskExecutesRule" and e.get("target_slug")]
-    dataobjects = [{"slug": e.get("target_slug"), "title": e.get("target_title"),
-                    "type": e.get("type")} for e in task_edges
-                   if e.get("type") == "bpmn:taskUsesDataObject"]
-    roles = [{"slug": e.get("target_slug"), "title": e.get("target_title")} for e in task_edges
-             if e.get("type") == "bpmn:taskHasRole"]
+    # ① 任务页 + 出边：**一次 Cypher**（图本优先 ✓，与 `_rule_contracts` 同口径）
+    task_slug, task_title, task_dfn, task_edges = "", "", "", []
+    try:
+        import ke_neo4j as _neo
+        rows = _neo.query(
+            "MATCH (t:BodhiInstance {kb_id:$kb}) "
+            "WHERE t.page_type = 'bpmn:Task' AND (t.slug CONTAINS $q OR coalesce(t.name,'') CONTAINS $q) "
+            "WITH t LIMIT 1 OPTIONAL MATCH (t)-[e]->(m:BodhiInstance {kb_id:$kb}) "
+            "RETURN t.slug AS slug, coalesce(t.name,'') AS nm, coalesce(t.definition,'') AS dfn, "
+            "       collect(DISTINCT {t: type(e), s: m.slug, n: coalesce(m.name,'')}) AS outs",
+            {"kb": kb, "q": q}, timeout=8)
+        if rows and rows[0].get("slug"):
+            task_slug = str(rows[0]["slug"])
+            task_title = str(rows[0].get("nm") or "")
+            task_dfn = str(rows[0].get("dfn") or "")
+            task_edges = [e for e in (rows[0].get("outs") or []) if e.get("t")]
+    except Exception:  # noqa: BLE001  图不可用 ⇒ PG 兜底
+        task_edges = []
 
-    rules: list = []
-    if rule_slugs:
-        lst = ", ".join(_db.sql_str(s) for s in rule_slugs)
-        for r in _db.psql_csv(
-                "SELECT slug, COALESCE(title,'') AS title, "
-                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleImplementation','') AS impl, "
-                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:knowledgeNeed','') AS need, "
-                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleScope','') AS scope, "
-                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:enforcementLevel','') AS lvl, "
-                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleReference','') AS ref, "
-                "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
-                "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
-                " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s) "
-                " ORDER BY slug" % (_db.sql_str(kb), lst)):
-            impl, need = str(r["impl"] or ""), str(r["need"] or "")
-            # A/B 类分流（口径）：实现方式写"知识提取"或声明了所需知识 ⇒ 需先抽取事实
-            needs_extract = bool(need) or ("知识提取" in impl)
-            strategies = [{"slug": e.get("target_slug"), "title": e.get("target_title"),
-                           "type": e.get("type")} for e in _edges(r["slug"])
-                          if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor")]
-            rules.append({
-                "slug": r["slug"], "title": r["title"],
-                "definition": str(r["dfn"] or r["note"] or "")[:400],
-                "implementation": impl, "knowledgeNeed": need, "scope": str(r["scope"] or ""),
-                "enforcement": str(r["lvl"] or ""), "reference": str(r["ref"] or ""),
-                "needs_extract": needs_extract,
-                "strategies": strategies,
-                "required_fields": {          # 结论的最小契约（技能按它输出，避免各写各的 ✗）
-                    "conclusion": "合规｜违规｜不适用｜待澄清（逐字枚举）",
-                    "evidence": "原文证据（逐字摘录，可回溯）",
-                    "severity": "高｜中｜低（违规时必填）",
-                    "rule_ref": "本规则的 slug（出处）",
-                },
-                "source": "graph:taskExecutesRule",
-            })
+    if not task_slug:
+        trows = _db.psql_csv(
+            "SELECT slug, COALESCE(title,'') AS title, "
+            "       COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn "
+            "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+            "   AND page_type = 'bpmn:Task' AND (slug LIKE %s OR title LIKE %s) LIMIT 5"
+            % (_db.sql_str(kb), _db.sql_str("%%%s%%" % q), _db.sql_str("%%%s%%" % q)))
+        if not trows:
+            raise ValueError("找不到任务页（bpmn:Task，slug/标题含 %r）" % q)
+        task_slug, task_title = trows[0]["slug"], trows[0]["title"]
+        task_dfn = trows[0]["dfn"]
+        task_edges = [{"t": e.get("type"), "s": e.get("target_slug"), "n": e.get("target_title")}
+                      for e in _edges(task_slug)]
+
+    rule_slugs = [e.get("s") for e in task_edges
+                  if e.get("t") == "bpmn:taskExecutesRule" and e.get("s")]
+    dataobjects = [{"slug": e.get("s"), "title": e.get("n"), "type": e.get("t")}
+                   for e in task_edges if e.get("t") == "bpmn:taskUsesDataObject"]
+    roles = [{"slug": e.get("s"), "title": e.get("n")} for e in task_edges
+             if e.get("t") == "bpmn:taskHasRole"]
+
+    rules = _rule_contracts(kb, rule_slugs, kb_name)   # 一次 Cypher（属性 + 策略边）✓
+    for x in rules:                                    # 标注"经任务边到达"（可审计 ✓）
+        x["via"] = "bpmn:taskExecutesRule"
     payload = {"task": task_slug, "rules": rules}
     return {"ok": True, "kb": {"id": kb, "name": kb_name},
-            "task": {"slug": task_slug, "title": trows[0]["title"], "definition": trows[0]["dfn"][:400],
+            "task": {"slug": task_slug, "title": task_title, "definition": task_dfn[:400],
                      "dataobjects": dataobjects, "roles": roles},
             "rules": rules[:int(limit or 300)],
             "counts": {"rules": len(rules),
                        "needs_extract": sum(1 for x in rules if x["needs_extract"]),
                        "direct_judge": sum(1 for x in rules if not x["needs_extract"])},
-            "read_from": "neo4j(graph edges) + pg(page attributes)",
+            "read_from": "neo4j(node attrs + edges)",
             "hash": hashlib.sha256(_json.dumps(payload, ensure_ascii=False,
                                                sort_keys=True).encode("utf-8")).hexdigest()[:16]}
 
