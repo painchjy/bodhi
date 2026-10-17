@@ -157,3 +157,17 @@
     rdfs:domain :Task ;
     rdfs:range bmm:SubSystem ;
     rdfs:comment "任务由哪个系统实现/承载（如『问题管理』由 IT 工作平台承载）⇒ 该任务归属对象的权威系统"@zh .
+
+# ============================================================
+# 2026-10-16（用户口径 · 第 5 条）：**任务执行策略**
+#   任务 → 策略 → （策略包含）规则 ⇒ 与"任务 → 规则"（taskExecutesRule）**并存**：
+#   · 直接路径：Task --taskExecutesRule--> BusinessRule
+#   · 间接路径：Task --taskExecutesPolicy--> BusinessPolicy --isBasisFor--> BusinessRule
+#   检索工具（knowledge_lookup 模式二）应先用 ontology_paths 找**全部路径**；
+#   多条时让用户选一条或取**并集** ⇒ 这正是"规则搜索成功率"的验证场景。
+# ============================================================
+:taskExecutesPolicy a owl:ObjectProperty ;
+    rdfs:label "任务执行策略"@zh ;
+    rdfs:domain :Task ;
+    rdfs:range <http://example.org/bmm#BusinessPolicy> ;
+    rdfs:comment "任务按哪条业务策略执行（策略包含的规则构成判定的间接路径；与 taskExecutesRule 直接绑定并存）"@zh .
