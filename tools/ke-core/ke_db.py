@@ -232,6 +232,25 @@ def psql_csv(sql: str) -> list[dict]:
     return list(csvlib.DictReader(io.StringIO(psql(sql, csv=True))))
 
 
+# 2026-10-16：**kb 清单缓存**（实测 1 次 psql 往返 ≈ 230ms ✗，而 kb 列表几乎不变 ✓）
+#   · 默认 TTL 60s；设 `BODHI_KB_CACHE_TTL=0` 可关闭缓存（写路径需要"立刻可见"时用）；
+#   · 只缓存「库清单」这一张极小的表 ✓，不含任何业务数据 ✓。
+_KB_CACHE_TTL = float(os.environ.get("BODHI_KB_CACHE_TTL", "60") or 0)
+_kb_cache: dict = {"at": 0.0, "rows": []}
+
+
+def _kb_rows() -> list[dict]:
+    """取知识库清单（进程内缓存 ✓）：`id, name`，按更新时间倒序。"""
+    now = time.time()
+    if _kb_cache["rows"] and _KB_CACHE_TTL > 0 and (now - _kb_cache["at"]) < _KB_CACHE_TTL:
+        return _kb_cache["rows"]
+    rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
+                    "ORDER BY updated_at DESC")
+    if _KB_CACHE_TTL > 0:
+        _kb_cache.update(at=now, rows=rows)
+    return rows
+
+
 def resolve_kb_id(raw: str) -> tuple[str, str, str]:
     """把 kb_id 参数解析成真实 UUID：支持 UUID / UUID 前缀 / 知识库名称（精确或包含，忽略空格）。
 
@@ -240,8 +259,7 @@ def resolve_kb_id(raw: str) -> tuple[str, str, str]:
     否则调用方无从纠正；这里也支持用 UUID 前缀（如 `dbc2528f`）解析。
     """
     raw = (raw or "").strip()
-    rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
-                    "ORDER BY updated_at DESC")
+    rows = _kb_rows()
     options = "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in rows) or "（无）"
     if re.fullmatch(r"[0-9a-fA-F-]{36}", raw):
         hit = [r for r in rows if r["id"].lower() == raw.lower()]
@@ -282,8 +300,7 @@ def resolve_kb_candidate(raw: str) -> tuple[str, str, str]:
     - 命中 0 个 / 多个 / 参数为空或占位符 → 抛 ValueError（带可选清单，供调用方纠正）。
     """
     raw = (raw or "").strip()
-    rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
-                    "ORDER BY updated_at DESC")
+    rows = _kb_rows()
     options = "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in rows) or "（无）"
     if not raw:
         raise ValueError("kb_id 不能为空：**写库必须明确指定一个知识库**；可选：%s" % options)
