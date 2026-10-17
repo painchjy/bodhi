@@ -93,7 +93,13 @@ def _attrs_from_content(content: str) -> dict[str, str]:
 
 
 def _attrs_of(page_meta_json: str) -> dict[str, str]:
-    """从 `page_metadata.ontology.attributes` 取数据属性（键去模块前缀，只留标量）。"""
+    """从 `page_metadata.ontology.attributes` 取数据属性（键去模块前缀）。
+
+    2026-10-17 修：**对象/数组不再丢弃** ✗→✓ —— 统一序列化为**紧凑 JSON 字符串** ✓
+    （`verdicts={"符合":3,…}` 这类属性必须能上图 ✓，否则 `rebuild_kb_graph` 搬不回来 ✗，
+      与 `upsert_nodes_batch` 的序列化口径一致 ✓：`json.dumps(ensure_ascii=False, sort_keys=True,
+      separators=(",", ":"))`）。
+    """
     out: dict[str, str] = {}
     try:
         data = json.loads(page_meta_json or "{}")
@@ -104,6 +110,8 @@ def _attrs_of(page_meta_json: str) -> dict[str, str]:
         if v is None:
             continue
         if isinstance(v, (dict, list)):
+            out[str(k).split(":")[-1]] = json.dumps(v, ensure_ascii=False, sort_keys=True,
+                                                    separators=(",", ":"))
             continue
         out[str(k).split(":")[-1]] = str(v)
     return out
