@@ -214,8 +214,11 @@ def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
                                   capture_output=True, check=False, env=env)
         else:
             cmd += (["--csv", "-c", sql] if csv else ["-t", "-A", "-c", sql])
+            # 2026-10-16 修：`docker exec -i` 会**读 stdin 直到 EOF** ✗；若 stdin 继承自父进程
+            # （非交互脚本/服务下是未关闭的管道）⇒ **永久阻塞** ✗（实测：WSL 里 psql 挂死，
+            # 同一命令在 bash 手敲却 154ms ✓）。所以这里必须显式给 /dev/null ⇒ 立即 EOF ✓。
             done = subprocess.run(cmd, text=True, encoding="utf-8", capture_output=True,
-                                  check=False, env=env)
+                                  check=False, env=env, stdin=subprocess.DEVNULL)
         if done.returncode != 0:
             _ok = False
             raise RuntimeError("psql 失败：%s" % (done.stderr or done.stdout)[:600])
