@@ -519,11 +519,20 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
                ke_db.sql_json(_uniq_str(source_refs)),
                ke_db.sql_json(_uniq_str(chunk_refs)),
                ke_db.sql_json(_alias_derived)))
+    # ② **图先写**（2026-10-17 用户口径 ✓）：顺序必须是「图 → PG」✓
+    #    图节点写不成功 ⇒ **拒绝建 PG 页** ✓（不能出现"只有 PG、没有图"的半成品 ✗，
+    #    也就不会再有"事后补图"这种补救流程 ✗ —— 与 `write_knowledge` 的 §8「图本优先」一致 ✓）。
+    try:
+        _kg.upsert_node(kb_id, slug, title, page_type,
+                        attributes=_attrs_for_graph, wiki_content=_wiki_content_for_graph)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("图节点写入失败，已拒绝建页（图本优先，契约 §8）：%s" % str(exc)[:200])
+    # ③ 图成功后再落 PG
     ke_db.psql("BEGIN;\nINSERT INTO wiki_pages (%s) VALUES (%s);\nCOMMIT;\n" % (cols, vals), stdin=True)
     if sync_folders:
         _sync_folders(kb_id)
     return {"slug": slug, "created": True, "before_version": 0, "after_version": 1,
-            "category_path": cat,
+            "category_path": cat, "graph": {"ok": True, "node": "upserted"},
             "content": _wiki_content_for_graph, "attrs": _attrs_for_graph}
 
 
@@ -1215,6 +1224,10 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
         except Exception as exc:  # noqa: BLE001
             graph["ok"] = False
             graph["reason"] = "图节点写入失败：%s" % str(exc)[:180]
+            if sink is None:
+                # 2026-10-17 用户口径 ✓：单条写路径 **fail-closed** —— 图写不成 ⇒ 不落 PG ✓
+                # （批量路径 `sink` 由图节点由调用方一条 UNWIND 写 ✓，不在此处阻断）
+                raise RuntimeError(graph["reason"])
     # ② 节点落 PG（建/合并页）—— **关系校验（domain/range、目标页存在）要读 PG 的 `page_type`**，
     #    所以必须在建边之前完成：否则源/目标页未落库 → add_edge 报「目标页不存在」（2026-10-09 修）。
     # 溯源列（契约 §5，2026-10-09 补内核缺口）：文档来源 → `source_refs`；片段/分块 → `chunk_refs`。
