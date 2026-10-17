@@ -121,6 +121,21 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
     kind, arg = kind.strip().lower(), arg.strip()
 
     def _pols(like: str = "") -> list:
+        """策略清单：**图查优先**（实测 ~10ms ✓）；图不可用才回 PG（~230ms ✗）。"""
+        try:
+            import ke_neo4j as _neo
+            rows = _neo.query(
+                "MATCH (n:BodhiInstance {kb_id:$kb}) WHERE n.page_type = 'bmm:BusinessPolicy' "
+                + ("AND (n.slug CONTAINS $q OR coalesce(n.name,'') CONTAINS $q) " if like else "")
+                + "RETURN n.slug AS slug, coalesce(n.name,'') AS t ORDER BY t LIMIT %d"
+                % (5 if like else 200),
+                {"kb": kb, "q": like}, timeout=8)
+            out = [{"slug": str(r.get("slug")), "t": str(r.get("t") or "")}
+                   for r in (rows or []) if r.get("slug")]
+            if out or like:                 # 带过滤且无命中 ⇒ 就是没有 ✓（不回 PG ✗）
+                return out
+        except Exception:  # noqa: BLE001  图不可用 ⇒ 下降级 PG
+            pass
         cond = ""
         if like:
             needle = ke_db.sql_str("%%%s%%" % like)
