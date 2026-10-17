@@ -121,8 +121,10 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
     kind, arg = kind.strip().lower(), arg.strip()
 
     def _pols(like: str = "") -> list:
-        cond = ("AND (slug LIKE '%s' OR title LIKE '%s')"
-                % (ke_db.sql_str("%%%s%%" % like), ke_db.sql_str("%%%s%%" % like))) if like else ""
+        cond = ""
+        if like:
+            needle = ke_db.sql_str("%%%s%%" % like)
+            cond = "AND (slug LIKE %s OR title LIKE %s)" % (needle, needle)
         return ke_db.psql_csv(
             "SELECT slug, COALESCE(title,'') AS t FROM wiki_pages "
             " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND page_type = 'bmm:BusinessPolicy' "
