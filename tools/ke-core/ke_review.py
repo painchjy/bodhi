@@ -97,6 +97,126 @@ def _bmm_rule_class_closure() -> list:
         return []
 
 
+def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
+    """**按步骤解析规则**（取代"任务→规则"的单一解 ✗）。
+
+    `spec` 五种（**每步自选** ✓）：
+      · `direct:<slug>[,<slug>…]`   直接指定 ✓
+      · `policy:<策略名/slug 片段>`  经策略解析（**递归**：`isDerivedFrom` 入边 + `includesBusinessPolicy` 出边）✓
+      · `ask`                        不回规则，回**可选范围**（策略清单），由用户定 ✓
+      · `task:<任务名/slug>`         兼容旧行为（任务 → `taskExecutesRule`）✓
+      · `path:<json>`                预留（`ontology_paths` 多路径并集）✓
+
+    回执：`{resolved_by, rules[…与 rules_of_task 逐字段一致…], scope_options[], counts, hash}` ✓
+    """
+    import hashlib
+    import json as _json
+    import ke_graph as _kg
+
+    kb, kb_name, _n = ke_db.resolve_kb_id(kb_id)
+    sp = (spec or "").strip()
+    if not sp:
+        raise ValueError("rules_resolve 需要 spec（direct:/policy:/ask/task:/path:）")
+    kind, _, arg = sp.partition(":")
+    kind, arg = kind.strip().lower(), arg.strip()
+
+    def _pols(like: str = "") -> list:
+        cond = ("AND (slug LIKE '%s' OR title LIKE '%s')"
+                % (ke_db.sql_str("%%%s%%" % like), ke_db.sql_str("%%%s%%" % like))) if like else ""
+        return ke_db.psql_csv(
+            "SELECT slug, COALESCE(title,'') AS t FROM wiki_pages "
+            " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND page_type = 'bmm:BusinessPolicy' "
+            "   %s ORDER BY title %s"
+            % (ke_db.sql_str(kb), cond, "LIMIT 5" if like else ""))
+
+    resolved_by, rules, options = kind, [], []
+    if kind == "direct":
+        rules = _rule_contracts(kb, [x.strip() for x in arg.split(",") if x.strip()], kb_name)
+    elif kind == "task":
+        rep = rules_of_task(kb, arg, limit)
+        resolved_by, rules = "task", rep.get("rules") or []
+    elif kind == "policy":
+        hits = _pols(arg)
+        if not hits:
+            raise ValueError("找不到策略（含 %r）；现有策略：%s"
+                             % (arg, "、".join(x["t"] for x in _pols())))
+        slugs, seen, queue = [], set(), [hits[0]["slug"]]
+        while queue:                              # 策略可包含策略 ⇒ 递归 ✓
+            pol = queue.pop(0)
+            if pol in seen:
+                continue
+            seen.add(pol)
+            try:
+                rel = _kg.relations_of(kb, pol) or {}
+            except Exception:  # noqa: BLE001
+                rel = {}
+            for e in (rel.get("in") or []):        # 规则 --isDerivedFrom--> 策略
+                if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor") and e.get("source_slug"):
+                    if e["source_slug"] not in slugs:
+                        slugs.append(e["source_slug"])
+            for e in (rel.get("out") or []):       # 策略 --includesBusinessPolicy--> 策略
+                if e.get("type") == "bmm:includesBusinessPolicy" and e.get("target_slug"):
+                    queue.append(e["target_slug"])
+        rules = _rule_contracts(kb, slugs, kb_name)
+        resolved_by = "policy"
+    elif kind == "ask":
+        options = [{"kind": "policy", "slug": x["slug"], "title": x["t"]} for x in _pols()]
+        resolved_by = "ask"
+    elif kind == "path":
+        resolved_by = "path"
+        options = [{"note": "path 模式待接入 ontology_paths + walk_path（下一步）"}]
+    else:
+        raise ValueError("未知 spec 前缀 %r（direct:/policy:/ask/task:/path:）" % kind)
+
+    payload = {"resolved_by": resolved_by, "spec": sp, "rules": rules}
+    return {"ok": True, "kb": {"id": kb, "name": kb_name}, "resolved_by": resolved_by, "spec": sp,
+            "rules": rules[:int(limit or 300)],
+            "counts": {"rules": len(rules),
+                       "needs_extract": sum(1 for x in rules if x.get("needs_extract"))},
+            "scope_options": options,
+            "hash": hashlib.sha256(_json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                                   .encode("utf-8")).hexdigest()[:16]}
+
+
+def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
+    """规则页 → 统一契约（与 `rules_of_task` 的字段一致 ✓）。"""
+    import ke_graph as _kg
+
+    if not slugs:
+        return []
+    lst = ", ".join(ke_db.sql_str(s) for s in slugs)
+    out = []
+    for r in ke_db.psql_csv(
+            "SELECT slug, COALESCE(title,'') AS title, "
+            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleImplementation','') AS impl, "
+            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:knowledgeNeed','') AS need, "
+            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleScope','') AS scope, "
+            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:enforcementLevel','') AS lvl, "
+            "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleReference','') AS ref, "
+            "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
+            "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
+            " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s) "
+            " ORDER BY slug" % (ke_db.sql_str(kb_id), lst)):
+        impl, need = str(r["impl"] or ""), str(r["need"] or "")
+        try:
+            pol = [e.get("target_slug") for e in ((_kg.relations_of(kb_id, r["slug"]) or {}).get("out") or [])
+                   if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor")]
+        except Exception:  # noqa: BLE001
+            pol = []
+        out.append({"slug": r["slug"], "title": r["title"],
+                    "definition": str(r["dfn"] or r["note"] or "")[:400],
+                    "implementation": impl, "knowledgeNeed": need, "scope": str(r["scope"] or ""),
+                    "enforcement": str(r["lvl"] or ""), "reference": str(r["ref"] or ""),
+                    "needs_extract": bool(need) or ("知识提取" in impl),
+                    "strategies": pol,
+                    "required_fields": {"conclusion": "合规｜违规｜不适用｜待澄清（逐字枚举）",
+                                        "evidence": "原文证据（逐字摘录，可回溯）",
+                                        "severity": "高｜中｜低（违规时必填）",
+                                        "rule_ref": "本规则的 slug（出处）"},
+                    "source": "graph:taskExecutesRule"})
+    return out
+
+
 def rules_of_task(kb_id: str = "", task: str = "", limit: int = 300) -> dict:
     """**按任务取规则契约（只读）** —— 取代"按策略取清单"的旧口径（`rules_of_policy` 只回清单、
     不带判定口径 ⇒ 智能体只能回去"看文档复原"✗）。
