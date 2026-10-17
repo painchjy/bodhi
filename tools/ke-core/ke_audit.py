@@ -1808,6 +1808,75 @@ def apply_plan(kb_id: str, plan_id: str, confirm: bool = False, page_limit: int 
 # ---------------------------------------------------------------------------
 # 编排 + CLI
 # ---------------------------------------------------------------------------
+def check_graph_pg_drift(ctx: dict, rep: Report) -> None:
+    """**W10 图↔PG 属性漂移**（2026-10-17）—— "图为主、PG 可重建"的**验收断言** ✓。
+
+    对每页比对：`page_metadata->'ontology'->'attributes'`（PG，键含前缀）
+    ↔ 图节点属性（**去前缀**，如 `bmm:knowledgeNeed` → `knowledgeNeed`）。
+    - 有差异 ⇒ 有人**绕过写核**直接改过 PG ✗（2026-10-17 实例：6 条规则的
+      `knowledgeNeed`/`ruleImplementation` 全部漂移 ✗）或重建没跑 ✓；
+    - 修法：`ke_graph.rebuild_kb_graph(kb_id)` ✓（只重建节点/属性 ✓ **保留边** ✓）。
+    - 图不可用 ⇒ 只记一条提示 ✓（不阻断其它检查 ✓）。
+    """
+    kb = ctx.get("kb_id") or ""
+    slugs = list(ctx.get("live") or [])[:1500]
+    if not kb or not slugs:
+        return
+    try:
+        import ke_neo4j as _neo  # noqa: PLC0415
+        g: dict = {}
+        for r in _neo.query(
+                "MATCH (n:BodhiInstance {kb_id:$kb}) WHERE n.slug IN $slugs "
+                "RETURN n.slug AS slug, properties(n) AS p",
+                {"kb": kb, "slugs": slugs}, timeout=10) or []:
+            g[str(r.get("slug"))] = r.get("p") or {}
+    except Exception as exc:  # noqa: BLE001
+        rep.add("W10", "low", kb, "图不可用，跳过图↔PG 漂移检查：%s" % exc,
+                "检查 Neo4j 可用性（ke_neo4j.available）")
+        return
+    if not g:
+        return
+    skip = {"kb", "slug", "pt", "module", "name", "wc", "tenant", "page_type", "tenant_id"}
+    drift, no_node = [], []
+    for i in range(0, len(slugs), 200):
+        chunk = slugs[i:i + 200]
+        for r in ke_db.psql_csv(
+                "SELECT slug, page_metadata->'ontology'->'attributes' AS a FROM wiki_pages "
+                " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s)"
+                % (ke_db.sql_str(kb), ", ".join(ke_db.sql_str(s) for s in chunk))):
+            slug = str(r.get("slug"))
+            if slug not in g:
+                no_node.append(slug)
+                continue
+            diffs = []
+            attrs = r.get("a") or {}
+            if isinstance(attrs, str):            # psql CSV ⇒ jsonb 以**字符串**返回 ✓
+                try:
+                    import json as _json  # noqa: PLC0415
+                    attrs = _json.loads(attrs)
+                except Exception:  # noqa: BLE001
+                    attrs = {}
+            for k, v in (attrs or {}).items():
+                key = str(k).split(":")[-1]
+                if not key or key in skip:
+                    continue
+                pv = ("" if v is None else str(v)).strip()
+                gv = ("" if g[slug].get(key) is None else str(g[slug].get(key))).strip()
+                if pv != gv:
+                    diffs.append(key)
+            if diffs:
+                drift.append((slug, diffs))
+    for slug, keys in drift[:20]:
+        rep.add("W10", "medium", kb,
+                "图↔PG 属性漂移：%s（差异键：%s）" % (slug, "、".join(keys[:6])),
+                "跑 `ke_graph.rebuild_kb_graph(kb_id)`（保留边）；并排查是否有脚本用 raw SQL 改属性 ✗")
+    for slug in no_node[:10]:
+        rep.add("W10", "low", kb, "页面在图里没有节点：%s" % slug,
+                "rebuild_kb_graph，或确认该页是否新建未同步")
+    if not drift and not no_node:
+        rep.add("W10", "low", kb, "图↔PG 属性一致（已比对 %d 页 ✓）" % len(g), "")
+
+
 def check_summary_drift(ctx: dict, rep: Report) -> None:
     """W5/W6 摘要·别名一致性**清单**（2026-10-16 用户口径：只列清单，供人工核查处理，不批量修）。
 
@@ -1918,6 +1987,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     if scope in ("all", "wiki"):
         check_wiki_graph(ctx, rep)
         check_summary_drift(ctx, rep)      # W5/W6 摘要·别名一致性清单（只列，供人工核查）
+        check_graph_pg_drift(ctx, rep)     # W10 图↔PG 属性漂移（"图为主"的验收断言）
     if scope in ("all", "model"):
         check_graph_model(ctx, rep)
         check_ontology_artifacts(ctx, rep)
