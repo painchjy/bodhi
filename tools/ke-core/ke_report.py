@@ -62,22 +62,20 @@ def render(sample: str, doc_title: str, facts: dict, domain_kb: str,
     for i, r in enumerate(lk["rules"], 1):
         md.append("| %d | %s | %s | %s |" % (i, r["title"], r["enforcement"] or "-",
                                             "是" if r["needs_extract"] else "否"))
-    md += ["", "## ③ 逐条结论", "", "| 编号 | 判定 | 可信度 |", "|---|---|---|"]
-    md += ["| %s | %s | %s / %.2f |" % (x["id"], x["verdict"], x["level"], x["score"]) for x in rows]
-    md += ["", "## ④ 问题清单（%d 列 ✓）" % len(cols), "",
+    md += ["", "## ③ 问题清单（%d 列 ✓）" % len(cols), "",
            "| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
     for x in rows:
         cells = [x["id"], x["desc"], x["rule"], x["locator"], x["quote"], x["verdict"],
                  x["severity"], x["fix"], "**%s / %.2f**" % (x["level"], x["score"])]
         md.append("| " + " | ".join(cells) + " |")
     if insuf:
-        md += ["", "### ④-补充：无法判定说明（%d 项 ✓）" % len(insuf), "",
+        md += ["", "### ③-补充：无法判定说明（%d 项 ✓）" % len(insuf), "",
                "| 编号 | 无法判断的原因 | 影响的问题 | 需要反馈或核实的内容 |", "|---|---|---|---|"]
         for x in rows:
             if x["verdict"] == "无法判定":
                 md.append("| %s | %s | %s | %s |" % (x["id"], x["why"] or "—", "、".join(insuf),
                                                      x.get("ask") or "① 请提供认证清单（含版本号）；② 或书面确认是否免比对；③ 或人工比对回填"))
-    md += ["", "## ⑤ 结论与建议", "",
+    md += ["", "## ④ 结论与建议", "",
            "**总判定：%s**" % ("不通过（否决 %d：%s）" % (len(veto), "、".join(x["id"] for x in veto))
                               if veto else ("不通过（无严重项）" if failed else "通过")),
            "- 结论分布：不符合 %d ｜ 符合 %d ｜ 无法判定 %d" % (len(failed), len(passed), len(insuf)),

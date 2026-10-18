@@ -41,6 +41,7 @@ score = 0.45 × 覆盖分      # Σ w(status)/n；present=1.0, absent_verified=1
 # 置信度 × 来源类型（口径与 knowledgeSpec 的 kind/tools 对齐 ✓）
 CONF = {"high": 1.0, "medium": 0.7, "low": 0.4}
 SOURCE = {"doc_table": 1.0, "doc_text": 0.9, "graph": 0.95, "image": 0.7,
+          "doc_image": 0.85,      # 2026-10-18（用户口径 ✓）：**知识来自文档中的图** ✓（不是"图片本体" ✗）
           "external_query": 0.6, "external_stub": 0.4, "unknown": 0.5}
 # 2026-10-17：**别名兼容** ✓（实测智能体会传 `document` / `table` / 数值 confidence ✗）
 SOURCE_ALIAS = {"document": "doc_text", "doc": "doc_text", "text": "doc_text",

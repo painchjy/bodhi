@@ -28,6 +28,8 @@ KW = {
     "certified": ["认证清单", "中心认证", "参考规范"],
 }
 SNIP = 120
+# 2026-10-18（用户口径 ✓）：**"知识来自文档中的图"** 的识别（图注 / 图内文字 / 引用图的句子 ✓）
+CAPTION = re.compile(r"图\s*\d+|图注|附图|见图|如下图|图一|图二|Figure\s*\d+")
 
 
 def _lines(doc: dict) -> list:
@@ -171,9 +173,14 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
             "id": iid, "status": "unknown", "needs_judgement": True,
             "source_type": stype, "confidence": "", "found_in": "",
             "quote": "", "locator": "",
-            "candidates": [{"line": ln[:SNIP], "locator": t} for t, ln in hits],
+            "candidates": [{"line": ln[:SNIP], "locator": t,
+                            # 2026-10-18（用户口径 ✓）：**知识来自文档中的图** ⇒ 标 `doc_image` ✓
+                            #   （图不当知识入库 ✗；只标来源 ✓ 便于与文字来源对比验证 ✓）
+                            "source_type_hint": ("doc_image" if CAPTION.search(t + " " + ln) else stype)}
+                           for t, ln in hits],
             "hints_other_kb": other_hint,
-            "how_to_judge": ("文档里有 ⇒ present ✓；文档没有但其他库有 ⇒ absent_verified（文档遗漏 ✓ 是问题 ✓）；"
+            "how_to_judge": ("文档里有 ⇒ present ✓（若候选来自图注/图内文字，`source_type` 用 `doc_image` ✓）；"
+                             "文档没有但其他库有 ⇒ absent_verified（文档遗漏 ✓ 是问题 ✓）；"
                              "哪都没有 ⇒ unavailable ✓"),
         })
     return {"ok": True, "kb": kb, "knowledge_id": knowledge_id,

@@ -34,7 +34,7 @@ kb_export(kb_id, [out_dir], [make_zip=true])
    → 服务端 exports/ 落目录 + zip；回执给 download 链接（/bodhi/kb-export?name=…）
    → 用浏览器/curl 拉下来：curl -o kb-xfer.zip "http://<mcp主机>:8765/bodhi/kb-export?name=<zip名>"
 
-kb_import(source, [kb_id] | [new_kb], [keep_ids=false], [verify=true])
+(source, [kb_id] | [new_kb], [keep_ids=false], [verify=true])
    → source 可为 **zip 或目录**（也可只给文件名，自动在服务端 exports/ 找）
    → 导入后**默认立刻做 PG + Neo4j 六项比对**，回执 `verify_ok`；**不 ✅ 不许说"迁移完成"**
 ```
@@ -60,9 +60,9 @@ $T verify <源kb_id或目录或zip> --to <目标kb_id>          # 六项比对
 |---|---|---|
 | **上传页（推荐，零工具）** | 浏览器打开 `http://<mcp主机>:8765/bodhi/kb-upload` → 选 zip、填**新库名**（跨环境）或既有 `kb_id`、勾 `keep_ids` → 点"上传并导入" → 页面直接显示回执（含 `verify_ok`） | 内网、非命令行用户 |
 | **curl / 脚本** | `curl -X POST --data-binary @kb-xfer.zip "http://<mcp主机>:8765/bodhi/kb-upload?name=kb-xfer.zip&new_kb=库名&verify=1"`（**body 是文件原始字节**，不是表单） | 运维自动化/流水线 |
-| **拷贝到服务器目录** | 把 zip scp/共享卷拷进服务器任意路径（如 `<包根>/exports/uploads/`），再让智能体调 `kb_import(source=<绝对路径或文件名>)` | 已有文件通道（沙箱导出、共享盘） |
+| **拷贝到服务器目录** | 把 zip scp/共享卷拷进服务器任意路径（如 `<包根>/exports/uploads/`），再让智能体调 `(source=<绝对路径或文件名>)` | 已有文件通道（沙箱导出、共享盘） |
 
-**落点**：上传的文件保存在服务端 **`exports/uploads/<文件名>`**；`kb_import` 的 `source` 支持**绝对路径 / 文件名（自动在 `exports/` 下找）/ 目录 / zip**，所以"上传后能不能被 tools 读到"——**能**（实测：上传 145,358 字节 → `source=<文件名>` → 导入 + 六项比对全 ✅）。
+**落点**：上传的文件保存在服务端 **`exports/uploads/<文件名>`**；`` 的 `source` 支持**绝对路径 / 文件名（自动在 `exports/` 下找）/ 目录 / zip**，所以"上传后能不能被 tools 读到"——**能**（实测：上传 145,358 字节 → `source=<文件名>` → 导入 + 六项比对全 ✅）。
 
 ## 2 验收口径（`verify` 六项）
 

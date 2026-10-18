@@ -8,7 +8,7 @@ models: [bmm, agent]
 default_model: bmm
 sources: [document]
 stages: [extract]
-tools: [doc_outline, extract_state, save_knowledge, link_candidates, list_link_candidates, resolve_link_candidate, image_extract, ontology_types, skills, wiki_search, wiki_read_page, get_document_info, grep_chunks, list_knowledge_chunks]
+tools: [doc_outline, extract_state, save_knowledge, list_image_extract, ontology_types, skills, wiki_search, wiki_read_page, get_document_info, grep_chunks, list_knowledge_chunks]
 inputs:
   knowledge_id: 必填。本次要处理的那一篇（文档名或 id；<pinned_documents> 里的最准）
   budget_tokens: 可选。本轮上下文的 token 上限（会话参数；默认取 BODHI_ROUND_BUDGET_TOKENS=8000）
@@ -78,9 +78,9 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
      `session.pages_total` = 累计页数（这些就是"整个文档不缺失"的索引）。
 5. **跨上下文/跨库的关联**（本批里出现、但目标不在本批/本库可见范围）：
    - 先用向量检索（`wiki_search`，必要时 `wiki_read_page` 确认语义）找候选页；
-   - `link_candidates(kb_id, source_slug, relation, candidates=[{target_slug, similarity, reason}],
+   - `(kb_id, source_slug, relation, candidates=[{target_slug, similarity, reason}],
      knowledge_id, round_no)` 登记候选 —— **只登记，不写库**；
-   - **把候选清单交给用户逐条确认**，再 `resolve_link_candidate(candidate_id, action="confirm"|"reject")`；
+   - **把候选清单交给用户逐条确认**，再 `(candidate_id, action="confirm"|"reject")`；
      `target_exists=false` 的候选**不能确认**（先补页或换目标）。
 6. **循环**：重复 2→5（`cursor = session.next_cursor`），直到 `doc_outline.done=true`。
 

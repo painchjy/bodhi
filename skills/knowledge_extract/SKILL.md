@@ -6,7 +6,7 @@ when: 规则实现方式含"知识提取"，或规则声明了 knowledgeNeed；�
 models: [bmm, bpmn, agent]
 default_model: bmm
 stages: [extract]
-tools: [ontology_types, knowledge_lookup, doc_outline, list_knowledge_chunks, grep_chunks, image_extract, graph_query, save_knowledge, wiki_read_page, extract_state]
+tools: [ontology_types, knowledge_lookup, doc_outline, list_knowledge_chunks, grep_chunks, image_extract, save_knowledge, wiki_read_page, extract_state]
 version: 0.1.0
 guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事实带 source_text（原句）+ sourceLocator（会话定位）；外部系统已管理的数据**不本体化**（查挡板/接口）；多库未点名 ⇒ 拒写；跨库同名不合并。
 ---
@@ -29,7 +29,7 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
 ## 1. 取事实（按来源分层，全部要留定位）
 1. **文档**：`doc_outline(work_kb, knowledge_id, budget_tokens, cursor)` 取本批 → 只抽**本批文本支撑**的内容 ✓；
    表格：逐行逐格取值（行/列定位）；条款：原句 + 章节；
-2. **图**：`graph_query`（只读 Cypher）取实例/关系事实；
+2. **图**：``（只读 Cypher）取实例/关系事实；
 3. **外部系统**：查**挡板/接口**（见 0.5）；返回值即"事实"，与文档抽取值同权 ✓；
 4. **图像**：`image_extract`（部署图/架构图/技术栈截图）→ 结构化后再判定（可信度低 ⇒ 待澄清 ✓，不硬判 ✗）。
 

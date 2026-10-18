@@ -6,7 +6,7 @@ when: 用户要"把这次会话的知识/澄清/改进建议记下来""查某结
 models: [bmm]
 default_model: bmm
 stages: [identify, page, bind, board, verify]
-tools: [save_knowledge, wiki_search, wiki_read_page, grep_chunks, list_knowledge_chunks, doc_outline, link_candidates, list_link_candidates, resolve_link_candidate, audit_scan]
+tools: [save_knowledge, wiki_search, wiki_read_page, grep_chunks, list_knowledge_chunks, doc_outline, list_audit_scan]
 version: 0
 ---
 
@@ -95,7 +95,7 @@ version: 0
      · **找不到** → 才新建会话页（编号来自运行时；运行时没给就留空标「待系统注入」）。
    - 首次会话 → 建**会话起始页**；有内容 → 建**分页**；
    - 已有会话 → 先 `wiki_search`/`wiki_read_page` 找到起始页，**沿用同一会话编号/名称**。
-3. **bind**：给本次产出的每个知识页补 `## 原文依据`，写成 **`分页 slug + 定位`**；跨上下文引用先 `link_candidates` 登记 → `resolve_link_candidate(confirm)`。
+3. **bind**：给本次产出的每个知识页补 `## 原文依据`，写成 **`分页 slug + 定位`**；跨上下文引用先 `` 登记 → `(confirm)`。
 4. **board**（仅 `sessionKind=改进建议` 时需要）：把建议条目写进建议页（字段见 §3），并刷新**改进建议总览页** `advice/board`（滚动汇总 `adviceStatus=待受理`）。
 5. **verify**：`audit_scan` 确认本次涉及的页**都有原文依据**（无来源即 F3 红），并回报"会话页/分页/知识页"三层的 slug 清单。
 

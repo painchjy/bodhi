@@ -939,6 +939,21 @@ SKILL_CONTEXTS = {
 }
 
 
+def _type_label_of(page_type: str, fallback: str = "") -> str:
+    """本体类型的中文名：**必须查本体** ✓（`class_meta()`），查不到才用 fallback。
+    2026-10-18 修：报告页曾写死「概要设计报告」⇒ 页头出现
+    「本体类型：概要设计报告（bmm:TechnicalReviewReport）」的自相矛盾（用户实测）。
+    """
+    try:
+        info = (ke_ontology.class_meta() or {}).get(page_type) or {}
+        lab = (info.get("label") or "").strip()
+        if lab and lab != page_type:
+            return lab
+    except Exception:  # noqa: BLE001
+        pass
+    return (fallback or page_type)
+
+
 def context_meta(context: str = "") -> dict:
     """取技能上下文文案（未知/空 → `design`，保持旧行为）。"""
     key = (context or "").strip().lower()
@@ -2095,7 +2110,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         _upstream = [s for s in ((report or {}).get("upstream") or []) if s]
         spec = {
             "slug": slug,                    # 复用既有报告页时由上面的幂等查询给出；空则由内核派生
-            "title": title, "page_type": _ptype, "type_label": ctx["report_label"],
+            "title": title, "page_type": _ptype, "type_label": _type_label_of(_ptype, ctx["report_label"]),
             "mode": "document",              # 报告=文档类；**不依赖本体判定**（legacy 的 `summary` 不是本体类）
             "wiki_content": body,
             "summary": (report or {}).get("summary") or "",
@@ -3027,24 +3042,6 @@ def tool_definitions() -> list[dict]:
             }},
         },
         {
-            "name": "service_overview",
-            "description": ("**IT 服务详细设计总览**（评审页）：把所有 IT 服务的详设跨页聚合渲染成一页 —— "
-                            "服务一览（操作数 / 写方属性 / 只读属性 / 涉及键）、业务属性与键、"
-                            "跨服务读依赖（经接口）、逐操作明细（方法/幂等/事务/写读）、规模与巡检结论。"
-                            "不传 `apply` → 只读预览（含统计 + 前若干行，不写库）；"
-                            "`apply=true` → **异步**渲染并写入/刷新总览页（同 slug 复用），"
-                            "用 `job_status(job_id=...)` 查回执。"
-                            "服务详设改动后刷一遍，评审就看这一页。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string", "description": "知识库 UUID 或名称（原样传可选清单里的）"},
-                "apply": {"type": "boolean",
-                          "description": "true = 渲染并写总览页（异步）；留空 = 只读预览"},
-                "slug": {"type": "string", "description": "总览页 slug（默认 ea/summary/it服务详细设计总览）"},
-                "title": {"type": "string", "description": "总览页标题（默认 IT 服务详细设计总览）"},
-                "preview_lines": {"type": "integer", "description": "预览返回的 markdown 行数（默认 25）"},
-            }, "required": ["kb_id"]},
-        },
-        {
             "name": "kb_export",
             "description": ("**运维 · 导出知识库**：把指定知识库导出成文件（PG 页/目录/版本快照 + Neo4j 节点/边），"
                             "落在服务端 `exports/` 并打成 zip；回执给 **download** 链接（下载到本地）。"
@@ -3054,31 +3051,6 @@ def tool_definitions() -> list[dict]:
                                            "out_dir": {"type": "string", "description": "可选：导出目录（默认 exports/kb-<id前8位>-时间戳）"},
                                            "make_zip": {"type": "boolean", "description": "默认 true 打 zip"}},
                             "required": ["kb_id"]},
-        },
-        {
-            "name": "kb_import",
-            "description": ("**运维 · 导入知识库**：把导出的**目录/zip** 导入到指定知识库（或 `new_kb` 现建/复用同名库），"
-                            "按 (kb, slug) 先删后插（幂等）；`verify=true` 默认**立刻做 PG + Neo4j 六项一致性比对**"
-                            "（页内容/页链/目录/版本/图节点/图边），回执给 `verify_ok`。"),
-            "inputSchema": {"type": "object",
-                            "properties": {"source": {"type": "string", "description": "导出目录或 zip 的路径/文件名（默认在服务端 exports/ 下找）"},
-                                           "kb_id": {"type": "string", "description": "导入到该既有库"},
-                                           "new_kb": {"type": "string", "description": "或：新建/复用同名库（与 kb_id 二选一）"},
-                                           "keep_ids": {"type": "boolean", "description": "保留原 UUID（跨实例迁移建议 true）"},
-                                           "verify": {"type": "boolean", "description": "默认 true：导入后比对"}},
-                            "required": ["source"]},
-        },
-        {
-            "name": "rebuild_wiki_from_graph",
-            "description": ("**运维 · 图→wiki 全量重建**：按图节点的 `wiki_content` 重写 PG 正文"
-                            "（**正本是图、正文是派生**）。用于正文被误改/丢失后的**恢复**；"
-                            "图节点无 `wiki_content` 的页（index/原生页）不动；关系只在图里、不回写正文。"
-                            "`dry_run=true`（默认）只报影响面。**改类型/迁移 slug 不走这里**（走两段式 retag）。"),
-            "inputSchema": {
-                "type": "object",
-                "properties": {"kb_id": {"type": "string"},
-                               "dry_run": {"type": "boolean", "description": "默认 true 只报影响面"}},
-                "required": ["kb_id"]},
         },
         {
             "name": "audit_scan",
@@ -3233,68 +3205,6 @@ def tool_definitions() -> list[dict]:
             },
         },
         {
-            "name": "link_source_session",
-            "description": ("**补「来源会话」关系（显式入口）**：给知识页补 "
-                            "`- 知识来源会话（`bmm:sourceSession`）→ [[会话页 slug|标题]]`（**双链**），"
-                            "并重建 `in_links` —— 这样会话页的「被引用（入边）」能看到本次会话产出的全部知识。\n"
-                            "何时用：① 会话页与知识页**同批落库**（或知识先落、会话页后补）导致缺边；"
-                            "② 历史页补一次（`all=true`）；③ 巡检发现「知识无来源会话」。\n"
-                            "目标会话页：给 `session_no` 精确指定；未给则用**本库唯一的**会话页（分页优先；多于一页会拒，不猜）。\n"
-                            "两段式：默认 `apply=false` 只回清单。"),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"},
-                    "session_no": {"type": "string", "description": "WeKnora 会话编号（可选；不给我用本库唯一的会话页）"},
-                    "slugs": {"type": "array", "items": {"type": "string"},
-                              "description": "要补的页 slug 清单（可选；不给且 all=false 时=本库所有缺该行的非会话页）"},
-                    "all": {"type": "boolean", "description": "true = 本库所有缺该行的非会话页"},
-                    "apply": {"type": "boolean", "description": "false（默认）= 只出清单；true = 写库并重建 in_links"},
-                },
-                "required": ["kb_id"],
-            },
-        },
-        {
-            "name": "audit_kb",
-            "description": ("知识库**实例图谱一致性巡检 + 修复**（`fix=false` 只读；`fix=true` 时按 PG 全量重建该库实例层，"
-                            "删孤儿实例、补缺失实例、重灌边）。返回 `ok` + 各类违规清单"
-                            "（missing_instance/orphan_instance/type_mismatch/invalid_class/invalid_edge_types）。"),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"},
-                    "fix": {"type": "boolean", "description": "true = 一并修复（rebuild_kb_graph 全量重灌，幂等）"},
-                },
-                "required": ["kb_id"],
-            },
-        },
-        {
-            "name": "recategorize",
-            "description": ("**全量重刷目录（两段式，显式触发）**：按**当前本体 + 层级参数**重算该库所有页的 "
-                            "`category_path`/`wiki_path`，再重建目录树（挂页 + prune 空目录）。\n"
-                            "何时用：**改过本体**（新增类、改继承，如把 `Stub` 改成 `Tool` 的子类）、"
-                            "**手工改过页类型**、或只是想按新层级重排目录时（`category_path` 是写时物化的，"
-                            "不重算老页就留在旧目录）。\n"
-                            "**层级参数**：第一层永远是模块短名；`depth`=模块下再展开几层类 "
-                            "（**缺省 1** = 直接 Thing 子类，界面共 2 层；**0** = 第一层模块下直接到最底层的类；"
-                            "范围 0–5）。weknora 自带类型（`concept`/`entity`/`summary`…）固定放 "
-                            "`weknora/<类型>`，与 `depth` 无关。**本体模型库不支持本功能**（它另有 ontology:* 目录）。\n"
-                            "两段式：默认 `apply=false` 只回**变更清单**（页 / 旧目录 → 新目录）；"
-                            "确认后 `apply=true` 写库并自动重建目录。默认不动数据。"),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "目标知识库（uuid 或精确库名）"},
-                    "apply": {"type": "boolean",
-                              "description": "false（默认）= 只出清单；true = 写库 + 重建目录"},
-                    "depth": {"type": "integer",
-                              "description": "层级参数：第一层永远是模块短名；depth=模块下再展开几层类"
-                                             "（缺省 1；0=直接到最底层的类；上限 5）"},
-                },
-                "required": ["kb_id"],
-            },
-        },
-        {
             "name": "import_probe",
             "description": ("**结构化批量建模·探表（只读）**：读 Excel/CSV 的**结构**——sheet 名、表头、行数、抽样 3 行、"
                             "**重复表头**、**列前缀**（判断一张表里有几个实体）、疑似主键列。"
@@ -3346,27 +3256,6 @@ def tool_definitions() -> list[dict]:
                 "actor": {"type": "string"},
                 "prune": {"type": "boolean"}},
                 "required": ["ticket"]},
-        },
-        {
-            "name": "import_state",
-            "description": ("**结构化批量建模·账本（只读）**：不传 `batch` → 列最近批次；传 `batch` → 每个目标的"
-                            "状态与 **`remaining`**（为空 = 这张表所有类/关系都建完了）。智能体靠它循环到收敛。"),
-            "inputSchema": {"type": "object", "properties": {
-                "batch": {"type": "string"}}},
-        },
-        {
-            "name": "import_refresh",
-            "description": ("**结构化批量建模·元数据与目录刷新（写）**：① 把结构化导入页的 `page_metadata.ontology` 刷成当前口径"
-                            "（`attributes` 键=**本体属性名**如 `bmm:ruleScope`、`attributes_by_column`=中文列名；"
-                            "**只升级不降级**，中文列名按「账本 mapping → 本体 label」升级）；"
-                            "② 把 `wiki_path` 对齐成「**目录路径/标题**」（前端目录树靠它显示；写 slug 会导致**目录缺失**）"
-                            "并重建 `wiki_folders` + 页 `folder_id`。只改元数据/路径（正文/version 不动）；幂等。"
-                            "`dry_run=true` 只看会改哪些页（含 `wiki_path_before/after`）。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "dry_run": {"type": "boolean"},
-                "limit": {"type": "integer"}},
-                "required": ["kb_id"]},
         },
         {
             "name": "audit_purge",
@@ -3478,18 +3367,7 @@ def tool_definitions() -> list[dict]:
                 "dry_run": {"type": "boolean", "description": "默认 true：只回 diff，不写库"}},
                 "required": ["kb_id", "slug", "patch"]},
         },
-        {
-            "name": "graph_query",
-            "description": ("**文档评审·图检索（只读）**：执行**只读** Cypher（MATCH/OPTIONAL MATCH/WITH/UNWIND/RETURN 开头），"
-                            "写操作与存储过程调用一律拒；自动补 LIMIT（默认 200，上限 1000）。"
-                            "给「实现方式=图检索」的规则出结论：把规则语义翻成 Cypher → 拿命中行 → 结论里附**语句+命中数**。"
-                            "拿不准图谱标签时先跑探针 `MATCH (n) RETURN labels(n)[0] AS kind, count(*) AS n`。"),
-            "inputSchema": {"type": "object", "properties": {
-                "cypher": {"type": "string"},
-                "limit": {"type": "integer"}},
-                "required": ["cypher"]},
-        },
-        {
+                {
             "name": "reference_lookup",
             "description": ("**文档评审·取参考规范（只读）**：按规则里的「参考规范」（`bmm:ruleReference`，URL 或规范名）"
                             "找**规范内容**：① 知识库文档/附件同名 → 回 `knowledge_id`（正文用 `doc_outline` 取）；"
@@ -3514,25 +3392,6 @@ def tool_definitions() -> list[dict]:
                 "kb_id": {"type": "string"},
                 "knowledge_id": {"type": "string", "description": "文档 id 或标题（含匹配）"},
                 "figure_no": {"type": "integer", "description": "只要第几张图（缺省全部）"}}},
-        },
-        {
-            "name": "review_apply",
-            "description": ("**文档评审·写结论（写）**：把**逐条**评审结论写成**一页报告**（`slug=review/<文档>-<策略>`，"
-                            "版本化可回退）：正文=结论汇总 + 逐条结论表 + 每条明细（含**原文依据**逐字证据 / 图检索语句 / 建议）。"
-                            "`findings[]` 每条：{rule, verdict(符合|不符合|不适用|无法判定), severity, scope, evidence, how, cypher, suggestion}。"
-                            "写权限同其它写路径；`policy_slug` 给了会加一条 `bmm:promotesDirective` 关系指向策略页。"
-                            "**务必带 `session_no`**（会话溯源：否则结论页没有 `bmm:sourceSession`）。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "doc": {"type": "string", "description": "被评审的文档名/知识 id"},
-                "policy": {"type": "string"},
-                "policy_slug": {"type": "string"},
-                "findings": {"type": "array", "items": {"type": "object"}},
-                "page_type": {"type": "string", "description": "结论页的页类型（默认 bmm:TechnicalReviewReport（必须 bmm:Report 子类））"},
-                "actor": {"type": "string"},
-                "session_no": {"type": "string",
-                               "description": "本次会话编号（WeKnora 会话 id，uuid）→ 结论页连回会话页（bmm:sourceSession）。建议与 save_knowledge 传同一个"}},
-                "required": ["kb_id", "doc", "policy", "findings"]},
         },
         {
             "name": "doc_outline",
@@ -3565,53 +3424,6 @@ def tool_definitions() -> list[dict]:
                 "knowledge_id": {"type": "string", "description": "文档 id/标题；留空 = 该库全部文档会话"},
                 "action": {"type": "string", "enum": ["get", "reset"], "description": "默认 get"},
             }, "required": ["kb_id"]},
-        },
-        {
-            "name": "link_candidates",
-            "description": ("**候选关联登记**（跨批/跨库关联的\"单独确认\"环节）：当节点/关系需要的目标"
-                            "**不在当前上下文**里时，先用向量检索（wiki_search）找到候选页，再用本工具登记。"
-                            "本工具**只登记不写库**，回执含 `candidate_id`；把清单给用户逐条确认后调 "
-                            "`resolve_link_candidate(action=\"confirm\")` 才真正写入领域模型。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "kb_ids": {"type": "array", "items": {"type": "string"},
-                           "description": ("会话绑定的知识库 id 清单。**写操作**：>1 个且未传 kb_id 会被拒"
-                                           "（要求用户指明）；恰好 1 个时等价于显式指定")},
-                "confirm_kb_match": {"type": "boolean",
-                                     "description": ("模糊匹配（uuid 前缀 / 名称包含）命中唯一库时的二次确认："
-                                                     "true 才允许写；精确匹配不需要")},
-                "source_slug": {"type": "string", "description": "源页 slug（必须已落库）"},
-                "relation": {"type": "string", "description": "本体关系 prefixed 名，如 bmm:definedBy"},
-                "candidates": {"type": "array", "items": {"type": "object"},
-                               "description": "[{target_slug, similarity?, reason?}]；target_slug 用检索结果的 slug"},
-                "knowledge_id": {"type": "string", "description": "所属文档（把候选归到该会话）"},
-                "round_no": {"type": "integer", "description": "第几轮登记的"},
-            }, "required": ["kb_id", "source_slug", "relation", "candidates"]},
-        },
-        {
-            "name": "list_link_candidates",
-            "description": "列出候选关联（默认 `status=pending`；`all` 看全部含已裁决）。",
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "knowledge_id": {"type": "string", "description": "留空 = 该库全部会话"},
-                "status": {"type": "string", "enum": ["pending", "confirmed", "rejected", "all"]},
-            }, "required": ["kb_id"]},
-        },
-        {
-            "name": "resolve_link_candidate",
-            "description": ("候选关联**裁决**：`confirm` = 写入领域模型（调 `ke_pages.add_relation`，"
-                            "页面版本 +1 并可回退）；`reject` = 丢弃。**必须先拿到用户确认**"
-                            "（`target_exists=false` 的不能确认）。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "kb_ids": {"type": "array", "items": {"type": "string"},
-                           "description": "会话绑定的知识库 id 清单（多库且未传 kb_id 时会被拒，要求用户指明）"},
-                "confirm_kb_match": {"type": "boolean",
-                                     "description": "模糊匹配命中唯一库时的二次确认（true 才允许写）"},
-                "candidate_id": {"type": "string", "description": "link_candidates 回执里的 candidate_id"},
-                "action": {"type": "string", "enum": ["confirm", "reject"]},
-                "knowledge_id": {"type": "string"},
-            }, "required": ["kb_id", "candidate_id", "action"]},
         },
         {
             "name": "retag_preview",
@@ -3648,17 +3460,6 @@ def tool_definitions() -> list[dict]:
                                       "description": "用户确认过的风险项（= preview 的 required_risks，如 "
                                                      "['url_break','refs_rewrite','agent_session']）"},
             }, "required": ["kb_id", "slug", "new_type", "ticket", "acknowledge_risks"]},
-        },
-        {
-            "name": "retag_rollback",
-            "description": ("**回滚一次类型迁移**（运维用）：按 apply 留下的迁移记录 "
-                            "`state/retag/<ticket>.json` 恢复 slug / 类型 / 正文 / 引用 / 会话状态；幂等。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "kb_ids": {"type": "array", "items": {"type": "string"}},
-                "confirm_kb_match": {"type": "boolean"},
-                "ticket": {"type": "string", "description": "要回滚的那次迁移 ticket"},
-            }, "required": ["kb_id", "ticket"]},
         },
         {
             "name": "context_scan",
@@ -3722,14 +3523,6 @@ def tool_definitions() -> list[dict]:
             }, "required": ["slug", "ticket", "acknowledge_risks"]},
         },
         {
-            "name": "context_concept_rollback",
-            "description": ("**回滚一次概念页 apply**（按 `state/context_map/history/<ticket>.json` 恢复旧正文或"
-                            "删除新建页；幂等），并刷新映射缓存。"),
-            "inputSchema": {"type": "object", "properties": {
-                "ticket": {"type": "string", "description": "apply 时的 ticket"},
-            }, "required": ["ticket"]},
-        },
-        {
             "name": "context_authority",
             "description": ("**权威/副本（只读）**：某跨库同名组的「谁是企业权威、谁是只读副本」分工与影响面 —— "
                             "master（唯一可编辑）、replicas（含是否 `local_drift`/`outdated`）、需要的风险确认与 ticket。"
@@ -3738,22 +3531,6 @@ def tool_definitions() -> list[dict]:
                 "slug": {"type": "string", "description": "同名组的 slug（概念页同名）"},
                 "master": {"type": "string", "description": "候选权威库（id/前缀/精确库名）；留空=用概念页已登记的"},
             }, "required": ["slug"]},
-        },
-        {
-            "name": "context_authority_apply",
-            "description": ("**权威/副本（写，两段式）**：`action=decide` 把分工写进概念页的「权威与副本」小节（只写概念库）；"
-                            "`action=pull` 从权威**复制正文**到某副本页（只写副本库，副本页 `version+1` 可回退，并写同库自述元数据）。"
-                            "两者都要 `ticket` + `acknowledge_risks`（与预览一致）+ 对目标库的写权限。"
-                            "副本页**不允许**用其它写路径修改（服务端会拒并提示 pull）。"),
-            "inputSchema": {"type": "object", "properties": {
-                "action": {"type": "string", "enum": ["decide", "pull"]},
-                "slug": {"type": "string"},
-                "master": {"type": "string", "description": "action=decide 时的权威库（id/前缀/库名）"},
-                "kb": {"type": "string", "description": "action=pull 时的副本库（id/名称）"},
-                "ticket": {"type": "string"},
-                "acknowledge_risks": {"type": "array", "items": {"type": "string"}},
-                "actor": {"type": "string"},
-            }, "required": ["action", "slug", "ticket", "acknowledge_risks"]},
         },
     ]
 
@@ -4065,6 +3842,25 @@ def call_tool(name: str, args: dict) -> dict:
     return result
 
 
+_RETIRED_TOOLS = {
+    "review_apply": "评审结论改由 save_knowledge(mode=document) 落 `bmm:TechnicalReviewReport` 一页 ✓（本工具会产 `bmm:Assessment` 旧口径 ✗）",
+    "service_overview": "旧「服务概览」，被 `knowledge_lookup` + `doc_outline` 覆盖 ✓",
+    "rebuild_wiki_from_graph": "重建页已并入保存路径（图→PG 写序）✓，请用 `save_knowledge` / `recategorize`",
+    "link_source_session": "会话溯源由 `save_knowledge` 自动写 `bmm:sourceSession` ✓",
+    "link_candidates": "候选关联旧流程 ✗；关系随 `save_knowledge` 的 relations 一次写入 ✓",
+    "list_link_candidates": "同上 ✗",
+    "resolve_link_candidate": "同上 ✗",
+    "import_state": "结构化导入进度可由 `import_plan` 回执查看 ✓",
+    "import_refresh": "同上 ✗（重跑 `import_plan` 即刷新 ✓）",
+    "retag_rollback": "退回到页版本（`version` 可回退）✓，不再单设工具",
+    "context_concept_rollback": "退回到页版本 ✓",
+    "context_authority_apply": "权威/副本分工写概念页，用 `save_knowledge` 改该页 ✓",
+    "recategorize": "目录由 `ke_category.recompute` + `sync_folders` 在写库时自动收敛 ✓（CLI: `python3 -m ke_category`）",
+    "kb_import": "导入走 CLI（`tools/ke-core/kb_transfer.py`）✓，避免智能体误覆盖整库 ✗",
+    "audit_kb": "与 `audit_scan` 重复 ✓，统一用 `audit_scan`",
+}
+
+
 def _call_tool_impl(name: str, args: dict) -> dict:
     # P3-0f（2026-10-10）：每次工具调用先清**请求级只读 memo**（页 id / 属主 / 会话页引用）。
     # 放在这里而不是各工具里：唯一入口、线程局部、绝不会把上一次调用的结果带进来。
@@ -4201,7 +3997,17 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     if name == "rules_of_policy":
         return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
                                          int(args.get("limit", 300) or 300))
+    if name in _RETIRED_TOOLS:
+        return {"ok": False, "deprecated": True, "since": "2026-10-18",
+                "tool": name, "error": "该工具已退役", "hint": _RETIRED_TOOLS[name]}
     if name == "graph_query":
+        # 2026-10-18（用户口径 ✓）：**归一化到 knowledge_lookup** ✗ 不再建议直接拼 Cypher
+        return {"ok": False, "deprecated": True, "error": "graph_query 已归一化到 knowledge_lookup",
+                "hint": ("查知识：`knowledge_lookup(mode=\"keyword\", query=…)` ✓；"
+                         "查多跳：`knowledge_lookup(mode=\"path\", start=<slug>, depth=2)` ✓；"
+                         "取规则：`knowledge_lookup(mode=\"rules\", spec=…)` ✓"),
+                "since": "2026-10-18"}
+    if name == "graph_query_legacy":
         return ke_review.graph_query(str(args.get("cypher", "")), int(args.get("limit", 200) or 200))
     if name == "review_apply":
         _rv_sno, _rv_sslug = _resolve_session_for(str(args.get("kb_id", "")),
