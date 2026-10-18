@@ -7,7 +7,11 @@
 |---|---|---|
 | `present` | 文档里**有**（逐字 + 可回访定位 ✓） | 支持"符合/不符合" ✓ |
 | `absent_verified` | 文档里**确认没有**（且能回访到"没有"的事实 ✓，如"全文无设备清单"） | **支持 failed** ✓（文档缺陷 ✓ 证据充分 ✓） |
-| `unavailable` | 受评文档**之外**的数据源拿不到（外部清单/系统挡板 ✓） | **降分** ⇒ 可能 `insufficient` ✓ |
+| `unavailable` | 受评文档**之外**的数据源也拿不到（外部清单/系统挡板 ✓） | **降分** ⇒ 可能 `insufficient` ✓ |
+
+> **2026-10-17 补充口径（用户）✓**：文档里没有、但**其他知识库/系统能拿到** ⇒ 属**文档遗漏** ✓ ⇒
+> 仍记 `absent_verified` ✓（**这是"问题"** ✓ ⇒ `failed` ✓），**不是** `unavailable` ✗。
+> 只有"**任何地方都拿不到**"才记 `unavailable` ✓（这才允许 `insufficient` ✓）。
 
 > 一句话：**"缺文档要素"是证据 ✓；"缺外部数据"是缺证据 ✗** —— 这两者混在一起就会出现
 > "该判不符合的判成无法判定"或反之 ✗（样例3 回归已经踩到 ✓）。
@@ -107,18 +111,20 @@ def score_rule(facts: list | None = None, checks: list | None = None,
         reasons.append("未做事实核查 ⇒ 核查分按 0.60（不奖励 ✓）")
 
     score = sum(W[k] * parts[k] for k in W)
-    level = "high" if score >= 0.80 else ("medium" if score >= threshold else "low")
-    gate = "ok" if score >= threshold else "insufficient"
-    # 硬闸门（2026-10-17）：**必需事实外部不可得** ⇒ 直接无法判定 ✓（不靠加权分"拼过去" ✗）
+    # 两条闸门**互斥** ✓（2026-10-17 修：之前硬闸门也会插一行"score<threshold"⇒ 自相矛盾 ✗）
     blocked = [str(f.get("id")) for f in facts
                if str(f.get("status")) == "unavailable" and bool(f.get("required", True))]
     if blocked:
         gate, level = "insufficient", "low"
-        reasons.insert(0, "必需事实外部不可得：%s ⇒ **无法判定** ✓（拿不到就不得臆断 ✗）"
-                       % "、".join(blocked))
-    if gate == "insufficient":
-        reasons.insert(0, "score=%.2f ｜ threshold=%.2f ⇒ **无法判定** ✓（不得写 failed ✗）"
+        reasons.insert(0, "必需事实**外部不可得**：%s ⇒ 无法判定 ✓（拿不到就不得臆断 ✗；"
+                          "分数 %.2f 仅作参考，不参与本闸门 ✓）" % ("、".join(blocked), score))
+    elif score < threshold:
+        gate, level = "insufficient", "low"
+        reasons.insert(0, "score=%.2f **<** threshold=%.2f ⇒ 无法判定 ✓（证据不足 ✗ 不得写 failed ✗）"
                        % (score, threshold))
+    else:
+        gate = "ok"
+        level = "high" if score >= 0.80 else "medium"
     return {"score": round(score, 3), "level": level, "gate": gate,
             "threshold": threshold, "parts": {k: round(v, 3) for k, v in parts.items()},
             "reasons": reasons}
