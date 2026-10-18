@@ -76,16 +76,23 @@ def _doc_text(kb: str, knowledge_id: str) -> list:
     if not kid:
         return []
     out: list = []
+    cur = ""
     try:
         for r in _d.psql_csv(
                 "SELECT chunk_index, chunk_type, content FROM chunks "
                 " WHERE knowledge_base_id = %s AND knowledge_id = %s "
                 " ORDER BY chunk_index" % (_d.sql_str(kb), _d.sql_str(kid))):
-            loc = "chunk#%s%s" % (r.get("chunk_index"),
-                                  ("/" + str(r["chunk_type"])) if r.get("chunk_type") else "")
             for ln in str(r.get("content") or "").splitlines():
-                if ln.strip():
-                    out.append((loc, ln.strip()))
+                t = ln.strip()
+                if not t:
+                    continue
+                # 2026-10-17（用户口径 ✓）：**定位用文档章节标题** ✓
+                #   识别 Markdown 标题（`#`/`##`/`###`）⇒ 记作"当前章节" ✓；标题行本身也算一条 ✓
+                if re.match(r"^#{1,6}\s+", t):
+                    cur = re.sub(r"^#{1,6}\s+", "", t).strip()[:60]
+                    out.append((cur, cur))
+                else:
+                    out.append((cur or "全文", t))
     except Exception:  # noqa: BLE001
         pass
     return out
