@@ -18,7 +18,7 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
 **工具只做确定性的事**（读表/校验/建页/写关系）——**工具不做语义推断** ✓。
 
 ## 0. 先定"知识需要 + 本体模型范围"（**本技能第一步，可能有多个模型**）
-1. 从规则取需求：`rules_of_task(domain_kb, task)` → 该规则的 `knowledgeNeed`（如"技术栈及其版本（文档中以表格形式勾选）"）。
+1. 从规则取需求：`knowledge_lookup(kb_id, mode="rules", spec="task:…")` → 该规则的 `knowledgeNeed`（如"技术栈及其版本（文档中以表格形式勾选）"）。
 2. 把它拆成**知识项**（名称/版本、系统等级、部署方式、灾备方式、设备清单…）。
 3. **判定每项属于哪个本体模型/类**：`ontology_types("<模型>")` **现查** ✓，**不写死类型清单** ✓；
    - 典型：系统/资源类 → `bmm`（`bmm:ITAsset`/`bmm:SubSystem`）；规则/策略 → `bmm`；文档产物 → `bpmn:DataObject`/`bmm:Report` 系。
@@ -60,3 +60,13 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
 3. 表格类抽取**逐行逐格**、覆盖完整（行数 = 表行数 ✓）；
 4. 外部系统数据走挡板/接口 ✓，**没有**为它新建本体类/实例集合 ✗；
 5. 同输入重跑幂等（同 slug 版本+1 或不变 ✓）。
+
+## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）
+
+- **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
+  - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
+  - 旧调用 `rules_of_task(kb, task)` ≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+- **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
+  每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
+- **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓
+- **写库**：`write_knowledge`（**图 → PG** ✓）；`document` 类（`bmm:Report` 子类）**必须有正文** ✓

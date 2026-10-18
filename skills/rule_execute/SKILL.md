@@ -1,10 +1,10 @@
 ---
 id: rule_execute
 name: 规则执行（逐条评审）
-description: 给一个**任务**（bpmn:Task）→ 用 rules_of_task 取到该任务**真正绑定的规则及其判定口径** → 逐条出结论（合规｜违规｜不适用｜待澄清），每条带**逐字证据**、**严重度**与**规则出处**。规则分两型：**抽取型**（实现方式含"知识提取"或有 knowledgeNeed ⇒ 先取事实再判）与**判定型**（直接按规则与事实判）。事实来源分层：文档（doc_outline/grep_chunks）→ 图（graph_query）→ **外部系统已管理的数据（查挡板/接口，不本体化）**。
+description: 给一个**任务**（bpmn:Task）→ 用 knowledge_lookup 取到该任务**真正绑定的规则及其判定口径** → 逐条出结论（合规｜违规｜不适用｜待澄清），每条带**逐字证据**、**严重度**与**规则出处**。规则分两型：**抽取型**（实现方式含"知识提取"或有 knowledgeNeed ⇒ 先取事实再判）与**判定型**（直接按规则与事实判）。事实来源分层：文档（doc_outline/grep_chunks）→ 图（graph_query）→ **外部系统已管理的数据（查挡板/接口，不本体化）**。
 when: 用户要"按某任务/策略评审这份方案/文档""逐条评审""按规则检查"；或作为活动编排（activity_drive）里"逐项评审"任务的执行体。
 version: 0.1.0
-tools: [rules_of_task, doc_outline, list_knowledge_chunks, grep_chunks, graph_query, wiki_read_page, save_knowledge]
+tools: [knowledge_lookup, doc_outline, list_knowledge_chunks, grep_chunks, graph_query, wiki_read_page, save_knowledge]
 ---
 
 # 规则执行（逐条评审）
@@ -14,7 +14,7 @@ tools: [rules_of_task, doc_outline, list_knowledge_chunks, grep_chunks, graph_qu
 
 ## 0. 前置：取任务与规则（唯一入口）
 ```
-rules_of_task(kb_id=<库>, task=<任务 slug/标题片段>)
+knowledge_lookup(kb_id, mode="rules", spec="task:…")
 → { task:{slug,title,definition,dataobjects,roles}, rules:[{slug,title,implementation,knowledgeNeed,
      scope,enforcement,reference,needs_extract,strategies,required_fields,source}], counts, hash }
 ```
@@ -53,8 +53,18 @@ rules_of_task(kb_id=<库>, task=<任务 slug/标题片段>)
 - 报告 `page_metadata.review = {task, rules_hash, rule_count, counts:{合规,违规,不适用,待澄清}}` ✓。
 
 ## 4. 验收断言（回归用，必须全过）
-1. `rules_of_task` 返回的规则**条数**与图边一致（逐项评审 = 6，**不含总结规则** ✓）；
+1. `knowledge_lookup` 返回的规则**条数**与图边一致（逐项评审 = 6，**不含总结规则** ✓）；
 2. 每条规则都有结论；`违规` 必有 `severity` + **逐字证据**；
 3. **A 型样例**（规则 5，技术栈表格）：清单内的 (名称,版本) ⇒ 合规 ✓；**版本不在清单**（如 `PostgreSQL 15.6`）⇒ **违规** ✓；
 4. 同输入重跑：`rules_hash` 不变时结论应稳定（幂等 ✓）；改规则属性 ⇒ `hash` 变 ⇒ 允许结论变化 ✓；
 5. 报告里 `source`/`rule_slug` 可回指到图边与规则页 ✓（抽查 1 条）。
+
+## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）
+
+- **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
+  - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
+  - 旧调用 `rules_of_task(kb, task)` ≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+- **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
+  每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
+- **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓
+- **写库**：`write_knowledge`（**图 → PG** ✓）；`document` 类（`bmm:Report` 子类）**必须有正文** ✓

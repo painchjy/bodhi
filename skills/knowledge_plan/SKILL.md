@@ -2,11 +2,11 @@
 id: knowledge_plan
 name: 知识需求聚合（多规则 → 知识计划）
 description: 把 N 条规则的 knowledgeNeed 聚合成**可执行的知识计划**：候选类 → 去重 → 父子类整合（同链收敛到最近公共祖先）→ 归属本体模型 → 建模专家角色 → 歧义清单（questions）+ 稳定 hash。**只读、不写库**；确定性部分全在这里，语义歧义交智能体问用户。
-when: 任务的一步要处理**多条规则**且其中 ≥1 条有知识提取需求时（`rules_of_task` 里 needs_extract=true 的条数 ≥1）；单条规则时本技能同样适用（N=1，自动退化，不特判）。
+when: 任务的一步要处理**多条规则**且其中 ≥1 条有知识提取需求时（`knowledge_lookup` 里 needs_extract=true 的条数 ≥1）；单条规则时本技能同样适用（N=1，自动退化，不特判）。
 models: [bmm, bpmn, agent]
 default_model: bmm
 stages: [plan]
-tools: [rules_of_task, ontology_types, knowledge_lookup, wiki_read_page]
+tools: [knowledge_lookup, ontology_types, knowledge_lookup, wiki_read_page]
 version: 0.1.0
 guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链不硬合）；外部系统已管理的数据不当本体类（走挡板/接口）；模型与专家角色一律从编译产物读取。
 ---
@@ -19,7 +19,7 @@ guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链
 **语义裁决归智能体**（把 `questions` 变成用户能答的选择题 ✓）；**写入归 `knowledge_extract`** ✓。
 
 ## 0. 取输入
-1. `rules_of_task(domain_kb, task, policy?)` → 取 `needs_extract=true` 的规则（含 `knowledgeNeed`）；
+1. `knowledge_lookup(kb_id, mode="rules", spec="task:…")` → 取 `needs_extract=true` 的规则（含 `knowledgeNeed`）；
 2. 若 `needs_extract` 条数 = 0 → 返回 `{empty:true}`（本步无需提取）；
 3. **N=1 时照走本流程**（同一路径、无特判 ✓）。
 
@@ -88,3 +88,13 @@ guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链
 | 2 条同类规则（技术栈 + 设备申请） | 父子整合：`bmm:HardwareAsset` ⊂ `bmm:ITAsset` ⇒ LCA=`bmm:ITAsset`，`collect_at` 明确 ✓ |
 | 2 条跨模型规则（系统等级 ⊂ bmm；报告字段 ⊂ bpmn） | `groups` 两组 ✓ + **两个专家角色** ✓ + `questions` 中 model 歧义（若未指定 ✓） |
 断言：① 分类命中 ✓ ② 整合正确 ✓ ③ 模型/角色正确 ✓ ④ 同输入 `hash` 稳定 ✓ ⑤ `questions` 只含真歧义（不滥问 ✓）。
+
+## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）
+
+- **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
+  - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
+  - 旧调用 `rules_of_task(kb, task)` ≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+- **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
+  每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
+- **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓
+- **写库**：`write_knowledge`（**图 → PG** ✓）；`document` 类（`bmm:Report` 子类）**必须有正文** ✓

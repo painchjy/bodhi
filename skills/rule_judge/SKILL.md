@@ -51,3 +51,13 @@ description: 规则判定——读「规则契约」+「知识计划(ke_plan) �
 - 上游：`rules_resolve`（规则）✓ + `knowledge_plan`/`knowledge_extract`（事实）✓；
 - 下游：`report_compose`（报告「评审结论」与「问题清单」都只引这里 ✓）；
 - 不做：文章改写 ✗、知识入库决策 ✗（那是 `知识入库` 任务的 `ask` 环节 ✓）。
+
+## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）
+
+- **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
+  - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
+  - 旧调用 `rules_of_task(kb, task)` ≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+- **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
+  每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
+- **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓
+- **写库**：`write_knowledge`（**图 → PG** ✓）；`document` 类（`bmm:Report` 子类）**必须有正文** ✓

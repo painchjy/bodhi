@@ -57,3 +57,13 @@ description: 事实核查——把「问题清单」里的每一条问题核对�
 - 产出 → `逐项评审` 第 2 步的输入（组长确认）→ `问题核实`（专家裁决）；
 - 消费者 → `report_compose`（报告「问题清单」表格的 `verdict`/`quote` 列）；
 - **不做**判定（那是 `rule_judge`）✗、**不做**入库（`knowledge_extract` 写入阶段）✗。
+
+## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）
+
+- **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
+  - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
+  - 旧调用 `rules_of_task(kb, task)` ≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+- **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
+  每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
+- **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓
+- **写库**：`write_knowledge`（**图 → PG** ✓）；`document` 类（`bmm:Report` 子类）**必须有正文** ✓
