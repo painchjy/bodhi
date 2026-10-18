@@ -3397,32 +3397,12 @@ def tool_definitions() -> list[dict]:
                 "limit": {"type": "integer"}},
                 "required": ["kb_id", "policy"]},
         },
-        {
-            "name": "rules_of_task",
-            "description": ("**任务·取规则契约（只读，推荐用这个取规则）**：给一个**任务**（`bpmn:Task` 的 "
-                            "slug/标题片段），返回该任务**真正绑定的规则**（图边 `bpmn:taskExecutesRule`）"
-                            "**及其判定口径全量**：`implementation`（实现方式）、`knowledgeNeed`（所需知识）、"
-                            "`scope`（适用范围）、`enforcement`（级别）、`reference`、`needs_extract`"
-                            "（是否需先做知识抽取：由实现方式/所需知识判定）、`strategies`（所属策略，"
-                            "`isDerivedFrom` 出边）、`required_fields`（结论最小契约：结论枚举/证据/严重度/规则出处）、"
-                            "`source`（每条规则的**出处**，如 `graph:taskExecutesRule`）。"
-                            "另回任务自身：`definition` + `dataobjects`（`taskUsesDataObject`：输入/输出）+ "
-                            "`roles`（`taskHasRole`）。整包带 `hash` 指纹 ⇒ **可反假断言**"
-                            "（改了规则属性，字段与 hash 必变）。"
-                            "⚠️ 与 `rules_of_policy` 的区别：后者只回\"策略→规则清单\"、**不带判定口径**，"
-                            "智能体会只能回去看文档复原 ✗ —— 取规则请优先用本工具。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "task": {"type": "string", "description": "任务页（bpmn:Task）的 slug 片段或标题片段"},
-                "limit": {"type": "integer"}},
-                "required": ["kb_id", "task"]},
-        },
-        {
+                {
             "name": "rules_resolve",
             "description": ("**按步骤解析规则（只读，推荐用这个）**：任务由**步骤**组成，每步自选解析方式 —— "
                             "`direct:<slug>[,<slug>…]` 直接指定；`policy:<策略名/slug片段>` 经策略**递归解析**"
                             "（`isDerivedFrom` 入边 + `includesBusinessPolicy` 出边，支持策略包含策略）；"
-                            "`ask` **只回可选范围**（策略清单）由用户定；`task:<任务>` 兼容旧行为（= `rules_of_task`）；"
+                            "`ask` **只回可选范围**（策略清单）由用户定；`task:<任务>` **已废弃** ✗（任务边 `bpmn:taskExecutesRule` 已删除 ✓，请用 policy/direct/ask ✓）；"
                             "`path:` 预留。回执统一：`resolved_by` + `rules[…]`（含 `needs_extract` / "
                             "`required_fields` / `source` / `strategies`）+ `hash`（可断言）。"
                             "⚠️ 取规则请优先用本工具：它不假设\"任务=一组规则\"，而是**按步骤**解析。"),

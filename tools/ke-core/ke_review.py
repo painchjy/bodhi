@@ -150,8 +150,9 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
     if kind == "direct":
         rules = _rule_contracts(kb, [x.strip() for x in arg.split(",") if x.strip()], kb_name)
     elif kind == "task":
-        rep = rules_of_task(kb, arg, limit)
-        resolved_by, rules = "task", rep.get("rules") or []
+        # 2026-10-18（用户口径 ✓）：**task: 已废弃** ✗ —— `bpmn:taskExecutesRule` 边已删除 ✓
+        raise ValueError("spec 的 `task:` 已废弃 ✗（任务边已删除 ✓）；请改用 "
+                         "`policy:<策略>` / `direct:<规则slug,…>` / `ask` ✓")
     elif kind == "policy":
         hits = _pols(arg)
         if not hits:
