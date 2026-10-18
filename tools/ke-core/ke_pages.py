@@ -1752,15 +1752,25 @@ def delete_relation(kb_id: str, slug: str, target_slug: str, rel_type: str = "")
 # 本体类型修改 / 批量软删除 / KB 能力位（wiki 自动生成开关）
 # ---------------------------------------------------------------------------
 def _sync_folders(kb_id: str) -> dict:
-    """复用既有目录同步脚本（子进程，避免 ke-core ↔ ontology-mcp 的循环导入）。"""
+    """复用既有目录同步脚本（子进程，避免 ke-core ↔ ontology-mcp 的循环导入）。
+
+    2026-10-17（用户口径 ✓）：**先重算 `category_path`（收敛历史坏值 ✓），再建树挂页 ✓** ——
+    只建树不重算的话，页面上的坏值（如 `["bpmn:Task","bpmn:Task"]` ✗）会被永远照建出来 ✗。
+    """
+    try:
+        import ke_category as _kc  # noqa: PLC0415
+        _rec = _kc.recompute(kb_id, only_bad=True)
+    except Exception as exc:  # noqa: BLE001
+        _rec = {"ok": False, "error": str(exc)[:160]}
     import subprocess
     script = HERE.parents[0] / "ontology-mcp" / "sync_folders.py"
     if not script.is_file():
-        return {"ok": False, "error": "找不到 %s" % script}
+        return {"ok": False, "error": "找不到 %s" % script, "recompute": _rec}
     done = subprocess.run([sys.executable, str(script), "--kb-id", kb_id, "--link-pages"],
                           capture_output=True, text=True, encoding="utf-8", check=False)
     tail = (done.stdout or done.stderr or "").strip().splitlines()[-3:]
-    return {"ok": done.returncode == 0, "tail": tail}
+    return {"ok": done.returncode == 0, "tail": tail,
+            "recompute": {k: _rec.get(k) for k in ("fixed", "unresolved", "was_empty", "error")}}
 
 
 def set_page_type(kb_id: str, slug: str, new_type: str, sync_folders: bool = True) -> dict:

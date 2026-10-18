@@ -589,9 +589,16 @@ def category_path(type_name: str) -> list[str]:
     """
     meta = class_meta()
     info = meta.get(type_name) or {}
+    # 2026-10-17（用户口径）：**取不到类信息 ⇒ 返回空数组** ✓
+    #   绝不回落成 `[类名, 类名]` ✗ —— 那会把目录树污染出 `bpmn:Task/` 这种带冒号的一级目录 ✗。
+    #   页仍可见（挂根 ✓），等补上该类元数据后由 `ke_category.recompute()` 归位 ✓。
+    if not info:
+        return []
     module_label = (info.get("module_short") or info.get("module_label")
-                    or info.get("module") or type_name)
-    label = info.get("label") or type_name
+                    or info.get("module") or "")
+    label = info.get("label") or ""
+    if not module_label or not label:
+        return []
     group = top_group(type_name, meta) or label
     return [module_label, group]
 
