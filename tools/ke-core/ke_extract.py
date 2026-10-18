@@ -16,6 +16,9 @@
 4. 返回 `{items:[7 字段…], counts:{…}, doc:{…}}` ✓（不写库 ✗，由调用方确认后落 `extract_state` ✓）。
 """
 
+import json
+import re
+
 KW = {
     "deploy_fig": ["部署图", "部署架构", "图1", "图2"],
     "devices": ["设备申请", "设备清单", "配置规格"],
@@ -122,7 +125,7 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
                 "hint": ("读不到该文档正文 ✗。检查：① `knowledge_id` 是否在**工作库**的 `knowledges` 里 ✓"
                          "（可先 `knowledge_lookup(mode=\"keyword\", query=<文档名>)` ✓）；"
                          "② 文档是否已解析出 `chunks` ✓；③ 是否需要先上传/重建索引 ✓。"
-                         "**不要**据此判定"文档里没有" ✗。")}
+                         "**不要**据此判定「文档里没有」 ✗。")}
     # 2026-10-18（用户口径 ✓）：**不再依赖 task/taskExecutesRule** ✗ —— spec 优先 ✓，失败再兜底 ✓
     plan = {}
     for _dkb, _spec in ((dkb, spec or ""), (dkb, "policy:技术方案逐项评审策略"),
