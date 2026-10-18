@@ -3273,19 +3273,6 @@ def tool_definitions() -> list[dict]:
                 "dry_run": {"type": "boolean"}},
                 "required": ["kb_id"]},
         },
-        {
-            "name": "rules_of_policy",
-            "description": ("**文档评审·取规则清单（只读）**：给一条业务策略（`bmm:BusinessPolicy` 的 slug/标题片段），"
-                            "返回它下面的**业务规则**清单：每条的名称、**级别**（Strict/Advisory/Override）、"
-                            "**适用范围**（`ruleScope`，一般=文档章节）、**实现方式**（`ruleImplementation`："
-                            "LLM软规则 / 图检索）、**参考规范**（`ruleReference`）与规则原文依据。"
-                            "评审时**逐条**按实现方式分流（LLM软规则→大模型判定；图检索→`graph_query`）。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string"},
-                "policy": {"type": "string", "description": "策略的 slug 片段或标题片段"},
-                "limit": {"type": "integer"}},
-                "required": ["kb_id", "policy"]},
-        },
                 {
             "name": "rules_resolve",
             "description": ("**按步骤解析规则（只读，推荐用这个）**：任务由**步骤**组成，每步自选解析方式 —— "
@@ -3531,6 +3518,30 @@ def tool_definitions() -> list[dict]:
                 "slug": {"type": "string", "description": "同名组的 slug（概念页同名）"},
                 "master": {"type": "string", "description": "候选权威库（id/前缀/精确库名）；留空=用概念页已登记的"},
             }, "required": ["slug"]},
+        },
+        {
+            "name": "kb_import",
+            "description": ("**运维 · 导入知识库**：把导出的**目录/zip** 导入到指定知识库（或 `new_kb` 现建/复用同名库），"
+                            "按 (kb, slug) 先删后插（幂等）；`verify=true` 默认**立刻做 PG + Neo4j 六项一致性比对**"
+                            "（页内容/页链/目录/版本/图节点/图边），回执给 `verify_ok`。"),
+            "inputSchema": {"type": "object",
+                            "properties": {"source": {"type": "string", "description": "导出目录或 zip 的路径/文件名（默认在服务端 exports/ 下找）"},
+                                           "kb_id": {"type": "string", "description": "导入到该既有库"},
+                                           "new_kb": {"type": "string", "description": "或：新建/复用同名库（与 kb_id 二选一）"},
+                                           "keep_ids": {"type": "boolean", "description": "保留原 UUID（跨实例迁移建议 true）"},
+                                           "verify": {"type": "boolean", "description": "默认 true：导入后比对"}},
+                            "required": ["source"]},
+        },
+        {
+            "name": "retag_rollback",
+            "description": ("**回滚一次类型迁移**（运维用）：按 apply 留下的迁移记录 "
+                            "`state/retag/<ticket>.json` 恢复 slug / 类型 / 正文 / 引用 / 会话状态；幂等。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "kb_ids": {"type": "array", "items": {"type": "string"}},
+                "confirm_kb_match": {"type": "boolean"},
+                "ticket": {"type": "string", "description": "要回滚的那次迁移 ticket"},
+            }, "required": ["kb_id", "ticket"]},
         },
     ]
 
@@ -3843,6 +3854,7 @@ def call_tool(name: str, args: dict) -> dict:
 
 
 _RETIRED_TOOLS = {
+    "rules_of_policy": "改用 `rules_resolve(spec=…)`（同一份图本优先实现 ✓）",
     "review_apply": "评审结论改由 save_knowledge(mode=document) 落 `bmm:TechnicalReviewReport` 一页 ✓（本工具会产 `bmm:Assessment` 旧口径 ✗）",
     "service_overview": "旧「服务概览」，被 `knowledge_lookup` + `doc_outline` 覆盖 ✓",
     "rebuild_wiki_from_graph": "重建页已并入保存路径（图→PG 写序）✓，请用 `save_knowledge` / `recategorize`",
