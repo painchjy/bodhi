@@ -3433,6 +3433,22 @@ def tool_definitions() -> list[dict]:
                 "required": ["kb_id", "spec"]},
         },
         {
+            "name": "extract_candidates",
+            "description": ("**候选抽取（只定位，不判定）**：按 `ke_plan` 的必需事实，从**源文档**（WeKnora `chunks` "
+                            "直读 ✓）里定位**逐字行 + 章节位置**，返回 `candidates[]`（每项 `{line, locator}` ✓）。"
+                            "⚠️ 返回的 `status` **一律 `unknown`** ✗ —— 判读是你的工作（见技能 `knowledge_extract`）："
+                            "文档里有 ⇒ `present` ✓；文档没有但其他库/系统有 ⇒ `absent_verified`（文档遗漏 ✓ 是问题 ✓）；"
+                            "哪都没有 ⇒ `unavailable` ✓。**不得**把章节标题命中当成事实命中 ✗（假断言 ✗）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "源文档所在库（任务知识库）"},
+                "knowledge_id": {"type": "string", "description": "文档 UUID / 标题 / 文件名（如 样例1-…docx）"},
+                "domain_kb": {"type": "string", "description": "规则所在库（领域模型）"},
+                "task": {"type": "string", "description": "任务（默认 逐项评审）"},
+                "other_kbs": {"type": "array", "description": "文档缺时查哪些库（可选）"},
+                "limit_items": {"type": "integer"}},
+                "required": ["kb_id", "knowledge_id"]},
+        },
+        {
             "name": "evidence_score",
             "description": ("**证据/结论可信度评分（只读，纯函数）**：输入一条规则的 `facts`（每条事实带 "
                             "`status`(present/absent_verified/unavailable) / `confidence` / `source_type` / "
@@ -4166,6 +4182,14 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                             args.get("patch") or {},
                                             actor=str(args.get("actor", "")),
                                             dry_run=bool(_pa_dry))
+    if name == "extract_candidates":
+        # 2026-10-17：**候选抽取**（只定位 ✓ 不判定 ✗）—— 判读交给知识提取技能/模型 ✓
+        import ke_extract  # noqa: PLC0415
+        return ke_extract.extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
+                                  str(args.get("domain_kb", "")),
+                                  str(args.get("task", "逐项评审") or "逐项评审"),
+                                  args.get("other_kbs") or None,
+                                  int(args.get("limit_items", 20) or 20))
     if name == "evidence_score":
         # 2026-10-17：**证据/结论可信度**（只读纯函数 ✓，口径唯一 ✓，智能体不必自己算 ✗）
         import ke_score  # noqa: PLC0415
