@@ -4207,6 +4207,13 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return ke_review.rules_resolve(str(args.get("kb_id", "")), str(args.get("spec", "")),
                                        int(args.get("limit", 300) or 300))
     if name == "rules_of_task":
+        # 2026-10-18（用户口径 ✓）：**已下架** ✗ —— 旧"任务→规则（taskExecutesRule）"路径已删除 ✓
+        return {"ok": False, "deprecated": True, "error": "rules_of_task 已下架",
+                "hint": ("规则只按步骤解析：`knowledge_lookup(kb_id=<领域库>, mode=\"rules\", "
+                         "spec=\"policy:<策略>\" | \"direct:<规则slug,…>\" | \"ask\")` ✓；"
+                         "若要按策略取全部规则：spec=\"policy:技术方案逐项评审策略\" ✓"),
+                "since": "2026-10-18"}
+    if name == "rules_of_task_legacy":
         # 2026-10-16（用户口径）：**按任务取规则契约**（图边 taskExecutesRule + 页面属性真读；
         # 带 needs_extract 分流 / required_fields / source 出处 / hash 指纹 ⇒ 反假断言可验）
         return ke_review.rules_of_task(str(args.get("kb_id", "")), str(args.get("task", "")),

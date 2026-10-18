@@ -99,7 +99,9 @@ def _doc_text(kb: str, knowledge_id: str) -> list:
 
 
 def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐项评审",
-            other_kbs: list | None = None, limit_items: int = 20) -> dict:
+            other_kbs: list | None = None, limit_items: int = 20,
+            spec: str = "policy:技术方案逐项评审策略") -> dict:
+    """`spec` 决定取哪些规则 ✓（默认按**策略** ✓，不再依赖任务边 ✗）。"""
     import ke_db
     import ke_plan
     import ke_lookup
@@ -112,8 +114,19 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
 
     doc = _srv.doc_outline(kb, knowledge_id) or {}
     lines = _doc_text(kb, knowledge_id) or _lines(doc)
-    plan = ke_plan.build(dkb, task)
-    todo = [it for it in (plan.get("items") or []) if it.get("required") or it.get("kind") in ("image", "table", "text")]
+    # 2026-10-18（用户口径 ✓）：**不再依赖 task/taskExecutesRule** ✗ —— spec 优先 ✓，失败再兜底 ✓
+    plan = {}
+    for _dkb, _spec in ((dkb, spec or ""), (dkb, "policy:技术方案逐项评审策略"),
+                        ("技术方案评审领域模型", "policy:技术方案逐项评审策略")):
+        try:
+            plan = ke_plan.build(_dkb, task, spec=_spec)
+            if (plan.get("items") or []):
+                dkb = _dkb
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    todo = [it for it in (plan.get("items") or [])
+            if it.get("required") or it.get("kind") in ("image", "table", "text")]
     _seen, _uniq = set(), []          # 2026-10-17：同一事实可能被多条规则声明 ⇒ 按 id 去重 ✓
     for _it in todo:
         _id = str(_it.get("id") or "")

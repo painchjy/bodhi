@@ -117,14 +117,32 @@ def _external(token: str, kb: str) -> dict:
     return {}
 
 
-def build(domain_kb: str = "", task: str = "", policies: list | None = None) -> dict:
+def build(domain_kb: str = "", task: str = "", policies: list | None = None,
+          spec: str = "") -> dict:
+    """取规则：**只走 `rules_resolve(spec)`** ✓
+
+    2026-10-18（用户口径 ✓）：**不再走 `rules_of_task` / `taskExecutesRule`** ✗ ——
+    那条"任务 → 规则"的边属于旧路径，已计划清理 ✓；规则一律按**策略/直接/询问**解析 ✓。
+
+    `spec` 五种：`direct:` / `policy:` / `ask` / `task:`（兼容，需任务页存在 ✓）/ `path:`；
+    未给 `spec` 时：有 `policies` ⇒ `policy:<首个>` ✓；有 `task` ⇒ `task:<task>` ✓；
+    都没有 ⇒ 评审域默认 `policy:技术方案逐项评审策略` ✓。
+    """
     kb, kb_name, _n = ke_db.resolve_kb_id(domain_kb)
-    rep = ke_review.rules_of_task(domain_kb, task)
+    sp = (spec or "").strip()
+    if not sp:
+        if policies:
+            sp = "policy:%s" % str(policies[0])
+        elif task:
+            sp = "task:%s" % task
+        else:
+            sp = "policy:技术方案逐项评审策略"
+    rep = ke_review.rules_resolve(domain_kb, sp)
     rules = [r for r in (rep.get("rules") or []) if r.get("needs_extract")]
     if not rules:
-        return {"ok": True, "task": (rep.get("task") or {}).get("slug"), "empty": True,
+        return {"ok": True, "spec": sp, "empty": True,
                 "counts": {"rules": len(rep.get("rules") or []), "items": 0},
-                "note": "本步没有需要知识提取的规则"}
+                "note": "本步没有需要知识提取的规则（或 spec 解析为空）"}
 
     meta, idx = _meta(), _index()
     items: dict = {}

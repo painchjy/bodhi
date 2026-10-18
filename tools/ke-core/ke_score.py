@@ -42,6 +42,10 @@ score = 0.45 × 覆盖分      # Σ w(status)/n；present=1.0, absent_verified=1
 CONF = {"high": 1.0, "medium": 0.7, "low": 0.4}
 SOURCE = {"doc_table": 1.0, "doc_text": 0.9, "graph": 0.95, "image": 0.7,
           "external_query": 0.6, "external_stub": 0.4, "unknown": 0.5}
+# 2026-10-17：**别名兼容** ✓（实测智能体会传 `document` / `table` / 数值 confidence ✗）
+SOURCE_ALIAS = {"document": "doc_text", "doc": "doc_text", "text": "doc_text",
+                "table": "doc_table", "img": "image", "figure": "image",
+                "stub": "external_stub", "external": "external_query", "kb": "graph"}
 STATUS_W = {"present": 1.0, "absent_verified": 1.0, "unavailable": 0.2}
 CHECK = {"supported": 1.0, "not_supported": 0.0, "insufficient": 0.3}
 
@@ -75,8 +79,17 @@ def score_rule(facts: list | None = None, checks: list | None = None,
     if pres:
         vals = []
         for f in pres:
-            c = CONF.get(str(f.get("confidence") or "medium"), 0.7)
-            s = SOURCE.get(str(f.get("source_type") or "unknown"), 0.5)
+            _c = str(f.get("confidence") or "medium").strip().lower()
+            if _c in CONF:
+                c = CONF[_c]
+            else:
+                try:
+                    c = max(0.0, min(1.0, float(_c)))     # 数值 confidence ✓（0.95 ⇒ 0.95 ✓）
+                except Exception:  # noqa: BLE001
+                    c = 0.7
+            _s = str(f.get("source_type") or "unknown").strip().lower()
+            _s = SOURCE_ALIAS.get(_s, _s)
+            s = SOURCE.get(_s, 0.5)
             vals.append(c * s)
             if c * s < 0.7:
                 reasons.append("低置信事实 %s（confidence=%s, source=%s）"
