@@ -2153,7 +2153,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             "maintenance": "deferred" if defer_maintenance else "inline",
             "engine": "kernel:write_knowledge/document",
             "report_page": {"slug": res.get("slug"), "title": title, "chars": len(body),
-                            "type_label": ctx["report_label"], "page_type": _ptype,
+                            "type_label": _type_label_of(_ptype, ctx["report_label"]), "page_type": _ptype,
                             "action": _action,
                             "category_path": (report or {}).get("category_path")
                                              or [ctx["report_category"]],

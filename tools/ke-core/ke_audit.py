@@ -2013,6 +2013,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_wiki_graph(ctx, rep)
         check_summary_drift(ctx, rep)      # W5/W6 摘要·别名一致性清单（只列，供人工核查）
         check_graph_pg_drift(ctx, rep)     # W10 图↔PG 属性漂移（"图为主"的验收断言）
+        check_ontology_page_drift(ctx, rep)  # W11 本体库页 ↔ TTL 编译漂移
     if scope in ("all", "model"):
         check_graph_model(ctx, rep)
         check_ontology_artifacts(ctx, rep)
@@ -2203,3 +2204,54 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def check_ontology_page_drift(ctx: dict, rep: Report) -> None:
+    """**W11 本体库与 TTL 编译漂移**（2026-10-18）✓
+
+    背景：有人**把本体当实例改**（直接动图/PG），导致「技术方案文档类的数据属性展示报错」✗
+    （2026-10-18 实测：重传 3 个本体模型才恢复 ✓）。本体库是**只读**（`assert_writable_kb` ✓），
+    正常路径只能是「改 `ontology/*.ttl` → 加载编译」✓；本检查比对**类页 label/comment**
+    ↔ `ke_ontology.class_meta()`（编译结果的唯一读口 ✓），漂移即报 ✓。
+    """
+    kb = ctx.get("kb_id") or ""
+    slugs = [x for x in (ctx.get("live") or []) if str(x).startswith("ontology/")]
+    if not kb or not slugs:
+        return
+    try:
+        import ke_ontology as _ont  # noqa: PLC0415
+        meta = _ont.class_meta() or {}
+    except Exception as exc:  # noqa: BLE001
+        rep.add("W11", "low", kb, "本体索引不可用，跳过：%s" % exc, "检查 ke_ontology 索引")
+        return
+    bad = []
+    for sl in slugs[:800]:
+        rows = None
+        try:
+            import ke_db as _db  # noqa: PLC0415
+            rows = _db.psql_csv(
+                "SELECT COALESCE(page_metadata->'ontology'->>'label','') AS lab, "
+                "       COALESCE(page_metadata->'ontology'->>'comment','') AS cmt "
+                "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+                % (_db.sql_str(kb), _db.sql_str(sl)))
+        except Exception:  # noqa: BLE001
+            continue
+        if not rows:
+            continue
+        row = rows[0]
+        local = str(sl).rsplit("/", 1)[-1]
+        cand = [k for k in (sl.replace("ontology/", "").replace("/", ":"),
+                            "bmm:" + local, "bpmn:" + local, "agent:" + local) if k in meta]
+        if not cand:
+            continue
+        info = meta[cand[0]] or {}
+        exp = str(info.get("label") or "").strip()
+        got = str(row.get("lab") or "").strip()
+        if exp and got and exp != got:
+            bad.append((sl, "label", got, exp))
+    if bad:
+        rep.add("W11", "high", kb,
+                "本体库有 %d 页与编译结果不一致（疑似直接改过 PG/图 ✗）：%s"
+                % (len(bad), "; ".join("%s: %s≠%s" % (b[0], b[2], b[3]) for b in bad[:5])),
+                "重新上传本体（改 TTL → 加载编译），不要直接改本体库页 ✗")
+    else:
+        rep.add("W11", "low", kb, "本体库类页与编译结果一致（已比对 %d 页 ✓）" % len(slugs[:800]), "")

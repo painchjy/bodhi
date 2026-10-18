@@ -33,6 +33,22 @@ def columns(domain_kb: str, do_slug: str = "bpmn/dataobject/问题清单") -> li
     return out
 
 
+def _check_coverage(rows: list, rules: list) -> dict:
+    """③ 覆盖校验（2026-10-18 用户口径 ✓）：**行数 ≥ 规则数** ✓；
+    同一规则在不同位置/子系统结论不同 ⇒ 可多行 ✓（按 `rule` 去重后比较 ✓）。
+    返回 {ok, rules, rows, covered, missing}。
+    """
+    def _key(x) -> str:
+        return str(x.get("rule") or x.get("rule_slug") or "").strip()
+
+    rule_keys = {_key(r) for r in rules if _key(r)}
+    row_keys = {_key(x) for x in rows if _key(x)}
+    missing = sorted(rule_keys - row_keys)
+    return {"ok": not missing and len(rows) >= len(rules),
+            "rules": len(rules), "rows": len(rows),
+            "covered": len(rule_keys & row_keys), "missing": missing}
+
+
 def render(sample: str, doc_title: str, facts: dict, domain_kb: str,
            rules_spec: str = "policy:技术方案逐项评审策略") -> dict:
     """渲染一份报告正文 ✓（返回 {content, counts}；不写库 ✗）。"""
@@ -82,7 +98,8 @@ def render(sample: str, doc_title: str, facts: dict, domain_kb: str,
            "- 可信度：高 %d ｜ 中 %d ｜ 低 %d" % (sum(1 for x in rows if x["level"] == "high"),
                                               sum(1 for x in rows if x["level"] == "medium"),
                                               sum(1 for x in rows if x["level"] == "low"))]
-    return {"content": "\n".join(md) + "\n", "cols": cols,
+    _coverage = _check_coverage(rows, lk["rules"])
+    return {"content": "\n".join(md) + "\n", "cols": cols, "coverage": _coverage,
             "counts": {"不符合": len(failed), "符合": len(passed), "无法判定": len(insuf),
                        "否决": len(veto)}, "lookup_hash": lk["hash"]}
 
