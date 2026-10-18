@@ -70,3 +70,35 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
   每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
 - **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓
 - **写库**：`write_knowledge`（**图 → PG** ✓）；`document` 类（`bmm:Report` 子类）**必须有正文** ✓
+
+## 抽取产出契约（2026-10-17 用户口径 ✓）：三态 + `found_in`
+
+每条事实**必须**产出下面 7 个字段 ✓（`ke_plan.items[]` 逐项填 ✓），否则判定层无法算可信度 ✗：
+
+```json
+{"id": "deploy_fig",
+ "status": "present" | "absent_verified" | "unavailable",   // 三态 ✓
+ "confidence": "high" | "medium" | "low",                   // 你对该取值的把握 ✓
+ "source_type": "doc_text" | "doc_table" | "image" | "graph" | "external_query",
+ "found_in": "doc" | "other_kb:<库名/slug>" | "none",       // **从哪来** ✓
+ "quote": "逐字摘录（可全文检索到 ✓）",
+ "locator": "章节/表格行列/图号（可回访 ✓）"}
+```
+
+### 判定三态的**硬规则**（这是"文档遗漏 vs 外部不可得"的分界 ✓）
+| 情况 | status | 是否算问题 |
+|---|---|---|
+| 文档里有 ✓ | `present` | — |
+| 文档里没有 ✗，**但其他知识库/系统能拿到** ✓ | **`absent_verified`** ✓（`found_in="other_kb:…"` ✓，quote 写**其他库的来源** ✓） | **是问题** ✓ ⇒ 判 `failed`（文档遗漏 ✓） |
+| **任何地方都拿不到** ✗ | `unavailable` ✓（`found_in="none"` ✓） | **不算问题** ✗ ⇒ 只能 `无法判定` ✓ |
+
+### 禁止 ✗
+- **不许**在文档里没有、但没去其他库查过就写 `unavailable` ✗ —— 那是把"我们没查"当成"查不到" ✗；
+- **不许**自己判 `不符合` ✗（判定是 `rule_judge` 的事 ✓）；
+- **不许**写 `present` 但 `quote` 是转述 ✗（必须逐字 ✓，且 `locator` 可回访 ✓）。
+
+### 自检
+- [ ] 7 个字段齐全 ✓；`status` 只用三态 ✓
+- [ ] `absent_verified` 的条目 `found_in` 必须是 `other_kb:` ✓ 或明确的"文档确认无"证据 ✓
+- [ ] `unavailable` 的条目必须有"已查过哪些来源"的说明 ✓（写在 quote 或 note ✓）
+- [ ] `present` 的 `quote` 能全文检索到 ✓、`locator` 能回访 ✓

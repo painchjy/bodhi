@@ -164,6 +164,9 @@ def build(domain_kb: str = "", task: str = "", policies: list | None = None) -> 
                     "status": "present",
                     "source_type": {"class": "graph", "image": "image", "text": "doc_text",
                                     "table": "doc_table", "external": "external_query"}.get(kind, "unknown"),
+                    # 2026-10-17：抽取端回填 ✓ —— 这条事实从哪来（决定"文档遗漏" vs "外部不可得" ✓）
+                    #   取值：`doc` ✓ / `other_kb:<库名或slug>` ✓ / `none` ✗（哪都没有 ⇒ unavailable ✓）
+                    "found_in": "",
                     "facts": c.get("facts") or [], "columns": c.get("columns") or [],
                     "from_rules": [], "why": "规则已标注（knowledgeSpec）✓ 不猜类"})
                 it["from_rules"] = sorted(set(it["from_rules"] + [r["slug"]]))
