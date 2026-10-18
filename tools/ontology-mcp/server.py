@@ -3500,7 +3500,7 @@ def tool_definitions() -> list[dict]:
                 "policy": {"type": "string"},
                 "policy_slug": {"type": "string"},
                 "findings": {"type": "array", "items": {"type": "object"}},
-                "page_type": {"type": "string", "description": "结论页的页类型（默认 bmm:Assessment）"},
+                "page_type": {"type": "string", "description": "结论页的页类型（默认 bmm:TechnicalReviewReport（必须 bmm:Report 子类））"},
                 "actor": {"type": "string"},
                 "session_no": {"type": "string",
                                "description": "本次会话编号（WeKnora 会话 id，uuid）→ 结论页连回会话页（bmm:sourceSession）。建议与 save_knowledge 传同一个"}},
