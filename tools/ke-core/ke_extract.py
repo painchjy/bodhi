@@ -114,6 +114,15 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
 
     doc = _srv.doc_outline(kb, knowledge_id) or {}
     lines = _doc_text(kb, knowledge_id) or _lines(doc)
+    # 2026-10-18（用户口径 ✓）：**读不到正文 ⇒ 明确报错** ✗ —— 绝不返回空候选 ✗
+    #   （否则智能体会把"没读到"当成"文档里没有"⇒ 假 absent_verified ✗ 假断言 ✗）
+    if not lines:
+        return {"ok": False, "error": "doc_not_found_or_empty",
+                "kb": kb, "knowledge_id": knowledge_id,
+                "hint": ("读不到该文档正文 ✗。检查：① `knowledge_id` 是否在**工作库**的 `knowledges` 里 ✓"
+                         "（可先 `knowledge_lookup(mode=\"keyword\", query=<文档名>)` ✓）；"
+                         "② 文档是否已解析出 `chunks` ✓；③ 是否需要先上传/重建索引 ✓。"
+                         "**不要**据此判定"文档里没有" ✗。")}
     # 2026-10-18（用户口径 ✓）：**不再依赖 task/taskExecutesRule** ✗ —— spec 优先 ✓，失败再兜底 ✓
     plan = {}
     for _dkb, _spec in ((dkb, spec or ""), (dkb, "policy:技术方案逐项评审策略"),
