@@ -62,6 +62,20 @@ def parse_log(path: str) -> list[dict]:
     return calls
 
 
+def _stage_of(call: dict) -> str:
+    """按**参数**消歧 ✓：`knowledge_lookup(mode=rules)` = 取规则；keyword/path = 取事实 ✓。
+    （2026-10-18 实测：不分参数会把「取事实」判到「取规则」前面 ⇒ 顺序单调误判为「否」✗）
+    """
+    t = call.get("tool") or ""
+    a = call.get("args") or {}
+    if t == "knowledge_lookup":
+        return "取规则" if str(a.get("mode") or "").lower() == "rules" else "取事实"
+    for name, allowed in STAGES:
+        if t in allowed and t != "knowledge_lookup":
+            return name
+    return ""
+
+
 def evaluate(calls: list[dict]) -> dict:
     n = len(calls)
     if not n:
@@ -72,10 +86,10 @@ def evaluate(calls: list[dict]) -> dict:
 
     first, hit = {}, []
     for i, c in enumerate(calls):
-        for name, allowed in STAGES:
-            if c["tool"] in allowed and name not in first:
-                first[name] = i
-                hit.append(name)
+        name = _stage_of(c)
+        if name and name not in first:
+            first[name] = i
+            hit.append(name)
     order = [first[k] for k in hit]
     monotonic = all(order[i] < order[i + 1] for i in range(len(order) - 1))
     coverage = round(len(hit) / len(STAGES), 4)
