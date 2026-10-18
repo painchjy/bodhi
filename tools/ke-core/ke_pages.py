@@ -1214,6 +1214,22 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                          "文档(doc_refs/source_text/chunk_refs) 其一；否则拒写")
     slug = (spec.get("slug") or "").strip() or _derive_slug(page_type, title)
     attrs = dict(spec.get("attributes") or {})
+    # 2026-10-17（用户口径 ✓）：**属性必须是本体声明的数据属性** ✓ —— 否则拒写 ✗
+    #   反例：`verdicts` / `ruleSet` / `columns`（统计与列规范 ✗）—— 统计写正文 ✓、
+    #   工具元数据放 metadata_extra ✓，都不许进 attributes ✗。
+    if attrs:
+        try:
+            _allowed = {str(k).split(":")[-1].lower()
+                        for k in (ke_ontology.data_properties_for(page_type) or {})}
+        except Exception:  # noqa: BLE001
+            _allowed = set()
+        if _allowed:
+            _bad = [k for k in attrs if str(k).split(":")[-1].lower() not in _allowed]
+            if _bad:
+                raise ValueError(
+                    "属性不在 %s 的本体声明里：%s（允许：%s）—— 汇总统计写正文 ✓，"
+                    "工具元数据放 metadata_extra ✓，不要塞 attributes ✗"
+                    % (page_type, "、".join(_bad), "、".join(sorted(_allowed))))
     dkey = spec.get("definition_key", "definition")
     render_attrs = spec.get("render_attributes")
     if render_attrs is None:
