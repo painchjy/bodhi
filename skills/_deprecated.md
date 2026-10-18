@@ -32,7 +32,49 @@
 | `model_recommendation` | 模型推荐 | 与评审主链无关 ✓ |
 | `kb_transfer` / `session_provenance` / `revision_trace` / `skill_development` | 平台类 | 保留工具，不作为评审技能入口 ✓ |
 
-## 三、待办（本轮未做）
+## 四、报告生成能力盘点与统一（2026-10-17）
+
+### 现状：**3 个技能 + 2 条写路径**（口径不一致 ✗）
+| 类型 | 名字 | 现状 | 问题 |
+|---|---|---|---|
+| 技能 | `report_compose` | 新（规则驱动 ✓） | 未声明"报告类由本体定 ✓ / 章节按类 comment ✓" |
+| 技能 | `document_review` | 旧 ✗ | 按"看文档复原规则"✗，且自定章节 ✗ |
+| 技能 | `tech_review_extraction` | 旧 ✗ | 逐规则重复提取 ✗ |
+| 函数 | `ke_review.review_apply` | 旧 ✗ | 直接产 `bmm:Assessment` 报告 ✗（**entity 类型** ✗，章节自定 ✗） |
+| 函数 | `server.save_knowledge(stage="report")` | 旧 ✗ | 报告阶段用 `bmm:Assessment` ✗ 同上 |
+
+### 统一口径（唯一正确写法 ✓）
+```python
+ke_pages.write_knowledge(kb_id, {
+    "title": "评审报告：{文档}（{流程号}·R{n}）",
+    "page_type": "bmm:TechnicalReviewReport",   # ← 必须用本体里的报告子类 ✓
+    "mode": "document",                          # ← 由 render_mode(Report 子类) 决定 ✓
+    "wiki_content": <五节正文>,                   # ← 正文由智能体/技能生成 ✓（数据属性不产正文 ✓）
+    "attributes": {"skos:definition": … , "verdicts": …},   # 只作属性面板 ✓
+    "source": {"session_no": …, "locator": …},   # 严格溯源 ✓（缺则拒写 ✓）
+})
+```
+**判定链（不需要 `bodhi:renderMode` ✓ —— 已确认多余 ✗）**：
+```
+report/composite 模式 = `page_type` 是 `bmm:Report` 的子类
+  ⇒ ke_ontology.render_mode() 返回 "document" ✓（ke_ontology.py:433-436 ✓）
+  ⇒ 数据属性**不渲正文** ✓，正文只来自 wiki_content ✓
+其余类 ⇒ "entity" ✓，正文由数据属性渲染 ✓
+```
+> 2026-10-17 回滚说明：我曾往 TTL 加 `bodhi:renderMode "document"` ✗ —— **不需要** ✗，
+> 因为「`Report` 子类 ⇒ document」这条判定 2026-10-15 就已经定稿并实现 ✓。
+
+### 报告类的章节规范从哪来 ✓
+`rdfs:comment` 里写"**章节规范** ①…②…③…" ✓（如 `bmm:TechnicalReviewReport` ✓）⇒
+`report_compose` **必须先读该类的 comment** ✓ 再生成章节 ✓，不得自定章节 ✗。
+
+### 收敛动作（待办）
+1. `report_compose` 技能补三条硬约束 ✓：报告类由本体定 ✓ / 章节按 comment ✓ / 数据属性不产正文 ✓；
+2. `ke_review.review_apply` 标 deprecated ✓（保留函数 ✓，但不再产 `bmm:Assessment` 报告 ✗）；
+3. `server.save_knowledge(stage="report")` 的报告阶段改用 `bmm:TechnicalReviewReport` ✓；
+4. 存量 4 份《评审报告：样例X…》（`bmm:Assessment` ✗）标注 **legacy** ✓，不参与新口径统计 ✓；
+5. 任务步骤 note 明确报告类型 ✓：`3) 生成评审报告（类型 bmm:TechnicalReviewReport，章节 ①-⑤）。技能：report_compose` ✓。
+
 1. `systemCriticality` 的 TTL 注释补"**主系统定义、子系统继承；子系统可独立认定并覆盖**" ✓，
    然后 `upload_ttl`（顺序 bmm → bpmn → agent ✓）；
 2. `rules_of_task` 在 MCP 描述里标 `[deprecated → rules_resolve]` ✓（行为保留 ✓）；

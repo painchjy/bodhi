@@ -485,7 +485,7 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:label "重要性等级"@zh ;
     rdfs:domain :ITAsset ;
     rdfs:range xsd:string ;
-    rdfs:comment "系统重要性等级（主系统/子系统通用），如'高'/'中'/'低'" .
+    rdfs:comment "系统重要性等级（A/B/C/D）——**语义**：由「主系统」定义，「子系统」默认继承；子系统可独立认定并覆盖主系统等级。判定部署/灾备要求时按「该子系统最终生效等级」取最低要求。" .
 
 :systemStatus rdf:type owl:DatatypeProperty ;
     rdfs:label "状态"@zh ;
