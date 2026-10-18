@@ -26,7 +26,7 @@ sys.path.insert(0, str(HERE))
 import ke_db  # noqa: E402
 import ke_pages  # noqa: E402
 
-REPORT_TYPE = "bmm:Assessment"          # 评审=对文档的评估（本体类；B1 干净）
+REPORT_TYPE = "bmm:TechnicalReviewReport"   # 2026-10-17：必须用 Report 子类 ✓（旧 Assessment ✗）          # 评审=对文档的评估（本体类；B1 干净）
 REVIEW_TAG = "bodhi-review"
 REL_SECTION = "## 本体关系"
 EVIDENCE_SECTION = "## 原文依据"

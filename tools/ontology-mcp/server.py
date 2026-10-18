@@ -2070,7 +2070,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         #   · **会话溯源边由内核自动挂**（`source.session_no` → `ensure_session_page` + `bmm:sourceSession`），
         #     所以本分支不再手工调 `link_source_session`；
         #   · 溯源列 `source_refs`（L3 兼容字段）与正文「## 原文依据」由内核写。
-        _ptype_raw = ((report or {}).get("page_type") or "").strip() or "bmm:Assessment"
+        _ptype_raw = ((report or {}).get("page_type") or "").strip() or "bmm:TechnicalReviewReport"
         # **硬约束（2026-10-10，用户实测修正）**：报告页类型只能取**本体类**。
         # 实测：领域建模智能体在 `report.page_type` 里顺手传了 WeKnora 内建的 `summary`
         # （不在本体里、正是要退役的"不合理模式"）→ 页面就落成了摘要类型。
@@ -2082,7 +2082,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         except Exception:  # noqa: BLE001  本体读不到 → 保持原值（不强行改，避免误伤）
             _known_classes = {}
         if _known_classes and _ptype_raw not in _known_classes:
-            _fallback = "bmm:Assessment" if "bmm:Assessment" in _known_classes else _ptype_raw
+            _fallback = ("bmm:TechnicalReviewReport" if "bmm:TechnicalReviewReport" in _known_classes
+                         else _ptype_raw)
             if _fallback != _ptype_raw:
                 _ptype = _fallback
                 _ptype_note = {
@@ -4154,7 +4155,7 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                       policy=str(args.get("policy", "")),
                                       policy_slug=str(args.get("policy_slug", "")),
                                       findings=args.get("findings") or [],
-                                      page_type=str(args.get("page_type", "") or "bmm:Assessment"),
+                                      page_type=str(args.get("page_type", "") or "bmm:TechnicalReviewReport"),
                                       actor=str(args.get("actor", "agent:document_review")),
                                       session_no=_rv_sno, session_slug=_rv_sslug)
     if name == "doc_outline":
@@ -4869,7 +4870,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                     kb_id=str(b.get("kb_id", "")), doc=str(b.get("doc", "")),
                     policy=str(b.get("policy", "")), policy_slug=str(b.get("policy_slug", "")),
                     findings=b.get("findings") or [],
-                    page_type=str(b.get("page_type", "") or "bmm:Assessment"),
+                    page_type=str(b.get("page_type", "") or "bmm:TechnicalReviewReport"),
                     actor=str(b.get("actor", "http:review")),
                     session_no=_resolve_session_for(str(b.get("kb_id", "")), str(b.get("session_no", "")))[0],
                     session_slug=_resolve_session_for(str(b.get("kb_id", "")), str(b.get("session_no", "")))[1]),
