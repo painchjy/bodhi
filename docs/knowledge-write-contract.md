@@ -221,3 +221,5 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 
 **结论**：搬迁只保证"**内容一致、无遗漏**"✓，不套用报告的类型/章节/渲染规则 ✗。
 
+
+> **重构期口径（2026-10-18 ✓）**：公共库的 `agent:Tool` / `agent:Skill` / `agent:Agent` 页**暂时全部清空** ✓（工具 21 + 技能 8 + 智能体 6 = 35 页已 hard delete ✓），**重构完成后再统一重建** ✗ 不要零散补页 ✗。当前公共库只保留：`agent:WorkKnowledgeBase`（库登记）+ 设计单/指标/挡板/评测/安装指引/工具服务/改进建议 ✓（这些等重构后一并复核 ✓）。
