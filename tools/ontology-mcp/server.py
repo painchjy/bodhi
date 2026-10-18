@@ -3433,6 +3433,24 @@ def tool_definitions() -> list[dict]:
                 "required": ["kb_id", "spec"]},
         },
         {
+            "name": "knowledge_lookup",
+            "description": ("**统一检索入口（只读，三种模式）**："
+                            "`mode=\"rules\"` 取规则契约（收 `spec`：direct:/policy:/ask/task:，**按步骤解析** ✓，"
+                            "等价 `rules_resolve`）；`mode=\"keyword\"` 按关键词找知识（`query`，"
+                            "**图优先 → PG 收窄融合** ✓，每条命中带 `source`：graph / graph+pg / pg）；"
+                            "`mode=\"path\"` 沿关系多跳（`start`=slug，`depth`≤4 ✓，回节点链 + 关系链）。"
+                            "⚠️ 找知识先用本工具：比\"自己猜库再查\"稳 ✓，且 `source=pg` 占比高即说明图缺数据 ✗。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "mode": {"type": "string", "description": "rules | keyword | path（默认 rules）"},
+                "query": {"type": "string", "description": "keyword 模式的关键词"},
+                "spec": {"type": "string", "description": "rules 模式的 spec（direct:/policy:/ask/task:）"},
+                "start": {"type": "string", "description": "path 模式的起始 slug"},
+                "depth": {"type": "integer", "description": "path 模式深度（1-4，默认 2）"},
+                "limit": {"type": "integer"}},
+                "required": ["kb_id"]},
+        },
+        {
             "name": "page_attributes_set",
             "description": ("**改一页的数据属性（方案 D，写）**：entity 模式的知识页 —— 正文是**只读渲染**、"
                             "数据属性是**事实源**。给 `patch`（键=本体数据属性，可带/不带模块前缀；"
@@ -4134,6 +4152,13 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                             args.get("patch") or {},
                                             actor=str(args.get("actor", "")),
                                             dry_run=bool(_pa_dry))
+    if name == "knowledge_lookup":
+        # 2026-10-17：**统一检索入口**（rules / keyword 图优先 / path）
+        import ke_lookup  # noqa: PLC0415
+        return ke_lookup.knowledge_lookup(
+            str(args.get("kb_id", "")), str(args.get("mode", "rules") or "rules"),
+            str(args.get("query", "")), str(args.get("spec", "")), str(args.get("start", "")),
+            int(args.get("depth", 2) or 2), int(args.get("limit", 20) or 20))
     if name == "rules_resolve":
         # 2026-10-16（用户口径）：**按步骤解析规则**（direct/policy 递归/ask/task 兼容/path 预留）
         return ke_review.rules_resolve(str(args.get("kb_id", "")), str(args.get("spec", "")),
