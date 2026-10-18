@@ -924,6 +924,15 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
     onto = dict(meta.get("ontology") or {})
     mode = ke_ontology.render_mode(page_type)
     # 2026-10-14 用户口径：**不再按渲染模式拒改**（document/report 页若有数据属性，同样可编辑）。
+    # 2026-10-17（用户口径 ✓）：**属性键必须在类本体的数据属性声明里** ✓ —— 否则拒改 ✗
+    _spa_allowed = {str(k).split(":")[-1].lower()
+                    for k in (ke_ontology.data_properties_for(page_type) or {})}
+    if _spa_allowed and patch:
+        _spa_bad = [k for k in patch if str(k).split(":")[-1].lower() not in _spa_allowed]
+        if _spa_bad:
+            return {"ok": False, "slug": slug, "page_type": page_type,
+                    "unknown_keys": _spa_bad, "allowed": sorted(_spa_allowed),
+                    "error": "这些键不是 %s 的本体数据属性：%s" % (page_type, "、".join(_spa_bad))}
     props = ke_ontology.data_properties_for(page_type) or {}
     if not props:
         return {"ok": False, "slug": slug, "page_type": page_type,
