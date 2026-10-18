@@ -3433,6 +3433,20 @@ def tool_definitions() -> list[dict]:
                 "required": ["kb_id", "spec"]},
         },
         {
+            "name": "evidence_score",
+            "description": ("**证据/结论可信度评分（只读，纯函数）**：输入一条规则的 `facts`（每条事实带 "
+                            "`status`(present/absent_verified/unavailable) / `confidence` / `source_type` / "
+                            "`required` / `quote` / `locator`）与 `checks`（fact_check 的 verdict），"
+                            "输出 `{score, level, gate, parts, reasons}` ✓。"
+                            "`gate=insufficient` ⇒ 结论只能是**无法判定** ✓（不得写不符合 ✗）。"
+                            "`rule_judge` 必须调用本工具产出可信度 ✓，不要自己估 ✗。"),
+            "inputSchema": {"type": "object", "properties": {
+                "facts": {"type": "array", "description": "该规则 required 的事实列表（见上）"},
+                "checks": {"type": "array", "description": "fact_check 结果：[{verdict: supported|not_supported|insufficient}]"},
+                "threshold": {"type": "number", "description": "阈值，默认 0.60"}},
+                "required": ["facts"]},
+        },
+        {
             "name": "knowledge_lookup",
             "description": ("**统一检索入口（只读，三种模式）**："
                             "`mode=\"rules\"` 取规则契约（收 `spec`：direct:/policy:/ask/task:，**按步骤解析** ✓，"
@@ -4152,6 +4166,11 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                             args.get("patch") or {},
                                             actor=str(args.get("actor", "")),
                                             dry_run=bool(_pa_dry))
+    if name == "evidence_score":
+        # 2026-10-17：**证据/结论可信度**（只读纯函数 ✓，口径唯一 ✓，智能体不必自己算 ✗）
+        import ke_score  # noqa: PLC0415
+        return ke_score.score_rule(args.get("facts") or [], args.get("checks") or [],
+                                   float(args.get("threshold", 0.60) or 0.60))
     if name == "knowledge_lookup":
         # 2026-10-17：**统一检索入口**（rules / keyword 图优先 / path）
         import ke_lookup  # noqa: PLC0415

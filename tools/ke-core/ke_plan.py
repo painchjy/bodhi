@@ -158,6 +158,12 @@ def build(domain_kb: str = "", task: str = "", policies: list | None = None) -> 
                     "module": "", "expert_role": "",
                     "tools": c.get("tools") or [], "required": bool(c.get("required")),
                     "confidence": c.get("confidence") or "high",
+                    # 2026-10-17（用户口径 ✓）：供 `ke_score` 直接消费的三键 ✓
+                    #   · status 三态：present / absent_verified / unavailable ✓（初值 present ✓，抽取端可改 ✓）
+                    #   · source_type：用于置信加权 ✓（class→graph ✓ / image ✓ / text ✓ / table ✓ / external ✓）
+                    "status": "present",
+                    "source_type": {"class": "graph", "image": "image", "text": "doc_text",
+                                    "table": "doc_table", "external": "external_query"}.get(kind, "unknown"),
                     "facts": c.get("facts") or [], "columns": c.get("columns") or [],
                     "from_rules": [], "why": "规则已标注（knowledgeSpec）✓ 不猜类"})
                 it["from_rules"] = sorted(set(it["from_rules"] + [r["slug"]]))
