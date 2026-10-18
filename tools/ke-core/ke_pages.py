@@ -447,6 +447,19 @@ def upsert_page(kb_id: str, slug: str, title: str, page_type: str, content: str,
     # 替掉"每节点 1 次 Neo4j"（40 节点 ≈ 3 s）。`_wiki_content_for_graph` 用**剥离关系小节前**的原文，
     # 与旧 `_kg.upsert_node(wiki_content=…)` 逐字一致。
     _wiki_content_for_graph = content
+    # ── 报告（document 模式）统一护栏（2026-10-17 用户口径 ✓）──────────────────────────
+    #   工具**不猜场景** ✗：只保证规范 —— `page_type` 属 `bmm:Report` 子类 ⇒ **必须有正文** ✓；
+    #   报告类型（TechnicalReviewReport / RequirementAnalysisReport / agent:* 等）由**上游/用户**
+    #   按任务步骤指定 ✓，这里不限制具体类型 ✗；属性仍按本体约束（与 entity 类同一套 ✓）；
+    #   document 类**不做**"数据属性渲正文" ✓（正文完全由上游给 ✓）。
+    try:
+        _is_doc = ke_ontology.render_mode(page_type) == "document"
+    except Exception:  # noqa: BLE001
+        _is_doc = False
+    if _is_doc and not str(content or "").strip():
+        raise ValueError(
+            "document 类必须有正文：%s 属 `bmm:Report` 子类 ⇒ 正文（wiki_content）由上游生成 ✓；"
+            "数据属性不产正文 ✗" % page_type)
     _attrs_for_graph = dict((metadata or {}).get("ontology", {}).get("attributes") or {})
     if preloaded is not None:
         # 批量路径（2026-10-10 P3-0c）：调用方已用 `page_info_map` **一次**预读全批，
