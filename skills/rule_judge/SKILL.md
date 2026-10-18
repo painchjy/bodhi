@@ -73,3 +73,48 @@ description: 规则判定——读「规则契约」+「知识计划(ke_plan) �
    - 样例3 F3-02：文档**未给技术栈勾选表** ⇒ 属**文档缺陷** ⇒ `failed` ✓（不是"证据不足" ✗）；
    - 只有"**外部**清单/系统不可得"（如样例1 中心认证清单不可得 ✓）才判 `insufficient` ✓；
    - 判据一句话：**缺的是"受评文档里该有的东西" ⇒ failed ✓；缺的是"受评文档之外的数据源" ⇒ insufficient ✓**。
+
+## ke_score 必经（2026-10-17 用户口径 ✓）：结论必须带"可信度"
+
+**不再是"可选加分项" ✗ —— 每条结论都要出 `{score, level, gate, reasons}` ✓，否则本条判定视为不合格 ✗。**
+
+### 输入：`ke_plan.items[]` 每条事实必须带三键 ✓
+```python
+{"id": "deploy_fig",
+ "status": "present" | "absent_verified" | "unavailable",   # 三态 ✓（缺省视为 present）
+ "confidence": "high" | "medium" | "low",                   # 提取可信度 ✓
+ "source_type": "doc_table" | "doc_text" | "graph" | "image" | "external_query" | "external_stub",
+ "required": True,                                          # 是否"必需事实"（决定硬闸门 ✓）
+ "quote": "逐字摘录", "locator": "章节/表格行列/图号"}      # 证据（可回访 ✓）
+```
+
+### 判定流程（固定顺序 ✓）
+```python
+sc = ke_score.score_rule(facts=<该规则 required 的事实>, checks=<fact_check 结果>, threshold=0.60)
+if sc["gate"] == "insufficient":
+    verdict = "无法判定"      # ✓ 不得写 failed ✗
+else:
+    verdict = "符合" if 满足 pass_when else "不符合"
+```
+- `gate` 的两条来源 ✓：**必需事实 `unavailable` ⇒ 硬闸门** ✓；`score < threshold` ⇒ 阈值闸门 ✓；
+- `level`：≥0.80 高 ｜ 0.60–0.80 中 ｜ <0.60 低 ✓；
+- `reasons` 必须逐条可回访 ✓（缺哪条事实 / 哪个外部源不可得 / 哪条事实缺 quote 或 locator ✓）。
+
+### 输出（报告 ④ 的「可信度」列就取这里 ✓）
+```json
+{"rule": "...", "verdict": "不符合",
+ "credibility": {"score": 0.91, "level": "high", "gate": "ok",
+                 "parts": {"coverage": 1.0, "confidence": 0.95, "evidence": 1.0, "check": 1.0},
+                 "reasons": ["文档要素确认缺失：… ⇒ 支持不符合 ✓（不是证据不足 ✗）"]},
+ "basis": [...]}
+```
+
+### 与"无法判定说明"的衔接 ✓
+`gate=insufficient` 的条目 ⇒ **不进表格列** ✗，而是进 ④ 表后的「无法判定说明」✓：
+① 原因（= `reasons` ✓）② 影响的问题（编号 ✓）③ 需要反馈或核实的内容（**具体可执行** ✓）。
+
+### 自检
+- [ ] 每条结论都有 `credibility` ✓（缺 = 不合格 ✗）
+- [ ] `gate=insufficient` ⇒ 判定一定是「无法判定」✓（写成不符合 = 假断言 ✗）
+- [ ] `unavailable` 的事实 `required=True` ✓（否则硬闸门不触发 ✗）
+- [ ] `reasons` 里没有"信息不足"这种空话 ✗（必须指出具体事实/数据源 ✓）
