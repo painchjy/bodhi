@@ -107,6 +107,14 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
     lines = _doc_text(kb, knowledge_id) or _lines(doc)
     plan = ke_plan.build(dkb, task)
     todo = [it for it in (plan.get("items") or []) if it.get("required") or it.get("kind") in ("image", "table", "text")]
+    _seen, _uniq = set(), []          # 2026-10-17：同一事实可能被多条规则声明 ⇒ 按 id 去重 ✓
+    for _it in todo:
+        _id = str(_it.get("id") or "")
+        if _id and _id in _seen:
+            continue
+        _seen.add(_id)
+        _uniq.append(_it)
+    todo = _uniq
     others = other_kbs or ["技术方案评审领域模型", "技术方案评审任务知识库", "企业本体模型"]
 
     items = []
