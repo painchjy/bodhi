@@ -22,15 +22,15 @@
 | 技能 | `report_compose` | 五节报告（④ 问题清单 7 列表格 ✓） |
 | 技能 | `rule_execute` | 执行单条规则的判定脚本（A/B 分流 ✓） |
 
-## 二、标 deprecated（待用户确认后归档到 `skills/_deprecated/`）
+## 二、已归档（2026-10-17 ✓ 移到 `skills/_deprecated/`，`git mv` 保留历史 ✓）
 | 名字 | 现状 | 为什么收敛 |
 |---|---|---|
-| `document_review` | 旧"文档评审"技能 | 被 `rule_judge` + `report_compose` 取代 ✓（它按"看文档复原规则"✗，正是要消除的 ✗） |
-| `tech_review_extraction` | 旧"技术方案提取" | 被 `knowledge_plan` + `knowledge_extract` 取代 ✓（旧版逐规则重复提取 ✗） |
-| `structured_modeling` | 结构化建模 | 与 `domain_modeling` 重叠 ✓；本体改动走 TTL 编译 ✓ |
-| `multimodal_extraction` | 图像/表格提取 | 保留为**工具能力**（`knowledge_extract` 调用它 ✓），不再作为独立技能入口 ✓ |
-| `model_recommendation` | 模型推荐 | 与评审主链无关 ✓ |
-| `kb_transfer` / `session_provenance` / `revision_trace` / `skill_development` | 平台类 | 保留工具，不作为评审技能入口 ✓ |
+| `document_review` | **已归档** ✓ | 被 `rule_judge` + `report_compose` 取代 ✓（它按"看文档复原规则"✗，正是要消除的 ✗） |
+| `tech_review_extraction` | **已归档** ✓ | 被 `knowledge_plan` + `knowledge_extract` 取代 ✓（旧版逐规则重复提取 ✗） |
+| `structured_modeling` | **已归档** ✓ | 与 `domain_modeling` 重叠 ✓；本体改动走 TTL 编译 ✓ |
+| `model_recommendation` | **已归档** ✓ | 与评审主链无关 ✓ |
+| `multimodal_extraction` | **保留**（工具能力 ✓） | `knowledge_extract` 调用它取图/表 ✓，不再作独立技能入口 ✓ |
+| `kb_transfer` / `session_provenance` / `revision_trace` / `skill_development` | **保留**（平台类 ✓） | 不作评审技能入口 ✓ |
 
 ## 四、报告生成能力盘点与统一（2026-10-17）
 
