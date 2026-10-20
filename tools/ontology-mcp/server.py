@@ -4673,11 +4673,21 @@ class MCPHandler(BaseHTTPRequestHandler):
         out = {"ok": True, "saved": str(fp), "bytes": length,
                "note": "已收到 zip；带 new_kb/kb_id 时本端点会顺带导入"}
         if params.get("new_kb") or params.get("kb_id"):
-            out["import"] = kb_import(str(fp), kb_id=params.get("kb_id", ""),
-                                      new_kb=params.get("new_kb", ""),
-                                      keep_ids=bool(params.get("keep_ids")),
-                                      verify=bool(params.get("verify", "1")))
-        self._json(out, 200, self.CORS)
+            # 2026-10-20 修（用户实测）：导入异常时**必须返回 JSON 错误** ✓
+            # 旧实现异常直接冒泡 ⇒ 浏览器收不到响应 ⇒ 前端永远停在"上传中…"✗
+            try:
+                out["import"] = kb_import(str(fp), kb_id=params.get("kb_id", ""),
+                                          new_kb=params.get("new_kb", ""),
+                                          keep_ids=bool(params.get("keep_ids")),
+                                          verify=bool(params.get("verify", "1")))
+            except BaseException as exc:  # noqa: BLE001  SystemExit 也要接住 ✓
+                import traceback as _tb  # noqa: PLC0415
+                tb = _tb.format_exc()
+                out.update({"ok": False, "error": "%s: %s" % (type(exc).__name__, str(exc)[:400]),
+                            "traceback_tail": tb[-1200:],
+                            "note": ("导入中断 ✗（zip 已收下，可修好后重跑本端点 ✓）；"
+                                     "常见：修订唯一键冲突 / 图写入失败 —— 看 error 与 traceback_tail")})
+        self._json(out, 200 if out.get("ok") else 500, self.CORS)
 
     def _bodhi_post(self, path: str) -> None:
         try:

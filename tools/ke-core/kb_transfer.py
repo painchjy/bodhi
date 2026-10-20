@@ -154,7 +154,8 @@ def _cast(col: str, dtype: str) -> str:
     return "t.%s" % col
 
 
-def bulk_insert(table: str, rows: list[dict], max_bytes: int = 60000, max_rows: int = 400) -> int:
+def bulk_insert(table: str, rows: list[dict], max_bytes: int = 60000, max_rows: int = 400,
+                on_conflict: str = "") -> int:
     """**批量写**：一次多行 `INSERT … SELECT … FROM jsonb_to_recordset(...)`。
 
     关键约束：`ke_db` 走的是 `docker exec psql -c "<SQL>"`，**单条 SQL 不能超 ~128 KB**（ARG_MAX）
@@ -172,8 +173,9 @@ def bulk_insert(table: str, rows: list[dict], max_bytes: int = 60000, max_rows: 
     def flush(batch: list[dict]) -> None:
         nonlocal done
         payload = json.dumps(batch, ensure_ascii=False)
-        q("INSERT INTO %s (%s) SELECT %s FROM jsonb_to_recordset(%s::jsonb) AS t(%s)"
-          % (table, ", ".join(cols), sel, sql_lit(payload), defs))
+        tail = (" ON CONFLICT DO " + on_conflict) if on_conflict else ""
+        q("INSERT INTO %s (%s) SELECT %s FROM jsonb_to_recordset(%s::jsonb) AS t(%s)%s"
+          % (table, ", ".join(cols), sel, sql_lit(payload), defs, tail))
         done += len(batch)
 
     batch: list[dict] = []
@@ -353,7 +355,12 @@ def cmd_import(in_dir: str, to_kb: str = "", new_kb: str = "", keep_ids: bool = 
         row["page_id"] = pmap.get(r.get("page_id"), r.get("page_id"))
         rrows.append(row)
     bulk_delete("wiki_page_revisions", kid, "slug", sorted({r.get("slug") for r in rrows}))
-    bulk_insert("wiki_page_revisions", rrows)
+    # 2026-10-20 修（用户实测：重复导入撞 `(page_id, version)` 唯一键 ✗）：
+    #   · 再按 **page_id** 删一次（旧版导入残留的修订用的是旧 page_id ✓）
+    #   · 插入用 `ON CONFLICT DO NOTHING` 兜底（幂等 ✓）
+    if pmap:
+        bulk_delete("wiki_page_revisions", kid, "page_id", list(pmap.values()))
+    bulk_insert("wiki_page_revisions", rrows, on_conflict="NOTHING")
 
     issues = read_jsonl(d / JSONL["issues"])
     irows = []
