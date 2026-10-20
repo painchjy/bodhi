@@ -3,7 +3,7 @@
 | mode | 用途 | 收什么 | 出什么 | 取数 |
 |---|---|---|---|---|
 | `rules` | 取规则契约（**按步骤解析**） | `spec`（direct:/policy:/ask/task:） | 规则契约 + hash ✓ | 图 ✓（复用 `rules_resolve`） |
-| `keyword` | 按关键词找知识 | `query` | 命中列表（title/summary/type）+ **来源标注** | **图优先 ✓ → PG 收窄融合 ✓** |
+| `keyword` | 按关键词找知识 | `query` | 命中列表（title/**definition 全量**/attributes/version）+ **来源标注** | **图优先 ✓ → PG 收窄融合 ✓** |
 | `path` | 沿关系多跳 | `start`（slug）+ `depth` | 路径（节点链 + 关系链） | 图 ✓ |
 
 设计口径（与 `docs/graph-first-read-contract.md` 一致 ✓）：
@@ -53,10 +53,15 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
                                   "page_type": str(x.get("pt") or ""), "source": "graph"}
         except Exception:  # noqa: BLE001  图不可用 ⇒ 纯 PG ✓
             pass
-        try:                                    # PG 收窄：命中标题/正文，且补 summary ✓
+        try:                                    # PG 收窄：命中标题/正文，并**带回完整属性** ✓
+            # 2026-10-19 修（用户实测）：旧实现只给 `LEFT(summary,160)` ✗
+            # ⇒ 智能体按截断摘要推理（问题清单只看到 9 列 ✗）。
+            # 现在返回 `attributes`（page_metadata.ontology.attributes 全量 ✓）+ `definition` 便捷字段 ✓；
+            # `summary` 保留但标 `summary_truncated=true`，**仅供展示** ✓。
             for r in _db.psql_csv(
                     "SELECT slug, COALESCE(title,'') AS t, COALESCE(page_type,'') AS pt, "
-                    "       LEFT(COALESCE(summary,''), 160) AS s "
+                    "       COALESCE(version,1) AS v, COALESCE(summary,'') AS s_full, "
+                    "       COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS attrs "
                     "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
                     "   AND (COALESCE(title,'') ILIKE %s OR slug ILIKE %s) "
                     " ORDER BY updated_at DESC LIMIT %d"
@@ -65,14 +70,23 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
                 slug = str(r.get("slug") or "")
                 if not slug:
                     continue
+                try:
+                    attrs = json.loads(r.get("attrs") or "{}") or {}
+                except Exception:  # noqa: BLE001
+                    attrs = {}
+                dfn = str(attrs.get("skos:definition") or attrs.get("definition") or "")
+                note_txt = str(attrs.get("skos:note") or attrs.get("note") or "")
+                payload = {"version": int(r.get("v") or 1), "attributes": attrs,
+                           "definition": dfn, "note": note_txt,
+                           "summary": str(r.get("s_full") or "")[:200],
+                           "summary_truncated": len(str(r.get("s_full") or "")) > 200}
                 h = hits.get(slug)
                 if h:
-                    h["summary"] = r.get("s") or ""
+                    h.update(payload)
                     h["source"] = "graph+pg"
                 else:
                     hits[slug] = {"slug": slug, "title": r.get("t") or "",
-                                  "page_type": r.get("pt") or "",
-                                  "summary": r.get("s") or "", "source": "pg"}
+                                  "page_type": r.get("pt") or "", "source": "pg", **payload}
         except Exception:  # noqa: BLE001
             pass
         items = list(hits.values())[:lim]
@@ -81,8 +95,9 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
             src_count[h["source"]] = src_count.get(h["source"], 0) + 1
         return {**base, "query": q, "counts": {"hits": len(items), "by_source": src_count},
                 "hits": items,
-                "note": ("若 `pg` 占比高 ⇒ 图缺数据 ✗ ⇒ 跑 W10 / rebuild_kb_graph ✓"
-                         if src_count.get("pg") else "图命中为主 ✓")}
+                "note": ("**推理请用 `definition` / `attributes`（全量 ✓）；`summary` 是截断展示 ✗**。"
+                         + ("；`pg` 占比高 ⇒ 图缺数据 ✗ ⇒ 跑 W10 / rebuild_kb_graph ✓"
+                            if src_count.get("pg") else "；图命中为主 ✓"))}
 
     # ── ③ path：沿关系多跳（起点必须给 slug ✓）─────────────────────────
     if m == "path":

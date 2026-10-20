@@ -1438,6 +1438,22 @@ def authority_pull(replica_kb: str = "", slug: str = "", ticket: str = "",
         return {"error": "风险确认不一致：需 acknowledge_risks=%s" % risks, "required_risks": risks}
     m_content = str((_one_page(master["kb"], master["slug"]) or {}).get("content") or "")
     ke_pages.rewrite_page_content(rid, slug, m_content, tag=PULL_TAG)
+    # **同时复制数据属性**（2026-10-19 ✓ 用户实测：副本版本相同却缺 `bmm:ruleHash` ✗）
+    # 正文一致 ≠ 属性一致 ⇒ 把正本的 `page_metadata.ontology.attributes` 一并搬过来 ✓
+    attrs_copied = 0
+    try:
+        rows_a = ke_db.psql_csv(
+            "SELECT COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS a "
+            "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+            % (ke_db.sql_str(master["kb"]), ke_db.sql_str(slug)))
+        raw_a = (rows_a[0].get("a") if rows_a else "") or "{}"
+        attrs = json.loads(raw_a) if raw_a.strip().startswith("{") else {}
+        if attrs:
+            ke_pages.set_page_attributes(rid, slug, attrs, dry_run=False)
+            attrs_copied = len(attrs)
+    except Exception:  # noqa: BLE001  属性复制失败不阻断正文同步 ✓（回执里体现 ✗）
+        attrs_copied = 0
+    out["attributes_copied"] = attrs_copied
     meta = {"role": "replica",
             "master": {"kb": master["kb"], "kb_name": master.get("kb_name", ""),
                        "slug": master["slug"], "page_type": master.get("page_type", "")},

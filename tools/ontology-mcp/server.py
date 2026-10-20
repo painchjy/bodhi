@@ -1777,7 +1777,46 @@ def _resolve_session_for(kb_id: str, session_no: str = "") -> tuple[str, str]:
 _IMG_REF_RE = re.compile(r"!\[([^\]]*)\]\((resource://[^)]+)\)")
 
 
-def image_extract(kb_id: str = "", knowledge_id: str = "", figure_no: int = 0) -> dict:
+def _image_root() -> str:
+    """WeKnora local 存储根（**宿主机路径** ✓）。
+
+    2026-10-19 实测（P0 图可读）：容器 `WeKnora-app` 的 `/data/files` 挂载到
+    `/var/lib/docker/volumes/weknora_data-files/_data` ✓；资源 `physical_path` 形如
+    `storage://<backend>/local://<tenant>/exports/<file>` ⇒ 落盘 = `<root>/<tenant>/exports/<file>` ✓。
+    可用环境变量 `BODHI_IMAGE_ROOT` 覆盖（换部署时不用改代码 ✓）。
+    """
+    return (os.environ.get("BODHI_IMAGE_ROOT")
+            or "/var/lib/docker/volumes/weknora_data-files/_data").rstrip("/")
+
+
+def _resolve_image_path(handle: str) -> tuple:
+    """handle → (本地绝对路径 or "", 诊断信息 ✓)。"""
+    try:
+        rows = psql_csv("SELECT physical_path, mime_type, size FROM resources "
+                        "WHERE handle = %s AND deleted_at IS NULL LIMIT 1" % sql_str(handle))
+    except Exception as exc:  # noqa: BLE001
+        return "", "resources_query_failed:%r" % (str(exc)[:60],)
+    if not rows:
+        return "", "resource_not_found"
+    pp = str(rows[0].get("physical_path") or "")
+    # storage://<backend>/local://<tenant>/<rest>  →  <root>/<tenant>/<rest>
+    rest = ""
+    if "local://" in pp:
+        rest = pp.split("local://", 1)[1]
+    elif pp.startswith("/"):
+        return pp if os.path.exists(pp) else "", "abs_path_missing"
+    tried = []
+    for root in (_image_root(), "/data/files"):
+        cand = os.path.join(root, rest) if rest else ""
+        if cand:
+            tried.append(cand)
+            if os.path.exists(cand):
+                return cand, "ok"
+    return "", "storage_unresolved:%s" % ("|".join(tried[:2]) or pp[:80])
+
+
+def image_extract(kb_id: str = "", knowledge_id: str = "", figure_no: int = 0,
+                  inline: bool = True, max_bytes: int = 1_500_000) -> dict:
     """**取文档内嵌图（只读）**（2026-10-08）。
 
     WeKnora 把 docx/pptx 的**内嵌图**抽成正文里的 markdown 引用 `![alt](resource://<id>)`
@@ -1785,6 +1824,11 @@ def image_extract(kb_id: str = "", knowledge_id: str = "", figure_no: int = 0) -
     **会话多模态模型**看；识别按技能 `multimodal_extraction` 的**契约 v0 + 门禁 1–4** 输出。
     """
     kb = (kb_id or "").strip()
+    if kb:                                  # 2026-10-19 修：入参可能是**库名**，必须先解析成 UUID ✓
+        try:
+            kb = resolve_kb_id(kb)[0]
+        except Exception:  # noqa: BLE001
+            pass
     kid = (knowledge_id or "").strip()
     where = ["deleted_at IS NULL"]
     if kb:
@@ -1802,13 +1846,58 @@ def image_extract(kb_id: str = "", knowledge_id: str = "", figure_no: int = 0) -
                          "markdown": m.group(0), "knowledge_id": r["knowledge_id"],
                          "chunk_index": r["chunk_index"]})
             by_doc[r["knowledge_id"]] = by_doc.get(r["knowledge_id"], 0) + 1
+    # 去重（2026-10-19 ✓）：同一张图常被多个 chunk 重复引用（样例2 实测 2 张图 → 4 条引用 ✗）
+    seen, uniq = {}, []
+    for x in imgs:
+        key = x.get("image_ref") or ""
+        if key in seen:
+            seen[key].setdefault("also_in_chunks", []).append(x["chunk_index"])
+            continue
+        x["also_in_chunks"] = []
+        seen[key] = x
+        uniq.append(x)
+    for i, x in enumerate(uniq, 1):
+        x["no"] = i
+    imgs = uniq
     picked = [x for x in imgs if x["no"] == int(figure_no)] if figure_no else imgs
+
+    # **P0 图可读**（2026-10-19 ✓）：把 `resource://<handle>` 解析成宿主机文件 → base64 data URL ✓
+    # （多模态模型只认 http/data URL，认不了 resource:// ✗；WeKnora 图片端点要鉴权 401 ✗）
+    import base64  # noqa: PLC0415
+
+    readable = 0
+    for x in picked:
+        handle = str(x.get("image_ref") or "").replace("resource://", "").strip()
+        path, why = _resolve_image_path(handle) if handle else ("", "no_handle")
+        x["handle"], x["resolve"] = handle, why
+        if not path:
+            x.update({"readable": False, "reason": why})
+            continue
+        try:
+            size = os.path.getsize(path)
+            x["bytes"] = size
+            if size > int(max_bytes):
+                x.update({"readable": False, "reason": "too_large", "path": path})
+                continue
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            mime = ("image/png" if raw[:8] == b"\x89PNG\r\n\x1a\n"
+                    else "image/gif" if raw[:3] == b"GIF"
+                    else "image/jpeg")
+            x.update({"readable": True, "reason": "ok", "mime": mime, "path": path})
+            if inline:
+                x["data_url"] = "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode())
+            readable += 1
+        except Exception as exc:  # noqa: BLE001
+            x.update({"readable": False, "reason": "read_failed:%r" % (str(exc)[:60],)})
+
     return {"ok": True, "kb_id": kb, "knowledge_id": kid, "images_found": len(imgs),
             "by_document": by_doc, "images": picked or imgs,
-            "how": ("把 `markdown`（`![alt](resource://id)`）放进你的推理上下文 → 由**会话多模态模型**"
-                    "看图；识别结果按 `multimodal_extraction` 技能的契约 v0（nodes/edges/annotations/"
-                    "ambiguity/knowledgeGaps/todo，每条带 bbox/evidence+confidence）与门禁 1–4 输出，"
-                    "再经 `save_knowledge` 落库（务必带 session_no）")}
+            "images_readable": readable, "inline": bool(inline),
+            "how": ("**可读图**：`data_url` 直接放进推理上下文 ✓（多模态模型认 data/http，不认 `resource://` ✗）；"
+                    "**不可读**（`readable=false`）⇒ 看 `reason`（`storage_unresolved` / `too_large` / "
+                    "`resource_not_found`），报告里**必须写具体原因** ✗ 不许笼统写「未取得可机读图像」；"
+                    "识别结果按 `multimodal_extraction` 契约 v0 + 门禁 1–4 输出，再 `save_knowledge`（带 session_no）")}
 
 
 def link_source_session(kb_id: str = "", session_no: str = "", slugs: list | None = None,
@@ -2108,6 +2197,12 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                             % (_ptype_raw, _fallback)),
                 }
         _upstream = [s for s in ((report or {}).get("upstream") or []) if s]
+        # 报告**只读校验**（2026-10-19 用户口径 Q2=C ✓：只告警，不静默改 ✗）
+        try:
+            import ke_report as _kr  # noqa: PLC0415
+            _report_warns = _kr.check_report_md(body)
+        except Exception:  # noqa: BLE001
+            _report_warns = []
         spec = {
             "slug": slug,                    # 复用既有报告页时由上面的幂等查询给出；空则由内核派生
             "title": title, "page_type": _ptype, "type_label": _type_label_of(_ptype, ctx["report_label"]),
@@ -2148,6 +2243,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                                "action": _action,
                                "applied": mode == "apply"}],
             "graph": _graph, "warnings": res.get("warnings") or [],
+            "report_warnings": _report_warns,
             "source_session_edges": [],
             "stage": "report", "context": ctx["id"],
             "maintenance": "deferred" if defer_maintenance else "inline",
@@ -3543,6 +3639,16 @@ def tool_definitions() -> list[dict]:
                 "ticket": {"type": "string", "description": "要回滚的那次迁移 ticket"},
             }, "required": ["kb_id", "ticket"]},
         },
+        {
+            "name": "context_authority_apply",
+            "description": ("**权威/副本裁决（写，2026-10-19 恢复 ✓）**：`action=decide` 把某跨库同名组的**权威库**写进企业共享概念页（`master`），其余为副本；`action=pull` 从权威**复制正文**到副本页。**必须先跑 `context_authority` 看影响面并拿到用户确认** ✓。参数：`action`(decide|pull) / `slug` / `master` / `kb` / `ticket` / `acknowledge_risks` / `actor`"),
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "context_concept_rollback",
+            "description": ("**回滚一次概念页 apply（写，2026-10-19 恢复 ✓）**：按 `state/context_map/history/<ticket>.json` 恢复旧正文或删除新建概念页；幂等。参数：`ticket`"),
+            "inputSchema": {"type": "object", "properties": {}},
+        },
     ]
 
 
@@ -3865,8 +3971,6 @@ _RETIRED_TOOLS = {
     "import_state": "结构化导入进度可由 `import_plan` 回执查看 ✓",
     "import_refresh": "同上 ✗（重跑 `import_plan` 即刷新 ✓）",
     "retag_rollback": "退回到页版本（`version` 可回退）✓，不再单设工具",
-    "context_concept_rollback": "退回到页版本 ✓",
-    "context_authority_apply": "权威/副本分工写概念页，用 `save_knowledge` 改该页 ✓",
     "recategorize": "目录由 `ke_category.recompute` + `sync_folders` 在写库时自动收敛 ✓（CLI: `python3 -m ke_category`）",
     "kb_import": "导入走 CLI（`tools/ke-core/kb_transfer.py`）✓，避免智能体误覆盖整库 ✗",
     "audit_kb": "与 `audit_scan` 重复 ✓，统一用 `audit_scan`",

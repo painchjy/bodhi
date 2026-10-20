@@ -9,6 +9,7 @@
 
 <http://example.org/agent> rdf:type owl:Ontology ;
     rdfs:label "智能体开发本体（业务智能体 + 技能/工具开发 + 评测与改进建议）"@zh ;
+    owl:imports <http://example.org/bmm> ;
     owl:versionIRI <http://example.org/agent/1.1> ;
     bodhi:expertRole "智能体架构师，精通业务智能体的技能/工具设计开发与效果评测"@zh .
 
@@ -112,6 +113,13 @@
     rdfs:label "评测"@zh ;
     rdfs:comment "一次效果评测（闭环一的收尾）：固定指标口径、反例、结论与受限项清单，可复现；落「领域知识库」。"@zh ;
     rdfs:subClassOf bmm:Report .
+
+
+### 11.1 规则评测 RuleEvaluation（2026-10-19 新增 ✓）
+:RuleEvaluation rdf:type owl:Class ;
+    rdfs:label "规则评测"@zh ;
+    rdfs:comment "**一条规则一组**的评测台账（`Evaluation` 的子类）：累积该规则在历次《技术方案评审报告》中的执行结果 + 知识入库情况，用于**持续跟踪**一条规则是否可信、是否可被任务步骤引用；一规则一页。"@zh ;
+    rdfs:subClassOf :Evaluation .
 
 ### 12. 指标 Metric
 :Metric rdf:type owl:Class ;
@@ -366,6 +374,25 @@
 
 # ============ 与 BPMN 的连接（2026-10-11；本模块 imports bpmn）============
 # **一条关系**连接两个模块：**智能体协助活动**（智能体的工作由技能/工具支撑，见 :agentUsesSkill / :skillUsesTool）。
+
+:evaluationOfRule rdf:type owl:ObjectProperty ;
+    rdfs:label "评测对象（规则）"@zh ;
+    rdfs:comment "规则 ↔ 评测：一条规则的全部评测台账（持续跟踪 ✓）。跨库：台账在工作库，规则在领域库。"@zh ;
+    rdfs:domain :RuleEvaluation ;
+    rdfs:range bmm:BusinessRule .
+
+:reportKnowledgeIngest rdf:type owl:ObjectProperty ;
+    rdfs:label "报告的知识入库情况"@zh ;
+    rdfs:comment "报告 ↔ 知识入库清单（DataObject）：知识入库任务完成后，报告末尾给出**规则所需知识是否入库**的清单 ✓；评测据此比对知识库实际内容，入库率纳入评测指标。"@zh ;
+    rdfs:domain bmm:Report ;
+    rdfs:range bpmn:DataObject .
+
+:reportAppliesRule rdf:type owl:ObjectProperty ;
+    rdfs:label "报告适用规则"@zh ;
+    rdfs:comment "报告 ↔ 规则：该报告实际执行了哪些规则 ✓（用于反查**哪些报告用过这条规则**）。**规则名必须存在于领域库**，否则视为幻觉 ✗。"@zh ;
+    rdfs:domain bmm:Report ;
+    rdfs:range bmm:BusinessRule .
+
 :agentAssistsActivity rdf:type owl:ObjectProperty ;
     rdfs:label "协助活动"@zh ;
     rdfs:domain :Agent ;

@@ -223,3 +223,19 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 
 
 > **重构期口径（2026-10-18 ✓）**：公共库的 `agent:Tool` / `agent:Skill` / `agent:Agent` 页**暂时全部清空** ✓（工具 21 + 技能 8 + 智能体 6 = 35 页已 hard delete ✓），**重构完成后再统一重建** ✗ 不要零散补页 ✗。当前公共库只保留：`agent:WorkKnowledgeBase`（库登记）+ 设计单/指标/挡板/评测/安装指引/工具服务/改进建议 ✓（这些等重构后一并复核 ✓）。
+
+## 0.5 副本责任矩阵（2026-10-19 用户口径 ✓）
+
+**原则**：`ke_graph.add_edge` 只认同库目标 ✗ ⇒ **关系跨库时，必须先在工作库建副本**，
+且**谁产出这条关系，谁负责同步副本** ✓（副本同步写在对应任务步骤里 ✓）。
+
+| 关系 | 需要副本？ | 副本对象 | 责任任务步骤 | 同步命令 |
+|---|---|---|---|---|
+| `agent:reportAppliesRule`（报告→规则） | **要** ✓ | 规则 `bmm:OperativeBusinessRule` | **逐项评审**（写报告前 ✓） | `ke_rule_copy.py` |
+| `agent:evaluationOfRule`（评测→规则） | **要** ✓ | 规则（同上，复用 ✓） | **规则评测** | `ke_rule_copy.py` |
+| `agent:reportKnowledgeIngest`（报告→知识入库清单） | **不要** ✗ | 清单实例**直接建在工作库** ✓ | 知识入库任务 | — |
+| `evaluationUsesMetric`（评测→指标） | 要（暂未启用 ✓） | 指标 `agent:Metric` | 规则评测 | 待实现 |
+| `bmm:isDerivedFrom`（规则→策略） | 不要 ✗（领域库内部 ✓） | — | — | — |
+
+**副本口径**：`slug` 与正本**同名** ✓、类型一致 ✓、正文一致 ✓、标题加「（副本）」✓、
+元数据 `replica_of = {kb_id, slug}` ✓；**副本只读** ✗（改口径改正本 ✓）；幂等覆盖 ✓。

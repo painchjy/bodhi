@@ -1,94 +1,120 @@
-#!/usr/bin/env python3
-"""R1 判定样板（确定性）：规则5「开源软件适用规则」= 文档抽取值 vs 清单集合比对
-   清单来源：DataObject「开源软件清单」（挡板/接口；当前读其 skos:note 样例）"""
+"""ke_core · 规则体检（规则工程 · 规则化/评测的**门禁** ✓）
+
+一条规则要能**被机算、被评测、被任务步骤引用**，必须过四关：
+  ① **字段齐全**：title / definition / scope / enforcement / implementation ✓
+  ② **可机算**：implementation ∈ 受控集合（含 事实核查/知识提取/图检索/LLM/规则推理 之一）✓；
+     抽取型（needs_extract）⇒ `knowledgeNeed` 非空 且 `required_fields` 非空 ✓
+  ③ **无歧义**：definition 不得只有模糊词（合理/适当/尽量/完善/良好/必要时…）✗
+  ④ **可回溯**：`reference`（参考规范）建议非空（warn）；
+     required_fields 必须含 conclusion / evidence / severity / rule_ref ✓ 且 conclusion 枚举四态 ✓
+
+CLI：
+  python3 ke_rule_check.py [--kb 技术方案评审领域模型] [--spec policy:技术方案逐项评审策略] [--write]
+"""
+from __future__ import annotations
+
+import argparse
 import json
-import os
-import sys
+import re
 
-os.chdir("/mnt/c/Users/PHJY/source/bodhi2")
-sys.path.insert(0, "tools/ke-core")
-import ke_db  # noqa: E402
-import ke_import  # noqa: E402
-import ke_review  # noqa: E402
-
-L = open("logs/_r1_sample.txt", "w", encoding="utf-8")
+VERDICTS = ("合规", "违规", "不适用", "待澄清")
+IMPL_ALLOWED = ("事实核查", "知识提取", "图检索", "LLM", "规则推理")
+VAGUE = ("合理", "适当", "尽量", "完善", "良好", "必要时", "酌情", "大致", "较为")
+REQUIRED = ("conclusion", "evidence", "severity", "rule_ref")
+QUANT = re.compile(r"（|\(|\d|≥|≤|=|须|必须|不得|禁止|不少于|不超过")
 
 
-def w(*a):
-    print(*a, file=L)
-    L.flush()
+def check_rules(kb: str, spec: str) -> dict:
+    import ke_lookup  # noqa: PLC0415
+
+    lk = ke_lookup.knowledge_lookup(kb, mode="rules", spec=spec)
+    rules = lk.get("rules") or []
+    if not rules:
+        return {"ok": False, "hash": lk.get("hash"), "rules": 0, "per_rule": [],
+                "errors": ["没有解析到规则（spec=%s ✗ 检查策略是否挂规则）" % spec], "warns": []}
+
+    errors, warns, per = [], [], []
+    for r in rules:
+        name = str(r.get("title") or r.get("slug") or "?")[:40]
+        p, w = [], []
+        for f in ("title", "definition", "scope", "enforcement", "implementation"):
+            if not str(r.get(f) or "").strip():
+                p.append("字段空：%s" % f)
+        impl = str(r.get("implementation") or "")
+        if impl and not any(k in impl for k in IMPL_ALLOWED):
+            p.append("实现方式不受控：%r" % impl[:20])
+        if r.get("needs_extract"):
+            if not str(r.get("knowledgeNeed") or "").strip():
+                p.append("抽取型缺 knowledgeNeed")
+            rf = r.get("required_fields") or {}
+            if not rf:
+                p.append("抽取型缺 required_fields")
+            else:
+                lack = [k for k in REQUIRED if k not in rf]
+                if lack:
+                    p.append("required_fields 缺：%s" % "、".join(lack))
+                concl = str(rf.get("conclusion") or "")
+                if concl and not all(v in concl for v in VERDICTS):
+                    p.append("conclusion 枚举不全（须含四态）")
+        dfn = str(r.get("definition") or "")
+        if dfn and len(re.sub(r"\s", "", dfn)) < 10:
+            w.append("定义过短（%d 字）" % len(dfn))
+        vag = [v for v in VAGUE if v in dfn]
+        if vag and not QUANT.search(dfn):
+            w.append("含模糊词（%s）且无可量化判据" % "、".join(vag))
+        if not str(r.get("reference") or "").strip():
+            w.append("参考规范为空")
+        per.append({"rule": name, "slug": r.get("slug"), "errors": p, "warns": w})
+        errors += ["%s：%s" % (name, x) for x in p]
+        warns += ["%s：%s" % (name, x) for x in w]
+    return {"ok": not errors, "hash": lk.get("hash"), "rules": len(rules),
+            "errors": errors, "warns": warns, "per_rule": per}
 
 
-KB = "技术方案评审领域模型"
-kb = ke_db.resolve_kb_id(KB)[0]
+def render_md(res: dict, kb: str, spec: str) -> str:
+    md = ["# 规则体检报告（规则工程 · 规则化门禁）", "",
+          "> 库：`%s`｜规则集：`%s`｜规则 %d 条｜hash `%s`  " % (kb, spec, res.get("rules", 0),
+                                                              res.get("hash") or "-"),
+          "> 结论：**%s**（错误 %d ／ 提醒 %d）" % ("通过" if res.get("ok") else "未通过",
+                                                   len(res["errors"]), len(res["warns"])), "",
+          "## ① 逐条体检", "", "| 规则 | 错误 | 提醒 |", "|---|---|---|"]
+    for x in res["per_rule"]:
+        md.append("| %s | %s | %s |" % (x["rule"], "；".join(x["errors"]) or "✓",
+                                        "；".join(x["warns"]) or "—"))
+    md += ["", "## ② 结论与建议", ""]
+    md.append("- 结论：**%s**" % ("可进入「规则评测」✓" if res["ok"]
+                                 else "退回「规则化」✗（先修错误项再重跑体检）"))
+    if res["warns"]:
+        md.append("- 提醒 %d 条（不阻断，但影响可信度）：参考规范缺失 / 模糊词" % len(res["warns"]))
+    return "\n".join(md) + "\n"
 
-w("== ① 取清单（DataObject「开源软件清单」的 skos:note 样例 = 挡板输出）==")
-slug_obj = ke_import.page_slug("bpmn:DataObject", "开源软件清单")
-row = ke_db.psql_csv(
-    "SELECT COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
-    "       COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
-    " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug = %s"
-    % (ke_db.sql_str(kb), ke_db.sql_str(slug_obj)))
-note = (row[0].get("note") if row else "") or ""
-w("  来源页 = %s" % slug_obj)
-cert: dict = {}
-for line in note.splitlines():
-    line = line.strip().lstrip("·").strip()
-    if "——" in line:
-        left, status = line.split("——", 1)
-        parts = left.strip().split()
-        if parts:
-            name = parts[0]
-            ver = parts[1] if len(parts) > 1 else ""
-            cert[(name.lower(), ver)] = status.strip()
-w("  清单条数 = %d ；样例 = %s" % (len(cert), list(cert.items())[:3]))
 
-w("\n== ② 取规则 5 的口径（rules_of_task，真读）==")
-rep = ke_review.rules_of_task(KB, "逐项评审")
-r5 = [x for x in rep["rules"] if "开源软件" in x["title"]]
-if not r5:
-    w("  ✗ 未找到规则 5")
-    raise SystemExit(1)
-r5 = r5[0]
-w("  rule_slug=%s  enforcement=%s  needs_extract=%s" % (r5["slug"], r5["enforcement"], r5["needs_extract"]))
-w("  knowledgeNeed=%s" % r5["knowledgeNeed"])
-w("  rules_hash=%s" % rep["hash"])
+def main() -> None:
+    ap = argparse.ArgumentParser(description="规则体检（规则工程门禁）")
+    ap.add_argument("--kb", default="技术方案评审领域模型")
+    ap.add_argument("--spec", default="policy:技术方案逐项评审策略")
+    ap.add_argument("--write", action="store_true", help="落库为 bmm:Report 页")
+    ap.add_argument("--work-kb", default="技术方案评审任务知识库")
+    a = ap.parse_args()
+    import ke_db  # noqa: PLC0415
 
-w("\n== ③ 文档抽取值（样例 1 技术栈表格，逐字）==")
-extracted = [("MySQL", "8.0.32", "第 4 章 技术架构 · 技术栈表 · 第 1 行"),
-             ("Redis", "7.2.4", "第 4 章 技术架构 · 技术栈表 · 第 2 行"),
-             ("Nginx", "1.24.0", "第 4 章 技术架构 · 技术栈表 · 第 3 行"),
-             ("PostgreSQL", "15.6", "第 4 章 技术架构 · 技术栈表 · 第 4 行")]
-for n, v, loc in extracted:
-    w("  %-12s %-8s %s" % (n, v, loc))
+    kb = ke_db.resolve_kb_id(a.kb)[0]
+    res = check_rules(kb, a.spec)
+    md = render_md(res, a.kb, a.spec)
+    print(md)
+    if a.write:
+        import ke_pages  # noqa: PLC0415
+        wk = ke_db.resolve_kb_id(a.work_kb)[0]
+        slug = "review/规则体检-" + re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "-", a.spec).strip("-")[-40:]
+        out = ke_pages.write_knowledge(wk, {
+            "slug": slug, "title": "规则体检报告（%s）" % a.spec,
+            "page_type": "bmm:Report", "wiki_content": md,
+            "attributes": {"skos:definition": "规则工程门禁：字段齐全 / 可机算 / 无歧义 / 可回溯 ✓"},
+            "source": {"doc_refs": [a.spec],
+                       "source_text": "规则集来自领域库规则页（hash %s）" % (res.get("hash") or "-")},
+        }, strict_source=True)
+        print(json.dumps({"written": out.get("slug"), "version": out.get("version")}, ensure_ascii=False))
 
-w("\n== ④ 判定（集合比对；逐字证据）==")
-findings = []
-for name, ver, loc in extracted:
-    status = cert.get((name.lower(), ver))
-    if status is None:
-        findings.append({"quote": "%s %s" % (name, ver), "locator": loc,
-                         "why": "不在清单内（或版本不符）"})
-    elif "未认证" in status:
-        findings.append({"quote": "%s %s（清单标记：%s）" % (name, ver, status), "locator": loc,
-                         "why": "清单内但状态=未认证"})
-conclusion = "违规" if findings else "合规"
-w("  conclusion = %s" % conclusion)
-for f in findings:
-    w("  · 违规证据：%s  ← %s（%s）" % (f["quote"], f["why"], f["locator"]))
-w("  契约字段：rule_slug=%s / severity=%s / source=%s" % (r5["slug"],
-                                                          "高" if r5["enforcement"] == "严格执行" else "中",
-                                                          r5["source"]))
 
-w("\n== ⑤ 断言 ==")
-ok1 = conclusion == "违规"
-ok2 = any("PostgreSQL 15.6" in f["quote"] for f in findings)
-ok3 = all((n.lower(), v) in cert for n, v, _ in extracted[:3])
-ok4 = bool(r5["source"] and r5["slug"] and r5["needs_extract"])
-w("  ① 样例 1 判违规（因 PostgreSQL 15.6 不在清单）= %s" % ok1)
-w("  ② 违规证据指向 PostgreSQL 15.6 = %s" % ok2)
-w("  ③ 前 3 个版本命中清单（不误报）= %s" % ok3)
-w("  ④ 结论契约字段齐（rule_slug/source/needs_extract）= %s" % ok4)
-w("  合计：%s" % ("全绿 ✓" if all((ok1, ok2, ok3, ok4)) else "有失败 ✗"))
-L.close()
-print("R1_SAMPLE_DONE")
+if __name__ == "__main__":
+    main()
