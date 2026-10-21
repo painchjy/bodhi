@@ -69,6 +69,11 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
+def squash(text: str) -> str:
+    """压掉所有空白（相似度/去重/标题归一的公共前置 ✓）"""
+    return "".join((text or "").split())
+
+
 def page_id_for(kb_id: str, slug: str) -> str:
     """**(知识库, slug) → 确定性页 id**。
 

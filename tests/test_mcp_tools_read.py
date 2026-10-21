@@ -52,6 +52,26 @@ def test_knowledge_lookup_path(mcp, kbs):
     assert (r.get("counts") or {}).get("paths", 0) >= 1, "起点 %s 无路径 ✗" % start
 
 
+def test_doc_outline_smoke(mcp):
+    """`doc_outline`（P2 切片 S4 验收 ✓）：切片→批次，断言回执结构与游标字段
+
+    取**库里真实存在的文档**（不写死库名/slug ✓）：没有文档则 skip（数据缺口，非工具错）。
+    """
+    import ke_db
+    rows = ke_db.psql_csv("SELECT knowledge_base_id AS kb, id FROM knowledges "
+                          "WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1")
+    if not rows:
+        import pytest
+        pytest.skip("库里没有任何文档（doc_outline 无从验证）")
+    r = mcp.call("doc_outline", {"kb_id": rows[0]["kb"], "knowledge_id": rows[0]["id"],
+                                 "with_text": False})
+    assert isinstance(r, dict), "回执不是对象 ✗"
+    for k in ("total_units", "next_cursor", "done", "budget_tokens", "batches"):
+        assert k in r, "doc_outline 回执缺 %s ✗：%s" % (
+            k, json.dumps(r, ensure_ascii=False)[:240])
+    assert r["next_cursor"] >= 0 and isinstance(r["batches"], list)
+
+
 def test_extract_state_get(mcp, kbs):
     """`extract_state`（P2 切片 S3 验收 ✓）：走 `resolve_kb_id` + 状态文件读路径"""
     r = mcp.call("extract_state", {"kb_id": kbs["domain"], "action": "get"})

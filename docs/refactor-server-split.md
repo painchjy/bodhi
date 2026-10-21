@@ -19,7 +19,7 @@
 | **S1** | `srv/text.py` | 相似度（`normalize_name`/`_ngrams`/`lexical_similarity`/`embed_texts`/`cosine`）+ `page_id_for` | 仅标准库 | 极低 | **✅ 完成** |
 | S2 | `srv/kbresolve.py` | `resolve_kb_id` / `kb_choices` / `resolve_write_kb` / `resolve_knowledge_id` / `get_kb_tenant` | `ke_db` | 低（纯解析） | **✅ 完成** |
 | S3 | `srv/state.py` + `srv/constants.py` | `_state_path` / `_empty_state` / `load_domain_state` / `save_domain_state` / `extract_state` / `_iter_states`；常量 `DOMAIN_STATE_DIR`/`DEFAULT_ROUND_BUDGET`/`CHARS_PER_TOKEN` | `srv.kbresolve` | 低 | **✅ 完成** |
-| S4 | `srv/outline.py` | `doc_outline` / `_chunk_units` / `_split_unit` / `_est_tokens` | `ke_*` | 中（拆词/游标） | 待做 |
+| S4 | `srv/outline.py` | `_est_tokens` / `_chunk_units` / `_split_unit` / `doc_outline` | `srv.text`/`srv.constants`/`srv.kbresolve` | 中 | **✅ 完成** |
 | S5 | `srv/session.py` | `adopt_session` / `_resolve_session_identity` / `_resolve_session_for` / 会话页确保 | `ke_pages`, `ke_db` | 中 | 待做 |
 | S6 | `srv/links.py` | `link_candidates` / `list_link_candidates` / `resolve_link_candidate` / `_page_row_by_slug` | `ke_pages` | 中（多已退役） | 待做 |
 | S7 | `srv/render.py` | `_design_sections` / `_type_label_of` / `build_new_page` / `_contract_head` 等**纯渲染** | 本体 | 中 | 待做 |
@@ -42,6 +42,18 @@
 - **不搬** `fetch_existing_pages`：它依赖模块常量 `TYPE_PENDING`，搬走会引入反向 import（环）✗ ⇒ 留待 S3 与常量一起搬
 - 验证：`py_compile` ✓ / `active` ✓ / `success` ✓ / `tools=31` ✓ / 读写回归 **9 pass + 1 xfail** ✓
 - `server.py` 行数变化：**5645 → 5570**（S1 −75，S2 −75；后续 S3-S9 目标 ≤ 800 行）
+
+## 7. S4 记录（已完成 · 含一次事故与教训）
+- 抽出 `srv/outline.py`（`_est_tokens` / `_chunk_units` / `_split_unit` / `doc_outline`）
+- 顺带把 `squash` 收进 `srv/text.py`（S1 漏了它；`outline` 依赖它）
+- **⚠️ 事故**：首版 `srv/outline.py` 写了 `from srv.text import squash`，但 `squash` 当时还在 `server.py`
+  ⇒ **`yaml` 无关的纯 ImportError** ⇒ 服务 `exit status=1` **崩溃循环 ~35s**（`activating (auto-restart)`）
+- **教训（已写入流程）**：切片后**先做导入冒烟** `cd tools/ontology-mcp && python3 -c 'import server'`，
+  再执行 `systemctl restart`；冒烟失败就**不要重启**（否则把服务打进重启风暴 ✗）
+- 恢复：修 import → 冒烟通过 → `reset-failed` + `restart` → `active` / 端口 8765 LISTEN / **tools=31** ✓
+- 新增验收：`tests/test_mcp_tools_read.py::test_doc_outline_smoke`（**取库里真实文档**，不写死库名/slug ✓）
+- 回归：`tests/test_mcp_tools_read.py` **7/7 通过** ✓
+- 规模：`server.py` **5495 → 5288**（S4 −207）｜`srv/` 合计 **485 行**
 
 ## 6. S3 记录（已完成）
 - 抽出 `srv/constants.py`（路径/阈值常量，**取值表达式逐字一致**；`REPO` 用 `parents[3]` 对齐 server 的 `parents[2]`）
