@@ -1,0 +1,37 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "stage": "graph",
+    "confirm_kb_match": true,
+    "edges": [
+      {
+        "node1": "评审执行",
+        "node2": "逐项评审",
+        "type": "bpmn:activityContainsTask"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "dry",
+    "keys": [
+      "applied",
+      "created",
+      "engine",
+      "maintenance",
+      "merge",
+      "merged",
+      "page_versions",
+      "unmatched",
+      "violations"
+    ]
+  },
+  "meta": {
+    "ms": 1228,
+    "ts": "2026-10-16 21:02:37 +0800",
+    "hits": 1,
+    "source": "args/20261016-210237-049468-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "rules_resolve",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "spec": "policy:技术方案评审策略"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 29,
+    "ts": "2026-10-18 21:26:09 +0800",
+    "hits": 1,
+    "source": "args/20261018-212609-883814-rules_resolve.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

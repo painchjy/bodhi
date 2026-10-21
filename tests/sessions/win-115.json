@@ -1,0 +1,53 @@
+{
+  "session": "win-115",
+  "calls": [
+    {
+      "tool": "context_lookup",
+      "ts": "2026-10-19 21:37:05 +0800",
+      "shape": "ok_brief",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    },
+    {
+      "tool": "context_scan",
+      "ts": "2026-10-19 21:37:07 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "context_authority",
+      "ts": "2026-10-19 21:37:10 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:37:14 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:37:17 +0800",
+      "shape": "ok",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    },
+    {
+      "tool": "context_authority",
+      "ts": "2026-10-19 21:37:24 +0800",
+      "shape": "ok_brief",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:37:28 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    },
+    {
+      "tool": "context_page",
+      "ts": "2026-10-19 21:37:31 +0800",
+      "shape": "silent",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "session": "win-66",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 06:43:19 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 06:43:21 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "ontology_types",
+      "ts": "2026-10-12 06:43:23 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "extract_state",
+      "ts": "2026-10-12 06:43:35 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-12 06:43:35 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "ontology_types",
+      "ts": "2026-10-12 06:43:36 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 06:44:21 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "ontology_types",
+      "ts": "2026-10-12 06:44:22 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-12 06:44:33 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-12 06:44:39 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "ontology_types",
+      "ts": "2026-10-12 06:44:50 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "ontology_types",
+      "ts": "2026-10-12 06:44:51 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['bmm/businesspolicy/技术方案总结策略','bmm/businesspolicy/技术方案评审策略','bmm/operativebusinessrule/合理性行动方案合理性'] RETURN n.slug AS slug, n.name AS name, n.definition AS definition, n.note AS note, n.wiki_content AS body",
+    "limit": 10
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 52,
+    "ts": "2026-10-18 20:20:09 +0800",
+    "hits": 1,
+    "source": "args/20261018-202009-353391-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "tool": "skills",
+  "args": {
+    "skill": "knowledge_plan"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 501,
+    "ts": "2026-10-18 16:31:07 +0800",
+    "hits": 2,
+    "source": "args/20261018-163107-253471-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

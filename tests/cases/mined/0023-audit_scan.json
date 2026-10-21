@@ -1,0 +1,22 @@
+{
+  "tool": "audit_scan",
+  "args": {
+    "kb_id": "测试",
+    "max_findings": 50,
+    "scope": "all"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 7734,
+    "ts": "2026-10-20 22:04:36 +0800",
+    "hits": 1,
+    "source": "args/20261020-220436-395361-audit_scan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

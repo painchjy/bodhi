@@ -1,0 +1,23 @@
+{
+  "tool": "reference_lookup",
+  "args": {
+    "allow_fetch": true,
+    "kb_id": "技术方案评审领域模型",
+    "reference": "http://techdoc.sdc.bocomm.com/jcbtechdocs/1DS/1.1DesignSpec/1.1.1TechnologyStackDesign"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 3987,
+    "ts": "2026-10-14 13:32:12 +0800",
+    "hits": 1,
+    "source": "args/20261014-133212-007653-reference_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

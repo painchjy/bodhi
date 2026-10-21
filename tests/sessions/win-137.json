@@ -1,0 +1,29 @@
+{
+  "session": "win-137",
+  "calls": [
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-21 22:47:19 +0800",
+      "shape": "ok_brief",
+      "target": "a2e8aace-40c8-4719-bfc2-b5c46342b6f7"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-21 22:47:27 +0800",
+      "shape": "timeout",
+      "target": "95b8a928-3b76-4fb2-993c-34a2cd6b7f22"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-21 22:47:31 +0800",
+      "shape": "timeout",
+      "target": "76f4b115-a4df-4eaf-808f-b2f86299448e"
+    },
+    {
+      "tool": "kb_export",
+      "ts": "2026-10-21 22:47:33 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    }
+  ]
+}

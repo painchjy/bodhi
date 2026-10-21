@@ -1,0 +1,19 @@
+{
+  "tool": "rules_of_task",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "task": "逐项评审"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 889,
+    "ts": "2026-10-16 22:06:53 +0800",
+    "hits": 5,
+    "source": "args/20261016-220653-303722-rules_of_task.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

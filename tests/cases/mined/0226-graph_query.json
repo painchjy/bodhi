@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.page_type CONTAINS 'BusinessPolicy' OR n.page_type CONTAINS 'BusinessRule' RETURN n.name AS name, n.slug AS slug, n.page_type AS pt, n.kb_id AS kb ORDER BY pt, name LIMIT 200"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 317,
+    "ts": "2026-10-13 23:20:41 +0800",
+    "hits": 1,
+    "source": "args/20261013-232041-051277-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

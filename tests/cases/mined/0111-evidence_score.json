@@ -1,0 +1,40 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "not_supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "locator": "2.2 技术架构 技术栈勾选表",
+        "quote": "Kafka | 消息 | 3.6.1 | 同城",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "locator": "开源软件清单（挡板·模拟数据）",
+        "quote": "· MySQL 8.0.32 —— 已认证\\n· Redis 7.2.4 —— 已认证\\n· Nginx 1.24.0 —— 已认证\\n· Apache Tomcat 9.0.85 —— 已认证\\n· PostgreSQL 15.6 —— 未认证（示意：不在清单内⇒违规）",
+        "required": true,
+        "source_type": "external_stub",
+        "status": "absent_verified"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 13,
+    "ts": "2026-10-18 16:12:58 +0800",
+    "hits": 1,
+    "source": "args/20261018-161258-310755-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

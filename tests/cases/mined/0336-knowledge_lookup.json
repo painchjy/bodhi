@@ -1,0 +1,22 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "mode": "rules",
+    "spec": "ask"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 46,
+    "ts": "2026-10-18 14:55:31 +0800",
+    "hits": 1,
+    "source": "args/20261018-145531-198984-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

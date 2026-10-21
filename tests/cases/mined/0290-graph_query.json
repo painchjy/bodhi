@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n['rdfs:comment'] IS NOT NULL OR n.comment IS NOT NULL RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type, n['rdfs:comment'] AS rc, n.comment AS c",
+    "limit": 30
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 178,
+    "ts": "2026-10-18 20:20:05 +0800",
+    "hits": 1,
+    "source": "args/20261018-202005-033240-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "tool": "context_authority_apply",
+  "args": {
+    "action": "detach",
+    "actor": "技术方案评审智能体",
+    "kb": "技术方案评审任务知识库",
+    "slug": "bmm/operativebusinessrule/技术方案章节裁剪规则"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 62,
+    "ts": "2026-10-20 13:26:00 +0800",
+    "hits": 1,
+    "source": "args/20261020-132600-239534-context_authority_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

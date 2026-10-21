@@ -1391,6 +1391,10 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
             warnings.append("会话溯源边写入失败：%s" % str(exc)[:160])
     return {"applied": True, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
             "created": res.get("created"), "version": res.get("after_version"),
+            # 2026-10-21 修：原实现漏回 `before_version` ⇒ 外层 `page_versions[].before`
+            # **永远是 null**（实测回执 `{'action':'created','before':None}` ✗），
+            # 调用方无法判断"是新建还是幂等更新" ⇒ 幂等性不可验证 ✗。这里如实回传 ✓。
+            "before_version": res.get("before_version"),
             "graph": graph, "warnings": warnings,
             # P3-0d：回传"已构建好的"正文/属性，供批量路径一条 UNWIND 写图节点
             "content": res.get("content"), "attrs": res.get("attrs")}

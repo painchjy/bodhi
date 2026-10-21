@@ -1,0 +1,19 @@
+{
+  "tool": "context_page",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "slug": "bpmn/task/逐项评审"
+  },
+  "expect": {
+    "shape": "timeout",
+    "keys": []
+  },
+  "meta": {
+    "ms": null,
+    "ts": "2026-10-18 21:26:19 +0800",
+    "hits": 1,
+    "source": "args/20261018-212619-132530-context_page.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

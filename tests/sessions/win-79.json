@@ -1,0 +1,83 @@
+{
+  "session": "win-79",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-16 07:03:59 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-16 07:04:04 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "ontology_types",
+      "ts": "2026-10-16 07:04:05 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-16 07:04:05 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-16 07:04:07 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-16 07:04:10 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-16 07:04:10 +0800",
+      "shape": "timeout",
+      "target": "b1"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-16 07:04:13 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-16 07:04:14 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-16 07:04:18 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-16 07:04:19 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-16 07:04:19 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-16 07:04:20 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    }
+  ]
+}

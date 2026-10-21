@@ -1,0 +1,221 @@
+{
+  "session": "win-92",
+  "calls": [
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:11:59 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:12:01 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_task",
+      "ts": "2026-10-18 16:12:04 +0800",
+      "shape": "error",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:12:05 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:12:05 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:12:07 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:12:07 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:12:09 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:12:12 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:12:12 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 16:12:15 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 16:12:18 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "image_extract",
+      "ts": "2026-10-18 16:12:21 +0800",
+      "shape": "ok",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 16:12:21 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:12:26 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 16:12:26 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:12:57 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:12:57 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:12:57 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:12:57 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:12:58 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:12:58 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:12:58 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:12:58 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:13:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:13:06 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:13:08 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:13:11 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:13:14 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

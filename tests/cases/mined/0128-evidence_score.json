@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "tech_stack",
+        "locator": "2.2 技术架构 · 技术栈勾选表",
+        "quote": "| 达梦数据库 DM8 | 业务库 | 8.1.3.100 | 同城 |；| Redis | 缓存 | **5.0.14** | 同城 |；| Nginx | 接入 | 1.24.0 | 同城 |；| Kafka | 消息 | 3.6.1 | 同城 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "certified_list",
+        "locator": "DataObject 开源软件清单（挡板返回样例）",
+        "quote": "MySQL 8.0.32 —— 已认证；Redis 7.2.4 —— 已认证；Nginx 1.24.0 —— 已认证；Apache Tomcat 9.0.85 —— 已认证；PostgreSQL 15.6 —— 未认证",
+        "required": true,
+        "source_type": "external_stub",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 13,
+    "ts": "2026-10-18 16:31:49 +0800",
+    "hits": 1,
+    "source": "args/20261018-163149-627465-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

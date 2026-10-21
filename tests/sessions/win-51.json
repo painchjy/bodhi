@@ -1,0 +1,17 @@
+{
+  "session": "win-51",
+  "calls": [
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-11 18:56:25 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-11 18:57:02 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

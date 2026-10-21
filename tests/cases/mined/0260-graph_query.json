@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug CONTAINS 'bpmn/task' OR n.slug CONTAINS 'bpmn/activity' RETURN n.slug AS slug, n.title AS title, keys(n) AS k",
+    "limit": 50
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 220,
+    "ts": "2026-10-18 16:21:28 +0800",
+    "hits": 1,
+    "source": "args/20261018-162128-258010-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

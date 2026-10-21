@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.page_type IN ['bpmn:Task','bpmn:Activity','bpmn:Process'] RETURN n.slug AS slug, n.name AS name, n.page_type AS type, n.note AS note ORDER BY type, slug",
+    "limit": 100
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 101,
+    "ts": "2026-10-18 20:30:08 +0800",
+    "hits": 1,
+    "source": "args/20261018-203008-702976-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

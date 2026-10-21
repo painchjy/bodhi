@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.kb_id = '12ccea38-f388-432c-8683-e0201a15dcaa' RETURN coalesce(n.page_type,'(未标)') AS page_type, count(*) AS cnt ORDER BY cnt DESC LIMIT 100"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 67,
+    "ts": "2026-10-18 14:52:49 +0800",
+    "hits": 1,
+    "source": "args/20261018-145249-761575-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

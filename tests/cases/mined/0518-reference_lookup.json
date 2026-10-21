@@ -1,0 +1,23 @@
+{
+  "tool": "reference_lookup",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "max_chars": 6000,
+    "reference": "问题清单规范"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 391,
+    "ts": "2026-10-18 21:26:50 +0800",
+    "hits": 1,
+    "source": "args/20261018-212650-924623-reference_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

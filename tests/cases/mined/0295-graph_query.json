@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.uri ENDS WITH 'TechnicalReviewReport' RETURN labels(n) AS lbl, n.uri AS uri, n.name AS name, n.comment AS c",
+    "limit": 10
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 43,
+    "ts": "2026-10-18 20:20:20 +0800",
+    "hits": 1,
+    "source": "args/20261018-202020-139149-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

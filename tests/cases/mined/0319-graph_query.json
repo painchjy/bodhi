@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (p {slug:'bmm/businessprocess/技术方案评审流程'})-[:`bpmn:processHasActivity`]->(a)-[r]->(t) RETURN a.slug AS activity, type(r) AS rel, t.slug AS target LIMIT 200"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 125,
+    "ts": "2026-10-18 20:53:08 +0800",
+    "hits": 1,
+    "source": "args/20261018-205308-019076-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

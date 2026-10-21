@@ -1,0 +1,67 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "not_supported"
+      },
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.5,
+        "id": "system_level",
+        "locator": "2.1 应用架构 / 2.3 部署架构",
+        "quote": "订单子系统（A 级，本次改造）……对账子系统（C 级，本次改造）；订单子系统（C 级）：同城跨云双活 + 异地多云热备",
+        "required": true,
+        "source_type": "document",
+        "status": "present"
+      },
+      {
+        "confidence": 0.95,
+        "id": "deploy_fig_order",
+        "locator": "2.3 部署架构 · 订单子系统",
+        "quote": "订单子系统（C 级）：同城跨云双活 + 异地多云热备。本方案未提供该子系统的部署图。",
+        "required": true,
+        "source_type": "document",
+        "status": "absent_verified"
+      },
+      {
+        "confidence": 0.45,
+        "id": "deploy_fig_others",
+        "locator": "2.3 部署架构 · 图注（图件本身不可机读）",
+        "quote": "（图 1：对账子系统 —— 同城浦江云/张江云，异地内蒙云 → 同城跨云双活、异地多云热备）（图 2：结算子系统 —— 同城与异地全部多云多活（单元化），最高等级灾备）",
+        "required": true,
+        "source_type": "document_caption",
+        "status": "present"
+      },
+      {
+        "confidence": 0.9,
+        "id": "devices",
+        "locator": "3 设备申请清单",
+        "quote": "订单子系统 应用服务器 浦江云 8C32G 8；订单子系统 数据库服务器 张江云 16C64G 4；结算子系统 应用服务器 浦江云 8C32G 6；对账子系统 应用服务器 内蒙云 8C32G 4",
+        "required": false,
+        "source_type": "document",
+        "status": "present"
+      }
+    ],
+    "threshold": 0.6
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 98,
+    "ts": "2026-10-18 14:56:04 +0800",
+    "hits": 1,
+    "source": "args/20261018-145604-002697-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "tool": "context_lookup",
+  "args": {},
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 531,
+    "ts": "2026-10-10 05:20:33 +0800",
+    "hits": 1,
+    "source": "args/20261010-052033-225158-context_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

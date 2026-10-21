@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.kb_id = '12ccea38-f388-432c-8683-e0201a15dcaa' RETURN n.slug AS slug ORDER BY slug LIMIT 100"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 92,
+    "ts": "2026-10-18 14:53:17 +0800",
+    "hits": 1,
+    "source": "args/20261018-145317-641892-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

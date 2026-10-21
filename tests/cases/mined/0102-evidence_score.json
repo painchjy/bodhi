@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "stack_table",
+        "locator": "2.2 技术架构 · 技术栈勾选表",
+        "quote": "| 达梦数据库 DM8 | 业务库 | 8.1.3.100 | 同城 |；| Redis | 缓存 | **7.0.5** | 同城 |；| Nginx | 接入 | 1.24.0 | 同城 |；| Kafka | 消息 | 3.6.1 | 同城 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": "low",
+        "id": "certified_list",
+        "locator": "",
+        "quote": "",
+        "required": true,
+        "source_type": "external_api",
+        "status": "unavailable"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 17,
+    "ts": "2026-10-18 15:31:25 +0800",
+    "hits": 1,
+    "source": "args/20261018-153125-779240-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

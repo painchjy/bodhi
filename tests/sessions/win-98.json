@@ -1,0 +1,131 @@
+{
+  "session": "win-98",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 20:29:57 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 20:29:57 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 20:29:59 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_resolve",
+      "ts": "2026-10-18 20:29:59 +0800",
+      "shape": "silent",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 20:30:02 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 20:30:02 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:05 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:05 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:07 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:08 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 20:30:13 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "rules_resolve",
+      "ts": "2026-10-18 20:30:13 +0800",
+      "shape": "silent",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:15 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:18 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:18 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:18 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 20:30:18 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:26 +0800",
+      "shape": "error",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:26 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:28 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:30:28 +0800",
+      "shape": "error",
+      "target": ""
+    }
+  ]
+}

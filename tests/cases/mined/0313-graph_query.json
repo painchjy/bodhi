@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'bmm/operativebusinessrule/合理性行动方案合理性' RETURN n.name AS name, n.definition AS definition, n.note AS note, n.prefLabel AS label",
+    "limit": 1
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 88,
+    "ts": "2026-10-18 20:45:13 +0800",
+    "hits": 1,
+    "source": "args/20261018-204513-388223-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "tool": "context_lookup",
+  "args": {
+    "kb_ids": [
+      "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    ],
+    "slug": "bpmn/dataobject/问题清单"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 795,
+    "ts": "2026-10-19 13:04:15 +0800",
+    "hits": 1,
+    "source": "args/20261019-130415-378358-context_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "tool": "context_concept_apply",
+  "args": {
+    "acknowledge_risks": [],
+    "actor": "技术方案评审智能体",
+    "definition": "适用开源软件必须符合中心认证清单范围内，包括版本号。",
+    "slug": "bmm/operativebusinessrule/技术架构开源软件适用规则",
+    "standard_name": "技术架构-开源软件适用规则",
+    "ticket": "981074194d9c9ca56e754cee095d07a5bfaabb90"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 1453,
+    "ts": "2026-10-19 22:00:27 +0800",
+    "hits": 1,
+    "source": "args/20261019-220027-856141-context_concept_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

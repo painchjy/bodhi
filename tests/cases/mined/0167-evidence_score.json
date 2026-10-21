@@ -1,0 +1,33 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "low",
+        "id": "template",
+        "locator": "《技术方案模板》（知识库查找无结果）",
+        "quote": "",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "unavailable"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 12,
+    "ts": "2026-10-19 18:34:30 +0800",
+    "hits": 1,
+    "source": "args/20261019-183430-450089-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

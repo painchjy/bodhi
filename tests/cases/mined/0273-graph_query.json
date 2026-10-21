@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'review/样例1-统一结算平台技术方案-技术方案逐项评审策略' RETURN n.page_type AS page_type, size(n.wiki_content) AS chars, n.wiki_content CONTAINS '## 1 评审范围与依据' AS s1, n.wiki_content CONTAINS '## 2 适用规则清单' AS s2, n.wiki_content CONTAINS '## 3 逐条结论' AS s3, n.wiki_content CONTAINS '## 4 问题清单' AS s4, n.wiki_content CONTAINS '## 5 结论与建议' AS s5, n.wiki_content CONTAINS 'Q-05' AS q5"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 75,
+    "ts": "2026-10-18 16:34:29 +0800",
+    "hits": 1,
+    "source": "args/20261018-163429-238223-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

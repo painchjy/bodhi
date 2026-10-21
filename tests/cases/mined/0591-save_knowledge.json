@@ -1,0 +1,26 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "kb_id": "439d7b78-b29d-4e0b-942c-57c3853efe4c",
+    "stage": "report",
+    "mode": "apply",
+    "session_no": "pytest-1021222659",
+    "report": {
+      "title": "回归测试报告",
+      "slug": "review/_t-report",
+      "content_md": "# 回归测试报告\n\n## ① 范围与依据\n- x\n"
+    }
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 370,
+    "ts": "2026-10-21 22:26:59 +0800",
+    "hits": 1,
+    "source": "args/20261021-222659-423951-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

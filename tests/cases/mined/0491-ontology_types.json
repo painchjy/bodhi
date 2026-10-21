@@ -1,0 +1,20 @@
+{
+  "tool": "ontology_types",
+  "args": {
+    "model": "bmm"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 2805,
+    "ts": "2026-10-21 22:08:24 +0800",
+    "hits": 1,
+    "source": "args/20261021-220824-881134-ontology_types.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

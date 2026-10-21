@@ -1,0 +1,149 @@
+{
+  "session": "win-75",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-13 23:20:22 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:22 +0800",
+      "shape": "timeout",
+      "target": "b2"
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-13 23:20:24 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:26 +0800",
+      "shape": "error",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:20:31 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:32 +0800",
+      "shape": "error",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:20:34 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:20:34 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:38 +0800",
+      "shape": "error",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:39 +0800",
+      "shape": "error",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:20:41 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:44 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:45 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:46 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:46 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-13 23:20:46 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:20:55 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "context_page",
+      "ts": "2026-10-13 23:20:55 +0800",
+      "shape": "timeout",
+      "target": "bmm/operativebusinessrule/技术架构开源软件适用规则"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:20:59 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:20:59 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-13 23:21:04 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-13 23:21:04 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-13 23:21:05 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-13 23:21:18 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    }
+  ]
+}

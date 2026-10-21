@@ -1,0 +1,22 @@
+{
+  "tool": "skills",
+  "args": {
+    "skill": "kb_transfer"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 323,
+    "ts": "2026-10-20 21:28:44 +0800",
+    "hits": 1,
+    "source": "args/20261020-212844-908837-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "tool": "ontology_types",
+  "args": {},
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 296,
+    "ts": "2026-10-10 05:20:39 +0800",
+    "hits": 19,
+    "source": "args/20261010-052039-214887-ontology_types.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

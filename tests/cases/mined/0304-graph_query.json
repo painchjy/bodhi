@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'review/样例2-统一结算平台技术方案-端到端规则驱动' RETURN n.wiki_content AS content",
+    "limit": 1
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 55,
+    "ts": "2026-10-18 20:30:18 +0800",
+    "hits": 1,
+    "source": "args/20261018-203018-272467-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

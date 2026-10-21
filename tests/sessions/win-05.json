@@ -1,0 +1,23 @@
+{
+  "session": "win-05",
+  "calls": [
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-10 05:12:08 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-10 05:12:16 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-10 05:13:03 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.name CONTAINS '评审报告' OR n.slug CONTAINS 'reviewreport' RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type, keys(n) AS k",
+    "limit": 50
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 128,
+    "ts": "2026-10-18 19:59:16 +0800",
+    "hits": 1,
+    "source": "args/20261018-195916-938897-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

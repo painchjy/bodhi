@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "not_supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "software",
+        "locator": "2.2 技术架构 · 技术栈勾选表",
+        "quote": "| Kafka | 消息 | 3.6.1 | 同城 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": "medium",
+        "id": "certified",
+        "locator": "bpmn/dataobject/开源软件清单",
+        "quote": "清单中查无 Kafka（清单仅含 MySQL 8.0.32／Redis 7.2.4／Nginx 1.24.0／Apache Tomcat 9.0.85／PostgreSQL 15.6）",
+        "required": true,
+        "source_type": "dataobject_stub",
+        "status": "absent_verified"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 33,
+    "ts": "2026-10-20 14:57:28 +0800",
+    "hits": 1,
+    "source": "args/20261020-145728-345885-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

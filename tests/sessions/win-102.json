@@ -1,0 +1,59 @@
+{
+  "session": "win-102",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 21:12:11 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 21:12:12 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "rules_resolve",
+      "ts": "2026-10-18 21:12:29 +0800",
+      "shape": "silent",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 21:12:36 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 21:12:36 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 21:12:36 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 21:12:36 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 21:12:36 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 21:12:36 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

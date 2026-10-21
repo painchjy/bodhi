@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug STARTS WITH 'bpmn/dataobject/开源软件清单' OR n.name CONTAINS '开源软件清单' RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type, n.definition AS definition, n.note AS note, n['columns'] AS cols",
+    "limit": 50
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 73,
+    "ts": "2026-10-18 16:31:07 +0800",
+    "hits": 1,
+    "source": "args/20261018-163107-804127-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

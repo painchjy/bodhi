@@ -1,0 +1,21 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (p)-[:bpmn:activityContainsTask]->(t) RETURN p.slug AS activity, t.slug AS task, t.name AS task_name ORDER BY activity",
+    "limit": 50
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 83,
+    "ts": "2026-10-18 20:30:28 +0800",
+    "hits": 1,
+    "source": "args/20261018-203028-522204-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

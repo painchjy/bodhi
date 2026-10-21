@@ -1,0 +1,16 @@
+{
+  "tool": "audit_purge",
+  "args": {},
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 7964,
+    "ts": "2026-10-10 05:12:08 +0800",
+    "hits": 14,
+    "source": "args/20261010-051208-291908-audit_purge.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

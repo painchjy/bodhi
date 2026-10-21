@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n)-[r]-(m) WHERE n.slug IN ['bpmn/task/逐项评审','bpmn/task/问题核实','bpmn/task/知识入库','bpmn/activity/评审执行','bpmn/activity/问题跟踪'] RETURN n.slug AS src, type(r) AS rel, m.slug AS dst, m.name AS dst_name ORDER BY src",
+    "limit": 100
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 211,
+    "ts": "2026-10-18 16:30:48 +0800",
+    "hits": 1,
+    "source": "args/20261018-163048-002915-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "slug": "bmm/operativebusinessrule/技术方案章节裁剪规则"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1191,
+    "ts": "2026-10-19 22:01:50 +0800",
+    "hits": 1,
+    "source": "args/20261019-220150-875455-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

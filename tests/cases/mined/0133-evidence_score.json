@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.9,
+        "key": "review_points",
+        "locator": "参考规范《技术方案评审要点》",
+        "quote": "",
+        "required": true,
+        "source_type": "external",
+        "status": "unavailable"
+      },
+      {
+        "confidence": 0.95,
+        "key": "trim_note",
+        "locator": "4 章节裁剪说明",
+        "quote": "本方案为新建类技术方案，已裁剪「运维方案」章节。其余章节按模板编写。",
+        "required": false,
+        "source_type": "doc_text",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 34,
+    "ts": "2026-10-18 20:45:01 +0800",
+    "hits": 1,
+    "source": "args/20261018-204501-332840-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

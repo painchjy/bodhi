@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['review/样例2-统一结算平台技术方案-端到端规则驱动','review/样例1-统一结算平台技术方案-技术方案逐项评审策略'] RETURN n.slug AS slug, n.name AS name, n.version AS version, n.source_locator AS locator",
+    "limit": 10
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 57,
+    "ts": "2026-10-18 20:30:28 +0800",
+    "hits": 1,
+    "source": "args/20261018-203028-459839-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

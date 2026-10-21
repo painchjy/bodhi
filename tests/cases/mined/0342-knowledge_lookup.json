@@ -1,0 +1,22 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "mode": "keyword",
+    "query": "开源软件认证清单"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 225,
+    "ts": "2026-10-18 15:31:05 +0800",
+    "hits": 1,
+    "source": "args/20261018-153105-870202-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

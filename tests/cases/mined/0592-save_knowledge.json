@@ -1,0 +1,26 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "kb_id": "d13d0d79-7e5c-443d-b789-f4fdc604382e",
+    "stage": "report",
+    "mode": "apply",
+    "session_no": "pytest-1021222703",
+    "report": {
+      "title": "回归测试报告",
+      "slug": "review/_t-report",
+      "content_md": "# 回归测试报告\n"
+    }
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 235,
+    "ts": "2026-10-21 22:27:03 +0800",
+    "hits": 1,
+    "source": "args/20261021-222703-504994-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

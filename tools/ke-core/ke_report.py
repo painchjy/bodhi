@@ -180,11 +180,12 @@ def render(sample: str, doc_title: str, facts: dict, domain_kb: str,
           "## ② 规则清单", "",
           "| 序号 | 规则 | 执行级别 | 适用范围 | 参考规范 | 本次判定概览 | 规则指纹 |",
           "|---|---|---|---|---|---|---|"]
+    _hm, _hm_err = {}, ""
     try:                              # 规则指纹：读规则页**属性** `bmm:ruleHash` ✓（发布时写入）
         import ke_fp
         _hm = ke_fp.rule_hash_map(domain_kb)
-    except Exception:  # noqa: BLE001
-        _hm = {}
+    except Exception as exc:  # noqa: BLE001  **不吞**：记录到回执，测试据此暴露真因 ✗
+        _hm_err = "%s: %s" % (type(exc).__name__, str(exc)[:200])
     for i, r in enumerate(lk["rules"], 1):
         _title = str(r.get("title") or "")
         _cnt: dict = {}

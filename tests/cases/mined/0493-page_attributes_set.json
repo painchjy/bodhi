@@ -1,0 +1,25 @@
+{
+  "tool": "page_attributes_set",
+  "args": {
+    "dry_run": true,
+    "kb_id": "7efad3eb-762a-4981-9164-cd3b3a226bd4",
+    "patch": {
+      "skos:definition": ""
+    },
+    "slug": "bpmn/dataobject/问题清单"
+  },
+  "expect": {
+    "shape": "dry",
+    "keys": [
+      "applied"
+    ]
+  },
+  "meta": {
+    "ms": 346,
+    "ts": "2026-10-19 13:04:20 +0800",
+    "hits": 1,
+    "source": "args/20261019-130420-305525-page_attributes_set.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

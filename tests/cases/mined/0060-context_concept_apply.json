@@ -1,0 +1,26 @@
+{
+  "tool": "context_concept_apply",
+  "args": {
+    "acknowledge_risks": [],
+    "actor": "技术方案评审智能体",
+    "definition": "列明方案涉及的所有系统、主要改动点；方案涉及系统与其他系统的交互边界要清晰，应用分工合理，符合高内聚低耦合的设计原则。",
+    "slug": "bmm/operativebusinessrule/应用架构系统边界原则",
+    "standard_name": "应用架构-系统边界原则",
+    "ticket": "06a28b3fea49c83ae7337205ec3d28c8f0a18e21"
+  },
+  "expect": {
+    "shape": "ok",
+    "keys": [
+      "applied",
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 5178,
+    "ts": "2026-10-19 22:00:57 +0800",
+    "hits": 1,
+    "source": "args/20261019-220057-966957-context_concept_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

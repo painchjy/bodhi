@@ -1,0 +1,17 @@
+{
+  "session": "win-56",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 02:31:08 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 02:31:08 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

@@ -1,0 +1,4514 @@
+{
+  "totals": {
+    "logs": 13,
+    "calls": 1054,
+    "unique_cases": 625,
+    "sessions": 152
+  },
+  "by_shape": {
+    "ok": 78,
+    "ok_brief": 392,
+    "silent": 477,
+    "timeout": 63,
+    "dry": 10,
+    "error": 34
+  },
+  "by_tool": {
+    "selftest": {
+      "ok": 1
+    },
+    "skills": {
+      "ok_brief": 41,
+      "ok": 25
+    },
+    "save_knowledge": {
+      "silent": 146,
+      "dry": 6,
+      "ok": 2
+    },
+    "doc_outline": {
+      "silent": 42,
+      "timeout": 3
+    },
+    "audit_purge": {
+      "silent": 14,
+      "ok_brief": 4
+    },
+    "audit_scan": {
+      "ok_brief": 39,
+      "timeout": 4,
+      "ok": 3
+    },
+    "extract_state": {
+      "silent": 6,
+      "timeout": 2
+    },
+    "context_lookup": {
+      "ok_brief": 5
+    },
+    "ontology_types": {
+      "ok_brief": 27
+    },
+    "resolve_pending_merge": {
+      "silent": 1
+    },
+    "link_source_session": {
+      "silent": 3
+    },
+    "audit_plan": {
+      "ok_brief": 13,
+      "timeout": 2
+    },
+    "rebuild_wiki_from_graph": {
+      "ok_brief": 1
+    },
+    "kb_export": {
+      "ok_brief": 14
+    },
+    "kb_import": {
+      "ok_brief": 5,
+      "timeout": 2
+    },
+    "context_page": {
+      "silent": 10,
+      "timeout": 3
+    },
+    "graph_query": {
+      "silent": 107,
+      "error": 4
+    },
+    "rules_of_policy": {
+      "timeout": 2,
+      "error": 4,
+      "ok": 16
+    },
+    "reference_lookup": {
+      "ok_brief": 42
+    },
+    "rules_of_task": {
+      "silent": 4,
+      "timeout": 3,
+      "error": 2
+    },
+    "image_extract": {
+      "ok": 20
+    },
+    "review_apply": {
+      "silent": 1,
+      "timeout": 2,
+      "error": 4
+    },
+    "rules_resolve": {
+      "silent": 17,
+      "timeout": 1
+    },
+    "knowledge_lookup": {
+      "timeout": 38,
+      "ok_brief": 179
+    },
+    "evidence_score": {
+      "silent": 124
+    },
+    "extract_candidates": {
+      "timeout": 1,
+      "silent": 2
+    },
+    "page_attributes_set": {
+      "dry": 4,
+      "error": 4,
+      "ok": 3
+    },
+    "context_scan": {
+      "ok_brief": 1
+    },
+    "context_authority": {
+      "error": 3,
+      "ok_brief": 14
+    },
+    "context_concept_apply": {
+      "error": 12,
+      "ok": 8
+    },
+    "context_authority_apply": {
+      "ok_brief": 7,
+      "error": 1
+    }
+  },
+  "cases": [
+    {
+      "file": "0001-audit_plan.json",
+      "tool": "audit_plan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 8
+    },
+    {
+      "file": "0002-audit_plan.json",
+      "tool": "audit_plan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0003-audit_plan.json",
+      "tool": "audit_plan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0004-audit_plan.json",
+      "tool": "audit_plan",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0005-audit_plan.json",
+      "tool": "audit_plan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0006-audit_plan.json",
+      "tool": "audit_plan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0007-audit_purge.json",
+      "tool": "audit_purge",
+      "shape": "silent",
+      "replayable": false,
+      "hits": 14
+    },
+    {
+      "file": "0008-audit_purge.json",
+      "tool": "audit_purge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0009-audit_purge.json",
+      "tool": "audit_purge",
+      "shape": "silent",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0010-audit_purge.json",
+      "tool": "audit_purge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0011-audit_purge.json",
+      "tool": "audit_purge",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0012-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 34
+    },
+    {
+      "file": "0013-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0014-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0015-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0016-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0017-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0018-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0019-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0020-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0021-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0022-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0023-audit_scan.json",
+      "tool": "audit_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0024-context_authority.json",
+      "tool": "context_authority",
+      "shape": "error",
+      "replayable": true,
+      "hits": 5
+    },
+    {
+      "file": "0025-context_authority.json",
+      "tool": "context_authority",
+      "shape": "error",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0026-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0027-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0028-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0029-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0030-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0031-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0032-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0033-context_authority.json",
+      "tool": "context_authority",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0034-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0035-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0036-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0037-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0038-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0039-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0040-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0041-context_authority_apply.json",
+      "tool": "context_authority_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0042-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0043-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "ok",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0044-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0045-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0046-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "ok",
+      "replayable": false,
+      "hits": 2
+    },
+    {
+      "file": "0047-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0048-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0049-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0050-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "ok",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0051-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0052-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0053-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0054-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0055-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0056-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "error",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0057-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "ok",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0058-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "ok",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0059-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "ok",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0060-context_concept_apply.json",
+      "tool": "context_concept_apply",
+      "shape": "ok",
+      "replayable": false,
+      "hits": 1
+    },
+    {
+      "file": "0061-context_lookup.json",
+      "tool": "context_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0062-context_lookup.json",
+      "tool": "context_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0063-context_lookup.json",
+      "tool": "context_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0064-context_lookup.json",
+      "tool": "context_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0065-context_lookup.json",
+      "tool": "context_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0066-context_page.json",
+      "tool": "context_page",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0067-context_page.json",
+      "tool": "context_page",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0068-context_page.json",
+      "tool": "context_page",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0069-context_page.json",
+      "tool": "context_page",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0070-context_page.json",
+      "tool": "context_page",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0071-context_page.json",
+      "tool": "context_page",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0072-context_page.json",
+      "tool": "context_page",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0073-context_page.json",
+      "tool": "context_page",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0074-context_page.json",
+      "tool": "context_page",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0075-context_scan.json",
+      "tool": "context_scan",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0076-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 11
+    },
+    {
+      "file": "0077-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0078-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 4
+    },
+    {
+      "file": "0079-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 7
+    },
+    {
+      "file": "0080-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0081-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0082-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0083-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0084-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0085-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0086-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0087-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0088-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0089-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0090-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 4
+    },
+    {
+      "file": "0091-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0092-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0093-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0094-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0095-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0096-doc_outline.json",
+      "tool": "doc_outline",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0097-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0098-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0099-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0100-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0101-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0102-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0103-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0104-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0105-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0106-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0107-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0108-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0109-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0110-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0111-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0112-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0113-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0114-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0115-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0116-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0117-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0118-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0119-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0120-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0121-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0122-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0123-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0124-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0125-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0126-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0127-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0128-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0129-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0130-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0131-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0132-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0133-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0134-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0135-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0136-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0137-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0138-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0139-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0140-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0141-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0142-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0143-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0144-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0145-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0146-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0147-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0148-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0149-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0150-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0151-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0152-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0153-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0154-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0155-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0156-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0157-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0158-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0159-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0160-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0161-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0162-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0163-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0164-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0165-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0166-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0167-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0168-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0169-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0170-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0171-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0172-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0173-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0174-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0175-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0176-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0177-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0178-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0179-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0180-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0181-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0182-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0183-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0184-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0185-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0186-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0187-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0188-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0189-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0190-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0191-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0192-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0193-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0194-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0195-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0196-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0197-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0198-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0199-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0200-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0201-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0202-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0203-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0204-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0205-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0206-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0207-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0208-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0209-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0210-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0211-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0212-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0213-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0214-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0215-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0216-evidence_score.json",
+      "tool": "evidence_score",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0217-extract_candidates.json",
+      "tool": "extract_candidates",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0218-extract_candidates.json",
+      "tool": "extract_candidates",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0219-extract_candidates.json",
+      "tool": "extract_candidates",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0220-extract_state.json",
+      "tool": "extract_state",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 7
+    },
+    {
+      "file": "0221-extract_state.json",
+      "tool": "extract_state",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0222-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 7
+    },
+    {
+      "file": "0223-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0224-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0225-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0226-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0227-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0228-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0229-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0230-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0231-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0232-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0233-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0234-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0235-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0236-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0237-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0238-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0239-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0240-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0241-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0242-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0243-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0244-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0245-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0246-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0247-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0248-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0249-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0250-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0251-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0252-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0253-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0254-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0255-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0256-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0257-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0258-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0259-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0260-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0261-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0262-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0263-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0264-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0265-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0266-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0267-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0268-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0269-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0270-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0271-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0272-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0273-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0274-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0275-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0276-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0277-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0278-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0279-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0280-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0281-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0282-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0283-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0284-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0285-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0286-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0287-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0288-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0289-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0290-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0291-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0292-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0293-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0294-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0295-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0296-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0297-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0298-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0299-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0300-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0301-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0302-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0303-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0304-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0305-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0306-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0307-graph_query.json",
+      "tool": "graph_query",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0308-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0309-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0310-graph_query.json",
+      "tool": "graph_query",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0311-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0312-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0313-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0314-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0315-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0316-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0317-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0318-graph_query.json",
+      "tool": "graph_query",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0319-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0320-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0321-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0322-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0323-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0324-graph_query.json",
+      "tool": "graph_query",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0325-image_extract.json",
+      "tool": "image_extract",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 11
+    },
+    {
+      "file": "0326-image_extract.json",
+      "tool": "image_extract",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0327-image_extract.json",
+      "tool": "image_extract",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0328-image_extract.json",
+      "tool": "image_extract",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0329-image_extract.json",
+      "tool": "image_extract",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 4
+    },
+    {
+      "file": "0330-image_extract.json",
+      "tool": "image_extract",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0331-kb_export.json",
+      "tool": "kb_export",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0332-kb_export.json",
+      "tool": "kb_export",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0333-kb_export.json",
+      "tool": "kb_export",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 10
+    },
+    {
+      "file": "0334-kb_import.json",
+      "tool": "kb_import",
+      "shape": "ok_brief",
+      "replayable": false,
+      "hits": 7
+    },
+    {
+      "file": "0335-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0336-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0337-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0338-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0339-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0340-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0341-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0342-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0343-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0344-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0345-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0346-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0347-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0348-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0349-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0350-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0351-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0352-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0353-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0354-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0355-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0356-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0357-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0358-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0359-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0360-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0361-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0362-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0363-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0364-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0365-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0366-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0367-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0368-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0369-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0370-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0371-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0372-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0373-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0374-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0375-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0376-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0377-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0378-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0379-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0380-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0381-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0382-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0383-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0384-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0385-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0386-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0387-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0388-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0389-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0390-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0391-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0392-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 5
+    },
+    {
+      "file": "0393-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0394-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0395-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0396-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0397-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0398-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0399-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0400-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0401-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0402-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0403-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0404-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0405-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0406-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0407-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0408-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0409-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0410-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0411-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0412-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0413-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0414-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0415-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0416-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 4
+    },
+    {
+      "file": "0417-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0418-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0419-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0420-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0421-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0422-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0423-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0424-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0425-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0426-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0427-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0428-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0429-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0430-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0431-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0432-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0433-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0434-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0435-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0436-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0437-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0438-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0439-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0440-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0441-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0442-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0443-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0444-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0445-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0446-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0447-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0448-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0449-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0450-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0451-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0452-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0453-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0454-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0455-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0456-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0457-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0458-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0459-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0460-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0461-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0462-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0463-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 12
+    },
+    {
+      "file": "0464-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 7
+    },
+    {
+      "file": "0465-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0466-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0467-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0468-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 12
+    },
+    {
+      "file": "0469-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 7
+    },
+    {
+      "file": "0470-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0471-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0472-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0473-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0474-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0475-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0476-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0477-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0478-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0479-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0480-knowledge_lookup.json",
+      "tool": "knowledge_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0481-link_source_session.json",
+      "tool": "link_source_session",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0482-link_source_session.json",
+      "tool": "link_source_session",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0483-link_source_session.json",
+      "tool": "link_source_session",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0484-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 19
+    },
+    {
+      "file": "0485-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0486-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0487-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0488-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0489-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0490-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0491-ontology_types.json",
+      "tool": "ontology_types",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0492-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "dry",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0493-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "dry",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0494-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "dry",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0495-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "dry",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0496-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0497-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0498-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0499-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0500-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0501-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0502-page_attributes_set.json",
+      "tool": "page_attributes_set",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0503-rebuild_wiki_from_graph.json",
+      "tool": "rebuild_wiki_from_graph",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0504-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 4
+    },
+    {
+      "file": "0505-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 5
+    },
+    {
+      "file": "0506-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0507-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0508-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 8
+    },
+    {
+      "file": "0509-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 9
+    },
+    {
+      "file": "0510-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0511-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0512-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0513-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0514-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0515-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0516-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0517-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0518-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0519-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0520-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0521-reference_lookup.json",
+      "tool": "reference_lookup",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0522-resolve_pending_merge.json",
+      "tool": "resolve_pending_merge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0523-review_apply.json",
+      "tool": "review_apply",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0524-review_apply.json",
+      "tool": "review_apply",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0525-review_apply.json",
+      "tool": "review_apply",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0526-review_apply.json",
+      "tool": "review_apply",
+      "shape": "error",
+      "replayable": true,
+      "hits": 4
+    },
+    {
+      "file": "0527-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0528-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0529-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0530-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0531-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "error",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0532-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0533-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0534-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0535-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0536-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0537-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0538-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0539-rules_of_policy.json",
+      "tool": "rules_of_policy",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0540-rules_of_task.json",
+      "tool": "rules_of_task",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 5
+    },
+    {
+      "file": "0541-rules_of_task.json",
+      "tool": "rules_of_task",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0542-rules_of_task.json",
+      "tool": "rules_of_task",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0543-rules_of_task.json",
+      "tool": "rules_of_task",
+      "shape": "timeout",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0544-rules_of_task.json",
+      "tool": "rules_of_task",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0545-rules_resolve.json",
+      "tool": "rules_resolve",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0546-rules_resolve.json",
+      "tool": "rules_resolve",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 9
+    },
+    {
+      "file": "0547-rules_resolve.json",
+      "tool": "rules_resolve",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0548-rules_resolve.json",
+      "tool": "rules_resolve",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0549-rules_resolve.json",
+      "tool": "rules_resolve",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 3
+    },
+    {
+      "file": "0550-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 84
+    },
+    {
+      "file": "0551-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0552-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0553-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0554-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0555-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0556-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "dry",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0557-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0558-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "dry",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0559-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0560-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0561-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0562-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0563-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0564-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0565-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0566-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0567-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0568-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0569-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0570-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0571-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0572-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0573-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0574-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0575-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0576-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0577-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0578-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0579-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0580-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0581-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0582-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "dry",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0583-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0584-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0585-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0586-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0587-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0588-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0589-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0590-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0591-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0592-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0593-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0594-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0595-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0596-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0597-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0598-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0599-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0600-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0601-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0602-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0603-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0604-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0605-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0606-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0607-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0608-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0609-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0610-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0611-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0612-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0613-save_knowledge.json",
+      "tool": "save_knowledge",
+      "shape": "silent",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0614-selftest.json",
+      "tool": "selftest",
+      "shape": "ok",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0615-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 38
+    },
+    {
+      "file": "0616-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0617-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0618-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0619-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 6
+    },
+    {
+      "file": "0620-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 10
+    },
+    {
+      "file": "0621-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0622-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    },
+    {
+      "file": "0623-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0624-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 2
+    },
+    {
+      "file": "0625-skills.json",
+      "tool": "skills",
+      "shape": "ok_brief",
+      "replayable": true,
+      "hits": 1
+    }
+  ]
+}

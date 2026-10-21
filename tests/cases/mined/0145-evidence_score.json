@@ -1,0 +1,60 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "criticality",
+        "locator": "2.1 应用架构 / 2.3 部署架构",
+        "quote": "涉及系统：订单子系统（A 级，本次改造）……／订单子系统（C 级）：同城跨云双活 + 异地多云热备。**本方案未提供该子系统的部署图。**",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "deploy_fig_order",
+        "locator": "2.3 部署架构",
+        "quote": "订单子系统（C 级）：同城跨云双活 + 异地多云热备。本方案未提供该子系统的部署图。",
+        "required": true,
+        "source_type": "doc_image",
+        "status": "absent_verified"
+      },
+      {
+        "confidence": "medium",
+        "id": "deploy_fig_others",
+        "locator": "2.3 部署架构",
+        "quote": "（图 1：对账子系统 —— 同城浦江云/张江云，异地内蒙云 → 同城跨云双活、异地多云热备）；（图 2：结算子系统 —— 同城与异地全部多云多活（单元化），最高等级灾备）",
+        "required": true,
+        "source_type": "doc_image",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "devices",
+        "locator": "3 设备申请清单",
+        "quote": "| 订单子系统 | 应用服务器 | 浦江云 | 8C32G | 8 | 应用节点 |",
+        "required": false,
+        "source_type": "doc_table",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 29,
+    "ts": "2026-10-18 21:12:36 +0800",
+    "hits": 1,
+    "source": "args/20261018-211236-760246-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

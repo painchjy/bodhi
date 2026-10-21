@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug STARTS WITH 'bmm/businesspolicy/' RETURN n.name AS name, n.definition AS def, left(n.wiki_content, 900) AS body ORDER BY name"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 92,
+    "ts": "2026-10-13 23:20:59 +0800",
+    "hits": 1,
+    "source": "args/20261013-232059-569536-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "kb_import",
+  "args": {},
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 11420,
+    "ts": "2026-10-12 02:47:06 +0800",
+    "hits": 7,
+    "source": "args/20261012-024706-222641-kb_import.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

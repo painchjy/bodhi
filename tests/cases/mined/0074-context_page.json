@@ -1,0 +1,19 @@
+{
+  "tool": "context_page",
+  "args": {
+    "kb_id": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+    "slug": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 1471,
+    "ts": "2026-10-19 21:46:45 +0800",
+    "hits": 2,
+    "source": "args/20261019-214645-456500-context_page.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

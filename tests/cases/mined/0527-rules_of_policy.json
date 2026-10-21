@@ -1,0 +1,19 @@
+{
+  "tool": "rules_of_policy",
+  "args": {
+    "kb_id": "b2",
+    "policy": "技术方案评审"
+  },
+  "expect": {
+    "shape": "timeout",
+    "keys": []
+  },
+  "meta": {
+    "ms": null,
+    "ts": "2026-10-13 23:20:22 +0800",
+    "hits": 1,
+    "source": "args/20261013-232022-305853-rules_of_policy.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

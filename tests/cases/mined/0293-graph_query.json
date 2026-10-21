@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.page_type IN ['agent:Advice','agent:Evaluation'] RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type, n.definition AS definition, n.note AS note, n.wiki_content AS body",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 49,
+    "ts": "2026-10-18 20:20:12 +0800",
+    "hits": 1,
+    "source": "args/20261018-202012-511692-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

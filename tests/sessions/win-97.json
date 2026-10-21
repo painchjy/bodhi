@@ -1,0 +1,95 @@
+{
+  "session": "win-97",
+  "calls": [
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:19:55 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:19:55 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 20:19:55 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-18 20:20:04 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:05 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:09 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:09 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:12 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:20 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:20 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:25 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:25 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:20:35 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:21:02 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

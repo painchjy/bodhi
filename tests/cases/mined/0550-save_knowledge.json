@@ -1,0 +1,16 @@
+{
+  "tool": "save_knowledge",
+  "args": {},
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 2512,
+    "ts": "2026-10-10 03:11:01 +0800",
+    "hits": 84,
+    "source": "args/20261010-031101-116449-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

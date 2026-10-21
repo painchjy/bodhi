@@ -1,0 +1,20 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "slug": "bmm/operativebusinessrule/技术架构系统隔离原则"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1184,
+    "ts": "2026-10-19 21:56:22 +0800",
+    "hits": 2,
+    "source": "args/20261019-215622-214924-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

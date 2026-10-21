@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'bpmn/task/逐项评审' RETURN n.note AS note, n.wiki_content AS body"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 36,
+    "ts": "2026-10-18 19:59:30 +0800",
+    "hits": 1,
+    "source": "args/20261018-195930-875561-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

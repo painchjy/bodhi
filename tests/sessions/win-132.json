@@ -1,0 +1,41 @@
+{
+  "session": "win-132",
+  "calls": [
+    {
+      "tool": "ontology_types",
+      "ts": "2026-10-21 22:08:24 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-21 22:08:27 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-21 22:08:28 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-21 22:08:29 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "review_apply",
+      "ts": "2026-10-21 22:08:29 +0800",
+      "shape": "error",
+      "target": "x"
+    },
+    {
+      "tool": "kb_export",
+      "ts": "2026-10-21 22:08:31 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    }
+  ]
+}

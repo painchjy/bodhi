@@ -1,0 +1,23 @@
+{
+  "tool": "reference_lookup",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "max_chars": 5000,
+    "reference": "技术方案模板"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 538,
+    "ts": "2026-10-18 21:26:45 +0800",
+    "hits": 1,
+    "source": "args/20261018-212645-504618-reference_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

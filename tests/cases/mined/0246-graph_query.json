@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug CONTAINS '开源软件清单' RETURN n.slug AS slug, n.title AS title, labels(n) AS labels, properties(n) AS props",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 208,
+    "ts": "2026-10-18 14:55:49 +0800",
+    "hits": 1,
+    "source": "args/20261018-145549-676684-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

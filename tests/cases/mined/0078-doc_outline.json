@@ -1,0 +1,20 @@
+{
+  "tool": "doc_outline",
+  "args": {
+    "budget_tokens": 8000,
+    "kb_id": "技术方案评审任务知识库",
+    "knowledge_id": "d3"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 404,
+    "ts": "2026-10-17 06:20:07 +0800",
+    "hits": 4,
+    "source": "args/20261017-062007-234367-doc_outline.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

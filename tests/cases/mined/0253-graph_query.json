@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['bpmn/task/逐项评审','bpmn/dataobject/问题清单'] RETURN n.slug AS slug, keys(n) AS k, n.title AS title, n.wiki_content AS content",
+    "limit": 5
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 146,
+    "ts": "2026-10-18 16:12:09 +0800",
+    "hits": 1,
+    "source": "args/20261018-161209-854797-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

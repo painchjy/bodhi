@@ -6,7 +6,7 @@ when: 用户要"设计或开发某个业务智能体/业务技能""给配置与�
 models: [bmm, agent]
 default_model: agent
 stages: [intake, design, scaffold, install, stub, verify]
-tools: [skills, ontology_types, save_knowledge, doc_outline, grep_chunks, list_knowledge_chunks, wiki_search, wiki_read_page, rules_of_policy, reference_lookup, import_probe, import_plan, audit_scan]
+tools: [skills, ontology_types, save_knowledge, doc_outline, grep_chunks, list_knowledge_chunks, wiki_search, wiki_read_page, reference_lookup, import_probe, import_plan, audit_scan]
 version: 0
 ---
 

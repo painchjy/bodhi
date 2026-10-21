@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'review/样例1-统一结算平台技术方案-技术方案逐项评审策略' RETURN n.wiki_content AS content, n.note AS note",
+    "limit": 1
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 60,
+    "ts": "2026-10-18 20:44:41 +0800",
+    "hits": 1,
+    "source": "args/20261018-204441-399326-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

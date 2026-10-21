@@ -1,0 +1,22 @@
+{
+  "tool": "skills",
+  "args": {
+    "skill": "session_provenance"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 640,
+    "ts": "2026-10-16 07:04:14 +0800",
+    "hits": 1,
+    "source": "args/20261016-070414-193012-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

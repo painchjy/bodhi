@@ -1,0 +1,20 @@
+{
+  "tool": "doc_outline",
+  "args": {
+    "budget_tokens": 4000,
+    "kb_id": "7efad3eb-762a-4981-9164-cd3b3a226bd4",
+    "knowledge_id": "bpmn/dataobject/问题清单"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 332,
+    "ts": "2026-10-19 13:04:09 +0800",
+    "hits": 1,
+    "source": "args/20261019-130409-203793-doc_outline.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

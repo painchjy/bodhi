@@ -1,0 +1,20 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "slug": "bmm/operativebusinessrule/应用架构系统边界原则"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1281,
+    "ts": "2026-10-19 22:01:49 +0800",
+    "hits": 1,
+    "source": "args/20261019-220149-598945-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

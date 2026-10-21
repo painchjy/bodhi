@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "low",
+        "id": "template",
+        "locator": "规则「技术方案文档结构规范」bmm:ruleReference",
+        "quote": "参考规范《技术方案模板》在知识库中检索不到",
+        "required": true,
+        "source_type": "rule_reference",
+        "status": "unavailable"
+      },
+      {
+        "confidence": "high",
+        "id": "sections",
+        "locator": "全文",
+        "quote": "1 现状与目标／2 总体方案（2.1 应用架构、2.2 技术架构、2.3 部署架构）／3 设备申请清单／4 章节裁剪说明",
+        "required": false,
+        "source_type": "doc_text",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 10,
+    "ts": "2026-10-20 14:57:28 +0800",
+    "hits": 1,
+    "source": "args/20261020-145728-065998-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

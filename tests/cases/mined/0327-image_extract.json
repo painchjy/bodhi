@@ -1,0 +1,23 @@
+{
+  "tool": "image_extract",
+  "args": {
+    "kb_id": "12ccea38-f388-432c-8683-e0201a15dcaa",
+    "knowledge_id": "80a5dfaf-94a2-4b46-b6c9-77b315579189"
+  },
+  "expect": {
+    "shape": "ok",
+    "keys": [
+      "by_document",
+      "images",
+      "images_found"
+    ]
+  },
+  "meta": {
+    "ms": 137,
+    "ts": "2026-10-18 15:30:46 +0800",
+    "hits": 1,
+    "source": "args/20261018-153046-150082-image_extract.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

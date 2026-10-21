@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['bpmn/dataobject/问题清单','bmm/report/技术评审报告','bmm/technicalreviewreport/技术评审报告'] RETURN n.slug AS slug, labels(n)[0] AS kind, n.columns AS columns, n.title AS title, n.comment AS comment"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 45,
+    "ts": "2026-10-18 15:30:35 +0800",
+    "hits": 1,
+    "source": "args/20261018-153035-339754-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

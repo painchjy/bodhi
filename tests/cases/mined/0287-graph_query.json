@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.kb_id = '7efad3eb-762a-4981-9164-cd3b3a226bd4' RETURN n.page_type AS page_type, count(*) AS c ORDER BY c DESC",
+    "limit": 60
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 190,
+    "ts": "2026-10-18 20:19:55 +0800",
+    "hits": 1,
+    "source": "args/20261018-201955-673670-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

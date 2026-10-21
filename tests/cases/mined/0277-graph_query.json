@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'ontology/bmm/technicalreviewreport' RETURN n.module AS module, keys(n) AS k, n.wiki_content AS body"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 148,
+    "ts": "2026-10-18 19:59:20 +0800",
+    "hits": 1,
+    "source": "args/20261018-195920-267542-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

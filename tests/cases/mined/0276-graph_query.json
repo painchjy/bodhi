@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug STARTS WITH 'review-report/' OR n.slug CONTAINS '评审报告' OR n.name CONTAINS '评审报告规范' RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type, substring(coalesce(n.wiki_content,''),0,3000) AS body",
+    "limit": 30
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 51,
+    "ts": "2026-10-18 19:59:20 +0800",
+    "hits": 1,
+    "source": "args/20261018-195920-146536-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

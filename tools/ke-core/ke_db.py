@@ -239,10 +239,17 @@ _KB_CACHE_TTL = float(os.environ.get("BODHI_KB_CACHE_TTL", "60") or 0)
 _kb_cache: dict = {"at": 0.0, "rows": []}
 
 
-def _kb_rows() -> list[dict]:
-    """取知识库清单（进程内缓存 ✓）：`id, name`，按更新时间倒序。"""
+def _kb_rows(force: bool = False) -> list[dict]:
+    """取知识库清单（进程内缓存 ✓）：`id, name`，按更新时间倒序。
+
+    `force=True`：**绕过缓存**读一次（仅在"解析未命中"时用 ✓ —— 2026-10-21 实测：
+    UI 刚建的库在 `resolve_write_kb` 里查不到，因为缓存 60s 未过期，而错误回执里的
+    `candidates` 却是实时查的 ⇒ 自相矛盾 ✗。这里"未命中再刷一次"既保留缓存性能，
+    又不放宽解析口径 ✓）。
+    """
     now = time.time()
-    if _kb_cache["rows"] and _KB_CACHE_TTL > 0 and (now - _kb_cache["at"]) < _KB_CACHE_TTL:
+    if (not force and _kb_cache["rows"] and _KB_CACHE_TTL > 0
+            and (now - _kb_cache["at"]) < _KB_CACHE_TTL):
         return _kb_cache["rows"]
     rows = psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
                     "ORDER BY updated_at DESC")
@@ -257,9 +264,17 @@ def resolve_kb_id(raw: str) -> tuple[str, str, str]:
     与 `server.resolve_kb_id` 同口径（2026-09-19 实测：智能体常把**名称**当 id 传；
     2026-09-21 实测：它还会**自己编**一个短串，如 `b1`）→ 因此报错信息里**必须带 id**，
     否则调用方无从纠正；这里也支持用 UUID 前缀（如 `dbc2528f`）解析。
+
+    2026-10-21：未命中时**强制刷新 kb 缓存一次**再判（刚建的库不会被 60s 缓存挡住 ✓）。
     """
+    try:
+        return _resolve_kb_id(raw, _kb_rows())
+    except ValueError:
+        return _resolve_kb_id(raw, _kb_rows(force=True))
+
+
+def _resolve_kb_id(raw: str, rows: list[dict]) -> tuple[str, str, str]:
     raw = (raw or "").strip()
-    rows = _kb_rows()
     options = "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in rows) or "（无）"
     if re.fullmatch(r"[0-9a-fA-F-]{36}", raw):
         hit = [r for r in rows if r["id"].lower() == raw.lower()]
@@ -298,9 +313,17 @@ def resolve_kb_candidate(raw: str) -> tuple[str, str, str]:
     - `fuzzy`：**UUID 前缀**或**名称包含**且只命中 1 个 → 不算精确，调用方必须**二次确认**
       （2026-09-22 用户口径：模糊命中=1 也要确认，只有精确匹配不用）；
     - 命中 0 个 / 多个 / 参数为空或占位符 → 抛 ValueError（带可选清单，供调用方纠正）。
+
+    2026-10-21：未命中时**强制刷新 kb 缓存一次**再判 ✓（刚建的库不被 60s 缓存挡住 ✗）。
     """
+    try:
+        return _resolve_kb_candidate(raw, _kb_rows())
+    except ValueError:
+        return _resolve_kb_candidate(raw, _kb_rows(force=True))
+
+
+def _resolve_kb_candidate(raw: str, rows: list[dict]) -> tuple[str, str, str]:
     raw = (raw or "").strip()
-    rows = _kb_rows()
     options = "、".join("%s（%s…）" % (r["name"], r["id"][:8]) for r in rows) or "（无）"
     if not raw:
         raise ValueError("kb_id 不能为空：**写库必须明确指定一个知识库**；可选：%s" % options)

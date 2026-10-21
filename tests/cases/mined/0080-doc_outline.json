@@ -1,0 +1,20 @@
+{
+  "tool": "doc_outline",
+  "args": {
+    "budget_tokens": 8000,
+    "kb_id": "b1",
+    "knowledge_id": "d2"
+  },
+  "expect": {
+    "shape": "timeout",
+    "keys": []
+  },
+  "meta": {
+    "ms": null,
+    "ts": "2026-10-18 14:55:26 +0800",
+    "hits": 1,
+    "source": "args/20261018-145526-977121-doc_outline.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

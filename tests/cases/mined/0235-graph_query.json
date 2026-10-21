@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n:BodhiInstance OR n:BodhiOntClass RETURN labels(n) AS lbl, n.slug AS slug, n.title AS title LIMIT 100"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 167,
+    "ts": "2026-10-17 06:20:07 +0800",
+    "hits": 1,
+    "source": "args/20261017-062007-056789-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

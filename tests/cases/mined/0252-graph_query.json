@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug CONTAINS 'technicalreviewreport' OR n.name CONTAINS '技术评审报告' RETURN n.slug AS slug, n.comment AS comment, n.definition AS definition"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 63,
+    "ts": "2026-10-18 15:31:33 +0800",
+    "hits": 1,
+    "source": "args/20261018-153133-415437-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

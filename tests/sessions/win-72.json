@@ -1,0 +1,47 @@
+{
+  "session": "win-72",
+  "calls": [
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-12 18:35:46 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "audit_plan",
+      "ts": "2026-10-12 18:35:51 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 18:36:35 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-12 18:36:35 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-12 18:36:48 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-12 18:37:26 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-12 18:37:43 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

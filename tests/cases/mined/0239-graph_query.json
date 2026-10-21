@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) RETURN n.slug AS slug ORDER BY slug LIMIT 400",
+    "limit": 400
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 101,
+    "ts": "2026-10-17 06:20:28 +0800",
+    "hits": 1,
+    "source": "args/20261017-062028-030971-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

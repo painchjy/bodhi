@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'bmm/businesspolicy/技术方案模板规范' RETURN n.name AS name, n.definition AS definition, n.note AS note, n.wiki_content AS body"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 42,
+    "ts": "2026-10-18 19:59:30 +0800",
+    "hits": 1,
+    "source": "args/20261018-195930-773415-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

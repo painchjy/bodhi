@@ -1,0 +1,51 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "level",
+        "locator": "2.3 部署架构",
+        "quote": "订单子系统（A 级）：同城双活（浦江云 + 张江云跨云双活）。",
+        "required": true,
+        "source_type": "document",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "deploy_fig_missing",
+        "locator": "2.3 部署架构",
+        "quote": "本方案未提供该子系统的部署图。",
+        "required": true,
+        "source_type": "document",
+        "status": "absent_verified"
+      },
+      {
+        "confidence": "high",
+        "id": "remote_site",
+        "locator": "2.3 部署架构",
+        "quote": "订单子系统仅描述同城双活，未描述任何异地部署",
+        "required": true,
+        "source_type": "document",
+        "status": "absent_verified"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 9,
+    "ts": "2026-10-18 22:22:59 +0800",
+    "hits": 1,
+    "source": "args/20261018-222259-731654-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

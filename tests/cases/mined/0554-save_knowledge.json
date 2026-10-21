@@ -1,0 +1,28 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "context": "domain_modeling",
+    "kb_id": "技术方案评审领域模型",
+    "mode": "apply",
+    "report": {
+      "content_md": "# 会话起始页 · 技术方案评审策略汇总（新建总策略）\n\n- 会话编号（bmm:sessionNo）：bddabe6e-8ff1-458f-8b09-ee83e772da95\n- 会话名称（bmm:sessionName）：技术方案评审策略汇总（新建总策略）\n- 初始问题（bmm:initialQuestion）：新建“技术方案评审策略”，把现有的所有策略包含在新建策略之下，这样我们以后进行技术方案评审，只要选择一个策略，就可以执行所有评审规则\n- 开始时间（bmm:startedAt）：2026-10-16\n- 是否权威副本（bmm:isAuthoritative）：true\n- 会话状态（bmm:sessionStatus）：进行中\n- 会话种类（页级 sessionKind）：领域建模\n- 权威库（页级 authoritativeKb）：技术方案评审领域模型\n\n## 分页索引\n\n（暂无分页；本会话的澄清与产出均在起始页登记）\n\n## 本会话产出的知识页\n\n- [[bmm/businesspolicy/技术方案评审策略|技术方案评审策略]]\n\n## 本会话结论摘要\n\n- 新建总策略「技术方案评审策略」，以 `bmm:includesBusinessPolicy` 收拢既有 5 项业务政策（技术方案合理性评审、技术方案模板规范、应用架构设计原则、技术架构设计原则、部署架构设计原则），选定该策略即执行其下全部 7 条业务规则。\n",
+      "page_type": "bmm:KnowledgeSession",
+      "slug": "session/bddabe6e-8ff1-458f-8b09-ee83e772da95",
+      "title": "会话起始页 · 技术方案评审策略汇总（新建总策略）"
+    },
+    "session_no": "bddabe6e-8ff1-458f-8b09-ee83e772da95",
+    "stage": "report"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 4458,
+    "ts": "2026-10-16 07:07:04 +0800",
+    "hits": 1,
+    "source": "args/20261016-070704-499391-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

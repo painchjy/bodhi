@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BusinessPolicy) RETURN n.slug AS slug, n.title AS title, n.page_type AS t ORDER BY slug"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 64,
+    "ts": "2026-10-16 07:04:05 +0800",
+    "hits": 1,
+    "source": "args/20261016-070405-702927-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

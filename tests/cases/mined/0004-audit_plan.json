@@ -1,0 +1,20 @@
+{
+  "tool": "audit_plan",
+  "args": {
+    "kb_id": "b1",
+    "kinds": "init",
+    "scope": "all"
+  },
+  "expect": {
+    "shape": "timeout",
+    "keys": []
+  },
+  "meta": {
+    "ms": null,
+    "ts": "2026-10-20 13:29:36 +0800",
+    "hits": 1,
+    "source": "args/20261020-132936-750136-audit_plan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

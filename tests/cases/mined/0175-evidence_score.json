@@ -1,0 +1,32 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.9,
+        "locator": "全文",
+        "quote": "1 现状与目标……2 总体方案（2.1 应用架构 / 2.2 技术架构 / 2.3 部署架构）……3 设备申请清单……4 章节裁剪说明",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 10,
+    "ts": "2026-10-19 19:41:41 +0800",
+    "hits": 1,
+    "source": "args/20261019-194141-008673-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

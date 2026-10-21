@@ -1,0 +1,16 @@
+{
+  "tool": "link_source_session",
+  "args": {},
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 419,
+    "ts": "2026-10-10 05:27:27 +0800",
+    "hits": 1,
+    "source": "args/20261010-052727-348914-link_source_session.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

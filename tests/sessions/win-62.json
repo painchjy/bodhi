@@ -1,0 +1,29 @@
+{
+  "session": "win-62",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 05:13:02 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 05:13:03 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "kb_import",
+      "ts": "2026-10-12 05:13:16 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-12 05:13:25 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

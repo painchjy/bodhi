@@ -1,0 +1,29 @@
+{
+  "session": "win-80",
+  "calls": [
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-16 07:07:19 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-16 07:07:19 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-16 07:07:20 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-16 07:07:33 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    }
+  ]
+}

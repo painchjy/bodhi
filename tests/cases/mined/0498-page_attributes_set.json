@@ -1,0 +1,25 @@
+{
+  "tool": "page_attributes_set",
+  "args": {
+    "kb_id": "6d65d99c-925f-4798-bb34-2fad4b021b67",
+    "slug": "review/_t-report",
+    "patch": {
+      "bmm:notARealProp": "x"
+    },
+    "dry_run": false
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 364,
+    "ts": "2026-10-21 22:53:22 +0800",
+    "hits": 1,
+    "source": "args/20261021-225322-147041-page_attributes_set.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

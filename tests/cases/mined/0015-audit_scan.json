@@ -1,0 +1,22 @@
+{
+  "tool": "audit_scan",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "max_findings": 20,
+    "scope": "source"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1252,
+    "ts": "2026-10-17 06:28:06 +0800",
+    "hits": 1,
+    "source": "args/20261017-062806-005034-audit_scan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

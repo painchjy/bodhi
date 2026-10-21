@@ -1,0 +1,25 @@
+{
+  "tool": "context_concept_apply",
+  "args": {
+    "acknowledge_risks": [],
+    "actor": "技术方案评审智能体",
+    "definition": "根据技术方案分类，可以适当裁剪部分章节，但评审要点关注章节不能裁剪。",
+    "slug": "bmm/operativebusinessrule/技术方案章节裁剪规则",
+    "standard_name": "技术方案章节裁剪规则",
+    "ticket": "981074194d9c9ca56e754cee095d07a5bfaabb90"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 1227,
+    "ts": "2026-10-19 22:00:26 +0800",
+    "hits": 1,
+    "source": "args/20261019-220026-565491-context_concept_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

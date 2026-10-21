@@ -1,0 +1,17 @@
+{
+  "session": "win-47",
+  "calls": [
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-11 06:43:05 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-11 06:43:10 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

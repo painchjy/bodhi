@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug STARTS WITH 'bmm/operativebusinessrule/' RETURN n.name AS name, n.enforcementLevel AS level, n.ruleScope AS scope, n.ruleImplementation AS how, n.ruleReference AS ref, n.knowledgeNeed AS need ORDER BY name"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 1069,
+    "ts": "2026-10-14 13:32:06 +0800",
+    "hits": 1,
+    "source": "args/20261014-133206-819034-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

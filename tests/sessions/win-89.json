@@ -1,0 +1,47 @@
+{
+  "session": "win-89",
+  "calls": [
+    {
+      "tool": "audit_plan",
+      "ts": "2026-10-18 14:52:44 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 14:52:49 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 14:53:17 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-18 14:53:21 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "audit_purge",
+      "ts": "2026-10-18 14:53:25 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 14:53:30 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-18 14:53:30 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (a)-[r]->(t) WHERE t.slug = 'bpmn/task/逐项评审' RETURN a.slug AS src, a.name AS src_name, a.page_type AS src_type, type(r) AS rel, r.name AS rel_name",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 164,
+    "ts": "2026-10-18 20:30:26 +0800",
+    "hits": 1,
+    "source": "args/20261018-203026-368743-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

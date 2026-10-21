@@ -1,0 +1,27 @@
+{
+  "tool": "context_authority_apply",
+  "args": {
+    "acknowledge_risks": [
+      "replica_protection"
+    ],
+    "action": "decide",
+    "actor": "技术方案评审智能体",
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/技术方案章节裁剪规则",
+    "ticket": "c30868d77e15a6f3c50ed61ba4adf6a4894d39a1"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 6077,
+    "ts": "2026-10-19 22:01:14 +0800",
+    "hits": 1,
+    "source": "args/20261019-220114-945304-context_authority_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

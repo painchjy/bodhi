@@ -1,0 +1,26 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "kb_id": "6d65d99c-925f-4798-bb34-2fad4b021b67",
+    "stage": "report",
+    "mode": "apply",
+    "session_no": "06e25425-5ed7-4332-97a2-e58af5dfd4a1",
+    "report": {
+      "title": "回归测试报告",
+      "slug": "review/_t-report",
+      "content_md": "# 回归测试报告\n"
+    }
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 7257,
+    "ts": "2026-10-21 22:53:13 +0800",
+    "hits": 1,
+    "source": "args/20261021-225313-659035-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

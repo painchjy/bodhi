@@ -1,0 +1,48 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "locator": "2.1 应用架构",
+        "quote": "涉及系统：订单子系统（A 级，本次改造）、结算子系统（B 级，本次新建）、对账子系统（C 级，本次改造）；外部依赖：支付网关（仅通过接口交互）。",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      },
+      {
+        "confidence": 0.9,
+        "locator": "2.1 应用架构",
+        "quote": "主要改动点：新建结算子系统；订单子系统改造下单、退款流程；对账子系统新增准实时对账任务。",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      },
+      {
+        "confidence": 0.9,
+        "locator": "2.1 应用架构",
+        "quote": "系统边界：订单子系统与结算子系统之间通过消息主题 order-events 交互，不直接读写对方数据库；对账子系统仅调用结算子系统的对账查询接口。",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 32,
+    "ts": "2026-10-18 16:22:26 +0800",
+    "hits": 1,
+    "source": "args/20261018-162226-639441-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

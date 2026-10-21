@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.comment CONTAINS '章节' RETURN labels(n) AS lbl, n.uri AS uri, n.name AS name, n.comment AS c",
+    "limit": 30
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 74,
+    "ts": "2026-10-18 20:20:20 +0800",
+    "hits": 1,
+    "source": "args/20261018-202020-065741-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

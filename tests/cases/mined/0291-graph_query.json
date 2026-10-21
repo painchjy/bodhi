@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.kb_id = '7efad3eb-762a-4981-9164-cd3b3a226bd4' AND n.page_type = 'bmm:OperativeBusinessRule' RETURN n.slug AS slug, n.name AS name, n['ruleScope'] AS scope, n['ruleImplementation'] AS impl, n['ruleReference'] AS ref, substring(coalesce(n.definition,''),0,300) AS def",
+    "limit": 30
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 118,
+    "ts": "2026-10-18 20:20:09 +0800",
+    "hits": 1,
+    "source": "args/20261018-202009-228253-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

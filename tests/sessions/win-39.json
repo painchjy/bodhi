@@ -1,0 +1,47 @@
+{
+  "session": "win-39",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-10 15:54:02 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-10 15:54:02 +0800",
+      "shape": "timeout",
+      "target": ""
+    },
+    {
+      "tool": "extract_state",
+      "ts": "2026-10-10 15:54:03 +0800",
+      "shape": "timeout",
+      "target": ""
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-10 15:54:09 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "extract_state",
+      "ts": "2026-10-10 15:54:09 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-10 15:54:51 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-10 15:55:51 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

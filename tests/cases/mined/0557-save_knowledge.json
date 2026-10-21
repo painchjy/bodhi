@@ -1,0 +1,139 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "stage": "graph",
+    "confirm_kb_match": true,
+    "nodes": [
+      {
+        "type": "bmm:BusinessPolicy",
+        "name": "技术方案逐项评审策略",
+        "definition": "包含除「总结性规则」以外的全部业务规则（系统边界、文档结构、章节裁剪、开源软件、系统隔离、部署灾备）；不含总结。"
+      },
+      {
+        "type": "bmm:BusinessPolicy",
+        "name": "技术方案总结策略",
+        "definition": "仅含 1 条总结性规则（合理性-行动方案合理性）：其他规则完成后按问题严重程度总结最终结论。"
+      },
+      {
+        "type": "bpmn:Activity",
+        "name": "评审执行",
+        "definition": "技术方案评审的执行活动：包含任务「逐项评审」。"
+      },
+      {
+        "type": "bpmn:Task",
+        "name": "逐项评审",
+        "definition": "逐条评审技术方案：输入=技术方案文档+策略下规则清单；输出=逐条结论（含原文证据与规则出处）。"
+      },
+      {
+        "type": "bpmn:Role",
+        "name": "评审智能体",
+        "definition": "执行逐项评审的智能体角色。"
+      },
+      {
+        "type": "bpmn:Role",
+        "name": "评审组长",
+        "definition": "评审任务发起与把关角色。"
+      }
+    ],
+    "edges": [
+      {
+        "node1": "应用架构系统边界原则",
+        "node2": "技术方案逐项评审策略",
+        "type": "bmm:isDerivedFrom"
+      },
+      {
+        "node1": "技术方案文档结构规范",
+        "node2": "技术方案逐项评审策略",
+        "type": "bmm:isDerivedFrom"
+      },
+      {
+        "node1": "技术方案章节裁剪规则",
+        "node2": "技术方案逐项评审策略",
+        "type": "bmm:isDerivedFrom"
+      },
+      {
+        "node1": "技术架构开源软件适用规则",
+        "node2": "技术方案逐项评审策略",
+        "type": "bmm:isDerivedFrom"
+      },
+      {
+        "node1": "技术架构系统隔离原则",
+        "node2": "技术方案逐项评审策略",
+        "type": "bmm:isDerivedFrom"
+      },
+      {
+        "node1": "部署架构最低部署和灾备要求",
+        "node2": "技术方案逐项评审策略",
+        "type": "bmm:isDerivedFrom"
+      },
+      {
+        "node1": "合理性行动方案合理性",
+        "node2": "技术方案总结策略",
+        "type": "bmm:isDerivedFrom"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "应用架构系统边界原则",
+        "type": "bpmn:taskExecutesRule"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "技术方案文档结构规范",
+        "type": "bpmn:taskExecutesRule"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "技术方案章节裁剪规则",
+        "type": "bpmn:taskExecutesRule"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "技术架构开源软件适用规则",
+        "type": "bpmn:taskExecutesRule"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "技术架构系统隔离原则",
+        "type": "bpmn:taskExecutesRule"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "部署架构最低部署和灾备要求",
+        "type": "bpmn:taskExecutesRule"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "评审智能体",
+        "type": "bpmn:taskHasRole"
+      },
+      {
+        "node1": "逐项评审",
+        "node2": "评审组长",
+        "type": "bpmn:taskHasRole"
+      },
+      {
+        "node1": "评审执行",
+        "node2": "逐项评审",
+        "type": "bpmn:activityContainsTask"
+      },
+      {
+        "node1": "技术方案评审流程",
+        "node2": "评审执行",
+        "type": "bpmn:processHasActivity"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 4441,
+    "ts": "2026-10-16 18:28:31 +0800",
+    "hits": 1,
+    "source": "args/20261016-182831-123015-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/应用架构系统边界原则"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1150,
+    "ts": "2026-10-19 22:01:10 +0800",
+    "hits": 1,
+    "source": "args/20261019-220109-999513-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

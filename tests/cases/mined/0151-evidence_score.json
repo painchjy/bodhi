@@ -1,0 +1,33 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0,
+        "locator": "规则参考规范：技术方案模板（库内未收录）",
+        "name": "《技术方案模板》章节要求",
+        "quote": "",
+        "required": true,
+        "source_type": "reference",
+        "status": "unavailable"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 17,
+    "ts": "2026-10-18 21:27:34 +0800",
+    "hits": 1,
+    "source": "args/20261018-212734-447341-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

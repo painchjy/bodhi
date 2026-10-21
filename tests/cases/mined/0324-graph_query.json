@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['agent/stub/开源软件清单查询挡板','bpmn/dataobject/开源软件清单'] RETURN n.slug AS slug, properties(n) AS props LIMIT 10"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 68,
+    "ts": "2026-10-18 20:53:28 +0800",
+    "hits": 1,
+    "source": "args/20261018-205328-903438-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

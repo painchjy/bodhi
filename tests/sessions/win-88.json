@@ -1,0 +1,17 @@
+{
+  "session": "win-88",
+  "calls": [
+    {
+      "tool": "rules_resolve",
+      "ts": "2026-10-18 00:04:07 +0800",
+      "shape": "silent",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_resolve",
+      "ts": "2026-10-18 00:04:07 +0800",
+      "shape": "silent",
+      "target": "技术方案评审领域模型"
+    }
+  ]
+}

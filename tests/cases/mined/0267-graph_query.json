@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug CONTAINS 'stub' AND (n.slug CONTAINS '开源软件' OR n.name CONTAINS '开源软件') RETURN n.slug AS slug, n.name AS name, n.definition AS definition, n.note AS note, n.wiki_content AS wiki",
+    "limit": 10
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 48,
+    "ts": "2026-10-18 16:22:10 +0800",
+    "hits": 1,
+    "source": "args/20261018-162210-430747-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

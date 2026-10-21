@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "limit": 20,
+    "mode": "keyword",
+    "query": "技术栈 软件 版本"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 187,
+    "ts": "2026-10-19 19:41:32 +0800",
+    "hits": 1,
+    "source": "args/20261019-194132-605512-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

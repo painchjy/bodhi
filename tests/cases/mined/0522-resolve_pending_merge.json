@@ -1,0 +1,16 @@
+{
+  "tool": "resolve_pending_merge",
+  "args": {},
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 622,
+    "ts": "2026-10-10 05:27:14 +0800",
+    "hits": 1,
+    "source": "args/20261010-052714-282114-resolve_pending_merge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

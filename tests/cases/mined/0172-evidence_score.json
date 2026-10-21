@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "system_criticality",
+        "locator": "2.3 部署架构 · 结算",
+        "quote": "结算子系统（B 级）：部署方案详见部署图（图 2）；文字部分不做展开。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": "medium",
+        "id": "deploy_fig",
+        "locator": "图 2 结算部署",
+        "quote": "（图 2：结算子系统 —— 同城与异地全部多云多活（单元化），最高等级灾备）",
+        "required": true,
+        "source_type": "doc_image",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 60,
+    "ts": "2026-10-19 18:34:47 +0800",
+    "hits": 1,
+    "source": "args/20261019-183447-681059-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

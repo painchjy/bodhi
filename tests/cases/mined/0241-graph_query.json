@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug IN ['bmm/resource/中心已认证组件技术栈','review/样例1-统一结算平台技术方案-技术方案评审规则集','agent/stub/评审流程与任务接口工具挡板','bpmn/activity/评审执行','bpmn/dataobject/开源软件清单','agent/stub/it工作平台查询工具挡板'] RETURN n.slug AS slug, properties(n) AS props LIMIT 20"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 126,
+    "ts": "2026-10-17 06:20:46 +0800",
+    "hits": 1,
+    "source": "args/20261017-062046-089287-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

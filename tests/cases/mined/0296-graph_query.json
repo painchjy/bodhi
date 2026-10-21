@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.kb_id = '12ccea38-f388-432c-8683-e0201a15dcaa' RETURN n.page_type AS page_type, count(*) AS c ORDER BY c DESC"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 126,
+    "ts": "2026-10-18 20:20:25 +0800",
+    "hits": 1,
+    "source": "args/20261018-202025-195734-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

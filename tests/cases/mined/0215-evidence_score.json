@@ -1,0 +1,40 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.85,
+        "locator": "2.1 应用架构",
+        "quote": "结算子系统（B 级，本次新建）",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": 0.75,
+        "locator": "图2 结算子系统",
+        "quote": "（图 2：结算子系统 —— 同城与异地全部多云多活（单元化），最高等级灾备）",
+        "required": true,
+        "source_type": "doc_image",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 11,
+    "ts": "2026-10-20 19:44:45 +0800",
+    "hits": 1,
+    "source": "args/20261020-194445-375388-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

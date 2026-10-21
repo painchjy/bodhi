@@ -1,0 +1,27 @@
+{
+  "tool": "context_authority_apply",
+  "args": {
+    "acknowledge_risks": [
+      "replica_protection"
+    ],
+    "action": "decide",
+    "actor": "技术方案评审智能体",
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/技术架构系统隔离原则",
+    "ticket": "74242448bcfbd11ac89a39d95b37e8074bc9b4a2"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 5149,
+    "ts": "2026-10-19 21:56:07 +0800",
+    "hits": 1,
+    "source": "args/20261019-215607-910031-context_authority_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

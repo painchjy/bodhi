@@ -1,0 +1,21 @@
+{
+  "tool": "context_lookup",
+  "args": {
+    "q": "技术架构系统隔离原则",
+    "slug": "bmm/operativebusinessrule/技术架构系统隔离原则"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1275,
+    "ts": "2026-10-19 21:37:05 +0800",
+    "hits": 1,
+    "source": "args/20261019-213705-881275-context_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

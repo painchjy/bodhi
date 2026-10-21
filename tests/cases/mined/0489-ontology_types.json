@@ -1,0 +1,23 @@
+{
+  "tool": "ontology_types",
+  "args": {
+    "classes": [
+      "bmm:TechnicalReviewReport"
+    ],
+    "model": "bmm"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 332,
+    "ts": "2026-10-20 13:31:57 +0800",
+    "hits": 1,
+    "source": "args/20261020-133157-705983-ontology_types.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

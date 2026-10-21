@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "limit": 20,
+    "mode": "keyword",
+    "query": "技术栈 系统等级 部署方式 设备申请清单"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 143,
+    "ts": "2026-10-19 18:34:30 +0800",
+    "hits": 1,
+    "source": "args/20261019-183430-766223-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

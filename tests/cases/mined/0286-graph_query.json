@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n)-[r]-(m) WHERE n.slug = 'review/样例1-统一结算平台技术方案-技术方案逐项评审策略' RETURN type(r) AS rel, m.slug AS other",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 40,
+    "ts": "2026-10-18 20:00:10 +0800",
+    "hits": 1,
+    "source": "args/20261018-200010-045049-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

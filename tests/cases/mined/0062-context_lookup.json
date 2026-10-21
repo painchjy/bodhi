@@ -1,0 +1,23 @@
+{
+  "tool": "context_lookup",
+  "args": {
+    "kb_ids": [
+      "技术方案评审领域模型"
+    ],
+    "slug": "bpmn/task/逐项评审"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1387,
+    "ts": "2026-10-18 21:26:21 +0800",
+    "hits": 1,
+    "source": "args/20261018-212621-901884-context_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

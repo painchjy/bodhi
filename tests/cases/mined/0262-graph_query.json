@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug IN ['bpmn/task/逐项评审','bpmn/activity/评审执行','bmm/businessprocess/技术方案评审流程'] RETURN n.slug AS slug, n.name AS name, n.definition AS definition, n.note AS note, n.wiki_content AS wiki",
+    "limit": 10
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 95,
+    "ts": "2026-10-18 16:21:30 +0800",
+    "hits": 1,
+    "source": "args/20261018-162130-446671-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

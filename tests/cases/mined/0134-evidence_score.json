@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "key": "stack_table",
+        "locator": "2.2 技术架构 · 技术栈勾选表",
+        "quote": "| Redis | 缓存 | **5.0.14** | 同城 |；| Kafka | 消息 | 3.6.1 | 同城 |",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": 0.6,
+        "key": "certified_list",
+        "locator": "DataObject 开源软件清单（挡板测试样例）",
+        "quote": "Redis 7.2.4 —— 已认证；Nginx 1.24.0 —— 已认证；清单内无 Kafka 条目",
+        "required": true,
+        "source_type": "external_stub",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 16,
+    "ts": "2026-10-18 20:45:01 +0800",
+    "hits": 1,
+    "source": "args/20261018-204501-418564-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

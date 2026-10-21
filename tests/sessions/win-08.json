@@ -1,0 +1,47 @@
+{
+  "session": "win-08",
+  "calls": [
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-10 05:25:38 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-10 05:26:13 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-10 05:26:43 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "resolve_pending_merge",
+      "ts": "2026-10-10 05:27:14 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-10 05:27:14 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-10 05:27:23 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "link_source_session",
+      "ts": "2026-10-10 05:27:27 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

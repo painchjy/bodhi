@@ -1,0 +1,23 @@
+{
+  "tool": "image_extract",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "knowledge_id": "样例1-统一结算平台技术方案.docx"
+  },
+  "expect": {
+    "shape": "ok",
+    "keys": [
+      "by_document",
+      "images",
+      "images_found"
+    ]
+  },
+  "meta": {
+    "ms": 134,
+    "ts": "2026-10-17 06:20:22 +0800",
+    "hits": 11,
+    "source": "args/20261017-062022-017400-image_extract.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

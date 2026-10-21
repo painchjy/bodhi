@@ -1,0 +1,16 @@
+{
+  "tool": "extract_state",
+  "args": {},
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 169,
+    "ts": "2026-10-10 05:15:13 +0800",
+    "hits": 7,
+    "source": "args/20261010-051513-542825-extract_state.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

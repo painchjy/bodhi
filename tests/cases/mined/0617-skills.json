@@ -1,0 +1,23 @@
+{
+  "tool": "skills",
+  "args": {
+    "model": "bmm",
+    "skill": "domain_modeling"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 1006,
+    "ts": "2026-10-16 07:04:04 +0800",
+    "hits": 1,
+    "source": "args/20261016-070404-579915-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

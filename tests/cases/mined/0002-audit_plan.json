@@ -1,0 +1,22 @@
+{
+  "tool": "audit_plan",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "kinds": "init",
+    "scope": "all"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 5307,
+    "ts": "2026-10-18 14:52:44 +0800",
+    "hits": 2,
+    "source": "args/20261018-145244-453668-audit_plan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

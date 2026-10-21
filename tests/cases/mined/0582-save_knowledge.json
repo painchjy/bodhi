@@ -1,0 +1,172 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "edges": [
+      {
+        "source": "统一结算平台",
+        "target": "订单子系统",
+        "type": "bmm:mainSystemContainsSubSystem"
+      },
+      {
+        "source": "统一结算平台",
+        "target": "结算子系统",
+        "type": "bmm:mainSystemContainsSubSystem"
+      },
+      {
+        "source": "统一结算平台",
+        "target": "对账子系统",
+        "type": "bmm:mainSystemContainsSubSystem"
+      },
+      {
+        "source": "订单子系统-应用服务器-浦江云",
+        "target": "订单子系统",
+        "type": "bmm:hardwareAssetBelongsToSubSystem"
+      },
+      {
+        "source": "订单子系统-数据库服务器-张江云",
+        "target": "订单子系统",
+        "type": "bmm:hardwareAssetBelongsToSubSystem"
+      },
+      {
+        "source": "结算子系统-应用服务器-浦江云",
+        "target": "结算子系统",
+        "type": "bmm:hardwareAssetBelongsToSubSystem"
+      },
+      {
+        "source": "对账子系统-应用服务器-内蒙云",
+        "target": "对账子系统",
+        "type": "bmm:hardwareAssetBelongsToSubSystem"
+      }
+    ],
+    "kb_id": "技术方案评审任务知识库",
+    "mode": "dry_run",
+    "nodes": [
+      {
+        "aliases": [
+          "统一结算平台技术方案"
+        ],
+        "attributes": {
+          "bmm:coreFunction": "统一结算入口与对账口径，结算时效由 T+1 提升为准实时",
+          "bmm:systemStatus": "新建（方案阶段，计划 2026 年 12 月底前投产）"
+        },
+        "definition": "新建类技术方案《样例1-统一结算平台技术方案》涉及的主系统：统一结算入口与对账口径，结算时效由 T+1 提升为准实时。现状为结算功能分散在订单、结算、对账三套系统，各系统各管一套对账逻辑。",
+        "name": "统一结算平台",
+        "purpose": "承载统一结算与对账能力",
+        "type": "bmm:MainSystem"
+      },
+      {
+        "attributes": {
+          "bmm:systemCriticality": "A 级",
+          "bmm:systemStatus": "本次改造"
+        },
+        "definition": "订单子系统（A 级，本次改造）：改动下单、退款流程；与结算子系统通过消息主题 order-events 交互，不直接读写对方数据库；与结算子系统共用同一套 Redis 集群存放订单快照缓存。部署：同城双活（浦江云 + 张江云跨云双活），方案未提供该子系统部署图。",
+        "name": "订单子系统",
+        "purpose": "订单受理与下单、退款流程",
+        "type": "bmm:SubSystem"
+      },
+      {
+        "attributes": {
+          "bmm:systemCriticality": "B 级",
+          "bmm:systemStatus": "本次新建"
+        },
+        "definition": "结算子系统（B 级，本次新建）：部署见方案图 2 —— 同城与异地全部多云多活（单元化），最高等级灾备。与订单子系统共用同一套 Redis 集群（跨子系统共享缓存），违反系统隔离原则，已列为严重问题。",
+        "name": "结算子系统",
+        "purpose": "统一结算处理",
+        "type": "bmm:SubSystem"
+      },
+      {
+        "attributes": {
+          "bmm:systemCriticality": "C 级",
+          "bmm:systemStatus": "本次改造"
+        },
+        "definition": "对账子系统（C 级，本次改造）：新增准实时对账任务，仅调用结算子系统的对账查询接口。部署见方案图 1 —— 同城浦江云/张江云，异地内蒙云，同城跨云双活、异地多云热备；方案 2.3 文字另写「异地数据级备份」，与图注口径不一致。",
+        "name": "对账子系统",
+        "purpose": "准实时对账",
+        "type": "bmm:SubSystem"
+      },
+      {
+        "definition": "技术栈勾选表组件：商业数据库，业务库，版本 8.1.3.100，部署位置 同城。不属「开源软件适用规则」的约束范围（判不适用）。",
+        "name": "达梦数据库 DM8 8.1.3.100",
+        "purpose": "业务库（商业数据库）",
+        "type": "bmm:ITAsset"
+      },
+      {
+        "definition": "技术栈勾选表组件：缓存，版本 5.0.14，部署位置 同城。中心开源软件认证清单仅认证 Redis 7.2.4，本版本不在认证范围（不符合）。结算与订单两个子系统共用同一套集群。",
+        "name": "Redis 5.0.14",
+        "purpose": "缓存（订单快照缓存）",
+        "type": "bmm:ITAsset"
+      },
+      {
+        "definition": "技术栈勾选表组件：接入层，版本 1.24.0，部署位置 同城。与中心开源软件认证清单一致（符合）。",
+        "name": "Nginx 1.24.0",
+        "purpose": "接入",
+        "type": "bmm:ITAsset"
+      },
+      {
+        "definition": "技术栈勾选表组件：消息中间件，版本 3.6.1，部署位置 同城。中心开源软件认证清单中查无 Kafka（不符合）。",
+        "name": "Kafka 3.6.1",
+        "purpose": "消息",
+        "type": "bmm:ITAsset"
+      },
+      {
+        "attributes": {
+          "bmm:hardwareAssetCategory": "应用服务器"
+        },
+        "definition": "设备申请清单：子系统=订单子系统；设备类型=应用服务器；部署位置=浦江云；配置规格=8C32G；数量=8；用途=应用节点。",
+        "name": "订单子系统-应用服务器-浦江云",
+        "purpose": "应用节点（8C32G × 8）",
+        "type": "bmm:HardwareAsset"
+      },
+      {
+        "attributes": {
+          "bmm:hardwareAssetCategory": "数据库服务器"
+        },
+        "definition": "设备申请清单：子系统=订单子系统；设备类型=数据库服务器；部署位置=张江云；配置规格=16C64G；数量=4；用途=DM8 主备。",
+        "name": "订单子系统-数据库服务器-张江云",
+        "purpose": "DM8 主备（16C64G × 4）",
+        "type": "bmm:HardwareAsset"
+      },
+      {
+        "attributes": {
+          "bmm:hardwareAssetCategory": "应用服务器"
+        },
+        "definition": "设备申请清单：子系统=结算子系统；设备类型=应用服务器；部署位置=浦江云；配置规格=8C32G；数量=6；用途=应用节点。",
+        "name": "结算子系统-应用服务器-浦江云",
+        "purpose": "应用节点（8C32G × 6）",
+        "type": "bmm:HardwareAsset"
+      },
+      {
+        "attributes": {
+          "bmm:hardwareAssetCategory": "应用服务器"
+        },
+        "definition": "设备申请清单：子系统=对账子系统；设备类型=应用服务器；部署位置=内蒙云；配置规格=8C32G；数量=4；用途=准实时对账。",
+        "name": "对账子系统-应用服务器-内蒙云",
+        "purpose": "准实时对账（8C32G × 4）",
+        "type": "bmm:HardwareAsset"
+      }
+    ],
+    "stage": "graph"
+  },
+  "expect": {
+    "shape": "dry",
+    "keys": [
+      "applied",
+      "created",
+      "engine",
+      "maintenance",
+      "merge",
+      "merged",
+      "page_versions",
+      "unmatched",
+      "violations"
+    ]
+  },
+  "meta": {
+    "ms": 501,
+    "ts": "2026-10-20 15:01:22 +0800",
+    "hits": 1,
+    "source": "args/20261020-150122-227065-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "session": "win-99",
+  "calls": [
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 20:44:40 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:44:41 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 20:44:46 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 20:44:46 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 20:44:47 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:44:47 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 20:45:01 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 20:45:01 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 20:45:01 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 20:45:01 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 20:45:01 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 20:45:01 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-18 20:45:01 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-18 20:45:04 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "rules_of_policy",
+      "ts": "2026-10-18 20:45:05 +0800",
+      "shape": "ok",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:45:13 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "tool": "context_concept_apply",
+  "args": {
+    "acknowledge_risks": [],
+    "actor": "技术方案评审智能体",
+    "definition": "按技术方案模板要求规范编写，每个章节内容符合模板要求，上下文表述一致，表达清晰无歧义。",
+    "slug": "bmm/operativebusinessrule/技术方案文档结构规范",
+    "standard_name": "技术方案文档结构规范",
+    "ticket": "7e57eac3ba2476006ca7d59603d3fbf125d91b84"
+  },
+  "expect": {
+    "shape": "ok",
+    "keys": [
+      "applied",
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 5239,
+    "ts": "2026-10-19 22:00:52 +0800",
+    "hits": 1,
+    "source": "args/20261019-220052-690641-context_concept_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

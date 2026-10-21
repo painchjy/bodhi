@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "sections",
+        "locator": "全文各级章节标题",
+        "quote": "1 现状与目标 / 2 总体方案（2.1 应用架构、2.2 技术架构、2.3 部署架构）/ 3 设备申请清单 / 4 章节裁剪说明",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": "medium",
+        "id": "clarity",
+        "locator": "2.3 部署架构",
+        "quote": "结算子系统（B 级）：部署方案详见部署图（图 2）；文字部分不做展开。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 17,
+    "ts": "2026-10-18 21:57:29 +0800",
+    "hits": 1,
+    "source": "args/20261018-215729-453196-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

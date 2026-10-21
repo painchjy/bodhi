@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.9,
+        "locator": "4 章节裁剪说明",
+        "name": "技术方案分类与裁剪声明",
+        "quote": "本方案为新建类技术方案，已裁剪「运维方案」章节。其余章节按模板编写。",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      },
+      {
+        "confidence": 0,
+        "locator": "规则参考规范：技术方案评审要点（库内未收录）",
+        "name": "《技术方案评审要点》关注章节清单",
+        "quote": "",
+        "required": true,
+        "source_type": "reference",
+        "status": "unavailable"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 111,
+    "ts": "2026-10-18 21:27:34 +0800",
+    "hits": 1,
+    "source": "args/20261018-212734-572271-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

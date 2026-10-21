@@ -1,0 +1,22 @@
+{
+  "tool": "rules_of_policy",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "policy": "部署架构设计原则"
+  },
+  "expect": {
+    "shape": "ok",
+    "keys": [
+      "count",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 414,
+    "ts": "2026-10-13 23:20:46 +0800",
+    "hits": 2,
+    "source": "args/20261013-232046-014272-rules_of_policy.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

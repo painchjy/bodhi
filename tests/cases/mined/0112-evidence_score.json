@@ -1,0 +1,40 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "locator": "2.2 技术架构 技术栈勾选表",
+        "quote": "达梦数据库 DM8 | 业务库 | 8.1.3.100 | 同城",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "locator": "《技术栈设计规范》1.1.1TechnologyStackDesign（URL 取不到）",
+        "quote": "",
+        "required": true,
+        "source_type": "external_url",
+        "status": "unavailable"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 12,
+    "ts": "2026-10-18 16:13:03 +0800",
+    "hits": 1,
+    "source": "args/20261018-161303-595678-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

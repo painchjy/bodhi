@@ -6,7 +6,7 @@ when: 用户要"把这次会话的知识/澄清/改进建议记下来""查某结
 models: [bmm]
 default_model: bmm
 stages: [identify, page, bind, board, verify]
-tools: [save_knowledge, wiki_search, wiki_read_page, grep_chunks, list_knowledge_chunks, doc_outline, list_audit_scan]
+tools: [save_knowledge, wiki_search, wiki_read_page, grep_chunks, list_knowledge_chunks, doc_outline, audit_scan]
 version: 0
 ---
 

@@ -1,0 +1,26 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "kb_id": "cd3b8484-646a-40d7-a6b6-f1ecc5625d9c",
+    "stage": "report",
+    "mode": "apply",
+    "session_no": "pytest-1021222707",
+    "report": {
+      "title": "A 页",
+      "slug": "review/_t-a",
+      "content_md": "# A 页\n"
+    }
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 136,
+    "ts": "2026-10-21 22:27:07 +0800",
+    "hits": 1,
+    "source": "args/20261021-222707-333382-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

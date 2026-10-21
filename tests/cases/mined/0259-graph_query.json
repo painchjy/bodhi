@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) RETURN labels(n)[0] AS kind, count(*) AS n ORDER BY n DESC",
+    "limit": 50
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 54,
+    "ts": "2026-10-18 16:21:23 +0800",
+    "hits": 2,
+    "source": "args/20261018-162123-271136-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

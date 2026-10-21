@@ -1,0 +1,16 @@
+{
+  "tool": "doc_outline",
+  "args": {},
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 568,
+    "ts": "2026-10-10 03:34:02 +0800",
+    "hits": 11,
+    "source": "args/20261010-033402-807753-doc_outline.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

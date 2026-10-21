@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.wiki_content CONTAINS '适用规则清单' RETURN n.kb_id AS kb, n.slug AS slug, n.name AS name, n.page_type AS page_type, substring(n.wiki_content,0,1800) AS body",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 62,
+    "ts": "2026-10-18 20:20:03 +0800",
+    "hits": 1,
+    "source": "args/20261018-202003-973853-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

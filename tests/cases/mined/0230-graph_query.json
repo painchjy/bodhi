@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.name IN ['技术方案评审流程','企业重点评审规则严格遵守','中心已认证组件（技术栈）','评审规则维护','技术方案知识提取','技术方案评审任务知识库','技术方案评审规则集'] RETURN n.name AS name, n.page_type AS pt, n.definition AS def, left(n.wiki_content, 1400) AS body"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 107,
+    "ts": "2026-10-13 23:21:04 +0800",
+    "hits": 1,
+    "source": "args/20261013-232104-572934-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

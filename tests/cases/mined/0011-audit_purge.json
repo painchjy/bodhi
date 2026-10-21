@@ -1,0 +1,22 @@
+{
+  "tool": "audit_purge",
+  "args": {
+    "dry_run": false,
+    "kb_id": "技术方案评审任务知识库",
+    "kinds": "init"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "applied"
+    ]
+  },
+  "meta": {
+    "ms": 16679,
+    "ts": "2026-10-20 13:30:28 +0800",
+    "hits": 1,
+    "source": "args/20261020-133028-690630-audit_purge.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

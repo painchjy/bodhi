@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "id": "doc_kafka",
+        "locator": "2.2 技术架构",
+        "quote": "| Kafka | 消息 | 3.6.1 | 同城 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": 0.85,
+        "id": "cert_kafka",
+        "locator": "中心认证开源软件清单（挡板）",
+        "quote": "清单条目：MySQL 8.0.32／Redis 7.2.4／Nginx 1.24.0／Apache Tomcat 9.0.85／PostgreSQL 15.6（无 Kafka 条目）",
+        "required": true,
+        "source_type": "external",
+        "status": "absent_verified"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 11,
+    "ts": "2026-10-20 13:32:43 +0800",
+    "hits": 1,
+    "source": "args/20261020-133243-585351-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

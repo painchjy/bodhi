@@ -1,0 +1,27 @@
+{
+  "tool": "context_authority_apply",
+  "args": {
+    "acknowledge_risks": [
+      "replica_protection"
+    ],
+    "action": "decide",
+    "actor": "技术方案评审智能体",
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/应用架构系统边界原则",
+    "ticket": "0c3e0edd505b0b4de1c61649aed0f17cf1a6447d"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 8212,
+    "ts": "2026-10-19 22:01:35 +0800",
+    "hits": 1,
+    "source": "args/20261019-220135-282035-context_authority_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "context_page",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/技术架构开源软件适用规则"
+  },
+  "expect": {
+    "shape": "timeout",
+    "keys": []
+  },
+  "meta": {
+    "ms": null,
+    "ts": "2026-10-13 23:20:55 +0800",
+    "hits": 1,
+    "source": "args/20261013-232055-298293-context_page.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "tool": "rebuild_wiki_from_graph",
+  "args": {},
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1020,
+    "ts": "2026-10-11 08:54:24 +0800",
+    "hits": 1,
+    "source": "args/20261011-085424-437166-rebuild_wiki_from_graph.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

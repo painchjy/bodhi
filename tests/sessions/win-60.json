@@ -1,0 +1,17 @@
+{
+  "session": "win-60",
+  "calls": [
+    {
+      "tool": "kb_import",
+      "ts": "2026-10-12 02:55:58 +0800",
+      "shape": "timeout",
+      "target": ""
+    },
+    {
+      "tool": "kb_import",
+      "ts": "2026-10-12 02:57:08 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

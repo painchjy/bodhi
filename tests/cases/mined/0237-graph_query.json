@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug CONTAINS 'bpmn' OR n.slug CONTAINS 'task' OR n.slug CONTAINS 'rule' RETURN n.slug AS slug, n.rdfType AS type LIMIT 200"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 127,
+    "ts": "2026-10-17 06:20:17 +0800",
+    "hits": 1,
+    "source": "args/20261017-062017-654531-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE (n.slug CONTAINS 'Redis' OR n.slug CONTAINS 'redis' OR n.title CONTAINS 'Redis' OR n.title CONTAINS '达梦' OR n.title CONTAINS 'Nginx' OR n.title CONTAINS 'Kafka') RETURN n.slug AS slug, n.title AS title, labels(n)[0] AS kind, properties(n) AS props",
+    "limit": 50
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 76,
+    "ts": "2026-10-18 14:55:49 +0800",
+    "hits": 1,
+    "source": "args/20261018-145549-880029-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

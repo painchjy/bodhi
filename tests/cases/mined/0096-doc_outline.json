@@ -1,0 +1,21 @@
+{
+  "tool": "doc_outline",
+  "args": {
+    "budget_tokens": 8000,
+    "kb_id": "技术方案评审任务知识库",
+    "knowledge_id": "样例1-统一结算平台技术方案.docx",
+    "with_text": true
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 291,
+    "ts": "2026-10-20 14:56:44 +0800",
+    "hits": 1,
+    "source": "args/20261020-145644-568719-doc_outline.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

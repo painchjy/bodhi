@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.kb_id = '7efad3eb-762a-4981-9164-cd3b3a226bd4' AND n.page_type IN ['bpmn:DataObject','bmm:TechnicalReviewReport','agent:DesignSpec','bmm:BusinessPolicy','bpmn:Activity','bpmn:Task'] RETURN n.page_type AS page_type, n.slug AS slug, n.name AS name ORDER BY page_type",
+    "limit": 80
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 75,
+    "ts": "2026-10-18 20:19:55 +0800",
+    "hits": 1,
+    "source": "args/20261018-201955-865517-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

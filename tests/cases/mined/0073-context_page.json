@@ -1,0 +1,19 @@
+{
+  "tool": "context_page",
+  "args": {
+    "kb_id": "afcd1c2e-0ff3-41c9-8dde-01f136b8a072",
+    "slug": "bmm/operativebusinessrule/技术架构系统隔离原则"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 1483,
+    "ts": "2026-10-19 21:39:32 +0800",
+    "hits": 3,
+    "source": "args/20261019-213932-372301-context_page.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

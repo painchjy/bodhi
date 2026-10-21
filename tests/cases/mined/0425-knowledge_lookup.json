@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "limit": 20,
+    "mode": "keyword",
+    "query": "部署 灾备 设备清单"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 142,
+    "ts": "2026-10-19 19:41:32 +0800",
+    "hits": 1,
+    "source": "args/20261019-194132-796414-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

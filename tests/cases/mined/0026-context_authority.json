@@ -1,0 +1,20 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "slug": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1303,
+    "ts": "2026-10-19 21:56:17 +0800",
+    "hits": 1,
+    "source": "args/20261019-215617-487833-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

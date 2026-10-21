@@ -1,0 +1,23 @@
+{
+  "tool": "link_source_session",
+  "args": {
+    "apply": true,
+    "kb_id": "技术方案评审任务知识库",
+    "session_no": "497ad9de-237a-4cdf-900a-8106ac33591e",
+    "slugs": [
+      "review/样例1-统一结算平台技术方案-技术方案逐项评审策略"
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 997,
+    "ts": "2026-10-18 21:13:10 +0800",
+    "hits": 1,
+    "source": "args/20261018-211310-752566-link_source_session.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "tool": "skills",
+  "args": {
+    "skill": "document_review"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 2280,
+    "ts": "2026-10-13 23:20:24 +0800",
+    "hits": 2,
+    "source": "args/20261013-232024-114643-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

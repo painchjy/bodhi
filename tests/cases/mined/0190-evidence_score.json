@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "id": "doc_dm",
+        "locator": "2.2 技术架构",
+        "quote": "| 达梦数据库 DM8 | 业务库 | 8.1.3.100 | 同城 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": 0.6,
+        "id": "is_opensource",
+        "locator": "规则适用范围判断",
+        "quote": "达梦数据库（DM8）为企业级商用数据库产品，非开源软件",
+        "required": true,
+        "source_type": "knowledge",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 24,
+    "ts": "2026-10-20 13:32:43 +0800",
+    "hits": 1,
+    "source": "args/20261020-133243-719623-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

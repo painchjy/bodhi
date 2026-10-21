@@ -1,0 +1,19 @@
+{
+  "tool": "selftest",
+  "args": {},
+  "expect": {
+    "shape": "ok",
+    "keys": [
+      "applied",
+      "count"
+    ]
+  },
+  "meta": {
+    "ms": 1234,
+    "ts": "2026-10-09 21:34:22 +0800",
+    "hits": 1,
+    "source": "args/20261009-213422-815899-selftest.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

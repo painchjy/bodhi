@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (t:BodhiInstance {slug:'bpmn/task/逐项评审'})-[r]->(b) RETURN type(r) AS rel, b.slug AS target, b.rdfType AS ttype LIMIT 100"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 198,
+    "ts": "2026-10-17 06:20:27 +0800",
+    "hits": 1,
+    "source": "args/20261017-062027-832996-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

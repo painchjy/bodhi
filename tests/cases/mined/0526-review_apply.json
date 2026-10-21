@@ -1,0 +1,20 @@
+{
+  "tool": "review_apply",
+  "args": {
+    "kb_id": "x"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 43,
+    "ts": "2026-10-18 21:32:48 +0800",
+    "hits": 4,
+    "source": "args/20261018-213248-786622-review_apply.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

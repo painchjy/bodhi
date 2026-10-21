@@ -1,0 +1,20 @@
+{
+  "tool": "skills",
+  "args": {},
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 1103,
+    "ts": "2026-10-10 03:09:58 +0800",
+    "hits": 38,
+    "source": "args/20261010-030958-843604-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

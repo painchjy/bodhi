@@ -1,0 +1,27 @@
+{
+  "tool": "context_authority_apply",
+  "args": {
+    "acknowledge_risks": [
+      "replica_protection"
+    ],
+    "action": "decide",
+    "actor": "技术方案评审智能体",
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/技术架构开源软件适用规则",
+    "ticket": "1a487da4b90b09d61b5fbdca4161ad38d65db411"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 6681,
+    "ts": "2026-10-19 22:01:21 +0800",
+    "hits": 1,
+    "source": "args/20261019-220121-025288-context_authority_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

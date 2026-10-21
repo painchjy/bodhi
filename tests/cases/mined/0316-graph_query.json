@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) RETURN labels(n) AS lbl, n.slug AS slug, n.title AS title LIMIT 100",
+    "limit": 100
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 48,
+    "ts": "2026-10-18 20:53:04 +0800",
+    "hits": 1,
+    "source": "args/20261018-205304-293449-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

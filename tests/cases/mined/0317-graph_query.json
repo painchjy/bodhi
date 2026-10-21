@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (p {slug:'bmm/businessprocess/技术方案评审流程'})-[r]->(a) RETURN type(r) AS rel, a.slug AS slug, a.title AS title LIMIT 100"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 76,
+    "ts": "2026-10-18 20:53:06 +0800",
+    "hits": 1,
+    "source": "args/20261018-205306-424800-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

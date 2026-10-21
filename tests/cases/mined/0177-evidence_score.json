@@ -1,0 +1,40 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "locator": "2.2 技术架构 · 技术栈勾选表",
+        "quote": "| Redis | 缓存 | **5.0.14** | 同城 |",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": 0.9,
+        "locator": "bpmn/dataobject/开源软件清单（挡板）",
+        "quote": "Redis 7.2.4 —— 已认证",
+        "required": true,
+        "source_type": "dataobject",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 10,
+    "ts": "2026-10-19 19:41:41 +0800",
+    "hits": 1,
+    "source": "args/20261019-194141-129377-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

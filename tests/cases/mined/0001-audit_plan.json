@@ -1,0 +1,18 @@
+{
+  "tool": "audit_plan",
+  "args": {},
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 5210,
+    "ts": "2026-10-10 15:45:30 +0800",
+    "hits": 8,
+    "source": "args/20261010-154530-199610-audit_plan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

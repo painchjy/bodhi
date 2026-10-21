@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.wiki_content CONTAINS '章节规范' RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type, substring(n.wiki_content,0,2500) AS body",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 46,
+    "ts": "2026-10-18 19:59:30 +0800",
+    "hits": 1,
+    "source": "args/20261018-195930-821046-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

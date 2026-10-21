@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "limit": 20,
+    "mode": "keyword",
+    "query": "设备 服务器 硬件"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 156,
+    "ts": "2026-10-20 19:44:22 +0800",
+    "hits": 1,
+    "source": "args/20261020-194422-428641-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

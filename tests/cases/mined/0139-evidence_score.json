@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "trim",
+        "locator": "4 章节裁剪说明",
+        "quote": "本方案为新建类技术方案，已裁剪「运维方案」章节。其余章节按模板编写。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": "low",
+        "id": "review_points",
+        "locator": "技术方案评审要点",
+        "quote": "",
+        "required": true,
+        "source_type": "doc_missing",
+        "status": "unavailable"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 16,
+    "ts": "2026-10-18 20:53:55 +0800",
+    "hits": 2,
+    "source": "args/20261018-205355-919372-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

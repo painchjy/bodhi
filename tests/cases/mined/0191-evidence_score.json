@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.98,
+        "id": "shared_cache",
+        "locator": "2.2 技术架构",
+        "quote": "结算子系统与订单子系统**共用同一套 Redis 集群**（跨子系统共享缓存），用于存放订单快照缓存。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": 0.7,
+        "id": "deploy_per_sub",
+        "locator": "3 设备申请清单",
+        "quote": "| 订单子系统 | 应用服务器 | 浦江云 | 8C32G | 8 | 应用节点 | ／ | 结算子系统 | 应用服务器 | 浦江云 | 8C32G | 6 | 应用节点 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 31,
+    "ts": "2026-10-20 13:32:43 +0800",
+    "hits": 1,
+    "source": "args/20261020-133243-801943-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

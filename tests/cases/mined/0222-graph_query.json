@@ -1,0 +1,16 @@
+{
+  "tool": "graph_query",
+  "args": {},
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 112,
+    "ts": "2026-10-12 06:54:24 +0800",
+    "hits": 7,
+    "source": "args/20261012-065424-114327-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

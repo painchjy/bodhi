@@ -1,0 +1,21 @@
+{
+  "tool": "context_lookup",
+  "args": {
+    "q": "部署架构最低部署和灾备要求",
+    "slug": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1083,
+    "ts": "2026-10-19 21:46:10 +0800",
+    "hits": 1,
+    "source": "args/20261019-214610-426647-context_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

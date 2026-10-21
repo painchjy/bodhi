@@ -1,0 +1,21 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/技术架构开源软件适用规则"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 1174,
+    "ts": "2026-10-19 22:01:07 +0800",
+    "hits": 1,
+    "source": "args/20261019-220107-592260-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

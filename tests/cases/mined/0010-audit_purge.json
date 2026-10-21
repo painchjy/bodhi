@@ -1,0 +1,27 @@
+{
+  "tool": "audit_purge",
+  "args": {
+    "dry_run": true,
+    "kb_id": "12ccea38-f388-432c-8683-e0201a15dcaa",
+    "slugs": [
+      "bmm/operativebusinessrule/技术方案章节裁剪规则",
+      "bmm/operativebusinessrule/技术架构开源软件适用规则",
+      "bmm/operativebusinessrule/技术架构系统隔离原则",
+      "bmm/operativebusinessrule/部署架构最低部署和灾备要求",
+      "bmm/operativebusinessrule/技术方案文档结构规范",
+      "bmm/operativebusinessrule/应用架构系统边界原则"
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 307,
+    "ts": "2026-10-20 13:21:17 +0800",
+    "hits": 1,
+    "source": "args/20261020-132117-321573-audit_purge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

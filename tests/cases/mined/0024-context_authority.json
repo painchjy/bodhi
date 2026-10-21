@@ -1,0 +1,21 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/技术架构系统隔离原则"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 420,
+    "ts": "2026-10-19 21:37:10 +0800",
+    "hits": 5,
+    "source": "args/20261019-213710-905282-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

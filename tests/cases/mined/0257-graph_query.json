@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['ontology/bmm/report','ontology/bmm/technicalreviewreport'] RETURN n.slug AS slug, n.comment AS comment, n.wiki_content AS content, keys(n) AS k"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 84,
+    "ts": "2026-10-18 16:13:03 +0800",
+    "hits": 1,
+    "source": "args/20261018-161303-512986-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

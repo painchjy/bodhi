@@ -1,0 +1,17 @@
+{
+  "session": "win-117",
+  "calls": [
+    {
+      "tool": "context_authority",
+      "ts": "2026-10-19 21:43:07 +0800",
+      "shape": "ok_brief",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:43:13 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/技术架构系统隔离原则"
+    }
+  ]
+}

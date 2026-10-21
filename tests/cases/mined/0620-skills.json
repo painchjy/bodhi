@@ -1,0 +1,22 @@
+{
+  "tool": "skills",
+  "args": {
+    "skill": "report_compose"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 424,
+    "ts": "2026-10-18 16:21:48 +0800",
+    "hits": 10,
+    "source": "args/20261018-162148-608591-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

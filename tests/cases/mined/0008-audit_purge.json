@@ -1,0 +1,54 @@
+{
+  "tool": "audit_purge",
+  "args": {
+    "dry_run": true,
+    "kb_id": "技术方案评审任务知识库",
+    "slugs": [
+      "agent/advice/改进建议a2026100701补全开源软件认证清单参考规范",
+      "agent/advice/改进建议a2026100702补技术方案评审要点",
+      "agent/advice/改进建议a2026100703补技术方案模板",
+      "agent/advice/改进建议a2026100704补全图像识别挡板内容",
+      "agent/advice/改进建议a2026100705规则维护br001与br002",
+      "agent/advice/改进建议a2026100706明确评审阶段流转指引",
+      "agent/advice/改进建议a2026100707统一报告与待确认清单格式",
+      "agent/evaluation/规则驱动评测报告-样例1与样例3",
+      "bmm/assessment/反馈单样例3客户信息查询服务技术方案第1轮",
+      "bmm/assessment/客户信息查询压力集中于客户主库",
+      "bmm/assessment/待确认清单样例1统一结算平台技术方案aaaabbbbccc第1轮",
+      "bmm/assessment/待确认清单样例1统一结算平台技术方案pr20260187r1",
+      "bmm/assessment/待确认清单样例2统一结算平台技术方案pr20260187r2",
+      "bmm/assessment/重点规则知识提取统一结算平台技术方案pr20260187r1",
+      "bmm/courseofaction/客户信息查询服务建设",
+      "bmm/goal/客户信息查询负载隔离",
+      "bmm/hardwareasset/客户信息查询服务部署节点同城双活／异地热备",
+      "bmm/internalinfluencer/柜面系统直连客户主库",
+      "bmm/itasset/客户主库",
+      "bmm/itasset/客户主库只读副本",
+      "bmm/knowledgesession/会话分页p2评审执行与澄清统一结算平台技术方案",
+      "bmm/knowledgesession/会话样例3技术方案评审领域建模20261008",
+      "bmm/knowledgesession/统一结算平台技术方案评审及问题输出",
+      "bmm/objective/6个月内投产",
+      "bmm/resource/中心已认证组件技术栈",
+      "bmm/subsystem/客户信息查询服务",
+      "bmm/subsystem/柜面系统",
+      "review/样例1-统一结算平台技术方案-端到端规则驱动",
+      "review/样例1-统一结算平台技术方案（评审流程编号-1231111）-技术方案逐项评审策略",
+      "review/样例2-统一结算平台技术方案-端到端规则驱动",
+      "review/样例3-客户信息查询服务技术方案-端到端规则驱动",
+      "session/1427c9a6-48b8-4888-8165-5c838c750ece",
+      "session/20a663c9-d9df-4bf2-a318-754ab58a3e08"
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 416,
+    "ts": "2026-10-18 14:53:21 +0800",
+    "hits": 1,
+    "source": "args/20261018-145321-415419-audit_purge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

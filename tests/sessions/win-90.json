@@ -1,0 +1,95 @@
+{
+  "session": "win-90",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 14:55:26 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 14:55:26 +0800",
+      "shape": "timeout",
+      "target": "b1"
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 14:55:28 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 14:55:28 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 14:55:30 +0800",
+      "shape": "timeout",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 14:55:31 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 14:55:32 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "image_extract",
+      "ts": "2026-10-18 14:55:37 +0800",
+      "shape": "ok",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 14:55:37 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 14:55:37 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 14:55:38 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 14:55:49 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 14:55:49 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 14:56:03 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 14:56:04 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

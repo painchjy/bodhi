@@ -1,0 +1,20 @@
+{
+  "tool": "audit_scan",
+  "args": {
+    "kb_id": "b1",
+    "max_findings": 30,
+    "scope": "all"
+  },
+  "expect": {
+    "shape": "timeout",
+    "keys": []
+  },
+  "meta": {
+    "ms": null,
+    "ts": "2026-10-20 13:29:36 +0800",
+    "hits": 1,
+    "source": "args/20261020-132936-610225-audit_scan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

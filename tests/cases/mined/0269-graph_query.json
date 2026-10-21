@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['bpmn/task/逐项评审','bpmn/task/问题核实','bpmn/task/知识入库'] RETURN n.slug AS slug, n.name AS name, n.note AS note, substring(n.wiki_content,0,4000) AS body"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 150,
+    "ts": "2026-10-18 16:30:45 +0800",
+    "hits": 1,
+    "source": "args/20261018-163045-584300-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

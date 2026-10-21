@@ -1,0 +1,17 @@
+{
+  "session": "win-110",
+  "calls": [
+    {
+      "tool": "image_extract",
+      "ts": "2026-10-19 13:57:19 +0800",
+      "shape": "ok",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "image_extract",
+      "ts": "2026-10-19 13:58:43 +0800",
+      "shape": "ok",
+      "target": "技术方案评审任务知识库"
+    }
+  ]
+}

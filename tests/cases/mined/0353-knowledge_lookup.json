@@ -1,0 +1,24 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "depth": 2,
+    "kb_id": "技术方案评审领域模型",
+    "limit": 40,
+    "mode": "path",
+    "start": "bpmn/businessprocess/技术方案评审流程"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 67,
+    "ts": "2026-10-18 16:21:25 +0800",
+    "hits": 1,
+    "source": "args/20261018-162125-719499-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -3970,14 +3970,19 @@ _RETIRED_TOOLS = {
     "resolve_link_candidate": "同上 ✗",
     "import_state": "结构化导入进度可由 `import_plan` 回执查看 ✓",
     "import_refresh": "同上 ✗（重跑 `import_plan` 即刷新 ✓）",
-    "retag_rollback": "退回到页版本（`version` 可回退）✓，不再单设工具",
     "recategorize": "目录由 `ke_category.recompute` + `sync_folders` 在写库时自动收敛 ✓（CLI: `python3 -m ke_category`）",
-    "kb_import": "导入走 CLI（`tools/ke-core/kb_transfer.py`）✓，避免智能体误覆盖整库 ✗",
     "audit_kb": "与 `audit_scan` 重复 ✓，统一用 `audit_scan`",
+    # 2026-10-21：以下两个是**早期就删掉、但没进退役表**的（日志里还能看到调用 ⇒ 属"悄悄消失"✗）。
+    # 补进来只为**可解释**：调用方拿到明确指引，而不是莫名 unknown tool。
+    "resolve_pending_merge": "「相似度合并」已永久取消（2026-10-10）⇒ 待确认合并不复存在；按 `(kb, slug)` 幂等 `save_knowledge` 即可 ✓",
+    "selftest": "自检改为 `pytest tests`（回归套件 ✓）+ `audit_scan`（数据体检 ✓）",
 }
 
 
 def _call_tool_impl(name: str, args: dict) -> dict:
+    if name in _RETIRED_TOOLS:
+        return {"ok": False, "deprecated": True, "since": "2026-10-18",
+                "tool": name, "error": "该工具已退役", "hint": _RETIRED_TOOLS[name]}
     # P3-0f（2026-10-10）：每次工具调用先清**请求级只读 memo**（页 id / 属主 / 会话页引用）。
     # 放在这里而不是各工具里：唯一入口、线程局部、绝不会把上一次调用的结果带进来。
     _reset_request_cache()
@@ -4113,9 +4118,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     if name == "rules_of_policy":
         return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
                                          int(args.get("limit", 300) or 300))
-    if name in _RETIRED_TOOLS:
-        return {"ok": False, "deprecated": True, "since": "2026-10-18",
-                "tool": name, "error": "该工具已退役", "hint": _RETIRED_TOOLS[name]}
     if name == "graph_query":
         # 2026-10-18（用户口径 ✓）：**归一化到 knowledge_lookup** ✗ 不再建议直接拼 Cypher
         return {"ok": False, "deprecated": True, "error": "graph_query 已归一化到 knowledge_lookup",

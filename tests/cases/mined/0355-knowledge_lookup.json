@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审任务知识库",
+    "limit": 30,
+    "mode": "keyword",
+    "query": "统一结算平台 评审报告 问题清单 轮次"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 142,
+    "ts": "2026-10-18 16:21:49 +0800",
+    "hits": 1,
+    "source": "args/20261018-162149-049362-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

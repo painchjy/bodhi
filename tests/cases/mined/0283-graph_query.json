@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.wiki_content CONTAINS '结论与建议' RETURN n.kb_id AS kb, n.slug AS slug, n.name AS name, n.page_type AS page_type, substring(n.wiki_content,0,2000) AS body",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 75,
+    "ts": "2026-10-18 19:59:37 +0800",
+    "hits": 1,
+    "source": "args/20261018-195937-345190-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

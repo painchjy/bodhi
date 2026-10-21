@@ -1,0 +1,48 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "not_supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "locator": "2.3 部署架构 · 订单子系统",
+        "quote": "订单子系统（A 级）：同城双活（浦江云 + 张江云跨云双活）。本方案未提供该子系统的部署图。",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      },
+      {
+        "confidence": 0.9,
+        "locator": "2.3 部署架构 · 对账子系统",
+        "quote": "对账子系统（C 级）：同城双活 + 异地数据级备份（图 1）。",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      },
+      {
+        "confidence": 0.6,
+        "locator": "2.3 部署架构 · 结算子系统",
+        "quote": "结算子系统（B 级）：部署方案详见部署图（图 2）；文字部分不做展开。",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 49,
+    "ts": "2026-10-18 16:22:27 +0800",
+    "hits": 1,
+    "source": "args/20261018-162227-121240-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

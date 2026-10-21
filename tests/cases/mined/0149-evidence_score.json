@@ -1,0 +1,66 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "not_supported"
+      },
+      {
+        "verdict": "not_supported"
+      },
+      {
+        "verdict": "insufficient"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.9,
+        "locator": "2.1 应用架构",
+        "name": "系统等级",
+        "quote": "订单子系统（A 级，本次改造）、结算子系统（B 级，本次新建）、对账子系统（C 级，本次改造）",
+        "required": true,
+        "source_type": "doc",
+        "status": "present"
+      },
+      {
+        "confidence": 0.9,
+        "locator": "2.3 部署架构",
+        "name": "订单子系统部署图",
+        "quote": "本方案未提供该子系统的部署图。",
+        "required": true,
+        "source_type": "doc",
+        "status": "absent_verified"
+      },
+      {
+        "confidence": 0.85,
+        "locator": "2.3 部署架构",
+        "name": "订单子系统异地部署",
+        "quote": "订单子系统（A 级）：同城双活（浦江云 + 张江云跨云双活）。",
+        "required": true,
+        "source_type": "doc",
+        "status": "absent_verified"
+      },
+      {
+        "confidence": 0.5,
+        "locator": "2.3 部署架构/图2 图注",
+        "name": "部署图图像内容",
+        "quote": "（图 2：结算子系统 —— 同城与异地全部多云多活（单元化），最高等级灾备）",
+        "required": false,
+        "source_type": "doc_image",
+        "status": "unavailable"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 15,
+    "ts": "2026-10-18 21:27:34 +0800",
+    "hits": 1,
+    "source": "args/20261018-212734-308632-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

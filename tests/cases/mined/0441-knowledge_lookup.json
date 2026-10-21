@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "limit": 5,
+    "mode": "keyword",
+    "query": "应用架构-系统边界原则 规则哈希"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 165,
+    "ts": "2026-10-20 19:43:49 +0800",
+    "hits": 1,
+    "source": "args/20261020-194349-509884-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

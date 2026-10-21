@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "limit": 20,
+    "mode": "keyword",
+    "query": "认证状态 已认证 未认证 Redis 版本 挡板样例"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 297,
+    "ts": "2026-10-18 21:57:05 +0800",
+    "hits": 1,
+    "source": "args/20261018-215705-485421-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "mode": "keyword",
+    "query": "开源软件清单"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 151,
+    "ts": "2026-10-18 14:55:37 +0800",
+    "hits": 2,
+    "source": "args/20261018-145537-712575-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

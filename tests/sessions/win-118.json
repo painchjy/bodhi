@@ -1,0 +1,53 @@
+{
+  "session": "win-118",
+  "calls": [
+    {
+      "tool": "context_authority",
+      "ts": "2026-10-19 21:46:09 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    },
+    {
+      "tool": "context_lookup",
+      "ts": "2026-10-19 21:46:10 +0800",
+      "shape": "ok_brief",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:46:21 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:46:25 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:46:29 +0800",
+      "shape": "ok",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    },
+    {
+      "tool": "context_authority",
+      "ts": "2026-10-19 21:46:34 +0800",
+      "shape": "ok_brief",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    },
+    {
+      "tool": "context_concept_apply",
+      "ts": "2026-10-19 21:46:38 +0800",
+      "shape": "error",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    },
+    {
+      "tool": "context_page",
+      "ts": "2026-10-19 21:46:45 +0800",
+      "shape": "silent",
+      "target": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+    }
+  ]
+}

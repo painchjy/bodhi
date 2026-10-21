@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (a:BodhiInstance)-[r]->(b:BodhiInstance) WHERE a.slug = 'bmm/businesspolicy/技术方案评审策略' RETURN a.slug AS source, type(r) AS relation, b.slug AS target ORDER BY target"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 175,
+    "ts": "2026-10-16 07:07:19 +0800",
+    "hits": 1,
+    "source": "args/20261016-070719-698080-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "session": "win-57",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 02:32:51 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-12 02:32:53 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-12 02:33:02 +0800",
+      "shape": "timeout",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-12 02:33:10 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    }
+  ]
+}

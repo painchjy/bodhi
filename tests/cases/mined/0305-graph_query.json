@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug = 'bpmn/dataobject/问题清单' RETURN n.name AS name, n.definition AS definition, n.wiki_content AS content",
+    "limit": 1
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 51,
+    "ts": "2026-10-18 20:30:18 +0800",
+    "hits": 1,
+    "source": "args/20261018-203018-345155-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

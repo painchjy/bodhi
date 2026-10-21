@@ -1,0 +1,47 @@
+{
+  "session": "win-134",
+  "calls": [
+    {
+      "tool": "kb_export",
+      "ts": "2026-10-21 22:22:05 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-21 22:23:32 +0800",
+      "shape": "silent",
+      "target": "365cc944-35b6-4a87-9385-42d22a47d81e"
+    },
+    {
+      "tool": "page_attributes_set",
+      "ts": "2026-10-21 22:23:37 +0800",
+      "shape": "error",
+      "target": "review/_t-report"
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-21 22:23:40 +0800",
+      "shape": "silent",
+      "target": "4b364a94-8c49-4b65-be28-36b3e6d93da7"
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-21 22:23:41 +0800",
+      "shape": "silent",
+      "target": "4b364a94-8c49-4b65-be28-36b3e6d93da7"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-21 22:23:41 +0800",
+      "shape": "timeout",
+      "target": "4b364a94-8c49-4b65-be28-36b3e6d93da7"
+    },
+    {
+      "tool": "kb_export",
+      "ts": "2026-10-21 22:23:43 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    }
+  ]
+}

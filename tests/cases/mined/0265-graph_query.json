@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug CONTAINS 'technicalreviewreport' OR (n.comment IS NOT NULL AND n.slug CONTAINS 'reviewreport') RETURN n.slug AS slug, n.name AS name, n.comment AS comment, n.definition AS definition, labels(n) AS lb",
+    "limit": 20
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 91,
+    "ts": "2026-10-18 16:21:37 +0800",
+    "hits": 1,
+    "source": "args/20261018-162137-139464-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

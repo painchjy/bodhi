@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n {slug:'agent/stub/开源软件清单查询挡板'}) RETURN n.mockSource AS mockSource, n.stubStatus AS status, n.definition AS def"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 237,
+    "ts": "2026-10-18 15:31:02 +0800",
+    "hits": 1,
+    "source": "args/20261018-153102-488035-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

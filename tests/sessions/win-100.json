@@ -1,0 +1,23 @@
+{
+  "session": "win-100",
+  "calls": [
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:48:04 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 20:48:04 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-18 20:48:07 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    }
+  ]
+}

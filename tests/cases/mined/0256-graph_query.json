@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug CONTAINS 'technicalreviewreport' OR n.name='bmm:TechnicalReviewReport' RETURN n.slug AS slug, n.name AS name, n.comment AS comment, n.wiki_content AS content"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 163,
+    "ts": "2026-10-18 16:12:57 +0800",
+    "hits": 1,
+    "source": "args/20261018-161257-587529-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

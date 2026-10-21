@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (c {slug:'ontology/bmm/technicalreviewreport'}) RETURN properties(c) AS props LIMIT 5"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 33,
+    "ts": "2026-10-18 20:53:19 +0800",
+    "hits": 1,
+    "source": "args/20261018-205319-830464-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "not_supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "chapter_set",
+        "locator": "4 章节裁剪说明",
+        "quote": "本方案为新建类技术方案，已裁剪「运维方案」章节。其余章节按模板编写。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "grade_in_2_1",
+        "locator": "2.1 应用架构",
+        "quote": "涉及系统：订单子系统（A 级，本次改造）、结算子系统（B 级，本次新建）、对账子系统（C 级，本次改造）",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "grade_in_2_3",
+        "locator": "2.3 部署架构",
+        "quote": "订单子系统（C 级）：**同城跨云双活 + 异地多云热备**。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 14,
+    "ts": "2026-10-18 15:31:25 +0800",
+    "hits": 1,
+    "source": "args/20261018-153125-650997-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

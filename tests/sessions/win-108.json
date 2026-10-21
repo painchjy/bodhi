@@ -1,0 +1,89 @@
+{
+  "session": "win-108",
+  "calls": [
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-19 13:03:51 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "context_page",
+      "ts": "2026-10-19 13:03:52 +0800",
+      "shape": "silent",
+      "target": "bpmn/dataobject/问题清单"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-19 13:03:57 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "page_attributes_set",
+      "ts": "2026-10-19 13:03:57 +0800",
+      "shape": "dry",
+      "target": "bpmn/dataobject/问题清单"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-19 13:04:01 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-19 13:04:01 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-19 13:04:09 +0800",
+      "shape": "silent",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "audit_scan",
+      "ts": "2026-10-19 13:04:09 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-19 13:04:15 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "context_lookup",
+      "ts": "2026-10-19 13:04:15 +0800",
+      "shape": "ok_brief",
+      "target": "bpmn/dataobject/问题清单"
+    },
+    {
+      "tool": "page_attributes_set",
+      "ts": "2026-10-19 13:04:20 +0800",
+      "shape": "dry",
+      "target": "bpmn/dataobject/问题清单"
+    },
+    {
+      "tool": "page_attributes_set",
+      "ts": "2026-10-19 13:04:24 +0800",
+      "shape": "dry",
+      "target": "bpmn/dataobject/问题清单"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-19 13:04:31 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-19 13:04:31 +0800",
+      "shape": "ok_brief",
+      "target": "7efad3eb-762a-4981-9164-cd3b3a226bd4"
+    }
+  ]
+}

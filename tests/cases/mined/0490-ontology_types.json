@@ -1,0 +1,21 @@
+{
+  "tool": "ontology_types",
+  "args": {
+    "focus": "技术方案评审",
+    "model": "bmm"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 178,
+    "ts": "2026-10-20 14:56:28 +0800",
+    "hits": 1,
+    "source": "args/20261020-145628-230689-ontology_types.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "session": "s-pytest-1",
+  "calls": [
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-21 22:26:59 +0800",
+      "shape": "silent",
+      "target": "439d7b78-b29d-4e0b-942c-57c3853efe4c"
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-21 22:27:03 +0800",
+      "shape": "silent",
+      "target": "d13d0d79-7e5c-443d-b789-f4fdc604382e"
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-21 22:27:07 +0800",
+      "shape": "silent",
+      "target": "cd3b8484-646a-40d7-a6b6-f1ecc5625d9c"
+    }
+  ]
+}

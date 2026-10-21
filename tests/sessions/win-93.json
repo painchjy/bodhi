@@ -1,0 +1,185 @@
+{
+  "session": "win-93",
+  "calls": [
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 16:21:20 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:21:20 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:21:23 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:23 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "rules_of_task",
+      "ts": "2026-10-18 16:21:25 +0800",
+      "shape": "error",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:21:25 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:28 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:28 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:30 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:21:34 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:34 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:37 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:37 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:21:44 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 16:21:44 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "skills",
+      "ts": "2026-10-18 16:21:48 +0800",
+      "shape": "ok_brief",
+      "target": ""
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:21:49 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 16:21:52 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "knowledge_lookup",
+      "ts": "2026-10-18 16:21:52 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-18 16:21:54 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 16:22:09 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-18 16:22:09 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "image_extract",
+      "ts": "2026-10-18 16:22:10 +0800",
+      "shape": "ok",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-18 16:22:10 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:22:26 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:22:26 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:22:26 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:22:26 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:22:27 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "evidence_score",
+      "ts": "2026-10-18 16:22:27 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

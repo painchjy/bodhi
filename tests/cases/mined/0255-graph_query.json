@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.slug IN ['bpmn/dataobject/开源软件清单','agent/mcpservice/技术方案评审工具mcp服务'] RETURN n.slug AS slug, n.wiki_content AS content, n.definition AS definition"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 52,
+    "ts": "2026-10-18 16:12:26 +0800",
+    "hits": 1,
+    "source": "args/20261018-161226-809849-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

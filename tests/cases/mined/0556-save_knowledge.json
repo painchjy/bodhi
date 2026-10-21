@@ -1,0 +1,69 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "context": "domain_modeling",
+    "edges": [
+      {
+        "source": "技术方案评审策略",
+        "target": "合理性-行动方案合理性",
+        "type": "bmm:isBasisFor"
+      },
+      {
+        "source": "技术方案评审策略",
+        "target": "技术方案文档结构规范",
+        "type": "bmm:isBasisFor"
+      },
+      {
+        "source": "技术方案评审策略",
+        "target": "技术方案章节裁剪规则",
+        "type": "bmm:isBasisFor"
+      },
+      {
+        "source": "技术方案评审策略",
+        "target": "应用架构-系统边界原则",
+        "type": "bmm:isBasisFor"
+      },
+      {
+        "source": "技术方案评审策略",
+        "target": "技术架构-开源软件适用规则",
+        "type": "bmm:isBasisFor"
+      },
+      {
+        "source": "技术方案评审策略",
+        "target": "技术架构-系统隔离原则",
+        "type": "bmm:isBasisFor"
+      },
+      {
+        "source": "技术方案评审策略",
+        "target": "部署架构-最低部署和灾备要求",
+        "type": "bmm:isBasisFor"
+      }
+    ],
+    "kb_id": "技术方案评审领域模型",
+    "mode": "dry_run",
+    "session_no": "bddabe6e-8ff1-458f-8b09-ee83e772da95",
+    "stage": "graph"
+  },
+  "expect": {
+    "shape": "dry",
+    "keys": [
+      "applied",
+      "created",
+      "engine",
+      "maintenance",
+      "merge",
+      "merged",
+      "page_versions",
+      "unmatched",
+      "violations"
+    ]
+  },
+  "meta": {
+    "ms": 2832,
+    "ts": "2026-10-16 07:07:43 +0800",
+    "hits": 1,
+    "source": "args/20261016-070743-863653-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

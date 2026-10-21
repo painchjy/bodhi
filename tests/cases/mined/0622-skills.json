@@ -1,0 +1,22 @@
+{
+  "tool": "skills",
+  "args": {
+    "skill": "fact_check"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 78,
+    "ts": "2026-10-18 16:30:57 +0800",
+    "hits": 1,
+    "source": "args/20261018-163057-059669-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

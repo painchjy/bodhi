@@ -1,0 +1,22 @@
+{
+  "tool": "skills",
+  "args": {
+    "skill": "rule_execute"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "id",
+      "name",
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 87,
+    "ts": "2026-10-17 06:20:03 +0800",
+    "hits": 6,
+    "source": "args/20261017-062003-434194-skills.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

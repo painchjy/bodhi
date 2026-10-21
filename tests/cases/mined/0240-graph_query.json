@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug CONTAINS 'stub' OR n.slug CONTAINS 'dataobject' OR n.slug CONTAINS '清单' RETURN n.slug AS slug, n.rdfType AS type, properties(n) AS props LIMIT 50"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 220,
+    "ts": "2026-10-17 06:20:38 +0800",
+    "hits": 1,
+    "source": "args/20261017-062038-914282-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

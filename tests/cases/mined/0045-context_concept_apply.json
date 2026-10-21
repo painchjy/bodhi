@@ -1,0 +1,27 @@
+{
+  "tool": "context_concept_apply",
+  "args": {
+    "acknowledge_risks": [
+      "replica_protection"
+    ],
+    "actor": "技术方案评审智能体",
+    "definition": "主系统内建多个子系统的，每个子系统都应该有明确边界的一套完整物理部署，应避免跨系统的共享数据库及共享缓存。",
+    "slug": "bmm/operativebusinessrule/技术架构系统隔离原则",
+    "standard_name": "技术架构-系统隔离原则",
+    "ticket": "d4477983ceb23ab63b720517d7e99af6d5d327fa"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 1303,
+    "ts": "2026-10-19 21:39:18 +0800",
+    "hits": 1,
+    "source": "args/20261019-213918-633740-context_concept_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

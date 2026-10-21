@@ -1,0 +1,29 @@
+{
+  "session": "s-497ad9de",
+  "calls": [
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-18 20:55:02 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-18 21:13:04 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "link_source_session",
+      "ts": "2026-10-18 21:13:08 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "link_source_session",
+      "ts": "2026-10-18 21:13:10 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    }
+  ]
+}

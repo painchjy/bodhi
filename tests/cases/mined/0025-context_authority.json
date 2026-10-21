@@ -1,0 +1,21 @@
+{
+  "tool": "context_authority",
+  "args": {
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 505,
+    "ts": "2026-10-19 21:46:09 +0800",
+    "hits": 3,
+    "source": "args/20261019-214609-925009-context_authority.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

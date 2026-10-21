@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug CONTAINS '问题清单' OR n.slug CONTAINS 'bpmn/dataobject' RETURN n.slug AS slug, n.name AS name, n.definition AS definition, n.wiki_content AS wiki, keys(n) AS k",
+    "limit": 40
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 86,
+    "ts": "2026-10-18 16:21:34 +0800",
+    "hits": 1,
+    "source": "args/20261018-162134-318129-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.kb_id = '7efad3eb-762a-4981-9164-cd3b3a226bd4' AND (n.name CONTAINS '规范' OR n.name CONTAINS '章节' OR n.slug CONTAINS 'spec') RETURN n.slug AS slug, n.name AS name, n.page_type AS page_type",
+    "limit": 60
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 44,
+    "ts": "2026-10-18 19:59:25 +0800",
+    "hits": 1,
+    "source": "args/20261018-195925-237137-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

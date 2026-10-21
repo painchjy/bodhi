@@ -1,0 +1,42 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "level",
+        "locator": "2.3 部署架构",
+        "quote": "对账子系统（C 级）：同城双活 + 异地数据级备份（图 1）。",
+        "required": true,
+        "source_type": "document",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "fig_caption",
+        "locator": "2.3 图 1 图注",
+        "quote": "（图 1：对账子系统 —— 同城浦江云/张江云，异地内蒙云 → 同城跨云双活、异地多云热备）",
+        "required": true,
+        "source_type": "document",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 11,
+    "ts": "2026-10-18 22:22:59 +0800",
+    "hits": 1,
+    "source": "args/20261018-222259-859466-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

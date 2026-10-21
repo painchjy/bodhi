@@ -1,0 +1,22 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "2604eec2-8cfe-4c97-b93d-a29dbea164e3",
+    "mode": "keyword",
+    "query": "_t"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 438,
+    "ts": "2026-10-21 22:56:44 +0800",
+    "hits": 1,
+    "source": "args/20261021-225644-679592-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

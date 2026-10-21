@@ -1,0 +1,27 @@
+{
+  "tool": "context_authority_apply",
+  "args": {
+    "acknowledge_risks": [
+      "replica_protection"
+    ],
+    "action": "decide",
+    "actor": "技术方案评审智能体",
+    "master": "技术方案评审领域模型",
+    "slug": "bmm/operativebusinessrule/部署架构最低部署和灾备要求",
+    "ticket": "b87314d8631ea6586c977897620e677012c811cf"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 4610,
+    "ts": "2026-10-19 21:55:53 +0800",
+    "hits": 1,
+    "source": "args/20261019-215553-123316-context_authority_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

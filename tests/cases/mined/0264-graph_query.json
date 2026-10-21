@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug = 'bpmn/dataobject/问题清单' RETURN n.columns AS columns"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 129,
+    "ts": "2026-10-18 16:21:37 +0800",
+    "hits": 1,
+    "source": "args/20261018-162137-007916-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

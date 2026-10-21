@@ -1,0 +1,60 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "not_supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "high",
+        "id": "system_grade",
+        "locator": "2.3 部署架构",
+        "quote": "对账子系统（C 级）：同城双活 + 异地数据级备份（图 1）。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "order_deploy_fig",
+        "locator": "2.3 部署架构",
+        "quote": "订单子系统（C 级）：**同城跨云双活 + 异地多云热备**。**本方案未提供该子系统的部署图。**",
+        "required": true,
+        "source_type": "image",
+        "status": "absent_verified"
+      },
+      {
+        "confidence": "medium",
+        "id": "settle_fig",
+        "locator": "2.3 部署架构 · 图 2",
+        "quote": "（图 2：结算子系统 —— 同城与异地全部多云多活（单元化），最高等级灾备）",
+        "required": false,
+        "source_type": "image",
+        "status": "present"
+      },
+      {
+        "confidence": "high",
+        "id": "devices",
+        "locator": "3 设备申请清单",
+        "quote": "| 结算子系统 | 应用服务器 | 浦江云 | 8C32G | 6 | 应用节点 |；| 对账子系统 | 应用服务器 | 内蒙云 | 8C32G | 4 | 准实时对账 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 28,
+    "ts": "2026-10-18 15:31:25 +0800",
+    "hits": 1,
+    "source": "args/20261018-153125-913724-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

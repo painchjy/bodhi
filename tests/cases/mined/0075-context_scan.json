@@ -1,0 +1,21 @@
+{
+  "tool": "context_scan",
+  "args": {
+    "limit": 100,
+    "write": false
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 553,
+    "ts": "2026-10-19 21:37:07 +0800",
+    "hits": 1,
+    "source": "args/20261019-213707-161330-context_scan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

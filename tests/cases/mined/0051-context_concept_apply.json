@@ -1,0 +1,27 @@
+{
+  "tool": "context_concept_apply",
+  "args": {
+    "acknowledge_risks": [
+      "replica_protection"
+    ],
+    "actor": "技术方案评审智能体",
+    "definition": "各级别系统最低部署和灾备要求：A/B级系统必须同城+异地部署（同城云上跨云双活/跨云热备，异地云上多云多活/多云热备，云下同城与异地双活/热备）；C级系统必须同城+异地部署（同城云上单云双活/单云热备，异地云上数据级备份，同城云下双活/热备，异地云下数据级备份）。",
+    "slug": "bmm/operativebusinessrule/部署架构最低部署和灾备要求",
+    "standard_name": "部署架构-最低部署和灾备要求",
+    "ticket": "b87314d8631ea6586c977897620e677012c811cf"
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 1271,
+    "ts": "2026-10-19 21:46:38 +0800",
+    "hits": 1,
+    "source": "args/20261019-214638-587889-context_concept_apply.json",
+    "replayable": false,
+    "why_not": "危险工具的 apply 形态（只在 _test_* 库回放）"
+  }
+}

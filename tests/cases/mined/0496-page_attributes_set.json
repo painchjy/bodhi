@@ -1,0 +1,25 @@
+{
+  "tool": "page_attributes_set",
+  "args": {
+    "kb_id": "4fd37dc7-f1d8-4ab6-a39c-b3785835d5be",
+    "slug": "review/_t-report",
+    "patch": {
+      "skos:definition": "回归测试定义"
+    },
+    "dry_run": false
+  },
+  "expect": {
+    "shape": "error",
+    "keys": [
+      "error"
+    ]
+  },
+  "meta": {
+    "ms": 138,
+    "ts": "2026-10-21 22:23:37 +0800",
+    "hits": 1,
+    "source": "args/20261021-222337-114033-page_attributes_set.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

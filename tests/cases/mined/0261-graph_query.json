@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (a:BodhiInstance)-[r]->(b:BodhiInstance) WHERE a.slug CONTAINS 'bpmn/' OR b.slug CONTAINS 'bpmn/' RETURN a.slug AS s, type(r) AS rel, b.slug AS t LIMIT 200",
+    "limit": 200
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 93,
+    "ts": "2026-10-18 16:21:28 +0800",
+    "hits": 1,
+    "source": "args/20261018-162128-472359-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

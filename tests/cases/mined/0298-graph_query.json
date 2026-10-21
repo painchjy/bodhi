@@ -1,0 +1,19 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n) WHERE n.comment IS NOT NULL AND (n.comment CONTAINS '问题清单' OR n.comment CONTAINS '评审报告' OR n.comment CONTAINS '判定') RETURN labels(n) AS lbl, n.comment AS c",
+    "limit": 30
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 78,
+    "ts": "2026-10-18 20:20:35 +0800",
+    "hits": 1,
+    "source": "args/20261018-202035-961750-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

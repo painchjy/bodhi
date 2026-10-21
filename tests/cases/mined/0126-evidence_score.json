@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "insufficient"
+      },
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": "low",
+        "id": "template",
+        "locator": "规则参考规范《技术方案模板》",
+        "quote": "",
+        "required": true,
+        "source_type": "external_query",
+        "status": "unavailable"
+      },
+      {
+        "confidence": "high",
+        "id": "chapters",
+        "locator": "全文",
+        "quote": "### 1 现状与目标 ### 2 总体方案 ### 3 设备申请清单 ### 4 章节裁剪说明",
+        "required": false,
+        "source_type": "doc_text",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 11,
+    "ts": "2026-10-18 16:31:49 +0800",
+    "hits": 1,
+    "source": "args/20261018-163149-505888-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

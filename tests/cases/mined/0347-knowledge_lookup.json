@@ -1,0 +1,22 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "mode": "rules",
+    "spec": "direct:问题须至少一名专家核实,驳回必须给理由,澄清材料须入溯源"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "source"
+    ]
+  },
+  "meta": {
+    "ms": 188,
+    "ts": "2026-10-18 16:12:12 +0800",
+    "hits": 1,
+    "source": "args/20261018-161212-736331-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "tool": "knowledge_lookup",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "limit": 20,
+    "mode": "keyword",
+    "query": "技术方案评审 流程 活动 任务 角色"
+  },
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 454,
+    "ts": "2026-10-18 16:30:40 +0800",
+    "hits": 1,
+    "source": "args/20261018-163040-061557-knowledge_lookup.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

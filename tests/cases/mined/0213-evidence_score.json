@@ -1,0 +1,40 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "locator": "2.2 技术架构 · 补充说明",
+        "quote": "补充说明：结算子系统与订单子系统共用同一套 Redis 集群（跨子系统共享缓存），用于存放订单快照缓存。",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      },
+      {
+        "confidence": 0.95,
+        "locator": "2.1 应用架构",
+        "quote": "涉及系统：订单子系统（A 级，本次改造）、结算子系统（B 级，本次新建）、对账子系统（C 级，本次改造）",
+        "required": true,
+        "source_type": "doc_text",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 13,
+    "ts": "2026-10-20 19:44:45 +0800",
+    "hits": 1,
+    "source": "args/20261020-194445-249177-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

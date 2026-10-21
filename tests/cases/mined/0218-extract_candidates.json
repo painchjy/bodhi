@@ -1,0 +1,24 @@
+{
+  "tool": "extract_candidates",
+  "args": {
+    "domain_kb": "技术方案评审领域模型",
+    "kb_id": "技术方案评审任务知识库",
+    "knowledge_id": "样例2-统一结算平台技术方案.docx",
+    "other_kbs": [
+      "技术方案评审领域模型"
+    ],
+    "task": "bpmn/task/逐项评审"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 1276,
+    "ts": "2026-10-18 15:30:44 +0800",
+    "hits": 1,
+    "source": "args/20261018-153044-873218-extract_candidates.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

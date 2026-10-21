@@ -1,0 +1,18 @@
+{
+  "tool": "audit_scan",
+  "args": {},
+  "expect": {
+    "shape": "ok_brief",
+    "keys": [
+      "note"
+    ]
+  },
+  "meta": {
+    "ms": 4151,
+    "ts": "2026-10-10 05:12:16 +0800",
+    "hits": 34,
+    "source": "args/20261010-051216-258539-audit_scan.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

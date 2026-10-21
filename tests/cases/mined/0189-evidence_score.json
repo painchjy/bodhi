@@ -1,0 +1,45 @@
+{
+  "tool": "evidence_score",
+  "args": {
+    "checks": [
+      {
+        "verdict": "supported"
+      },
+      {
+        "verdict": "supported"
+      }
+    ],
+    "facts": [
+      {
+        "confidence": 0.95,
+        "id": "doc_nginx",
+        "locator": "2.2 技术架构",
+        "quote": "| Nginx | 接入 | 1.24.0 | 同城 |",
+        "required": true,
+        "source_type": "doc_table",
+        "status": "present"
+      },
+      {
+        "confidence": 0.85,
+        "id": "cert_nginx",
+        "locator": "中心认证开源软件清单（挡板）",
+        "quote": "Nginx 1.24.0 —— 已认证",
+        "required": true,
+        "source_type": "external",
+        "status": "present"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 15,
+    "ts": "2026-10-20 13:32:43 +0800",
+    "hits": 1,
+    "source": "args/20261020-133243-647639-evidence_score.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

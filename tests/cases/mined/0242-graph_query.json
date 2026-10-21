@@ -1,0 +1,18 @@
+{
+  "tool": "graph_query",
+  "args": {
+    "cypher": "MATCH (n:BodhiInstance) WHERE n.slug IN ['bmm/assessment/重点规则知识提取统一结算平台技术方案pr20260187r1','bmm/businesspolicy/技术方案逐项评审策略'] RETURN n.slug AS slug, properties(n) AS props LIMIT 10"
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 182,
+    "ts": "2026-10-17 06:21:20 +0800",
+    "hits": 1,
+    "source": "args/20261017-062120-835386-graph_query.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}

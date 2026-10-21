@@ -8,7 +8,7 @@ models: [bmm, agent]
 default_model: bmm
 sources: [document]
 stages: [extract]
-tools: [doc_outline, extract_state, save_knowledge, list_image_extract, ontology_types, skills, wiki_search, wiki_read_page, get_document_info, grep_chunks, list_knowledge_chunks]
+tools: [doc_outline, extract_state, save_knowledge, image_extract, ontology_types, skills, wiki_search, wiki_read_page, get_document_info, grep_chunks, list_knowledge_chunks]
 inputs:
   knowledge_id: 必填。本次要处理的那一篇（文档名或 id；<pinned_documents> 里的最准）
   budget_tokens: 可选。本轮上下文的 token 上限（会话参数；默认取 BODHI_ROUND_BUDGET_TOKENS=8000）

@@ -1,0 +1,23 @@
+{
+  "session": "win-73",
+  "calls": [
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-12 20:53:43 +0800",
+      "shape": "ok",
+      "target": ""
+    },
+    {
+      "tool": "save_knowledge",
+      "ts": "2026-10-12 20:54:05 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-12 20:54:24 +0800",
+      "shape": "silent",
+      "target": ""
+    }
+  ]
+}

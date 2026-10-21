@@ -1,0 +1,23 @@
+{
+  "session": "win-78",
+  "calls": [
+    {
+      "tool": "doc_outline",
+      "ts": "2026-10-14 13:32:06 +0800",
+      "shape": "silent",
+      "target": "技术方案评审任务知识库"
+    },
+    {
+      "tool": "graph_query",
+      "ts": "2026-10-14 13:32:06 +0800",
+      "shape": "silent",
+      "target": ""
+    },
+    {
+      "tool": "reference_lookup",
+      "ts": "2026-10-14 13:32:12 +0800",
+      "shape": "ok_brief",
+      "target": "技术方案评审领域模型"
+    }
+  ]
+}

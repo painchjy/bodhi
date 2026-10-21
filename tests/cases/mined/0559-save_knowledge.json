@@ -1,0 +1,34 @@
+{
+  "tool": "save_knowledge",
+  "args": {
+    "kb_id": "技术方案评审领域模型",
+    "stage": "graph",
+    "confirm_kb_match": true,
+    "nodes": [
+      {
+        "name": "问题清单",
+        "type": "bpmn:DataObject",
+        "definition": "**问题清单**（DataObject）：评审问题的结构化清单。属性：`序号`；`规则出处`（rule_slug，逐字）；`问题描述`；`严重度`（**受控取值**：高｜中｜低，逐字）；`原文证据`（**逐字摘录**）；`定位`（章节/表格行/图/接口）；`处置建议`。状态：待组长确认｜已确认｜已驳回。",
+        "description": "填写说明：一行一个问题；`原文证据`必须是**逐字**摘录并给定位；`严重度`只能取 高/中/低；问题先由评审组长确认事实核查是否充分，再交评审专家反馈补充。"
+      },
+      {
+        "name": "技术方案评审报告",
+        "type": "bpmn:DataObject",
+        "definition": "**技术方案评审报告**（DataObject）：逐项评审的产出文档；章节规范见备注（skos:note）✓",
+        "description": "**章节规范**（技术方案评审报告）：① 评审范围与依据（含策略/规则清单与版本）；② 适用规则清单；③ 逐条结论（结论枚举：合规｜违规｜不适用｜待澄清）；④ **问题清单（表格）** —— 按 DataObject「问题清单」的实例规范渲染；⑤ 结论与建议。"
+      }
+    ]
+  },
+  "expect": {
+    "shape": "silent",
+    "keys": []
+  },
+  "meta": {
+    "ms": 600,
+    "ts": "2026-10-17 09:59:18 +0800",
+    "hits": 1,
+    "source": "args/20261017-095918-888600-save_knowledge.json",
+    "replayable": true,
+    "why_not": ""
+  }
+}
