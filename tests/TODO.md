@@ -15,7 +15,7 @@
 | B1 | `save_knowledge` **必须**有真实会话身份，否则 `need_session=true` 拒写 | 回执 `reason/hint`（server.py:2081-2086） | 测试需 `session` fixture：从 `sessions`/会话页取**真实** `session_no` ✓（**不许自编** ✗） |
 | B2 | 写库目标库解析走 `resolve_write_kb` → `ke_db.resolve_kb_candidate`（**完整 uuid 或精确库名**；模糊要 `confirm_kb_match=true`） | server.py:713-746 | 测试库必须能被该解析器看见（见 C1） |
 | B3 | `kb_export` 回执**没有** `out_dir`/`saved` 键 | 实测回执 | 断言改为"任一含 dir/export/path 的字段" ✓（已修） |
-| B4 | **`save_knowledge` 幂等被判 `created`**（同库同 slug 二次写） | 实测：PG 里确有 1 行（`knowledge_base_id`=测试库、`version=1`、`deleted_at IS NULL`、`page_type=bmm:TechnicalReviewReport`），但第二次回执 `created=[…]`、`page_versions[0].before=0` ⇒ `upsert_page` 的 `existing` 在**服务端**没命中 ✗ | 用例已 `xfail` 并附证据；下一步：在服务端给 `upsert_page` 的 `existing` 查询加**一次性诊断回执**（`debug.existing`）定位 |
+| B4 | **`save_knowledge` 幂等被判 `created`**（同库同 slug 二次写） | **已定位到并发竞态**（2026-10-21）：同一次调用内 `existing` 查询=0 行，**几微秒后**同样的 SQL=1 行（`diag: {preloaded_is_none:true, existing_len:0, same_sql_len:1, c_alive:"1"}`）⇒ 有**并发写入**（疑似 `save_knowledge` 后台任务/job 与主路径同时写同一 `(kb,slug)`）✗ | 用例已 `xfail` 并附证据（诊断字段已撤）；下一步：查 `save_knowledge` 是否派生后台 job（`job_status` 工具存在 ⇒ 有 job 机制），改成**同 slug 串行**或让后台任务走幂等 upsert |
 | B5 | `ke_pages.write_knowledge` 最终返回**漏了 `before_version`** ⇒ `page_versions[].before` 恒为 null | 实测修前后：`before: None` → `before: 0` | **已修** ✓（`ke_pages.py:1392` 起加字段） |
 | B6 | `ke_db` kb 清单**60s 进程缓存** ⇒ 刚建的库写不进去（`kb_unresolved: not_found`，但 `candidates` 里就有它 ✗） | 实测（本轮多次复现） | **已修** ✓：`_kb_rows(force=True)` + `resolve_kb_id`/`resolve_kb_candidate` 未命中时**强制刷新一次**（不放宽口径 ✓） |
 
