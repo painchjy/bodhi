@@ -15,6 +15,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.join(REPO, "tests")
 GOLDEN = os.path.join(TESTS, "golden")
 SERVER = os.path.join(REPO, "tools", "ontology-mcp", "server.py")
+# 2026-10-22（P2 切片 S8a）：工具 schema 的**单一来源**已搬到 `srv/schemas.py`（纯声明数据 ✓）
+SCHEMAS = os.path.join(REPO, "tools", "ontology-mcp", "srv", "schemas.py")
 
 
 def ensure_golden_dir() -> str:
@@ -34,9 +36,9 @@ def tool_definitions() -> dict:
     """
     import ast  # noqa: PLC0415
 
-    src = read(SERVER)
-    start = src.index("def tool_definitions() -> list[dict]:")
-    end = src.index("\n    ]\n", start)
+    src = read(SCHEMAS)
+    start = src.index("TOOL_SCHEMAS = [")
+    end = src.index("\n]\n", start)
     body = src[start:end]
     out = {}
     for m in re.finditer(r'\{\s*\n\s+"name": "([a-z_0-9]+)",', body):

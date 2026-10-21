@@ -23,7 +23,7 @@
 | S5 | `srv/session.py` | `_IdentCtx`/`_IDENT`/`_session_ident`/`_attach_session`/`_resolve_session_identity`（`_pick_session_no`/`_resolve_session_for`/`adopt_session` 依赖 `IDENTITY_CLASS`+`ke_pages`，留到 S6） | `ke_db` | 中 | **✅ 完成** |
 | S6 | `srv/links.py` | `_page_row_by_slug` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate` | `srv.kbresolve`/`srv.state`/`ke_pages` | 中 | **✅ 完成** |
 | S7 | `srv/render.py` | `_design_sections` + `SKILL_CONTEXTS` + `_type_label_of` + `context_meta`（纯渲染；`build_new_page` 留 S8） | `srv.text`/`ke_pages`/`ke_ontology` | 低 | **✅ 完成** |
-| S8 | `srv/tools/*.py` | 把 `_call_tool_impl` 的分支按**读写/运维/本体**分组搬走，`server.py` 只留 `if name == ...: return srv.tools.x.y(...)` | 全部 | 高（分支多） | 待做 |
+| S8 | `srv/schemas.py`（**S8a**）+ `srv/tools/*`（S8b 分发分支） | schema 列表 559 行（纯声明）；S8b 待做 | `ke_audit`/`ke_plan`（枚举同源） | 中/高 | **S8a ✅** ｜ S8b 待做 |
 | S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | 待做 |
 
 ## 3. 完成判据
@@ -42,6 +42,15 @@
 - **不搬** `fetch_existing_pages`：它依赖模块常量 `TYPE_PENDING`，搬走会引入反向 import（环）✗ ⇒ 留待 S3 与常量一起搬
 - 验证：`py_compile` ✓ / `active` ✓ / `success` ✓ / `tools=31` ✓ / 读写回归 **9 pass + 1 xfail** ✓
 - `server.py` 行数变化：**5645 → 5570**（S1 −75，S2 −75；后续 S3-S9 目标 ≤ 800 行）
+
+## 11. S8a 记录（已完成）
+- 机械搬运（**脚本 + 行号锚点断言**，不是手工贴 559 行）：`tool_definitions()` 的 schema 列表 → `srv/schemas.py`
+- `server.py` 只剩 `def tool_definitions(): return TOOL_SCHEMAS`
+- **冒烟在重启前抓到一处真问题** ✓：schema 里有 2 处**运行期引用**（`ke_audit.SCOPES`、`ke_plan`）
+  ⇒ 补 import（枚举必须与实现**同源**，不能写死 ✗）；冒烟失败 ⇒ 服务**没有被重启**（旧版本继续跑 ✓）
+- `tests/_helpers.py` 的 schema 来源同步改为解析 `srv/schemas.py`（`TOOL_SCHEMAS = [` 锚点）
+- 验证：`SMOKE_OK → COMPILE_OK → active/success/PORT_OK/tools=31` ✓
+- 规模：`server.py` **4944 → 4446**（S8a −498）｜`srv/schemas.py` 579 行
 
 ## 10. S7 记录（已完成）
 - 抽出 `srv/render.py`：`_design_sections`（wiki 小节渲染）+ `SKILL_CONTEXTS`（技能上下文文案）+ `_type_label_of` + `context_meta`
