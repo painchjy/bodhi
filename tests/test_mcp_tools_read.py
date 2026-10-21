@@ -52,6 +52,14 @@ def test_knowledge_lookup_path(mcp, kbs):
     assert (r.get("counts") or {}).get("paths", 0) >= 1, "起点 %s 无路径 ✗" % start
 
 
+def test_extract_state_get(mcp, kbs):
+    """`extract_state`（P2 切片 S3 验收 ✓）：走 `resolve_kb_id` + 状态文件读路径"""
+    r = mcp.call("extract_state", {"kb_id": kbs["domain"], "action": "get"})
+    assert r.get("kb_id"), json.dumps(r, ensure_ascii=False)[:300]
+    for k in ("pages_total", "next_no", "rounds", "hint"):
+        assert k in r, "extract_state 回执缺 %s ✗：%s" % (k, json.dumps(r, ensure_ascii=False)[:200])
+
+
 def test_retired_tool_returns_deprecated(mcp):
     """退役工具必须**返回 deprecated**（不是 500、不是静默成功）✓"""
     r = mcp.call("review_apply", {"kb_id": "x"})
