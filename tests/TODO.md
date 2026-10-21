@@ -15,8 +15,9 @@
 | B1 | `save_knowledge` **必须**有真实会话身份，否则 `need_session=true` 拒写 | 回执 `reason/hint`（server.py:2081-2086） | 测试需 `session` fixture：从 `sessions`/会话页取**真实** `session_no` ✓（**不许自编** ✗） |
 | B2 | 写库目标库解析走 `resolve_write_kb` → `ke_db.resolve_kb_candidate`（**完整 uuid 或精确库名**；模糊要 `confirm_kb_match=true`） | server.py:713-746 | 测试库必须能被该解析器看见（见 C1） |
 | B3 | `kb_export` 回执**没有** `out_dir`/`saved` 键 | 实测回执 | 断言改为"任一含 dir/export/path 的字段" ✓（已修） |
-| B4 | **`save_knowledge` 幂等被判 `created`**（同库同 slug 二次写） | **已定位到并发竞态**（2026-10-21）：同一次调用内 `existing` 查询=0 行，**几微秒后**同样的 SQL=1 行（`diag: {preloaded_is_none:true, existing_len:0, same_sql_len:1, c_alive:"1"}`）⇒ 有**并发写入**（疑似 `save_knowledge` 后台任务/job 与主路径同时写同一 `(kb,slug)`）✗ | 用例已 `xfail` 并附证据（诊断字段已撤）；下一步：查 `save_knowledge` 是否派生后台 job（`job_status` 工具存在 ⇒ 有 job 机制），改成**同 slug 串行**或让后台任务走幂等 upsert |
+| B4 | **`save_knowledge` 幂等被判 `created`**（同库同 slug 二次写） | **⚠️ 上一轮的"并发竞态"结论作废**：诊断字段打在 `return`（在 INSERT **之后**）⇒ 看到的 1 行可能正是本次插入的 ✗。仍然成立：① 调用前测试进程查 PG 有 1 行（`version=1, del=f`）② 服务端 `existing` 查到 0 行 ③ 该次走 create 分支。⇒ 只剩两种可能：**(a) 服务端与测试进程看到的不是同一行/同一库** **(b) 调用前该行已被服务端软删** | 用例 xfail 带证据；下一步：一次诊断同时回传**行 id + deleted_at + psql 目标容器名**，与测试侧对比即可定案 |
 | B5 | `ke_pages.write_knowledge` 最终返回**漏了 `before_version`** ⇒ `page_versions[].before` 恒为 null | 实测修前后：`before: None` → `before: 0` | **已修** ✓（`ke_pages.py:1392` 起加字段） |
+| B7 | `wiki_pages` 的唯一索引是 **部分索引**：`UNIQUE (knowledge_base_id, slug) WHERE deleted_at IS NULL` | 实测 `pg_indexes`（2026-10-21） | ⇒ **软删后可再插同名页**（旧行留作历史，这是设计 ✓），但任何"按 slug 取最新"的逻辑**必须显式** `deleted_at IS NULL`，否则会拿到死行 ✗。当前 `(kb,slug)` 重复组 = **0** ✓，软删 57 / 总 427 ✓ |
 | B6 | `ke_db` kb 清单**60s 进程缓存** ⇒ 刚建的库写不进去（`kb_unresolved: not_found`，但 `candidates` 里就有它 ✗） | 实测（本轮多次复现） | **已修** ✓：`_kb_rows(force=True)` + `resolve_kb_id`/`resolve_kb_candidate` 未命中时**强制刷新一次**（不放宽口径 ✓） |
 
 ## C. 测试脚手架踩坑（已修 ✓）
@@ -27,7 +28,16 @@
 | C3 | 属性写入/关系用例**没有前置建页** ⇒ "页面不存在" | 统一 `_mk_page()` 前置 ✓ |
 | C4 | 图节点类型属性是 **`page_type`**（58/58），**没有 `pt`** | 用例已改 ✓ |
 
+## F. 历史覆盖（P1 起点 ✓）
+| 项 | 内容 |
+|---|---|
+| 工具 | `tests/test_coverage_gaps.py`：注册表 − 日志历史 = **无历史工具**，与 `tests/golden/tools_no_history.json` 对齐 |
+| 首次基线 | **18 个工具无真实调用历史**（`audit_kb`/`import_*`×5 + 退役 6 个 + `job_status`/`retag_*`/`service_overview`…） |
+| 用法 | 新工具"悄悄上线且无历史" ⇒ 用例立刻红 ✓（逼着造例或显式写进 golden 承认 ✓） |
+| 覆盖率 | 只打印不设阈值（`test_no_history_ratio_reported`）✓ |
+
 ## E. 日志还原管线（P0.5-3 ✓ 已落地）
+
 | 项 | 内容 |
 |---|---|
 | 生成器 | `tests/mine_logs.py`（`BEGIN/DONE` 用 `args_file=` 配对 → 去重 → 切会话 → 按回执**字段**标形态） |
@@ -38,9 +48,10 @@
 | 会话用例 | `tests/test_sessions_replay.py`：seq ≥2、工具已注册、超时占比 ≤50% |
 | 缺口造例 | 看 `tests/cases/mined/COVERAGE.md`：某工具缺 `guard`/`error`/`dry` 形态 ⇒ 按形态补例 |
 
+## D. 技能/工具清单（已修 ✓）
 | # | 问题 | 修法 |
 |---|---|---|
-| D1 | `rule_judge/SKILL.md` 缺 `id/when/tools`（MCP `skills()` 靠 front-matter ✓） | 补 3 个键 ✓ |
+| D1 | `rule_judge/SKILL.md` 缺 `id/when/tools`（`skills()` 靠 front-matter ✓） | 补 3 个键 ✓ |
 | D2 | `domain_modeling` 工具名误拼 `list_image_extract` | 改 `image_extract` ✓ |
 | D3 | `session_provenance` 工具名误拼 `list_audit_scan` | 改 `audit_scan` ✓ |
 | D4 | `skill_development` 引用**已退役** `rules_of_policy` | 删（取规则统一 `knowledge_lookup(mode="rules")`）✓ |
