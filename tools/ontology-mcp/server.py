@@ -125,82 +125,16 @@ def now_text() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 相似度：lexical（默认） / embedding（可选）
+# 相似度 + 页 id 派生（P2 切片 S1 ✓ 已移到 `srv/text.py`，**名字不变** ⇒ 下游零改动 ✓）
 # ---------------------------------------------------------------------------
-def normalize_name(text: str) -> str:
-    return re.sub(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/]+", "", (text or "").lower())
-
-
-def _ngrams(text: str, n: int = 3) -> dict[str, int]:
-    cleaned = re.sub(r"\s+", "", text or "")
-    if len(cleaned) < n:
-        return {cleaned: 1} if cleaned else {}
-    grams: dict[str, int] = {}
-    for i in range(len(cleaned) - n + 1):
-        gram = cleaned[i:i + n]
-        grams[gram] = grams.get(gram, 0) + 1
-    return grams
-
-
-def lexical_similarity(text_a: str, text_b: str) -> float:
-    """字符 3-gram 余弦：中文不需要分词，短文本上表现稳定。"""
-    a, b = _ngrams(text_a), _ngrams(text_b)
-    if not a or not b:
-        return 0.0
-    common = set(a) & set(b)
-    dot = sum(a[g] * b[g] for g in common)
-    na = math.sqrt(sum(v * v for v in a.values()))
-    nb = math.sqrt(sum(v * v for v in b.values()))
-    return dot / (na * nb) if na and nb else 0.0
-
-
-def embed_texts(texts: list[str]) -> list[list[float]] | None:
-    """可选：调 OpenAI 兼容嵌入服务；未配置返回 None（调用方退回 lexical）。"""
-    import os  # noqa: PLC0415
-    base = os.environ.get("BODHI_EMBED_BASE_URL", "").rstrip("/")
-    key = os.environ.get("BODHI_EMBED_API_KEY", "")
-    model = os.environ.get("BODHI_EMBED_MODEL", "")
-    if not (base and model):
-        return None
-    payload = json.dumps({"model": model, "input": texts}).encode("utf-8")
-    req = urlrequest.Request(base + "/embeddings", data=payload, method="POST")
-    req.add_header("Content-Type", "application/json")
-    if key:
-        req.add_header("Authorization", "Bearer " + key)
-    try:
-        with urlrequest.urlopen(req, timeout=60) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        return [item["embedding"] for item in body["data"]]
-    except Exception as exc:  # noqa: BLE001
-        print("[mcp] 嵌入调用失败，退回 lexical：%s" % exc)
-        return None
-
-
-def cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    return dot / (na * nb) if na and nb else 0.0
-
-
+from srv.text import (  # noqa: E402,F401
+    _ngrams, cosine, embed_texts, lexical_similarity, normalize_name, page_id_for,
+)
 # ---------------------------------------------------------------------------
 # Postgres（与 weknora_sync.py 同一套约定：走容器里的 psql）
 #   `_docker_prefix` / `psql` / `psql_csv` / `sql_str` / `sql_json` 已移到
 #   tools/ke-core/ke_db.py，并在文件头 import 回来（名字不变，下游脚本无感）。
 # ---------------------------------------------------------------------------
-def page_id_for(kb_id: str, slug: str) -> str:
-    """**(知识库, slug) → 确定性页 id**。
-
-    2026-09-24 修（用户实测）：旧实现只按 slug 派生 → **两个知识库里的同名页 id 相同** →
-    `INSERT ... ON CONFLICT (id) DO UPDATE` 会把**别的库那一行**更新掉（回执却报成功、
-    本库查不到该页）。现在把 kb 并入派生，跨库天然不冲突。
-    迁移策略见 `_resolve_page_id`：本库已有同 slug 的页一律**沿用其现有 id**（老数据零迁移）。
-    """
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, "bodhi-element:%s|%s" % (kb_id, slug)))
-
-
 # ---------------------------------------------------------------------------
 # P3-0f（2026-10-10）：**逐页只读查询**的批量预读 / 请求级 memo
 #
@@ -682,102 +616,15 @@ PAGE_COLUMNS = [
 ]
 
 
-def resolve_kb_id(raw: str) -> tuple[str, str]:
-    """把 kb_id 参数解析成真实 UUID：支持 UUID / UUID 前缀 / 知识库名称（精确或包含）。
-
-    统一委托给 `ke_db.resolve_kb_id`（2026-09-21）：那里的报错**带 id**（形如
-    `企业知识（dbc2528f…）`），调用方（智能体）能照着纠正 —— 实测它会自己编 `b1` 这种串。
-    """
-    kb_id, _name, note = ke_db.resolve_kb_id(raw)
-    return kb_id, note
+from srv.kbresolve import (  # noqa: E402,F401  （P2 切片 S2 ✓ 名字不变 ⇒ 下游零改动）
+    get_kb_tenant, kb_choices, resolve_kb_id, resolve_knowledge_id, resolve_write_kb,
+)
 
 
-def kb_choices() -> list[dict]:
-    """可选知识库清单（给「需要选择 / 需要确认」的回执用）。"""
-    return [{"id": r["id"], "name": r["name"], "pages": None} for r in psql_csv(
-        "SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY updated_at DESC")]
 
 
-def resolve_write_kb(kb_id: str = "", kb_ids: list | None = None,
-                     confirm: bool = False) -> tuple[str, str, dict | None]:
-    """**写库**的目标库解析：唯一确定 + 模糊需二次确认（2026-09-22 用户口径）。
-
-    为什么不能沿用读路径的宽松解析：会话可能绑定**多个**知识库（`<bound_knowledge_bases>`），
-    智能体若随手传个含糊名称，宽松解析会静默命中"另一个库" → 回执成功但用户在自己的库里看不到。
-    因此写路径：
-
-    | 情形 | 行为 |
-    |---|---|
-    | `kb_id` 精确（完整 uuid / **精确**库名） | 直接写 |
-    | `kb_id` 模糊（uuid 前缀 / 名称包含）且唯一命中 | **必须二次确认**（`confirm_kb_match=true`） |
-    | `kb_id` 未给 + 会话只绑 1 个库（`kb_ids`） | 用那个库 |
-    | `kb_id` 未给 + 会话绑了多个库 | **拒绝写** → `need_kb_selection`（请用户指明） |
-    | 命中 0 个 / 多个 / 占位符 | 拒绝写 → `kb_unresolved` + 可选清单 |
-
-    返回 `(uuid, note, block)`；`block` 非 None 时**不要写库**，直接把它作为工具回执返回。
-    """
-    ids = [str(x).strip() for x in (kb_ids or []) if str(x).strip()]
-    raw = (kb_id or "").strip()
-    if not raw:
-        if len(ids) == 1:
-            raw = ids[0]
-        elif len(ids) > 1:
-            return "", "", {
-                "kb_unresolved": "multi_kb_session", "need_kb_selection": True,
-                "bound_kb_ids": ids, "candidates": kb_choices(),
-                "how": ("本次会话绑定了 %d 个知识库：**写操作必须明确唯一的目标库**。"
-                        "请让用户指明写入哪一个，然后带 `kb_id=<该库 uuid 或精确名>` 重跑；"
-                        "只读操作（doc_outline / extract_state / audit_scan …）不受限制。" % len(ids))}
-        else:
-            return "", "", {
-                "kb_unresolved": "no_kb", "need_kb_selection": True,
-                "candidates": kb_choices(),
-                "how": ("没给 `kb_id` 也没提供会话绑定的库清单（`kb_ids`）："
-                        "请把 `<bound_knowledge_bases>` 里的 id 传进 `kb_ids`（多库时会要求用户指明），"
-                        "或直接传 `kb_id`")}
-    try:
-        uid, name, mode = ke_db.resolve_kb_candidate(raw)
-    except ValueError as exc:
-        return "", "", {"kb_unresolved": "not_found", "need_kb_selection": True,
-                        "asked": raw, "candidates": kb_choices(), "how": str(exc)}
-    if mode == "fuzzy" and not confirm:
-        return "", "", {
-            "kb_unresolved": "fuzzy_match", "need_kb_confirm": True,
-            "matched": {"kb_id": uid, "name": name,
-                        "how": "按 uuid 前缀 / 名称包含匹配到唯一库"},
-            "how": ("模糊匹配即使只命中 1 个也必须确认：请改传**完整 uuid 或精确库名**，"
-                    "或带 `confirm_kb_match=true` 重跑（表示「就是它」）")}
-    note = "" if mode == "exact" else ("（kb_id「%s」按模糊匹配解析为 %s，已二次确认）" % (raw, uid))
-    return uid, note, None
 
 
-def resolve_knowledge_id(kb_id: str, raw: str) -> tuple[str, str]:
-    """把 knowledge_id 解析成真实 UUID：支持 UUID / id 前缀 / 标题包含；
-    占位符或无法解析时退回该知识库**最新一篇**文档（并在返回里说明）。"""
-    rows = psql_csv("SELECT id, title FROM knowledges WHERE knowledge_base_id = %s AND deleted_at IS NULL "
-                    "ORDER BY created_at DESC" % sql_str(kb_id))
-    if not rows:
-        raise RuntimeError("该知识库还没有文档：请先上传文档并等切片完成")
-    raw = (raw or "").strip()
-    if raw:
-        for r in rows:
-            if r["id"] == raw:
-                return r["id"], ""
-        for r in rows:
-            if r["id"].startswith(raw):
-                return r["id"], "（knowledge_id「%s」按 id 前缀匹配）" % raw
-            if raw.lower() in (r["title"] or "").lower():
-                return r["id"], "（knowledge_id「%s」按标题匹配：%s）" % (raw, r["title"])
-    return rows[0]["id"], ("（knowledge_id「%s」无法解析，已改用该库最新文档：%s）"
-                           % (raw or "(空)", rows[0]["title"]))
-
-
-def get_kb_tenant(kb_id: str) -> int:
-    row = psql("SELECT tenant_id FROM knowledge_bases WHERE id = %s AND deleted_at IS NULL"
-               % sql_str(kb_id))
-    if not row.strip():
-        raise RuntimeError("知识库不存在：%s" % kb_id)
-    return int(row.strip().splitlines()[0])
 
 
 def fetch_existing_pages(kb_id: str) -> list[dict]:
