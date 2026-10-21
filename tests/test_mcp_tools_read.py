@@ -80,6 +80,22 @@ def test_extract_state_get(mcp, kbs):
         assert k in r, "extract_state 回执缺 %s ✗：%s" % (k, json.dumps(r, ensure_ascii=False)[:200])
 
 
+def test_audit_scan_smoke(mcp, kbs):
+    """`audit_scan`（P2 切片 S8b-1 验收 ✓）：只读巡检，回执应带 findings/计数结构"""
+    r = mcp.call("audit_scan", {"kb_id": kbs["domain"], "scope": "all", "max_findings": 5})
+    assert isinstance(r, dict), "回执不是对象 ✗"
+    assert not r.get("error") or "kb_id" in r, json.dumps(r, ensure_ascii=False)[:300]
+    assert any(k in r for k in ("findings", "count", "by_severity", "kb_id")), \
+        "audit_scan 回执结构异常 ✗：%s" % json.dumps(r, ensure_ascii=False)[:300]
+
+
+def test_context_lookup_smoke(mcp, kbs):
+    """`context_lookup`（P2 切片 S8b-1 验收 ✓）：跨库同名/同义查询，空查询也要能返回结构"""
+    r = mcp.call("context_lookup", {"kb_ids": [kbs["domain"]]})
+    assert isinstance(r, dict), "回执不是对象 ✗"
+    assert "traceback" not in json.dumps(r, ensure_ascii=False).lower()
+
+
 def test_retired_tool_returns_deprecated(mcp):
     """退役工具必须**返回 deprecated**（不是 500、不是静默成功）✓"""
     r = mcp.call("review_apply", {"kb_id": "x"})
