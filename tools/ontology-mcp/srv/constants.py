@@ -9,6 +9,7 @@ import pathlib
 
 REPO = pathlib.Path(__file__).resolve().parents[3]      # tools/ontology-mcp/srv/ → 仓库根
 DOMAIN_STATE_DIR = REPO / "state" / "domain_sessions"
+EXPORT_DIR = REPO / "exports"        # 导出产物目录（kb_export 落这里；HTTP 上传/下载也从这里）
 
 try:
     DEFAULT_ROUND_BUDGET = int(os.environ.get("BODHI_ROUND_BUDGET_TOKENS") or 8000)

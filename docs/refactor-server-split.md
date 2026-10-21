@@ -23,7 +23,7 @@
 | S5 | `srv/session.py` | `_IdentCtx`/`_IDENT`/`_session_ident`/`_attach_session`/`_resolve_session_identity`（`_pick_session_no`/`_resolve_session_for`/`adopt_session` 依赖 `IDENTITY_CLASS`+`ke_pages`，留到 S6） | `ke_db` | 中 | **✅ 完成** |
 | S6 | `srv/links.py` | `_page_row_by_slug` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate` | `srv.kbresolve`/`srv.state`/`ke_pages` | 中 | **✅ 完成** |
 | S7 | `srv/render.py` | `_design_sections` + `SKILL_CONTEXTS` + `_type_label_of` + `context_meta`（纯渲染；`build_new_page` 留 S8） | `srv.text`/`ke_pages`/`ke_ontology` | 低 | **✅ 完成** |
-| S8 | `srv/schemas.py`（**S8a ✅**）+ `srv/tools_read.py`（**S8b-1 ✅**）+ 写/运维分支（S8b-2 待做） | schema 559 行；只读薄封装 5 个（`audit_scan`/`context_scan`/`context_lookup`/`context_page`/`context_authority`） | `ke_audit`/`ke_context`/`ke_plan` | 中 | **S8a ✅ S8b-1 ✅** ｜ S8b-2 待做 |
+| S8 | `srv/schemas.py`（**S8a ✅**）+ `srv/tools_read.py`（**S8b-1 ✅**）+ `srv/tools_ops.py`（**S8b-2a ✅**）+ 危险工具/`save_knowledge`（S8b-2b 待做） | schema 559 行；只读 5 个；运维 `kb_export`/`kb_import` | `ke_audit`/`ke_context`/`kb_transfer` | 中 | **S8a ✅ S8b-1 ✅ S8b-2a ✅** |
 | S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | 待做 |
 
 ## 3. 完成判据
@@ -42,6 +42,13 @@
 - **不搬** `fetch_existing_pages`：它依赖模块常量 `TYPE_PENDING`，搬走会引入反向 import（环）✗ ⇒ 留待 S3 与常量一起搬
 - 验证：`py_compile` ✓ / `active` ✓ / `success` ✓ / `tools=31` ✓ / 读写回归 **9 pass + 1 xfail** ✓
 - `server.py` 行数变化：**5645 → 5570**（S1 −75，S2 −75；后续 S3-S9 目标 ≤ 800 行）
+
+## 13. S8b-2a 记录（已完成 · 含一次自查修复）
+- `EXPORT_DIR` 收进 `srv/constants.py`（HTTP 上传/下载两处仍用同一路径 ✓ 单一来源）
+- 抽出 `srv/tools_ops.py`：`kb_export` / `kb_import`（真逻辑在 `kb_transfer`：`cmd_export`/`cmd_import`/`cmd_verify`）
+- **自查修复**：替换 `kb_export`/`kb_import` 时把 `def rebuild_wiki_from_graph(...)` 的**函数头一并吃掉** ✗
+  ⇒ 立刻贴回（`SMOKE_OK` 与 `py_compile` 双确认后才重启 ✓）。教训：**长块删除时，old_text 的尾部锚点要选"函数体最后一行"，不要选"下一个 def 行"**
+- 验证：`SMOKE_OK → COMPILE_OK → active/success/PORT_OK/tools=31` ✓
 
 ## 12. S8b-1 记录（已完成）
 - 抽出 `srv/tools_read.py`：`audit_scan` + `context_scan` / `context_lookup` / `context_page` / `context_authority`
