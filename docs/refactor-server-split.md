@@ -22,7 +22,7 @@
 | S4 | `srv/outline.py` | `_est_tokens` / `_chunk_units` / `_split_unit` / `doc_outline` | `srv.text`/`srv.constants`/`srv.kbresolve` | 中 | **✅ 完成** |
 | S5 | `srv/session.py` | `_IdentCtx`/`_IDENT`/`_session_ident`/`_attach_session`/`_resolve_session_identity`（`_pick_session_no`/`_resolve_session_for`/`adopt_session` 依赖 `IDENTITY_CLASS`+`ke_pages`，留到 S6） | `ke_db` | 中 | **✅ 完成** |
 | S6 | `srv/links.py` | `_page_row_by_slug` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate` | `srv.kbresolve`/`srv.state`/`ke_pages` | 中 | **✅ 完成** |
-| S7 | `srv/render.py` | `_design_sections` / `_type_label_of` / `build_new_page` / `_contract_head` 等**纯渲染** | 本体 | 中 | 待做 |
+| S7 | `srv/render.py` | `_design_sections` + `SKILL_CONTEXTS` + `_type_label_of` + `context_meta`（纯渲染；`build_new_page` 留 S8） | `srv.text`/`ke_pages`/`ke_ontology` | 低 | **✅ 完成** |
 | S8 | `srv/tools/*.py` | 把 `_call_tool_impl` 的分支按**读写/运维/本体**分组搬走，`server.py` 只留 `if name == ...: return srv.tools.x.y(...)` | 全部 | 高（分支多） | 待做 |
 | S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | 待做 |
 
@@ -42,6 +42,13 @@
 - **不搬** `fetch_existing_pages`：它依赖模块常量 `TYPE_PENDING`，搬走会引入反向 import（环）✗ ⇒ 留待 S3 与常量一起搬
 - 验证：`py_compile` ✓ / `active` ✓ / `success` ✓ / `tools=31` ✓ / 读写回归 **9 pass + 1 xfail** ✓
 - `server.py` 行数变化：**5645 → 5570**（S1 −75，S2 −75；后续 S3-S9 目标 ≤ 800 行）
+
+## 10. S7 记录（已完成）
+- 抽出 `srv/render.py`：`_design_sections`（wiki 小节渲染）+ `SKILL_CONTEXTS`（技能上下文文案）+ `_type_label_of` + `context_meta`
+- 纯渲染、无 IO；`build_new_page`（需要 engine/`element_page_slug`）留到 S8
+- 验证：`SMOKE_OK → COMPILE_OK → active/success/PORT_OK/tools=31` ✓
+- 回归：read + write + **report_structure**（覆盖 `_type_label_of`/`context_meta` 渲染路径）
+- 规模：`server.py` **5092 → 4944**（S7 −148）
 
 ## 9. S6 记录（已完成）
 - 抽出 `srv/links.py`：`_page_row_by_slug` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate`
