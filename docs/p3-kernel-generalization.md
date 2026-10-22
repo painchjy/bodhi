@@ -53,3 +53,20 @@
 - server.py **3097 → 2916**（−181）；ke_category.py 205 → 412 行
 - 踩坑：ke_category 原本不 import ke_db ⇒ 冒烟 SMOKE_FAIL 直接拦住（服务未重启 ✓）→ 补 import 后通过
 - 验收：SMOKE_OK / COMPILE_OK / active / success / PORT_OK / tools=31；read+write+coverage 14 pass + 1 xfail
+
+## 8. C 的精确落地方案（未开工，下次直接照做）
+**逐函数依赖（AST 实测，2026-10-22）**
+| 函数 | 依赖的 server 级符号 |
+|---|---|
+| service_types | 无 |
+| crud_model | _page_row, detail_attributes |
+| crud_matrix_lines | crud_model |
+| refresh_crud_matrix | _page_row, _replace_section, crud_matrix_lines |
+| service_design_summary | crud_model, detail_attributes, service_types |
+| service_overview_lines | _overview_detail_lines, service_design_summary |
+| _overview_detail_lines | 无 |
+| **refresh_service_overview** | **save_knowledge（工具层 ✗ 不可下沉）** |
+
+**结论**：下沉 7 个（不含 refresh_service_overview）；需一并搬 `_page_row` / `_replace_section` / `detail_attributes` + 常量 `OVERVIEW_FOLDER`/`OVERVIEW_SLUG`/`OVERVIEW_TITLE`/`_ATTR_OF`/`CRUD_ORDER`/`CRUD_SECTION`；`refresh_service_overview` 留 server 并 `from ke_overview import service_overview_lines`。
+**验收**：`service_overview(kb_id=领域库)` 只读预览 + `/bodhi/graph` 探针 + read/write/coverage 回归 + 四项健康。
+**预估**：server.py ≈2916 → ≈2650。
