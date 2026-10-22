@@ -2041,6 +2041,20 @@ def ontology_types(model_key: str, focus: str = "", classes: list | None = None,
                              "range": ke_ontology.short_iri(a.get("range_literal") or "")}
                             for a in sorted(allowed.values(), key=lambda x: x["prefixed"])]
                 out["class_attributes"] = attrs
+            # 2026-10-22（内网问题 4.4）：**让智能体看到类层级** ——
+            # `parents` / `children` 直接给出，省掉"临时 lookup 后猜"的来回 ✓
+            try:
+                _meta = ke_ontology.class_meta()
+                _kids: dict = {}
+                for _n, _m2 in _meta.items():
+                    for _p2 in (_m2.get("parents") or []):
+                        _kids.setdefault(_p2, []).append(_n)
+                for _c in out["classes"]:
+                    _m2 = _meta.get(_c.get("name")) or {}
+                    _c["parents"] = list(_m2.get("parents") or [])
+                    _c["children"] = sorted(_kids.get(_c.get("name")) or [])
+            except Exception:  # noqa: BLE001  本体元信息不可用 ⇒ 不影响主回执
+                pass
             # 数据属性（如 ea:ai_skill）—— 设计要写"AI 技能/工具定义"，必须让智能体看得到
             try:
                 out["data_properties"] = [{"name": r["name"], "label": r.get("label") or ""}
@@ -2450,12 +2464,14 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return ke_score.score_rule(args.get("facts") or [], args.get("checks") or [],
                                    float(args.get("threshold", 0.60) or 0.60))
     if name == "knowledge_lookup":
-        # 2026-10-17：**统一检索入口**（rules / keyword 图优先 / path）
+        # 2026-10-22：**统一检索入口**（rules / keyword 类范围+多词 / instances / route / path / semantic）
         import ke_lookup  # noqa: PLC0415
         return ke_lookup.knowledge_lookup(
             str(args.get("kb_id", "")), str(args.get("mode", "rules") or "rules"),
             str(args.get("query", "")), str(args.get("spec", "")), str(args.get("start", "")),
-            int(args.get("depth", 2) or 2), int(args.get("limit", 20) or 20))
+            int(args.get("depth", 2) or 2), int(args.get("limit", 20) or 20),
+            str(args.get("cls", "")), str(args.get("page_type", "")),
+            args.get("kb_ids") or None, bool(args.get("auto_widen", False)))
     if name == "rules_resolve":
         # 2026-10-16（用户口径）：**按步骤解析规则**（direct/policy 递归/ask/task 兼容/path 预留）
         return ke_review.rules_resolve(str(args.get("kb_id", "")), str(args.get("spec", "")),

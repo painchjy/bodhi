@@ -20,7 +20,12 @@ def test_knowledge_lookup_keyword_returns_definition(mcp, kbs):
     assert hits, "无命中 ✗"
     h = hits[0]
     assert "definition" in h and "attributes" in h, "缺 definition/attributes ✗（summary 仅展示）"
-    assert len(h["definition"]) > 200, "definition 疑似被截断 ✗"
+    # 不变量（2026-10-22 收紧）：`definition` 必须等于**属性里的全量**，且**不与截断的 summary 同源**。
+    # 旧断言 `len>200` 依赖"首条命中恰是某条长定义"，检索排序一变就假红 ✗
+    attrs = h.get("attributes") or {}
+    full = str(attrs.get("skos:definition") or attrs.get("definition") or "")
+    assert h["definition"] == full, "definition 应为属性全量（被截断 ✗）"
+    assert h.get("summary_truncated") in (True, False), "缺 summary_truncated 标记 ✗"
 
 
 def test_knowledge_lookup_rules_has_rule_hash(mcp, kbs):

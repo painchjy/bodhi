@@ -1,0 +1,65 @@
+{
+  "note": "P5 · 内网问题 4.1/4.4 —— 检索策略 v2 用例（2026-10-22 用户口径：**先用例后实现**）。期望按 plan/strategy/suggestions 字段断言，不断言自由文本。",
+  "kb": "domain",
+  "cases": [
+    {
+      "id": "C1",
+      "why": "「流程」必须被识别为本体类（先认类，再定范围），不能当普通关键字",
+      "args": {"mode": "keyword", "query": "流程"},
+      "expect": {"equals": {"mode": "keyword", "plan.scope_by": "fuzzy_label"},
+                 "min_len": {"plan.scope_classes": 1}}
+    },
+    {
+      "id": "C2",
+      "why": "「流程 活动 任务」= 类型路径（不做 AND）；给出可执行检索配方",
+      "args": {"mode": "route", "query": "流程 活动 任务"},
+      "expect": {"min_len": {"sequence": 2, "legs": 1, "recipe": 2},
+                 "present": ["plan.path_template"]}
+    },
+    {
+      "id": "C3",
+      "why": "策略名查询：命中策略/规则页，或给出 mode=rules 的入口建议",
+      "args": {"mode": "keyword", "query": "技术方案评审策略"},
+      "expect": {"present": ["plan", "strategy"], "any_true": ["counts.hits", "suggestions"]}
+    },
+    {
+      "id": "C4",
+      "why": "AND 组合大概率空 ⇒ 一次内降级 OR / 跨库提示 / 可执行建议（不许让智能体反复试）",
+      "args": {"mode": "keyword", "query": "技术方案评审 XXXXX编号"},
+      "expect": {"present": ["plan", "next"], "min_len": {"suggestions": 1},
+                 "any_true": ["plan.relaxed_by", "cross_kb_hint", "counts.hits"]}
+    },
+    {
+      "id": "C5",
+      "why": "完全查不到时：诊断 + ≥2 条不同方向的可执行建议 + next",
+      "args": {"mode": "keyword", "query": "zzz不存在词xxxx"},
+      "expect": {"equals": {"counts.hits": 0}, "min_len": {"suggestions": 2},
+                 "present": ["next"]}
+    },
+    {
+      "id": "C6",
+      "why": "只有类名、没有其它关键字 ⇒ 列出该类全部实例（含子类）",
+      "args": {"mode": "instances", "cls": "bpmn:Activity"},
+      "expect": {"equals": {"mode": "instances", "plan.mode": "instances"},
+                 "min_len": {"types": 1}, "present": ["counts"]}
+    },
+    {
+      "id": "C7",
+      "why": "向后兼容：hits / counts.by_source / 每条命中有 slug",
+      "args": {"mode": "keyword", "query": "技术方案"},
+      "expect": {"present": ["hits", "counts.by_source"], "min_len": {"hits": 1}}
+    },
+    {
+      "id": "C8",
+      "why": "向量检索未配置时必须结构化说明（不静默、不报错）",
+      "args": {"mode": "semantic", "query": "技术方案"},
+      "expect": {"equals": {"ok": false, "reason": "not_configured"}, "present": ["hint"]}
+    },
+    {
+      "id": "C9",
+      "why": "rules 模式向后兼容（spec=ask 回策略清单 scope_options）",
+      "args": {"mode": "rules", "spec": "ask"},
+      "expect": {"present": ["scope_options"]}
+    }
+  ]
+}

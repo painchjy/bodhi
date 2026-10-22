@@ -344,19 +344,28 @@ TOOL_SCHEMAS = [
         },
         {
             "name": "knowledge_lookup",
-            "description": ("**统一检索入口（只读，三种模式）**："
-                            "`mode=\"rules\"` 取规则契约（收 `spec`：direct:/policy:/ask/task:，**按步骤解析** ✓，"
-                            "等价 `rules_resolve`）；`mode=\"keyword\"` 按关键词找知识（`query`，"
-                            "**图优先 → PG 收窄融合** ✓，每条命中带 `source`：graph / graph+pg / pg）；"
-                            "`mode=\"path\"` 沿关系多跳（`start`=slug，`depth`≤4 ✓，回节点链 + 关系链）。"
-                            "⚠️ 找知识先用本工具：比\"自己猜库再查\"稳 ✓，且 `source=pg` 占比高即说明图缺数据 ✗。"),
+            "description": ("**统一检索入口（只读）**：`rules` 取规则契约（`spec`：direct:/policy:/ask，按步骤解析）；"
+                            "`keyword` **类范围 + 多词**检索（先认本体类再定范围；`query` 支持 `a b`=AND、"
+                            "`a|b`=OR、`\"短语\"`、`-排除`；命中片段来自**图里的 articleBody**，PG 只补属性）；"
+                            "`instances` 列某类全部实例（`cls`）；`route` 把\"流程 活动 任务\"解析成**类型路径**"
+                            "（不做 AND ✗）；`path` 沿关系多跳（`start`+`depth`）；`semantic` 向量（未配置时结构化说明）。"
+                            "回执固定带 `plan`（scope_classes / text_terms / relaxed_by）、`strategy`、"
+                            "`suggestions`（**每条都带可直接调用的 args**）与 `next`；AND 过窄会**自动降级 OR** 并标注。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
-                "mode": {"type": "string", "description": "rules | keyword | path（默认 rules）"},
-                "query": {"type": "string", "description": "keyword 模式的关键词"},
-                "spec": {"type": "string", "description": "rules 模式的 spec（direct:/policy:/ask/task:）"},
+                "mode": {"type": "string",
+                         "description": "rules | keyword | instances | route | path | semantic（默认 rules）"},
+                "query": {"type": "string",
+                          "description": "keyword/instances/route 的查询：`a b`=AND、`a|b`=OR、\"短语\"、-排除"},
+                "spec": {"type": "string", "description": "rules 模式的 spec（direct:/policy:/ask）"},
+                "cls": {"type": "string",
+                        "description": "显式本体类（instances 必填；keyword 可给多个用逗号分隔）"},
+                "page_type": {"type": "string", "description": "只查某页类型（可与 cls 并用）"},
                 "start": {"type": "string", "description": "path 模式的起始 slug"},
                 "depth": {"type": "integer", "description": "path 模式深度（1-4，默认 2）"},
+                "kb_ids": {"type": "array", "items": {"type": "string"}},
+                "auto_widen": {"type": "boolean",
+                               "description": "保留位（默认 false：父类扩大只在 suggestions 里给 args）"},
                 "limit": {"type": "integer"}},
                 "required": ["kb_id"]},
         },

@@ -7,8 +7,8 @@
 |---|---|---|---|
 | **4.5** | 上下文**解绑**失败（`action 只能是 decide / pull`） | ✅ **已落地**（W1） | `ke_context.authority_detach` + `context_authority_apply{action:"detach"}` |
 | **4.3** | `reference_lookup` 内网 URL 超时（`urlopen error timed out`） | ✅ **已落地**（W1） | `ke_review._ref_fetch`：代理/超时/白名单 + 结构化 `reason` |
-| **4.1** | `knowledge_lookup` 不支持组合关键字，智能体反复试错 | ⏳ W2 | `ke_lookup` v2：多词 AND/OR/短语/排除 + `plan`/`suggestions`/`strategy` |
-| **4.4** | 智能体只认领域库、不认本体；"流程→活动→任务"被当关键字 | ⏳ W2（与 4.1 同片） | 类模糊匹配（`ke_ontology.classes()`）+ `mode="route"` 类型路径 |
+| **4.1** | `knowledge_lookup` 不支持组合关键字，智能体反复试错 | ✅ **已落地**（W2） | `ke_lookup` v2：多词 AND/OR/短语/排除 + `plan`/`suggestions`/`strategy` + AND→OR 自动降级 |
+| **4.4** | 智能体只认领域库、不认本体；"流程→活动→任务"被当关键字 | ✅ **已落地**（W2） | 类模糊匹配（`ke_ontology.class_meta()`，强/弱证据）+ `mode="route"` 类型路径 + `ontology_types` 回 `parents/children` |
 | **4.6** | 会话分页判定过简、溯源缺环 | ⏳ W3 | 扩展 `ke_pages.ensure_session_page` + 弱信号 ack + 分页反列产出 |
 | **4.2** | report 基类 → `schema.org/CreativeWork` + 文档模板子类 | ⏳ W4（最后） | 图属性 `articleBody` + `schema:DocumentTemplate` + `applicableReportType` |
 
@@ -26,6 +26,27 @@
 - **配套修正（必须）**：`rebuild_cache` 与 `authority_preview` 都改为**按表派**——
   之前按"同名组全量"派生 ⇒ 解绑后 `replica_protect` 仍在、写保护不解除 ✗。
 - 用例：`tests/test_mcp_tools_context_detach.py`（全链路 MCP 实调：decide → 副本写被拒 → detach → 可写 → 幂等）。
+
+## 4.1 + 4.4 检索策略 v2（已落地）
+
+**判定顺序（确定性，零 LLM）**：切词 → 每词查本体类（`ke_ontology.class_meta()` 的 label / 本地名）：
+
+| 证据 | 判据 | 处置 |
+|---|---|---|
+| **强** | 完全相等 ｜ 词是标签的**词尾**（"流程"⊂"业务流程"）｜ 占比 ≥75% ｜ 命中本地名 | 圈**范围类**（+全部子类） |
+| **弱** | 只是标签的**前缀修饰**（"技术方案"⊂"技术方案评审报告"） | **不圈范围**，只进 `plan.class_candidates`，仍当文本词 |
+| 多候选互不同族 | top1−top2 < 10 且无祖先关系 | `ambiguity=true` + `class_candidates`，**不静默选错** |
+
+**组合语义**：多类且有通路 ⇒ `mode=route` 出**类型路径**（不做 AND ✗）｜单类无文本词 ⇒ `mode=instances` 列实例（含子类）｜单类+文本词 ⇒ 范围内 AND（`name` / 图 `articleBody`）｜无类+文本词 ⇒ 图全文检索。
+
+**最少来回三条硬规则**：
+1. **AND 空 ⇒ 一次调用内降级 OR**，并标 `plan.relaxed_by="and→or"`；
+2. 每条 `suggestions[]` 都带 `tool` + **完整 args**（父类扩大 / 列实例 / 换库 / `rules` 入口 / 类型分布）；
+3. **空结果必带 `next`** + ≥2 条不同方向建议。
+
+**模式**：`keyword`（默认搜索）｜`instances`｜`route`｜`path`｜`rules`｜`semantic`（W2.5 未配置时结构化说明）。
+
+**用例**：`tests/cases/lookup_cases.json` + `tests/test_lookup_strategy.py`（C1–C9，走 MCP）。
 
 ## 4.3 参考规范（已落地）
 

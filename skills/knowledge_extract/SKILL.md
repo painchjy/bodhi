@@ -102,3 +102,10 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
 - [ ] `absent_verified` 的条目 `found_in` 必须是 `other_kb:` ✓ 或明确的"文档确认无"证据 ✓
 - [ ] `unavailable` 的条目必须有"已查过哪些来源"的说明 ✓（写在 quote 或 note ✓）
 - [ ] `present` 的 `quote` 能全文检索到 ✓、`locator` 能回访 ✓
+
+## 检索（类型优先，2026-10-22）
+
+- 先 `ontology_types(model)` 看类与 `parents/children`；
+- `knowledge_lookup` 会把**类名**识别为检索范围（不是 AND 关键词）；
+- 组合词为空时它会**自动降级 OR** 并回 `suggestions`（父类扩大 / 列实例 / 换库 / `mode=rules` 入口）——**照 args 直接调用，不要自己换词试错**；
+- 若多个词是**关系链**（类A 类B 类C），用 `mode="route"` 拿类型路径，别用 AND。

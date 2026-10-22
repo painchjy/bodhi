@@ -128,3 +128,10 @@ else:
 - **取规则/策略正文**：在**领域库**，用 `knowledge_lookup(mode="rules")` 或 `wiki_read_page(领域库, slug)` ✓；
 - **不要用 `context_page`** ✗ —— 它是「跨库同名概念视图」，不是取正文的入口；误用会报「本库没有这一页」（库名/副本不含该页 ✓）。
 - **取页面属性**：`knowledge_lookup(mode="keyword")` 的 **`definition` / `attributes`** ✓；`summary` 仅展示 ✗（截断）
+
+## 检索（类型优先，2026-10-22）
+
+- 先 `ontology_types(model)` 看类与 `parents/children`；
+- `knowledge_lookup` 会把**类名**识别为检索范围（不是 AND 关键词）；
+- 组合词为空时它会**自动降级 OR** 并回 `suggestions`（父类扩大 / 列实例 / 换库 / `mode=rules` 入口）——**照 args 直接调用，不要自己换词试错**；
+- 若多个词是**关系链**（类A 类B 类C），用 `mode="route"` 拿类型路径，别用 AND。
