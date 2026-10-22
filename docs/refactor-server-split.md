@@ -111,3 +111,11 @@
 - 验证：`py_compile` ✓ / `active` ✓ / `success` ✓ / `tools=31` ✓ / 读写回归 **全绿（含新用例）** ✓
 - **未搬**：`fetch_existing_pages`（依赖 `TYPE_PENDING`，与 S7/S8 的常量收敛一起搬 ✓）
 - `server.py` 行数：**5570 → 5495**（S3 −75）
+
+## 14. S9 第一次尝试：失败并回滚（2026-10-22）
+- 手法：行号锚点脚本把 MCPHandler 803 行 + main 22 行搬到 srv/http.py，server.py 留薄壳 main（注入 _CTX）
+- 结果：import server OK、import srv.http OK、active/success/PORT_OK/tools=31 全绿，但**每个请求都 RemoteDisconnected** => handler 运行期 NameError
+- 根因：grep 候选表只覆盖 5 个外部符号，实际 handler 还引用更多 server 级名字（我的候选正则漏项）
+- 处置：cp logs/server.pre_s9.py server.py + rm srv/http.py + 重启 => 服务恢复（active/success/PORT_OK/tools=31），未提交任何东西
+- 教训（下次必须）：① 搬前用 **AST 求自由变量**（不是 grep 候选表）枚举全部外部依赖；② 验收必须发**真实请求**（tools/list + 一次 tools/call），只做 import 冒烟不够 ✗
+- 备份：logs/server.pre_s9.py（回滚用，勿删）

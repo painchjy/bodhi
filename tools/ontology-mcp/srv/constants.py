@@ -19,3 +19,8 @@ try:
     CHARS_PER_TOKEN = float(os.environ.get("BODHI_CHARS_PER_TOKEN") or 1.6)
 except ValueError:
     CHARS_PER_TOKEN = 1.6
+
+# MCP protocol/server identity (P2 S9)
+PROTOCOL_VERSION = "2025-03-26"
+SERVER_NAME = "bodhi-ontology-mcp"
+SERVER_VERSION = "0.1.0"
