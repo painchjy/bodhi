@@ -38,7 +38,7 @@ def tool_definitions() -> dict:
 
     src = read(SCHEMAS)
     start = src.index("TOOL_SCHEMAS = [")
-    end = src.index("\n]\n", start)
+    end = src.rindex("\n    ]")      # 列表以 4 空格缩进的 `]` 收尾（`srv/schemas.py` ✓）
     body = src[start:end]
     out = {}
     for m in re.finditer(r'\{\s*\n\s+"name": "([a-z_0-9]+)",', body):

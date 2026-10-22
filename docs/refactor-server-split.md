@@ -5,6 +5,9 @@
 2. **三重验证**：`py_compile` → 重启服务 → `active / Result=success / tools=31` → 回归用例 ✓
 3. **禁止宽正则批量替换**（历史事故：曾误改 47 处导致服务崩溃循环 ✗）——只用**内容锚点**做精确替换
 4. 切片只搬**内聚**的东西；跨模块依赖用 `import` 单向（`srv/*` 不得反向 import `server`）✓
+5. **每片回归必须包含 `tests/test_coverage_gaps.py`**（它依赖 `tests/_helpers.py` 解析 schema/dispatcher，
+   结构搬家最容易把它打穿 ✗ —— 2026-10-22 实测：S8a 把 schema 搬到 `srv/schemas.py` 后，锚点 `\n]\n`
+   失配 ⇒ 5 个用例红，**只有全量回归才照到** ✗）；改完立刻回跑，别等全量。
 
 ## 1. 现状
 | 项 | 数值 |
