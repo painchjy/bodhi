@@ -597,4 +597,9 @@ TOOL_SCHEMAS = [
             "description": "规则发布：体检+评测双门禁通过才写库；回执给规则集 hash_before/hash_after（hash 变化=发布生效）。默认 dry_run。",
             "inputSchema": {"type": "object", "properties": {"kb_id": {"type": "string"}, "spec": {"type": "string", "description": "规则集标识（如 policy:<策略名> 或 spec 片段）"}, "apply": {"type": "boolean", "description": "true 才真正写库（默认 false=dry_run）"}}, "required": ["kb_id", "spec"]},
         },
+        {
+            "name": "metric_compute",
+            "description": "计算知识库基础指标（页数/类型分布/版本/来源覆盖[/规则数]）：同输入同结果 + 同 hash（可复算），每个指标自带 formula 口径。",
+            "inputSchema": {"type": "object", "properties": {"kb_id": {"type": "string"}, "spec": {"type": "string", "description": "规则集标识（仅 with_rules=true 时用）"}, "with_rules": {"type": "boolean", "description": "是否附带规则数指标（默认 false）"}}, "required": ["kb_id"]},
+        },
     ]

@@ -91,3 +91,10 @@
 - 注册 MCP 工具 `rule_publish`（schema + 分发）⇒ 工具数 **32 → 33**
 - 用例 `tests/test_mcp_tools_rule_publish.py`：dry_run 回执齐字段 + sha1 长度 40 + 不写库 + **同输入两次 hash 一致（可复算）** ✓
 - 后续：metric_compute（指标可复算 + 回执带口径）
+
+## 12. P3.5-3 metric_compute 已落地（P3.5 三项全完成）
+- 新增 `ke-core/ke_metrics.py`（59 行）：`compute(kb_id, spec, with_rules)` —— 页数/类型分布/版本/来源覆盖[/规则数]
+- **可复算**：metrics 序列化后 sha1（同输入同 hash）；**每个指标自带 `formula` 口径**；回执带 `rows` 明细
+- 注册 MCP 工具 `metric_compute` ⇒ 工具数 **33 → 34**
+- 用例 `tests/test_mcp_tools_metric_compute.py`：metrics 非空 + 含 pages_total + 全带 formula + rows 非空 + 两次 hash 相同 ✓
+- P3.5 汇总：page_copy（e0b231d）/ rule_publish（df47eb1）/ metric_compute（本轮）

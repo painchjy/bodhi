@@ -2333,6 +2333,9 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     if name == "rule_publish":
         import ke_rule_publish as _rp  # noqa: PLC0415
         return _rp.publish_with_hash(str(args.get("kb_id", "")), str(args.get("spec", "")), bool(args.get("apply", False)))
+    if name == "metric_compute":
+        import ke_metrics as _mt  # noqa: PLC0415
+        return _mt.compute(str(args.get("kb_id", "")), str(args.get("spec", "")), bool(args.get("with_rules", False)))
     if name == "job_status":
         return job_status(str(args.get("job_id", "")))
     # （原 `list_pending_merges` / `resolve_pending_merge` 两个工具已随「相似度合并永久取消」删除，2026-10-10）
