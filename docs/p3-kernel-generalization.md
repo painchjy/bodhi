@@ -70,3 +70,10 @@
 **结论**：下沉 7 个（不含 refresh_service_overview）；需一并搬 `_page_row` / `_replace_section` / `detail_attributes` + 常量 `OVERVIEW_FOLDER`/`OVERVIEW_SLUG`/`OVERVIEW_TITLE`/`_ATTR_OF`/`CRUD_ORDER`/`CRUD_SECTION`；`refresh_service_overview` 留 server 并 `from ke_overview import service_overview_lines`。
 **验收**：`service_overview(kb_id=领域库)` 只读预览 + `/bodhi/graph` 探针 + read/write/coverage 回归 + 四项健康。
 **预估**：server.py ≈2916 → ≈2650。
+
+## 9. C 已落地（2026-10-22）
+- 新增 `ke-core/ke_overview.py`（**361 行**）：service_types / _page_row / detail_attributes / crud_model / crud_matrix_lines / _replace_section / refresh_crud_matrix / service_design_summary / service_overview_lines / _overview_detail_lines + OVERVIEW_SLUG/_TITLE/_FOLDER/_ATTR_OF
+- `refresh_service_overview` 留在 server（它依赖工具层 `save_knowledge`），改为 `from ke_overview import service_overview_lines`
+- **顺手修真 bug**：原 server.py 引用 `CRUD_ORDER` / `CRUD_SECTION` 却**从未定义** ⇒ 该路径一旦执行就 NameError；已在内核补齐（`("C","R","U","D")` / `## CRUD 矩阵`）
+- server.py **2916 → 2596**（−320）；内核探针：service_types / service_design_summary / service_overview_lines 全部无异常
+- 验收：四项健康 + read/write/coverage 14 pass + 1 xfail；备份 logs/server.pre_c.py
