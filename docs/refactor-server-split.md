@@ -119,3 +119,10 @@
 - 处置：cp logs/server.pre_s9.py server.py + rm srv/http.py + 重启 => 服务恢复（active/success/PORT_OK/tools=31），未提交任何东西
 - 教训（下次必须）：① 搬前用 **AST 求自由变量**（不是 grep 候选表）枚举全部外部依赖；② 验收必须发**真实请求**（tools/list + 一次 tools/call），只做 import 冒烟不够 ✗
 - 备份：logs/server.pre_s9.py（回滚用，勿删）
+
+## 15. S9 第二轮：成功（2026-10-22）
+- 方案：**bind(server globals) 注入整个命名空间**（AST 实测外部依赖 **51 个**，逐名注入不可行）；搬移代码**逐字不改**
+- 踩坑 1：类体在 **import 时**就用到 SERVER_NAME/SERVER_VERSION ⇒ 必须从 srv.constants 直接 import（bind 来不及）
+- 踩坑 2：bind 把 server 的 main 覆盖本模块 main ⇒ RecursionError；改为**只补缺失名**（k not in globals()）
+- 验收升级：真实请求探针（initialize / tools-list / tools-call）+ 部署后 read 9/9、write 3 pass+1 xfail(B4)、coverage 2/2
+- 规模：server.py **4329 → 3510**；srv/http.py **847 行**；备份 logs/server.pre_s9b.py
