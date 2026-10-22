@@ -77,3 +77,10 @@
 - **顺手修真 bug**：原 server.py 引用 `CRUD_ORDER` / `CRUD_SECTION` 却**从未定义** ⇒ 该路径一旦执行就 NameError；已在内核补齐（`("C","R","U","D")` / `## CRUD 矩阵`）
 - server.py **2916 → 2596**（−320）；内核探针：service_types / service_design_summary / service_overview_lines 全部无异常
 - 验收：四项健康 + read/write/coverage 14 pass + 1 xfail；备份 logs/server.pre_c.py
+
+## 10. P3.5-1 page_copy 已落地（2026-10-22）
+- 新增 `ke-core/ke_page_ops.py`（71 行）：`_row`（只读取页）+ `copy_page`（保留本体类型/数据属性/来源引用/关系边；**源页零改动**）
+- 注册 MCP 工具 `page_copy`（`srv/schemas.py` + `server.py` 分发）⇒ 工具数 **31 → 32**
+- 用例 `tests/test_mcp_tools_page_copy.py`：副本 slug/类型正确 + 源页 version 不变 ✓
+- 踩坑：SQL 空串误写成双引号（PostgreSQL 当标识符）⇒ `zero-length delimited identifier`；改用 `sql_str("")` 后通过
+- 后续：rule_publish（hash 变化=发布成功）、metric_compute（指标可复算）

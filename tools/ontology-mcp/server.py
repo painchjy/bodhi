@@ -2325,6 +2325,11 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     # P3-0f（2026-10-10）：每次工具调用先清**请求级只读 memo**（页 id / 属主 / 会话页引用）。
     # 放在这里而不是各工具里：唯一入口、线程局部、绝不会把上一次调用的结果带进来。
     _reset_request_cache()
+    if name == "page_copy":
+        import ke_page_ops as _po  # noqa: PLC0415
+        return _po.copy_page(str(args.get("kb_id", "")), str(args.get("src_slug", "")),
+                             str(args.get("new_slug", "")), str(args.get("new_title", "")),
+                             bool(args.get("copy_relations", True)))
     if name == "job_status":
         return job_status(str(args.get("job_id", "")))
     # （原 `list_pending_merges` / `resolve_pending_merge` 两个工具已随「相似度合并永久取消」删除，2026-10-10）

@@ -577,4 +577,19 @@ TOOL_SCHEMAS = [
             "description": ("**回滚一次概念页 apply（写，2026-10-19 恢复 ✓）**：按 `state/context_map/history/<ticket>.json` 恢复旧正文或删除新建概念页；幂等。参数：`ticket`"),
             "inputSchema": {"type": "object", "properties": {}},
         },
+        {
+            "name": "page_copy",
+            "description": "复制一页（保留本体类型/数据属性/来源与关系；源页只读不改）。new_slug 缺省 <src>-copy。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "目标知识库（写库解析口径同 save_knowledge）"},
+                    "src_slug": {"type": "string", "description": "源页 slug"},
+                    "new_slug": {"type": "string", "description": "副本 slug（缺省 <src>-copy）"},
+                    "new_title": {"type": "string", "description": "副本标题（缺省 <原标题>（副本））"},
+                    "copy_relations": {"type": "boolean", "description": "是否复制关系边（默认 true）"},
+                },
+                "required": ["kb_id", "src_slug"],
+            },
+        },
     ]
