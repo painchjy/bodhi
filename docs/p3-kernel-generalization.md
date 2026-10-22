@@ -40,3 +40,10 @@
 - 验收：SMOKE_OK / COMPILE_OK / active / success / PORT_OK / tools=31；**HTTP 探针**：/bodhi/graph 5 节点 1 边、/bodhi/model-graph 31 节点 61 边、/bodhi/page 正常
 - 全量回归：126 项 **0 失败**（xfail 2 / skip 3）
 - 备份：logs/server.pre_p3a.py
+
+## 6. D+E 已落地（2026-10-22）
+- `srv/reentry.py`（31 行）：_REENTRY / _REENTRY_LOCK / REENTRY_TOOLS / REENTRY_WINDOW_S / _reentry_key / _prune_reentry
+- `srv/obs.py`（154 行）：_log_brief / _log_line / _dump_args / _log_tool_begin / _log_tool_call（两段式日志不变）
+- LOG_DIR / ARGS_DIR 归位 `srv/constants.py`（server 已无残留引用）
+- server.py **3242 → 3097**（−145）
+- 验收：SMOKE_OK / COMPILE_OK / active / success / PORT_OK / tools=31；HTTP 探针（graph 5/1、model-graph 31/61、page OK）；read+write+coverage **14 pass + 1 xfail(B4)**

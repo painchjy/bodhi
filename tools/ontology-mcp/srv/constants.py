@@ -24,3 +24,6 @@ except ValueError:
 PROTOCOL_VERSION = "2025-03-26"
 SERVER_NAME = "bodhi-ontology-mcp"
 SERVER_VERSION = "0.1.0"
+
+LOG_DIR = REPO / "logs"
+ARGS_DIR = LOG_DIR / "args"
