@@ -33,3 +33,10 @@
 4. **C（总览聚合）**：把 job 外壳留在协议层，聚合下沉；
 5. **F（分发）**：最后做，靠 126 项回归兜底；
 6. 每项都走：AST 依赖清单 → 搬 → 真实请求 + 定向回归 → 四项健康 → 文档 → 提交。
+
+## 5. A 已落地（2026-10-22）
+- 新增 `tools/ke-core/ke_graph_view.py`（289 行）：_class_meta / all_class_meta / class_group / class_category_path / _section_edge / bodhi_model_graph / bodhi_graph / bodhi_page + _WIKI_LINK_RE/_SECTION_EDGE
+- server.py **3510 → 3242**（−268），改为 from ke_graph_view import ...（名字不变，HTTP 层经 bind 继续可用）
+- 验收：SMOKE_OK / COMPILE_OK / active / success / PORT_OK / tools=31；**HTTP 探针**：/bodhi/graph 5 节点 1 边、/bodhi/model-graph 31 节点 61 边、/bodhi/page 正常
+- 全量回归：126 项 **0 失败**（xfail 2 / skip 3）
+- 备份：logs/server.pre_p3a.py
