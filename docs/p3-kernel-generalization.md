@@ -47,3 +47,9 @@
 - LOG_DIR / ARGS_DIR 归位 `srv/constants.py`（server 已无残留引用）
 - server.py **3242 → 3097**（−145）
 - 验收：SMOKE_OK / COMPILE_OK / active / success / PORT_OK / tools=31；HTTP 探针（graph 5/1、model-graph 31/61、page OK）；read+write+coverage **14 pass + 1 xfail(B4)**
+
+## 7. B 已落地（2026-10-22）
+- `ke_category.py` 新增：常量 MAX_DIR_DEPTH / WEKNORA_MODULE_SHORT / WEKNORA_TYPE_LABELS；函数 _realign_wiki_paths / refresh_folders / _class_chain_labels / _category_path_for / recategorize（逐字搬；resolve_kb_id 用内核侧适配器 _resolve_kb_id 保持 (id, note) 语义）
+- server.py **3097 → 2916**（−181）；ke_category.py 205 → 412 行
+- 踩坑：ke_category 原本不 import ke_db ⇒ 冒烟 SMOKE_FAIL 直接拦住（服务未重启 ✓）→ 补 import 后通过
+- 验收：SMOKE_OK / COMPILE_OK / active / success / PORT_OK / tools=31；read+write+coverage 14 pass + 1 xfail
