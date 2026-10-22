@@ -32,9 +32,13 @@ HTTP：`GET /bodhi/review/{rules,graph,reference}`、`POST /bodhi/review/apply`�
 
 **权威 / 副本（2026-09-29 新增，2 个工具）**：同义知识**认定一个领域为权威**，其它领域**只读**、
 **只能从权威复制** —— 工具面 `context_authority`（只读：谁是权威、副本漂移、ticket）+
-`context_authority_apply`（`action=decide|pull`，两段式写；HTTP 对应
+`context_authority_apply`（`action=decide|pull|detach`，两段式写；HTTP 对应
 `GET /bodhi/context/authority`、`POST /bodhi/context/authority/{decide,pull}`）。
 副本页的本地写会被服务端**拒绝**（`ke_pages.replica_guard`），错误里直接给「从权威复制」的命令。
+**解绑（2026-10-22）**：`action=detach`（`kb=<副本库>`，`apply:false` 先预览）把该库从
+「## 权威与副本」表摘掉 + 副本页自述改 `role=detached` ⇒ 该库**恢复可本地编辑**；
+**不删副本页**、幂等（重复调回 `already_detached`）；概念页「权威与副本」表是**事实源**
+（缓存 `replica_protect` 与只读视图都按表派生）。
 
 ---
 

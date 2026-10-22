@@ -572,11 +572,16 @@ draft（自动摘取/智能体起草，默认）
 
 #### 13.14.2 三种通道（运维/智能体/前端都够用）
 
-| 通道 | 只读视图 | 登记权威 | 从权威复制 |
-|---|---|---|---|
-| CLI | `ke_context.py authority-preview <slug> [--master <库>]` | `authority-decide <slug> --master <库> --ticket <t> --ack replica_protection` | `authority-pull <slug> --kb <副本库> [--apply] --ticket <t> --ack replica_overwrite,replica_version_bump` |
-| HTTP | `GET /bodhi/context/authority?slug=&master=` | `POST /bodhi/context/authority/decide` | `POST /bodhi/context/authority/pull`（`apply:false` 只预览） |
-| MCP | `context_authority` | `context_authority_apply{action:"decide"}` | `context_authority_apply{action:"pull", apply:true}` |
+| 通道 | 只读视图 | 登记权威 | 从权威复制 | 解除副本（解绑） |
+|---|---|---|---|---|
+| CLI | `ke_context.py authority-preview <slug> [--master <库>]` | `authority-decide <slug> --master <库> --ticket <t> --ack replica_protection` | `authority-pull <slug> --kb <副本库> [--apply] --ticket <t> --ack replica_overwrite,replica_version_bump` | （未加 CLI；走 MCP） |
+| HTTP | `GET /bodhi/context/authority?slug=&master=` | `POST /bodhi/context/authority/decide` | `POST /bodhi/context/authority/pull`（`apply:false` 只预览） | （未加路由；走 MCP） |
+| MCP | `context_authority` | `context_authority_apply{action:"decide"}` | `context_authority_apply{action:"pull", apply:true}` | `context_authority_apply{action:"detach", kb:"<副本库>", apply:false→预览 / true→执行}` |
+
+**解绑（2026-10-22 用户口径 1-A）**：`detach` = 把该库从「## 权威与副本」表**摘掉** + 该副本页
+`page_metadata.authority` 改 `role=detached` ⇒ 该库**恢复可本地编辑**（`replica_guard` 不再命中）。
+**不删副本页**（删页走 `audit_purge`/UI，与本动作解耦，**两种顺序都安全**）；两步写入各**只写一个库**；
+**幂等**：表里已无该行 / 自述已 detached / 副本页已删 ⇒ 回 `already_detached`。
 
 **两段式（所有写路径）**：① 预览拿 `ticket` + `required_risks` → ② 带 **完全一致的** `acknowledge_risks` 才执行；
 写权限 `ke_db.assert_can_write(kb_id, tenant)`（属主 / `kb_shares` 的 editor|writer|admin / **身份缺失 fail-closed**），

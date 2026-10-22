@@ -540,6 +540,101 @@ def graph_query(cypher: str = "", limit: int = 200, timeout: float = 25.0) -> di
             "result": rows[:cap], "truncated": len(rows) >= cap}
 
 
+def _ref_fetch(url: str, timeout: float = 8.0, max_bytes: int = 200_000) -> dict:
+    """抓取参考规范 URL（**内网友好**）：代理 / 超时 / 主机白名单 / **结构化失败原因**。
+
+    用户口径（2026-10-22 · 内网问题 4.3）：内网实测 `urlopen error timed out` ✗
+    —— 无代理、无超时口径、无白名单、失败只有一句 note。
+
+    环境变量：
+      · `BODHI_HTTP_PROXY`  —— http(s) 代理（内网常见；不设则用系统默认）
+      · `BODHI_REF_TIMEOUT` —— 单次超时秒（默认 8）
+      · `BODHI_REF_HOSTS`   —— 主机白名单（逗号分隔；空 = 不限；支持 `endswith` 匹配子域）
+
+    返回 `{ok, text, reason, detail, http_status, elapsed_ms, attempts, host}`，
+    `reason ∈ timeout｜dns｜tls｜blocked｜conn_refused｜http_4xx｜http_5xx｜empty｜other`。
+    """
+    import html  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+    import socket  # noqa: PLC0415
+    import ssl  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+    import urllib.parse  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    try:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        host = ""
+    allow = [h.strip().lower() for h in (_os.environ.get("BODHI_REF_HOSTS") or "").split(",") if h.strip()]
+    if allow and host not in allow and not any(host.endswith("." + a) for a in allow):
+        return {"ok": False, "text": "", "reason": "blocked",
+                "detail": "主机不在白名单（BODHI_REF_HOSTS）：%s" % (host or "?"),
+                "http_status": None, "elapsed_ms": 0, "attempts": 0, "host": host}
+    try:
+        timeout = float(_os.environ.get("BODHI_REF_TIMEOUT") or timeout or 8)
+    except (TypeError, ValueError):
+        timeout = 8.0
+    proxy = (_os.environ.get("BODHI_HTTP_PROXY") or "").strip()
+    opener = (urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy})) if proxy
+        else urllib.request.build_opener())
+    req = urllib.request.Request(url, headers={"User-Agent": "bodhi-review/1.0",
+                                               "Accept": "text/html,text/plain,*/*"})
+    attempts_max = 2 if timeout <= 10 else 1     # 总预算 ≤ 2×timeout，避开反代 60s
+    t0 = time.time()
+    last: dict = {}
+    for attempt in range(1, attempts_max + 1):
+        try:
+            with opener.open(req, timeout=timeout) as resp:  # noqa: S310
+                raw = resp.read(max_bytes)
+                status = int(getattr(resp, "status", None) or 200)
+            text = raw.decode("utf-8", "replace")
+            text = re.sub(r"(?is)<(script|style).*?</\1>", " ", text)
+            text = re.sub(r"(?s)<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", html.unescape(text)).strip()
+            return {"ok": bool(text), "text": text, "reason": "" if text else "empty",
+                    "detail": "" if text else "抓到了但正文为空", "http_status": status,
+                    "elapsed_ms": int((time.time() - t0) * 1000), "attempts": attempt, "host": host}
+        except urllib.error.HTTPError as exc:
+            code = int(getattr(exc, "code", 0) or 0)
+            last = {"ok": False, "text": "",
+                    "reason": "http_4xx" if 400 <= code < 500 else "http_5xx",
+                    "detail": "HTTP %d" % code, "http_status": code,
+                    "elapsed_ms": int((time.time() - t0) * 1000), "attempts": attempt, "host": host}
+            if code < 500:
+                break                            # 4xx 重试无意义
+        except (socket.timeout, TimeoutError) as exc:
+            # 连接建立后**读超时**抛的是 `socket.timeout`（不是 URLError）⇒ 必须单独接 ✓
+            last = {"ok": False, "text": "", "reason": "timeout", "detail": str(exc)[:160] or "read timeout",
+                    "http_status": None, "elapsed_ms": int((time.time() - t0) * 1000),
+                    "attempts": attempt, "host": host}
+        except urllib.error.URLError as exc:
+            why = getattr(exc, "reason", exc)
+            if isinstance(why, (socket.timeout, TimeoutError)) or "timed out" in str(why).lower():
+                kind = "timeout"
+            elif isinstance(why, socket.gaierror):
+                kind = "dns"
+            elif isinstance(why, ssl.SSLError):
+                kind = "tls"
+            elif isinstance(why, ConnectionRefusedError) or "refused" in str(why).lower():
+                kind = "conn_refused"
+            else:
+                kind = "other"
+            last = {"ok": False, "text": "", "reason": kind, "detail": str(why)[:160],
+                    "http_status": None, "elapsed_ms": int((time.time() - t0) * 1000),
+                    "attempts": attempt, "host": host}
+        except Exception as exc:  # noqa: BLE001
+            last = {"ok": False, "text": "", "reason": "other", "detail": str(exc)[:160],
+                    "http_status": None, "elapsed_ms": int((time.time() - t0) * 1000),
+                    "attempts": attempt, "host": host}
+            break
+    return last or {"ok": False, "text": "", "reason": "other", "detail": "未知失败",
+                    "http_status": None, "elapsed_ms": int((time.time() - t0) * 1000),
+                    "attempts": 0, "host": host}
+
+
 def reference_lookup(kb_id: str = "", reference: str = "", allow_fetch: bool = False,
                      max_chars: int = 6000, timeout: float = 8.0) -> dict:
     """按规则里的「参考规范」（`bmm:ruleReference`）线索找**规范内容**（只读）。三级查找：
@@ -592,26 +687,29 @@ def reference_lookup(kb_id: str = "", reference: str = "", allow_fetch: bool = F
                                for d in docs]
                 out["note"] = "命中的是知识库文档/附件；正文用 doc_outline（或 list_knowledge_chunks）取"
                 return out
-    if is_url and allow_fetch:
-        import html
-        import urllib.request
-        try:
-            req = urllib.request.Request(ref, headers={"User-Agent": "bodhi-review/1.0"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-                raw = resp.read(200_000)
-            text = raw.decode("utf-8", "replace")
-            text = re.sub(r"(?is)<(script|style).*?</\1>", " ", text)
-            text = re.sub(r"(?s)<[^>]+>", " ", text)
-            text = re.sub(r"\s+", " ", html.unescape(text)).strip()
-            out.update({"found": True, "source": "url", "text": text[:int(max_chars)],
+    if is_url:
+        if not allow_fetch:
+            out.update({"reason": "fetch_disabled",
+                        "hint": ("需要抓取就传 allow_fetch=true；内网不可达时会回结构化 "
+                                 "reason=timeout｜dns｜tls｜blocked｜conn_refused"),
+                        "note": ("知识库里找不到同名规范，且 URL 抓取未开启（allow_fetch=false）→ "
+                                 "标「参考规范不可得」，**不要编造**")})
+            return out
+        got = _ref_fetch(ref, timeout=float(timeout or 8))
+        out.update({"found": bool(got.get("ok")), "reason": got.get("reason") or "",
+                    "reason_detail": got.get("detail") or "", "host": got.get("host") or "",
+                    "http_status": got.get("http_status"), "elapsed_ms": got.get("elapsed_ms"),
+                    "attempts": got.get("attempts")})
+        if got.get("ok"):
+            out.update({"source": "url", "text": (got.get("text") or "")[:int(max_chars)],
                         "note": "从 URL 抓取并剥 HTML；判分时引用要标明来自外部规范"})
-            return out
-        except Exception as exc:  # noqa: BLE001
-            out["note"] = ("URL 取不到（%s）→ 按技能口径标「参考规范不可得」，**不要编造规范内容**"
-                           % str(exc)[:120])
-            return out
-    out["note"] = ("知识库里找不到同名规范%s → 标「参考规范不可得」，只按规则原文判定，**不要编造**"
-                   % ("；URL 抓取未开启（allow_fetch=false）" if is_url else ""))
+        else:
+            out["note"] = ("URL 取不到（reason=%s，%s）→ 按技能口径标「参考规范不可得」，"
+                           "**不要编造规范内容**；可改用规范名/文件名查本库文档，"
+                           "或请用户离线提供该规范"
+                           % (got.get("reason") or "other", str(got.get("detail") or "")[:120]))
+        return out
+    out["note"] = ("知识库里找不到同名规范 → 标「参考规范不可得」，只按规则原文判定，**不要编造**")
     return out
 
 

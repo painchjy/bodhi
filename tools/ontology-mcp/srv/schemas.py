@@ -383,13 +383,17 @@ TOOL_SCHEMAS = [
             "description": ("**文档评审·取参考规范（只读）**：按规则里的「参考规范」（`bmm:ruleReference`，URL 或规范名）"
                             "找**规范内容**：① 知识库文档/附件同名 → 回 `knowledge_id`（正文用 `doc_outline` 取）；"
                             "② 知识库 wiki 页标题/slug 命中 → 直接回正文片段；③ `allow_fetch=true` 且是 URL → 抓取并剥 HTML"
-                            "（内网可能不可达，**默认关**）。都找不到 → `found=false` + `note`：按技能口径标"
+                            "（**内网友好**：`BODHI_HTTP_PROXY` 代理 / `BODHI_REF_TIMEOUT` 超时 / `BODHI_REF_HOSTS` 白名单；"
+                            "失败回**结构化** `reason=timeout｜dns｜tls｜blocked｜http_4xx`，不再只给一句 note）。"
+                            "URL 且 `allow_fetch=false` 会回 `reason=fetch_disabled` + 提示。都找不到 → `found=false`：按技能口径标"
                             "「参考规范不可得」，**只按规则原文判定，不要编造规范内容**。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
                 "reference": {"type": "string", "description": "规则里的参考规范（URL / 规范名 / 文件名）"},
-                "allow_fetch": {"type": "boolean"},
-                "max_chars": {"type": "integer"}},
+                "allow_fetch": {"type": "boolean", "description": "允许抓取 http(s) URL（默认 false）"},
+                "max_chars": {"type": "integer"},
+                "timeout": {"type": "number",
+                            "description": "单次抓取超时秒（默认 8；也可用 BODHI_REF_TIMEOUT）"}},
                 "required": ["reference"]},
         },
         {
@@ -569,8 +573,24 @@ TOOL_SCHEMAS = [
         },
         {
             "name": "context_authority_apply",
-            "description": ("**权威/副本裁决（写，2026-10-19 恢复 ✓）**：`action=decide` 把某跨库同名组的**权威库**写进企业共享概念页（`master`），其余为副本；`action=pull` 从权威**复制正文**到副本页。**必须先跑 `context_authority` 看影响面并拿到用户确认** ✓。参数：`action`(decide|pull) / `slug` / `master` / `kb` / `ticket` / `acknowledge_risks` / `actor`"),
-            "inputSchema": {"type": "object", "properties": {}},
+            "description": ("**权威/副本裁决（写）**：`action=decide` 把某跨库同名组的**权威库**写进企业共享概念页"
+                            "（`master`），其余为副本；`action=pull` 从权威**复制正文**到副本页；"
+                            "`action=detach` **解除副本绑定**（把该库从「## 权威与副本」表摘掉 + 副本页自述改 "
+                            "`role=detached` ⇒ 该库恢复可本地编辑；**不删副本页**；幂等）。"
+                            "**必须先跑 `context_authority` 看影响面并拿到用户确认** ✓。"
+                            "`detach` 传 `apply=false` 只预览（回影响面 + 风险 + ticket）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["decide", "pull", "detach"]},
+                "slug": {"type": "string", "description": "同名组的 slug（概念库里的企业标准页）"},
+                "master": {"type": "string", "description": "decide：权威库（id/名）"},
+                "kb": {"type": "string", "description": "pull/detach：副本库（id/名）"},
+                "ticket": {"type": "string", "description": "来自预览的影响面指纹"},
+                "acknowledge_risks": {"type": "array", "items": {"type": "string"},
+                                      "description": "必须与预览回的 required_risks 完全一致"},
+                "actor": {"type": "string"},
+                "apply": {"type": "boolean",
+                          "description": "detach 专用：false=只预览（默认 true 表示执行）"}},
+                "required": ["action", "slug"]},
         },
         {
             "name": "context_concept_rollback",

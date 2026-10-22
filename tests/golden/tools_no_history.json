@@ -10,11 +10,14 @@
  "job_status",
  "link_candidates",
  "list_link_candidates",
+ "metric_compute",
+ "page_copy",
  "recategorize",
  "resolve_link_candidate",
  "retag_apply",
  "retag_preview",
  "retag_rollback",
+ "rule_publish",
  "rules_of_task_legacy",
  "service_overview"
 ]

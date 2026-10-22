@@ -1080,6 +1080,18 @@ def rebuild_cache() -> dict:
         m_ver, m_sha = _page_ver_sha(master["kb"], master["slug"])
         entry = {"concept_slug": row["slug"], "concept_kb": ckb, "master": master,
                  "master_version": m_ver, "master_hash": m_sha, "replicas": []}
+        # 2026-10-22（detach 解绑）：**表是事实源** ⇒ 只有「## 权威与副本」表里登记为
+        # replica 的库才算副本（进 `replicas` / `replica_protect`）。旧实现按"同名组全量"
+        # 派生 ⇒ 已解绑的库仍被写保护 ✗。兼容：概念页**还没有**该表时保持旧行为。
+        sec_rows = _authority_rows(row["content"])
+        has_table = bool(sec_rows)
+        table_replicas: set = set()
+        for _r0 in sec_rows:
+            _role0 = str(_r0.get("角色") or "").replace("*", "").strip().lower()
+            if _role0.startswith("replica"):
+                _info0 = _resolve_context(_r0.get("上下文"), names)
+                if _info0.get("kb"):
+                    table_replicas.add(_info0["kb"])
         for r in ke_db.psql_csv(
                 "SELECT knowledge_base_id AS kb, slug, COALESCE(version,1) AS version, "
                 "       COALESCE(page_metadata::text,'{}') AS meta FROM wiki_pages "
@@ -1087,8 +1099,12 @@ def rebuild_cache() -> dict:
                 " LIMIT 30" % ke_db.sql_str(norm_slug(row["slug"]))):
             if r["kb"] in (ckb, master["kb"], ke_ontology.resolve_ontology_kb().get("id") or ""):
                 continue
+            if has_table and r["kb"] not in table_replicas:
+                continue            # 未登记 / 已解绑 ⇒ 不再守门、不计入副本
             ver, sha = _page_ver_sha(r["kb"], r["slug"])
             ameta = (_json_load_str(r["meta"], {}) or {}).get(AUTH_MARK) or {}
+            if str(ameta.get("role") or "").strip().lower() == "detached":
+                continue            # 副本页自述已解绑（表可能还没重建）⇒ 同样不守门
             if ameta.get("synced_hash") and ameta.get("synced_hash") != sha:
                 state = "local_drift"
             elif ameta.get("synced_version") and m_ver and int(ameta["synced_version"]) < int(m_ver):
@@ -1242,10 +1258,17 @@ def _upsert_section(content: str, header: str, lines: list) -> str:
     return ("\n".join(src).strip() + "\n\n" + "\n".join([header, ""] + lines)).strip() + "\n"
 
 
-def _authority_body_lines(master: dict, members: list, names: dict) -> list:
-    """生成「## 权威与副本」小节内容（权威=master，其它=replica 只读）。"""
+def _authority_body_lines(master: dict, members: list, names: dict,
+                          exclude_kb: str = "") -> list:
+    """生成「## 权威与副本」小节内容（权威=master，其它=replica 只读）。
+
+    `exclude_kb`（2026-10-22 解绑/`authority_detach`）：把某库从表里**摘掉**——
+    只改登记，**不删副本页**；副本页自述由 detach 单独清（单库写原则）。
+    """
     lines = ["| 上下文 | 角色 | 页 slug | 类 | 说明 |", "|---|---|---|---|---|"]
     for m in members:
+        if exclude_kb and m.get("kb") == exclude_kb:
+            continue
         is_master = m["kb"] == master.get("kb")
         role = "**master**（权威）" if is_master else "replica（副本，只读）"
         note = ("该领域是权威：副本从这里复制" if is_master
@@ -1298,12 +1321,26 @@ def authority_preview(slug: str, master: str = "") -> dict:
                 "members": [{"kb": m["kb"], "kb_name": m["kb_name"], "slug": m["slug"]}
                             for m in members]}
     m_ver, m_sha = _page_ver_sha(chosen["kb"], chosen["slug"])
+    # 2026-10-22（detach）：与 `rebuild_cache` 同口径 —— **表是事实源**
+    # 有「## 权威与副本」表时，只有表里登记为 replica 的库才算副本（否则解绑后预览仍列它 ✗）
+    _table_rep: set = set()
+    for _r0 in current_rows:
+        _role0 = str(_r0.get("角色") or "").replace("*", "").strip().lower()
+        if _role0.startswith("replica"):
+            _i0 = _resolve_context(_r0.get("上下文"), names)
+            if _i0.get("kb"):
+                _table_rep.add(_i0["kb"])
+    _has_table = bool(current_rows)
     replicas = []
     for m in members:
         if m["kb"] == chosen["kb"]:
             continue
-        ver, sha = _page_ver_sha(m["kb"], m["slug"])
         self_meta = (_meta_dict(_one_page(m["kb"], m["slug"]) or {}).get(AUTH_MARK) or {})
+        if str(self_meta.get("role") or "").strip().lower() == "detached":
+            continue                       # 副本页自述已解绑 ⇒ 不再算副本
+        if _has_table and m["kb"] not in _table_rep:
+            continue                       # 未登记/已摘除 ⇒ 不再算副本
+        ver, sha = _page_ver_sha(m["kb"], m["slug"])
         drift = bool(self_meta.get("synced_hash") and self_meta.get("synced_hash") != sha)
         behind = bool(self_meta.get("synced_version") and m_ver
                       and int(self_meta["synced_version"]) < int(m_ver))
@@ -1476,6 +1513,125 @@ def authority_pull(replica_kb: str = "", slug: str = "", ticket: str = "",
                 "permission_why": acl.get("why", ""), "record": str(path.relative_to(REPO)),
                 "note": "只写了副本库（正文版本化 + 元数据自述）；概念页未改动"})
     return out
+
+
+def authority_detach(replica_kb: str = "", slug: str = "", ticket: str = "",
+                     acknowledge_risks: list | None = None, actor: str = "",
+                     tenant: int | None = None, apply: bool = False) -> dict:
+    """**解除副本绑定（写；两段式）**：把某库从概念页「## 权威与副本」表里**摘掉**，并把
+    该副本页的自述改成 `role=detached` ⇒ 该库**恢复可本地编辑**（写保护解除）。
+
+    用户口径（2026-10-22，方案 1-A）：
+    - **不删副本页**（删页走 `audit_purge`/UI，与本动作解耦；两种顺序都安全）；
+    - 两步写入各自**只写一个库**：① 概念库（登记表） ② 副本库（自述）；
+    - **幂等**：表里已无该行 / 自述已 detached / 副本页已删 ⇒ `already_detached`；
+    - `apply=False`（默认）只预览：影响面 + 风险 + `ticket`。
+    """
+    if not slug:
+        return {"error": "需要 slug"}
+    if not replica_kb:
+        return {"error": "需要 kb（要解除哪个库的副本绑定）"}
+    prev = authority_preview(slug, "")
+    if prev.get("error"):
+        return prev
+    concept = prev["concept_kb"]
+    ckb = concept.get("id") or ""
+    page = _one_page(ckb, slug)
+    if page is None:
+        return {"error": "概念页不存在：%s（先 `concept-apply`）" % slug}
+    names = {k["id"]: k["name"] for k in kb_rows()}
+    master = prev["master"]
+    try:
+        rid, rname, _rnote = ke_db.resolve_kb_id(replica_kb)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "副本库解析失败：%s" % exc}
+    if rid == ckb:
+        return {"error": "目标库是**概念库** ⇒ 不受权威/副本管辖"}
+    if rid == master.get("kb"):
+        return {"error": "目标库是**权威库**（%s）⇒ 无需解绑；要换权威请用 action=decide" % rname}
+
+    # 表里是否真登记了这个库（幂等判据之一）
+    in_table = False
+    for _r0 in _authority_rows(page["content"]):
+        _role0 = str(_r0.get("角色") or "").replace("*", "").strip().lower()
+        _info0 = _resolve_context(_r0.get("上下文"), names)
+        if _role0.startswith("replica") and _info0.get("kb") == rid:
+            in_table = True
+            break
+
+    r_page = _one_page(rid, slug)
+    r_ver, r_sha = _page_ver_sha(rid, slug)
+    r_meta = (_meta_dict(r_page).get(AUTH_MARK) or {}) if r_page else {}
+    r_role = str(r_meta.get("role") or "").strip().lower()
+    drift = bool(r_meta.get("synced_hash") and r_sha and r_meta.get("synced_hash") != r_sha)
+    if not in_table and r_role != "replica":
+        return {"ok": True, "action": "detach", "detached": False, "already_detached": True,
+                "slug": slug, "replica": {"kb": rid, "kb_name": rname, "exists": bool(r_page)},
+                "note": "该库不是本组的副本（表里无登记、副本页也无 replica 自述）⇒ 无需解绑"}
+
+    risks = sorted(["replica_detach"] + (["replica_drift_discard"] if drift else []))
+    body_lines = _authority_body_lines(master, prev["members"], names, exclude_kb=rid)
+    body_after = _upsert_section(page["content"], AUTH_SECTION, body_lines)
+    ticket_new = _sha1("detach-v1|%s|%s|%s|%s|%s"
+                       % (ckb, slug, int(page["version"] or 1), rid, text_hash(body_after)))
+    out = {"ok": True, "action": "detach", "apply": bool(apply), "slug": slug,
+           "concept_kb": concept,
+           "concept_page": {"version": int(page["version"] or 1), "page_type": page["page_type"]},
+           "master": master,
+           "replica": {"kb": rid, "kb_name": rname, "slug": slug, "exists": bool(r_page),
+                       "version": r_ver, "role": r_role, "local_drift": drift},
+           "in_table": in_table, "required_risks": risks, "ticket": ticket_new,
+           "body_lines": body_lines, "permission": "read_only（预览）",
+           "generated_at": ke_db.now_text(),
+           "note": "解绑=只摘登记 + 改自述（**不删副本页**）；副本页随即恢复可本地编辑"}
+    if not apply:
+        out["apply_hint"] = ("确认后：`context_authority_apply{action:\"detach\", kb:\"%s\", slug:\"%s\", "
+                             "ticket:\"%s\", acknowledge_risks:%s, apply:true}`"
+                             % (rname, slug, ticket_new, risks))
+        return out
+
+    acl = ke_db.assert_can_write(ckb, tenant if tenant is not None else ke_db.caller_tenant())
+    if not acl["allowed"]:
+        return {"error": "need_write_permission", "permission": acl,
+                "hint": "detach 第①步写概念库（登记表）"}
+    if str(ticket or "") != ticket_new:
+        return {"error": "ticket 不匹配（影响面已变化或未先预览）→ need_repreview=true",
+                "need_repreview": True, "ticket": ticket_new}
+    if sorted(acknowledge_risks or []) != risks:
+        return {"error": "风险确认不一致：需 acknowledge_risks=%s" % risks, "required_risks": risks}
+    # ① 概念库：摘掉该行（单库写）
+    written = ke_pages.upsert_page(ckb, slug, page["title"], page["page_type"], body_after,
+                                   summary="", tag="bodhi-cxt-detach",
+                                   metadata={"concept": dict((_meta_dict(page).get("concept") or {}))})
+    # ② 副本库：自述改 detached（单库写；副本页已删则跳过 ⇒ 与删页任意顺序都安全）
+    cleared = "missing"
+    if r_page is not None:
+        meta = {"role": "detached",
+                "master": {"kb": master["kb"], "kb_name": master.get("kb_name", ""),
+                           "slug": master["slug"], "page_type": master.get("page_type", "")},
+                "detached_at": ke_db.now_text(), "actor": actor or "unknown",
+                "previous": {"role": r_role,
+                             "synced_version": int(r_meta.get("synced_version") or 0),
+                             "synced_hash": str(r_meta.get("synced_hash") or "")}}
+        ke_db.psql("UPDATE wiki_pages SET page_metadata = COALESCE(page_metadata,'{}'::jsonb) || %s::jsonb, "
+                   "updated_at = now() WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+                   % (ke_db.sql_json({AUTH_MARK: meta}), ke_db.sql_str(rid), ke_db.sql_str(slug)))
+        cleared = "detached"
+    cache = rebuild_cache()
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    path = HISTORY_DIR / ("detach-%s.json" % ticket_new)
+    _json_dump(path, {"kind": "authority_detach", "ticket": ticket_new, "slug": slug,
+                      "at": ke_db.now_text(), "actor": actor or "unknown", "master": master,
+                      "replica_kb": rid, "replica_page_meta": cleared,
+                      "before_content": page["content"], "after_content": body_after,
+                      "concept_kb": concept, "permission": acl})
+    return {"ok": True, "action": "detach", "apply": True, "detached": True, "slug": slug,
+            "replica": {"kb": rid, "kb_name": rname, "exists": bool(r_page), "version": r_ver,
+                        "metadata": cleared},
+            "concept_page_version": written.get("after_version"),
+            "cache": cache.get("stats"), "permission": acl.get("mode"),
+            "record": str(path.relative_to(REPO)),
+            "note": "已解绑：副本页保留但**恢复可本地编辑**；权威表已摘除该行"}
 
 
 def lookup(kb_ids: list[str] | None = None, q: str = "", slug: str = "", limit: int = 20) -> dict:

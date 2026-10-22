@@ -2155,8 +2155,10 @@ def context_concept_rollback(ticket: str) -> dict:
 
 def context_authority_apply(action: str, slug: str, master: str = "", kb: str = "",
                             ticket: str = "", acknowledge_risks: list | None = None,
-                            actor: str = "") -> dict:
-    """**写**：`action=decide` 写概念库（登记权威）；`action=pull` 写副本库（从权威复制）。"""
+                            actor: str = "", apply: bool = True) -> dict:
+    """**写**：`decide` 写概念库（登记权威）；`pull` 写副本库（从权威复制）；
+    `detach` 解除副本绑定（摘登记 + 改自述；`apply=false` 只预览）。
+    """
     act = str(action or "").strip().lower()
     ack = [str(x) for x in (acknowledge_risks or [])]
     if act == "decide":
@@ -2165,7 +2167,10 @@ def context_authority_apply(action: str, slug: str, master: str = "", kb: str = 
     if act == "pull":
         return ke_context.authority_pull(str(kb or ""), str(slug or ""), str(ticket or ""), ack,
                                          actor=str(actor or ""), apply=True)
-    return {"error": "action 只能是 decide / pull"}
+    if act == "detach":
+        return ke_context.authority_detach(str(kb or ""), str(slug or ""), str(ticket or ""), ack,
+                                           actor=str(actor or ""), apply=bool(apply))
+    return {"error": "action 只能是 decide / pull / detach"}
 
 
 def rebuild_wiki_from_graph(kb_id: str = "", dry_run: bool = True) -> dict:
@@ -2410,9 +2415,11 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return ke_import.refresh_metadata(str(args.get("kb_id", "")), bool(args.get("dry_run", False)),
                                           int(args.get("limit", 5000) or 5000))
     if name == "reference_lookup":
+        _to = args.get("timeout")
         return ke_review.reference_lookup(str(args.get("kb_id", "")), str(args.get("reference", "")),
                                           bool(args.get("allow_fetch", False)),
-                                          int(args.get("max_chars", 6000) or 6000))
+                                          int(args.get("max_chars", 6000) or 6000),
+                                          float(_to) if _to not in (None, "") else 8.0)
     if name == "import_state":
         return ke_import.state(str(args.get("batch", "")))
     if name == "audit_purge":
@@ -2553,7 +2560,8 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                        str(args.get("master", "")), str(args.get("kb", "")),
                                        str(args.get("ticket", "")),
                                        args.get("acknowledge_risks") or [],
-                                       str(args.get("actor", "")))
+                                       str(args.get("actor", "")),
+                                       bool(args["apply"]) if "apply" in args else True)
     raise RuntimeError("未知工具：%s" % name)
 
 
