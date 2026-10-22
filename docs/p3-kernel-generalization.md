@@ -84,3 +84,10 @@
 - 用例 `tests/test_mcp_tools_page_copy.py`：副本 slug/类型正确 + 源页 version 不变 ✓
 - 踩坑：SQL 空串误写成双引号（PostgreSQL 当标识符）⇒ `zero-length delimited identifier`；改用 `sql_str("")` 后通过
 - 后续：rule_publish（hash 变化=发布成功）、metric_compute（指标可复算）
+
+## 11. P3.5-2 rule_publish 已落地（2026-10-22）
+- `ke_rule_publish.py` 新增 `ruleset_hash(kb, spec)`（按 slug 排序的 ruleHash 连接 + sha1）与 `publish_with_hash(kb, spec, apply)`
+- 回执字段：`hash_before` / `hash_after` / `changed` / `published` / `rules_before/after` / `reason` / `stamp`。**hash 变化 = 发布已生效**；dry_run 只算不写
+- 注册 MCP 工具 `rule_publish`（schema + 分发）⇒ 工具数 **32 → 33**
+- 用例 `tests/test_mcp_tools_rule_publish.py`：dry_run 回执齐字段 + sha1 长度 40 + 不写库 + **同输入两次 hash 一致（可复算）** ✓
+- 后续：metric_compute（指标可复算 + 回执带口径）

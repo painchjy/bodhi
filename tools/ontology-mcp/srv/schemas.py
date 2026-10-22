@@ -592,4 +592,9 @@ TOOL_SCHEMAS = [
                 "required": ["kb_id", "src_slug"],
             },
         },
+        {
+            "name": "rule_publish",
+            "description": "规则发布：体检+评测双门禁通过才写库；回执给规则集 hash_before/hash_after（hash 变化=发布生效）。默认 dry_run。",
+            "inputSchema": {"type": "object", "properties": {"kb_id": {"type": "string"}, "spec": {"type": "string", "description": "规则集标识（如 policy:<策略名> 或 spec 片段）"}, "apply": {"type": "boolean", "description": "true 才真正写库（默认 false=dry_run）"}}, "required": ["kb_id", "spec"]},
+        },
     ]

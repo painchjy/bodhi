@@ -90,3 +90,30 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def ruleset_hash(kb: str, spec: str) -> dict:
+    """规则集指纹：按 slug 排序后的 ruleHash 连接（sha1）——用于判断"发布是否生效"。"""
+    import hashlib
+    import ke_lookup
+    lk = ke_lookup.knowledge_lookup(kb, mode="rules", spec=spec)
+    rows = [{"slug": r.get("slug"), "ruleHash": r.get("ruleHash") or ""} for r in (lk.get("rules") or [])]
+    rows.sort(key=lambda x: str(x.get("slug")))
+    blob = json.dumps(rows, ensure_ascii=False, sort_keys=True)
+    return {"count": len(rows), "hash": hashlib.sha1(blob.encode("utf-8")).hexdigest(), "rules": rows}
+
+
+def publish_with_hash(kb: str, spec: str, apply: bool = False) -> dict:
+    """发布 + **规则集 hash 前后对比**：hash 变化 = 发布已生效（写库）。dry_run 只算不写。"""
+    before = ruleset_hash(kb, spec)
+    res = publish(kb, spec, apply=apply)
+    after = ruleset_hash(kb, spec)
+    return {"ok": bool(res.get("ok")), "apply": bool(apply),
+            "hash_before": before["hash"], "hash_after": after["hash"],
+            "changed": before["hash"] != after["hash"],
+            "rules_before": before["count"], "rules_after": after["count"],
+            "published": bool(apply and res.get("ok") and res.get("published")),
+            "reason": res.get("reason"), "check_errors": res.get("check_errors"),
+            "stamp": res.get("stamp"), "rules": res.get("rules"),
+            "failed": res.get("failed"),
+            "note": "hash 变化 = 发布已生效（已写库）" if apply else "dry_run：只算 hash、不写库"}
