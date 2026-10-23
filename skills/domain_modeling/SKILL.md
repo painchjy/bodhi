@@ -50,7 +50,7 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
 
 1. **先有会话页**：落库前确认本会话已有 `bmm:KnowledgeSession` 页（起始页 `session/<会话编号>`；上下文过长**且**一组高相关知识已确认更新完成时开分页 `session/<会话编号>/p<序号>`）。没有 → 按 `session_provenance` 建；
 2. **落库带会话身份**：`save_knowledge(..., session_no="<运行时给的会话编号>", session={knowledge_id, round_no, cursor, next_cursor, doc_title})` —— `session_no` **必传**（服务端据此取「会话选择的智能体」注 `agentName`、并把 `bmm:sourceSession` 自动挂到本次所有页）；并**把会话编号/分页序号写进页面「原文依据」小节**；
-3. **每条依据 = `source_text`（原句）+ 会话定位**（分页序号 + 轮次/段落）—— 只写原句不写定位 → `audit_scan` 的 F3 可能仍绿，但**溯源链是断的**（评审问题将追不到出处）。**定位必须落成两个地方**：
+3. **每条依据 = `source_text`（原句）+ 会话定位**（分页序号 + 轮次/段落）—— 只写原句不写定位 → `audit_scan` 的 F3 可能仍绿，但**溯源链是断的**（后续核对将追不到出处）。**定位必须落成两个地方**：
    - **节点属性 `bmm:sourceLocator`**（`nodes[].attributes.sourceLocator`，如 `"session/S-20261003-01/p2#轮3/段5"`）→ 这样**来源是可查询的数据属性**；
    - 页面「## 原文依据」的来源行（工具会把 locator 渲染进去）。
    > 示例：`attributes: {"sourceLocator": "session/S-20261003-01/p2#轮3/段5"}`；`source_text` 仍必填（原句）。

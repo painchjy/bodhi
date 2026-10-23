@@ -91,6 +91,6 @@ $T verify <源kb_id或目录或zip> --to <目标kb_id>          # 六项比对
 
 1. 导出：`export <kb> ./kb-xfer` → 看 `manifest.json` 的计数（页/目录/版本/节点/边）**对不对得上**；
 2. 打包：`tar czf kb-xfer.tgz kb-xfer` → 下载到本地；
-3. 内网上传 → `tar xzf` → `import ./kb-xfer --new-kb "技术方案评审领域模型" --keep-ids`；
+3. 内网上传 → `tar xzf` → `import ./kb-xfer --new-kb "<目标库名>" --keep-ids`；
 4. `verify ./kb-xfer --to <新库id>` → **六项全 ✅**；
 5. `audit_scan(kb_id=<新库id>)` 体检无新问题 → 再向用户汇报"迁移完成 + 计数 + 一致性结论"。

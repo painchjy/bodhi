@@ -1,14 +1,5 @@
 {
- "/skills/README.md": 4,
  "/skills/_deprecated.md": 10,
- "/skills/domain_modeling/SKILL.md": 1,
- "/skills/kb_transfer/SKILL.md": 2,
- "/skills/knowledge_extract/SKILL.md": 2,
- "/skills/knowledge_plan/SKILL.md": 3,
- "/skills/report_compose/CONSTRAINTS.md": 5,
- "/skills/report_compose/SKILL.md": 42,
- "/skills/rule_judge/SKILL.md": 13,
- "/skills/session_provenance/SKILL.md": 4,
  "/tools/ke-core/ke_audit.py": 19,
  "/tools/ke-core/ke_context.py": 1,
  "/tools/ke-core/ke_eval.py": 5,
@@ -16,8 +7,9 @@
  "/tools/ke-core/ke_fp.py": 1,
  "/tools/ke-core/ke_graph.py": 1,
  "/tools/ke-core/ke_import.py": 5,
- "/tools/ke-core/ke_lookup.py": 1,
+ "/tools/ke-core/ke_lookup.py": 4,
  "/tools/ke-core/ke_ontology.py": 1,
+ "/tools/ke-core/ke_overview.py": 2,
  "/tools/ke-core/ke_pages.py": 1,
  "/tools/ke-core/ke_plan.py": 9,
  "/tools/ke-core/ke_report.py": 32,
@@ -32,5 +24,7 @@
  "/tools/ke-core/ke_score.py": 1,
  "/tools/ke-core/ke_sheet.py": 1,
  "/tools/ontology-mcp/refresh_design.py": 1,
- "/tools/ontology-mcp/server.py": 25
+ "/tools/ontology-mcp/server.py": 12,
+ "/tools/ontology-mcp/srv/http.py": 6,
+ "/tools/ontology-mcp/srv/schemas.py": 5
 }

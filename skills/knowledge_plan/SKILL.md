@@ -28,7 +28,7 @@ guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链
 2. `ontology_types("<模型>")` **现查**（多模型逐个查；`requires`/`affects` 提示依赖）；
 3. 每个知识项映射**候选类**（可多个）：词面/别名匹配（`knowledge_lookup` 类模式），
    并把匹配理由写进 `why`（可复核 ✓）；
-4. **外部系统已管理的数据**（如"开源软件清单"由 IT 工作平台维护）⇒ **不是本体类** ✗：
+4. **外部系统已管理的数据**（如"外部清单对象"由 IT 工作平台维护）⇒ **不是本体类** ✗：
    该项标 `source:"external"` + `dataobject:"<DataObject 页>"` + `via:"stub|api"` ✓。
 
 ## 2. 去重
@@ -55,7 +55,7 @@ guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链
   "items": [{
      "need": "技术栈及其版本", "class": "bmm:SoftwareProduct",   // 或 null（歧义/外部）
      "candidates": ["bmm:SoftwareProduct","…"],                   // 多候选时非空
-     "source": "ontology|external", "dataobject": "bpmn/dataobject/开源软件清单",
+     "source": "ontology|external", "dataobject": "bpmn/dataobject/<外部清单对象>",
      "via": "stub", "collect_at": "each|parent", "module": "bmm",
      "expert_role": "企业架构分析专家…", "from_rules": ["…"], "why": "…"
   }],
@@ -84,7 +84,7 @@ guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链
 ## 8. 验收 / 评测（3 组固定输入，对比 A/B/C 用）
 | 输入 | 期望 |
 |---|---|
-| 1 条规则（技术栈及版本） | 1 项；`source=external`（DataObject「开源软件清单」）✓；**不产生**本体类 ✗ |
+| 1 条规则（版本类事实） | 1 项；`source=external`（DataObject「<外部清单对象>」）✓；**不产生**本体类 ✗ |
 | 2 条同类规则（技术栈 + 设备申请） | 父子整合：`bmm:HardwareAsset` ⊂ `bmm:ITAsset` ⇒ LCA=`bmm:ITAsset`，`collect_at` 明确 ✓ |
 | 2 条跨模型规则（系统等级 ⊂ bmm；报告字段 ⊂ bpmn） | `groups` 两组 ✓ + **两个专家角色** ✓ + `questions` 中 model 歧义（若未指定 ✓） |
 断言：① 分类命中 ✓ ② 整合正确 ✓ ③ 模型/角色正确 ✓ ④ 同输入 `hash` 稳定 ✓ ⑤ `questions` 只含真歧义（不滥问 ✓）。
