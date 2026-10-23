@@ -413,8 +413,9 @@ class MCPHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/bodhi/page/attributes"):
             # 数据属性**读**口（方案 D，2026-10-13，只读）：前端「数据属性」面板用 ——
-            # 回 `attributes`（事实源现值）、`source`（meta/graph/content）、`editable`（仅 entity）、
-            # `allowed`（该类可编辑属性）、`drift`（三处不一致的键）。
+            # 回 `attributes`（事实源现值）、`source`（meta/graph/content）、`editable`、
+            # `allowed`（该类可编辑属性；**已剔除正文载体** `schema:articleBody`/`bmm:wikiContent`）、
+            # `body_keys`（正文键，仅说明用；正文改走 `stage="report"`）、`drift`（三处不一致的键）。
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
                 self._json(ke_pages.page_attributes(str(params.get("kb_id", "")),

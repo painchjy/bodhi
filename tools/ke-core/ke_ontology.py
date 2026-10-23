@@ -786,6 +786,35 @@ def data_properties_for(type_name: str) -> dict[str, dict]:
             out[name] = meta
     return out
 
+# ---------------------------------------------------------------------------
+# 正文载体属性（**值 = 整篇正文**，不是「数据属性面板」里的可编辑项）
+# ---------------------------------------------------------------------------
+# 口径（2026-10-23 用户实测 + 裁定）：正文只有一份事实源（图节点 `articleBody`，
+# 旧键 `wiki_content` 为兼容别名；PG `content` 是渲染缓存）。因此这类属性
+#   · **不进属性面板**（`ke_pages.page_attributes().allowed`）
+#   · **写口拒收**（`set_page_attributes` / `write_knowledge(attributes=…)`）
+#   · 存量残留由 `migrate_article_body` 清
+# 这里只按**本体属性名**识别（`schema:articleBody` 及其等价别名 `bmm:wikiContent`）——
+# 两处 `owl:equivalentProperty` 已在 `docs/ontology/*完整版.ttl` 声明。
+# TODO：编译器支持 `bodhi:hiddenFromEditor` 后改为读本体标记（届时本清单退场）。
+BODY_PROPERTY_LOCALS = ("articlebody", "wikicontent")
+
+
+def is_body_property(name: str) -> bool:
+    """该属性名是否「正文载体」（按本地名，忽略模块前缀与大小写）。"""
+    return str(name or "").split(":")[-1].strip().lower() in BODY_PROPERTY_LOCALS
+
+
+def body_properties() -> list[str]:
+    """本体里实际声明的正文载体属性（prefixed 名）；本体不可用时回退常见键名。"""
+    try:
+        names = [n for n in (data_properties().get("properties") or {}) if is_body_property(n)]
+    except Exception:  # noqa: BLE001
+        names = []
+    return sorted(set(names) | {"schema:articleBody", "bmm:wikiContent"})
+
+
+
 
 def target_closure(rel_type: str, meta: dict[str, dict] | None = None) -> list[str]:
     """某对象属性的 range 闭包（**进程级缓存**，P3-0g：每条边做 range 校验都会调它）。"""

@@ -32,7 +32,7 @@
 
 | # | 工具 | 改动 | 验收 |
 |---|---|---|---|
-| T1 | `knowledge_lookup` | 已支持 `page_type` / `cls` / `instances`；补：`applicableReportType` 作为**属性过滤**（`attrs={"schema:applicableReportType": "<类名>"}`） | 用类名能精确拿到 1~N 个模板 |
+| T1 | `page_attributes` / `page_attributes_set` | ✅ **已实现（2026-10-23）**：**正文载体不是数据属性** —— `ke_ontology.is_body_property()`（`schema:articleBody` 与等价别名 `bmm:wikiContent`）⇒ 面板 `allowed` 不列、写口拒收（指路 `stage="report"`）、写路径静默剔除、`migrate_article_body` 清残留；面板另回 `body_keys`/`body_hint` | `tests/test_page_attributes_body_filter.py`（4）+ `tests/test_page_attributes_matrix.py`（4：报告类/模板类/有继承/无继承 各 2 个类实例页，期望值由本体数据属性动态推导） |
 | T2 | `ke_report` | ✅ **已实现（2026-10-23）**：`resolve_template`（`schema:DocumentTemplate` + `applicableReportType`，多候选按 `templateSelector`，仍多 ⇒ `ambiguous`）/ `parse_template_sections`（解析模板正文「章节结构」表）/ `check_report_md(md, sections)`（按模板必填章节校验）；`save_knowledge(stage="report")` 回执给 `template` / `missing_required_sections` / `template_fallback_reason` | `tests/test_report_template.py`（6 项） |
 | T3 | 巡检 `audit_kb` | ✅ **已实现（2026-10-23）**：`audit_scan(scope="template")` → `ke_audit.check_template_sections`：**T1**（medium，文档类页缺模板必填章节）/ **T2**（low，模板页解析不出章节表、未声明 `applicableReportType`、本库无模板需指定领域库、同报告类**多候选**）。**模板以领域库为准** ⇒ 用 `template_kb_id` 指定模板库（缺省只看本库，不跨库乱扫）；**多候选不静默**（只报不选、不判章节） | `tests/test_report_template.py::test_audit_*`（3 例） |
 | T4 | `page_attributes_set` | 模板页属性写入放开这两个 schema 属性（属于 `schema:DocumentTemplate`，已在 `class_attributes` ✓） | 模板页可写 `applicableReportType`/`templateSelector` |

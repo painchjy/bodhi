@@ -117,7 +117,31 @@
 真实环境实测（任务库 + `template_kb_id=技术方案评审领域模型`）：**4 份真实评审报告全部 T1 medium**
 （各缺「② 总体结论、③ 逐项评审结论」，模板 v4）—— 属**数据问题**（报告章节名与模板不一致），不是代码缺陷。
 
-## 4.3 参考规范（已落地）
+### 属性面板：正文载体属性退场（✅ 已完成 · T1）
+
+**问题**（用户 UI 实测）：报告页「数据属性」面板列出 `bmm:wikiContent` / `schema:articleBody`（正文！），
+模板页的 `适用报告类型` / `模板选用规则` 反而不明显。
+
+**口径**：正文只有**一份事实源**（图节点 `articleBody`；`wikiContent` 是兼容别名；PG `content` 是渲染缓存）
+⇒ 正文载体**不是**可编辑数据属性。落地：
+
+| 位置 | 行为 |
+|---|---|
+| `ke_ontology` | `is_body_property()` / `body_properties()`（按本体属性名识别 `schema:articleBody` 及等价别名 `bmm:wikiContent`；单一事实源） |
+| `GET /bodhi/page/attributes` | `allowed` **不列**正文键；三处现值里剔出正文键，另回 `body_keys` + `body_hint`；`hint` 按模式区分（document ⇒ 正文走 `stage="report"`） |
+| `page_attributes_set` / `write_knowledge` | 正文键**拒收/剔除**（拒收时指路 `stage="report"`） |
+| `migrate_article_body` | 清 PG 残留（键清单来自 `body_properties()`，不再写死两个键） |
+
+**实测（真实库）**：模板页面板 = 来源定位 / **适用报告类型** / **模板选用规则** / 定义 / 备注；
+报告页面板 = 来源定位 / 定义 / 备注 —— **正文键全部消失** ✓。
+
+**用例（不写死，按本体推导）**：
+- `tests/test_page_attributes_body_filter.py`（4）：面板不列正文 / 写口拒收 / 写路径剔除 / 模板页列出两个 schema 属性
+- `tests/test_page_attributes_matrix.py`（4）：**报告类 ×2、模板类 ×2、有继承 ×2、无继承 ×2** 的类实例页，
+  逐页断言「含 `skos:definition`+`skos:note`」「不含正文键」「`allowed` == 本体数据属性（含继承）− 正文」——
+  期望集由 `ke_ontology.data_properties_for()` 计算，**不硬编码任何键清单** ✓
+
+
 
 - 环境：`BODHI_HTTP_PROXY` / `BODHI_REF_TIMEOUT`(默认 8s) / `BODHI_REF_HOSTS`(白名单，空=不限)。
 - 失败结构化：`reason ∈ timeout｜dns｜tls｜blocked｜conn_refused｜http_4xx｜http_5xx｜empty`。

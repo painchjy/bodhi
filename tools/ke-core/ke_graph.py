@@ -219,29 +219,34 @@ def backfill_article_body(kb_id: str = "", dry_run: bool = True) -> dict:
 
 def strip_wiki_content_attr(kb_id: str = "", dry_run: bool = True) -> dict:
     """**迁移 · 清 PG 冗余正文键**：删掉 `page_metadata.ontology.attributes` 里的
-    `wikiContent` / `bmm:wikiContent` —— 正文事实源是图节点 `articleBody`，
-    属性里再存一份只会漂移（且页面/回执体积翻倍）✗。`dry_run=True`（默认）只报清单。
+    **正文载体属性**（`schema:articleBody` / `articleBody` / `wikiContent` / `bmm:wikiContent`）
+    —— 正文事实源是图节点 `articleBody`，属性里再存一份只会漂移（且页面/回执体积翻倍）✗。
+    `dry_run=True`（默认）只报清单。键清单来自 `ke_ontology.body_properties()`（不写死 ✗）。
     """
     import ke_db  # noqa: PLC0415
+    import ke_ontology  # noqa: PLC0415
+
+    keys = sorted({k for k in ke_ontology.body_properties()} | {"articleBody", "wikiContent"})
     cond = ("knowledge_base_id = %s AND " % ke_db.sql_str(kb_id)) if kb_id else ""
+    where_keys = " OR ".join(
+        "COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) ? %s" % ke_db.sql_str(k)
+        for k in keys)
     rows = ke_db.psql_csv(
         "SELECT knowledge_base_id AS kb, slug FROM wiki_pages "
-        " WHERE deleted_at IS NULL AND %s"
-        "(COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) ? 'wikiContent' "
-        " OR COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) ? 'bmm:wikiContent')"
-        % cond)
+        " WHERE deleted_at IS NULL AND %s(%s)" % (cond, where_keys))
     pages = [{"kb_id": r["kb"], "slug": r["slug"]} for r in rows[:50]]
     if dry_run:
         return {"ok": True, "dry_run": True, "hits": len(rows), "pages": pages,
-                "truncated": len(rows) > 50}
+                "keys": keys, "truncated": len(rows) > 50}
+    drop = " ".join("- %s" % ke_db.sql_str(k) for k in keys)
     for r in rows:
         ke_db.psql(
             "UPDATE wiki_pages SET page_metadata = jsonb_set(page_metadata, '{ontology,attributes}', "
-            "(COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) - 'wikiContent' "
-            " - 'bmm:wikiContent'), false), updated_at = now() "
+            "(COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) %s), false), "
+            "updated_at = now() "
             "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
-            % (ke_db.sql_str(r["kb"]), ke_db.sql_str(r["slug"])), stdin=True)
-    return {"ok": True, "dry_run": False, "cleaned": len(rows), "pages": pages}
+            % (drop, ke_db.sql_str(r["kb"]), ke_db.sql_str(r["slug"])), stdin=True)
+    return {"ok": True, "dry_run": False, "cleaned": len(rows), "pages": pages, "keys": keys}
 
 
 def rebuild_kb_wiki(kb_id: str, dry_run: bool = False) -> dict:

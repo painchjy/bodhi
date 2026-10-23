@@ -826,6 +826,9 @@ def page_attributes(kb_id: str, slug: str) -> dict:
         meta = {}
     onto = meta.get("ontology") or {}
     props = ke_ontology.data_properties_for(page_type) or {}
+    # 2026-10-23（T1）：**正文载体不是可编辑数据属性** —— 面板不列、写口拒收（正文走 `stage="report"`）
+    body_keys = sorted({k for k in props if ke_ontology.is_body_property(k)})
+    props = {k: v for k, v in props.items() if not ke_ontology.is_body_property(k)}
     mode = ke_ontology.render_mode(page_type)
 
     def _norm(data: dict) -> dict:
@@ -836,6 +839,14 @@ def page_attributes(kb_id: str, slug: str) -> dict:
     in_meta = _norm((onto.get("attributes") or {}))
     in_graph = _norm(_attrs_from_graph(kb_id, slug, props))
     in_body = _norm(_attrs_seed_from_content(page_type, row["content"], props))
+    # 正文载体键（`schema:articleBody` / `bmm:wikiContent`）**不算属性**：从三处现值里剔出，
+    # 只作为 `body_keys` 告诉面板/调用方"正文别在属性里改"（2026-10-23 T1）
+    body_keys = sorted(set(body_keys) | {k for k in (_raw_meta_keys | set(in_meta) | set(in_graph))
+                                         if ke_ontology.is_body_property(k)})
+    for _d in (in_meta, in_graph, in_body):
+        for _k in [k for k in _d if ke_ontology.is_body_property(k)]:
+            _d.pop(_k, None)
+    _raw_meta_keys = {k for k in _raw_meta_keys if not ke_ontology.is_body_property(k)}
     # ④ `summary`（WeKnora 原生「定义」框）——2026-10-15 用户口径：**不再当取值兜底**
     #   （否则会把"摘要里有、知识里没有"误判成一致 = 假一致）；它只参与 **drift 比对** 与写侧同步。
     skey = next((k for k in sorted(_raw_meta_keys)     # 页面实际在用的"定义键"优先（如 skos:definition）
@@ -863,10 +874,13 @@ def page_attributes(kb_id: str, slug: str) -> dict:
         if known != {sval}:
             drift.append(skey)
     drift = sorted(set(drift))
-    hint = ("数据属性 = 事实源（三处同写：元数据 + 图节点 + 正文属性段）；"
-            "与原生「定义」框同步的键（%s）同时写 `summary`。"
-            "改值走「数据属性」面板（HTTP `POST /bodhi/page/attributes`）或 `page_attributes_set`；不要改正文。"
-            % skey)
+    hint = (("正文为主（document）：正文改 `stage=\"report\"`（同 slug 覆盖）；"
+             "下面的数据属性只作结构化标记（如 `schema:applicableReportType`）")
+            if mode == "document" else
+            ("数据属性 = 事实源（三处同写：元数据 + 图节点 + 正文属性段）；"
+             "与原生「定义」框同步的键（%s）同时写 `summary`。"
+             "改值走「数据属性」面板（HTTP `POST /bodhi/page/attributes`）或 `page_attributes_set`；不要改正文。"
+             % skey))
     allowed = []
     for k, meta in props.items():                      # 面板要显示「中文标签（本体键）」
         allowed.append("%s（%s）" % ((meta or {}).get("label") or str(k), str(k)))
@@ -878,6 +892,8 @@ def page_attributes(kb_id: str, slug: str) -> dict:
             "editable": True,                  # 2026-10-15 用户口径：**不再判断**（面板一律可编辑；
                                                # 非法键由写口 `set_page_attributes` 拒绝）
             "attributes": attrs, "source": source, "allowed": allowed, "summary_key": skey,
+            "body_keys": body_keys, "body_hint": ("正文不是数据属性：改正文请走 "
+                                                  "`save_knowledge(stage=\"report\")`（同 slug 覆盖）"),
             "rendered": in_body, "in_meta": in_meta, "in_graph": in_graph, "in_summary": in_summary,
             "drift": drift, "hint": hint}
 
@@ -925,16 +941,25 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
     onto = dict(meta.get("ontology") or {})
     mode = ke_ontology.render_mode(page_type)
     # 2026-10-14 用户口径：**不再按渲染模式拒改**（document/report 页若有数据属性，同样可编辑）。
+    # 2026-10-23（T1）：**正文载体键一律拒收** —— 正文只有一份事实源（图 `articleBody`），
+    # 属性里再存一份必然漂移 ✗；改正文走 `save_knowledge(stage="report")`。
+    _spa_body = [k for k in (patch or {}) if ke_ontology.is_body_property(k)]
+    if _spa_body:
+        return {"ok": False, "slug": slug, "page_type": page_type, "body_keys": _spa_body,
+                "error": ("正文不是数据属性：%s —— 改正文请走 `save_knowledge(stage=\"report\")`"
+                          "（同 slug 覆盖）" % "、".join(_spa_body))}
     # 2026-10-17（用户口径 ✓）：**属性键必须在类本体的数据属性声明里** ✓ —— 否则拒改 ✗
     _spa_allowed = {str(k).split(":")[-1].lower()
-                    for k in (ke_ontology.data_properties_for(page_type) or {})}
+                    for k in (ke_ontology.data_properties_for(page_type) or {})
+                    if not ke_ontology.is_body_property(k)}
     if _spa_allowed and patch:
         _spa_bad = [k for k in patch if str(k).split(":")[-1].lower() not in _spa_allowed]
         if _spa_bad:
             return {"ok": False, "slug": slug, "page_type": page_type,
                     "unknown_keys": _spa_bad, "allowed": sorted(_spa_allowed),
                     "error": "这些键不是 %s 的本体数据属性：%s" % (page_type, "、".join(_spa_bad))}
-    props = ke_ontology.data_properties_for(page_type) or {}
+    props = {k: v for k, v in (ke_ontology.data_properties_for(page_type) or {}).items()
+             if not ke_ontology.is_body_property(k)}
     if not props:
         return {"ok": False, "slug": slug, "page_type": page_type,
                 "error": "本体面里取不到 %s 的数据属性（确认 page_type 正确、本体模型/图可用）" % page_type}
@@ -1366,7 +1391,9 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     attrs = dict(spec.get("attributes") or {})
     # 2026-10-22（4.2 前置）：**正文不进属性** —— 事实源是图节点 `articleBody`（PG `content` 只是渲染缓存）；
     # 属性里再存一份 `wikiContent` 只会漂移、且让页面/回执体积翻倍 ✗（迁移见 ke_graph.strip_wiki_content_attr）
-    for _k in ("wikiContent", "bmm:wikiContent"):
+    # 2026-10-23（T1）：按**正文载体属性**统一剔除（`schema:articleBody` 与等价别名 `bmm:wikiContent`）
+    dropped_body = sorted(k for k in attrs if ke_ontology.is_body_property(k))
+    for _k in dropped_body:
         attrs.pop(_k, None)
     # 2026-10-17（用户口径 ✓）：**属性必须是本体声明的数据属性** ✓ —— 否则拒写 ✗
     #   反例：`verdicts` / `ruleSet` / `columns`（统计与列规范 ✗）—— 统计写正文 ✓、
