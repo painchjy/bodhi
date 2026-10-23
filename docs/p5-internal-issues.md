@@ -97,7 +97,25 @@
   → `check_report_md(md, sections)`（按模板**必填**章节校验，只告警不拒写）
 - **回执可追溯**：`template`（slug/version/章节数/必填数/候选）、`missing_required_sections`、
   `template_fallback_reason`（没用上模板的原因）
-- 用例：`tests/test_report_template.py`（6 例：模板页直写 / 自动选中 / 缺必填章节 / 换模板 / 无模板回落 / graph 跳过文档类）
+- 用例：`tests/test_report_template.py`（9 例：模板页直写 / 自动选中 / 缺必填章节 / 换模板 / 无模板回落 /
+  T3 巡检 T1 / T3 模板不可用 T2 / T3 领域库模板 + 多候选不静默 / graph 跳过文档类）
+
+### W4b-T3 巡检"模板章节完整性"（✅ 已完成）
+
+`audit_scan(scope="template")` → `ke_audit.check_template_sections`（只读）：
+
+| 检查 | 严重度 | 判定 |
+|---|---|---|
+| **T1** | medium | 文档类页（`render_mode=document`）按其 `applicableReportType` 找到模板后，**缺模板声明的必填章节**（每页一条，detail 列缺哪些） |
+| **T2** | low | 模板页**解析不出章节表** / **未声明 `applicableReportType`** / **本库无模板**（提示指定领域库）/ **同报告类多候选**（只报不选） |
+
+口径（2026-10-23 用户裁定）：
+- **模板以领域库为准** ⇒ 用 `template_kb_id`（库名或 UUID，直查 `knowledge_bases` 不走缓存）指定模板库；
+  缺省**只看本库**，不跨库乱扫 ✗；
+- **多候选不静默**：多份模板同适用 ⇒ 只报 T2、不选、也不判章节 ✓。
+
+真实环境实测（任务库 + `template_kb_id=技术方案评审领域模型`）：**4 份真实评审报告全部 T1 medium**
+（各缺「② 总体结论、③ 逐项评审结论」，模板 v4）—— 属**数据问题**（报告章节名与模板不一致），不是代码缺陷。
 
 ## 4.3 参考规范（已落地）
 
