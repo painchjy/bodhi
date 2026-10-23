@@ -1,4 +1,4 @@
-@prefix : <https://schema.org/> .
+@prefix schema: <https://schema.org/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -12,7 +12,7 @@
 # ============================================================
 # 1. 创作作品基类（报告的父类）
 # ============================================================
-:CreativeWork rdf:type owl:Class ;
+schema:CreativeWork rdf:type owl:Class ;
     rdfs:label "创作作品"@zh ;
     rdfs:comment "可被创作/编排的内容基类：报告、模板等整篇正文的载体都归它。"@zh ;
     rdfs:subClassOf owl:Thing .
@@ -20,17 +20,17 @@
 # ============================================================
 # 2. 文档模板（实例页 = 一份模板；**章节结构写在正文**）
 # ============================================================
-:DocumentTemplate rdf:type owl:Class ;
+schema:DocumentTemplate rdf:type owl:Class ;
     rdfs:label "文档模板"@zh ;
     rdfs:comment "文档/报告模板：章节结构落在正文（articleBody），属性只标记「能出哪类报告、按哪条规则选用」。"@zh ;
-    rdfs:subClassOf :CreativeWork .
+    rdfs:subClassOf schema:CreativeWork .
 
 # ============================================================
 # 3. 正文属性（**唯一正文口径**；bmm:wikiContent 与它等价）
 # ============================================================
-:articleBody rdf:type owl:DatatypeProperty ;
+schema:articleBody rdf:type owl:DatatypeProperty ;
     rdfs:label "正文"@zh ;
-    rdfs:domain :CreativeWork ;
+    rdfs:domain schema:CreativeWork ;
     rdfs:range xsd:string ;
     rdfs:comment "整篇正文（Markdown）。事实源是**图节点 articleBody**；PG content 是渲染缓存，page_metadata 不存正文。"@zh .
 
@@ -39,15 +39,15 @@
 #    applicableReportType 的取值 = **bmm:Report 的子类类名**（如 bmm:TechnicalReviewReport），可多值
 #    templateSelector      的取值 = 规则页 slug（裁剪/选用规则**引用不复制**），空 = 不设条件
 # ============================================================
-:applicableReportType rdf:type owl:DatatypeProperty ;
+schema:applicableReportType rdf:type owl:DatatypeProperty ;
     rdfs:label "适用报告类型"@zh ;
-    rdfs:domain :DocumentTemplate ;
+    rdfs:domain schema:DocumentTemplate ;
     rdfs:range xsd:string ;
     rdfs:comment "本模板可用于哪些报告类型：值为**报告类名**（bmm:Report 的子类，如 bmm:TechnicalReviewReport），可多值。"@zh .
 
-:templateSelector rdf:type owl:DatatypeProperty ;
+schema:templateSelector rdf:type owl:DatatypeProperty ;
     rdfs:label "模板选用规则"@zh ;
-    rdfs:domain :DocumentTemplate ;
+    rdfs:domain schema:DocumentTemplate ;
     rdfs:range xsd:string ;
     rdfs:comment "选用本模板的规则页 slug（如 bmm/operativebusinessrule/…）；空 = 不设条件。规则引用不复制。"@zh .
 
