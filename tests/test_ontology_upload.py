@@ -33,6 +33,8 @@ UPLOADS = {
     "bpmn": "BPMN完整版.ttl",
     "agent": "智能体开发完整版.ttl",
 }
+# 2026-10-23：手工维护的本体文件已迁到 `docs/ontology/`（`ontology/sources/*.ttl` 是上传生成的真源，**不手改**）
+SRC_DIR = REPO / "docs" / "ontology"
 
 
 def _post(path: str, body: dict, timeout: int = 600) -> dict:
@@ -50,7 +52,7 @@ def _post(path: str, body: dict, timeout: int = 600) -> dict:
 
 
 def _upload(key: str) -> dict:
-    f = REPO / "ontology" / UPLOADS[key]
+    f = SRC_DIR / UPLOADS[key]
     assert f.is_file(), "缺本体源文件：%s" % f
     return _post("/bodhi/ontology/upload",
                  {"filename": f.name, "content": f.read_text(encoding="utf-8"),

@@ -169,5 +169,5 @@
 :taskExecutesPolicy a owl:ObjectProperty ;
     rdfs:label "任务执行策略"@zh ;
     rdfs:domain :Task ;
-    rdfs:range <http://example.org/bmm#BusinessPolicy> ;
+    rdfs:range bmm:BusinessPolicy ;
     rdfs:comment "任务按哪条业务策略执行（策略包含的规则构成判定的间接路径；与 taskExecutesRule 直接绑定并存）"@zh .
