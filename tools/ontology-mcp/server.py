@@ -2452,6 +2452,19 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                           float(_to) if _to not in (None, "") else 8.0)
     if name == "import_state":
         return ke_import.state(str(args.get("batch", "")))
+    if name == "migrate_article_body":
+        # 2026-10-22（4.2 前置）：**正文主键迁移** —— 图 `wiki_content → articleBody`
+        # + 清 PG 里冗余的 `wikiContent` 属性键（默认 dry_run，只报影响面 ✓）
+        import ke_graph as _kg  # noqa: PLC0415
+        _dry = bool(args.get("dry_run", True))
+        _kid = str(args.get("kb_id", "") or "")
+        if _kid:
+            _kid, _n2 = resolve_kb_id(_kid)
+        return {"ok": True, "kb_id": _kid or "all", "dry_run": _dry,
+                "graph": _kg.backfill_article_body(_kid, dry_run=_dry),
+                "page_metadata": _kg.strip_wiki_content_attr(_kid, dry_run=_dry),
+                "note": ("正文事实源 = 图节点 `articleBody`（旧键 `wiki_content` 仅兼容）；"
+                         "PG `content` 是渲染缓存，`page_metadata` 不再存正文")}
     if name == "audit_purge":
         return ke_audit.purge(str(args.get("kb_id", "")), str(args.get("kinds", "all")), "all", 5000,
                               args.get("slugs") or None, None, bool(args.get("dry_run", False)))

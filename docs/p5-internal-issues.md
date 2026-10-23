@@ -70,6 +70,29 @@
 
 **用例**：`tests/test_session_paging.py`（5 例：强信号换页 / 弱信号拒写 / ack 通过且不换页 / `/pN` 定位 / 反列产出）。
 
+## 4.2 报告模板化（进行中 · W4a 已完成正文主键）
+
+### W4a 正文主键 `articleBody`（图本，已完成）
+
+| 层 | 口径 |
+|---|---|
+| **Neo4j `BodhiInstance`** | 正文主键 **`articleBody`**（schema.org 对齐）；旧键 `wiki_content` **双写**兼容；读一律 `coalesce(articleBody, wiki_content)` |
+| **PG `wiki_pages.content`** | **渲染缓存**（可随时从图重建）；不含第二份"事实" |
+| **PG `page_metadata`** | **不再存正文**：写路径剔除 `wikiContent`/`bmm:wikiContent`；历史残留用迁移工具清 |
+
+**迁移工具**（新工具 `migrate_article_body`，默认 `dry_run=true`）：
+1. `graph`：把只有 `wiki_content` 的节点回填 `articleBody`（幂等）；
+2. `page_metadata`：清掉属性里残留的 `wikiContent` 键（幂等）。
+用例：`tests/test_article_body.py`（写路径双写 / 迁移幂等 / 片段取自图正文）。
+
+### W4b 模板（待做）
+
+- 本体：`schema:CreativeWork`（本地子集一并编译，**不远程抓取**）→ `bmm:Report rdfs:subClassOf schema:CreativeWork`；
+  `schema:DocumentTemplate`（模板=实例页，章节**只在正文**）；`schema:articleBody`（DP）
+- 模板属性**只 3 个**：`applicableReportType`（多值，报告类型类名）、`templateSelector`（规则页 slug，可空）
+- `ke_report` 读模板生成（缺模板回落 + `template_fallback_reason`）；模板兼作**评审规则参考**（`bmm:ruleReference` 指模板页）
+- 顺带消化域词 79 处（`ke_report` 32 + `report_compose` 47）
+
 ## 4.3 参考规范（已落地）
 
 - 环境：`BODHI_HTTP_PROXY` / `BODHI_REF_TIMEOUT`(默认 8s) / `BODHI_REF_HOSTS`(白名单，空=不限)。

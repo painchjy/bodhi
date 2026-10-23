@@ -1364,6 +1364,10 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                 "hint": ("疑似进入新任务（意图变化）：请先让用户确认；确认后带 "
                          "`acknowledge_intent_change=true` 重试，或先建分页再写")}
     attrs = dict(spec.get("attributes") or {})
+    # 2026-10-22（4.2 前置）：**正文不进属性** —— 事实源是图节点 `articleBody`（PG `content` 只是渲染缓存）；
+    # 属性里再存一份 `wikiContent` 只会漂移、且让页面/回执体积翻倍 ✗（迁移见 ke_graph.strip_wiki_content_attr）
+    for _k in ("wikiContent", "bmm:wikiContent"):
+        attrs.pop(_k, None)
     # 2026-10-17（用户口径 ✓）：**属性必须是本体声明的数据属性** ✓ —— 否则拒写 ✗
     #   反例：`verdicts` / `ruleSet` / `columns`（统计与列规范 ✗）—— 统计写正文 ✓、
     #   工具元数据放 metadata_extra ✓，都不许进 attributes ✗。

@@ -282,6 +282,18 @@ TOOL_SCHEMAS = [
                 "required": ["ticket"]},
         },
         {
+            "name": "migrate_article_body",
+            "description": ("**维护·正文主键迁移（写，默认 dry_run）**：正文事实源是**图节点 `articleBody`**"
+                            "（旧键 `wiki_content` 仅作兼容别名），PG `wiki_pages.content` 是渲染缓存。"
+                            "本工具 ① 把图里只有 `wiki_content` 的节点回填 `articleBody`（**幂等**）；"
+                            "② 清掉 `page_metadata.ontology.attributes` 里残留的 `wikiContent` 键"
+                            "（属性里再存正文只会漂移 ✗）。`dry_run=true`（默认）只报影响面。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "空 = 全库"},
+                "dry_run": {"type": "boolean", "description": "默认 true：只统计，不写"}},
+            },
+        },
+        {
             "name": "audit_purge",
             "description": ("**巡检清理·一步硬删（写）**：只要调用者对该知识库**有写权限**就执行，不需要后台 plan/confirm。"
                             "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理）；"

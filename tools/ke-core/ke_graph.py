@@ -160,7 +160,7 @@ def rebuild_kb_graph(kb_id: str, tenant_id: int | None = None) -> dict:
             "tenant": r.get("tenant_id"), "wc": wc,
         }
         sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name", "n.tenant_id=$tenant",
-                "n.wiki_content=$wc"]
+                "n.articleBody=$wc", "n.wiki_content=$wc"]   # 2026-10-22：`articleBody` 为新键（旧键保留兼容）
         for k, v in attrs.items():
             sets.append("n.%s=$%s" % (k, "a_" + k))
             params["a_" + k] = v
@@ -196,11 +196,60 @@ def strip_relation_sections(content: str) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def backfill_article_body(kb_id: str = "", dry_run: bool = True) -> dict:
+    """**迁移 · 图属性回填**：把旧键 `wiki_content` 回填到 `articleBody`（**幂等**，可重复执行）。
+
+    用户口径（2026-10-22）：正文是**图本**；`articleBody` 是主键（schema.org 对齐），
+    `wiki_content` 仅作兼容旧数据/旧调用方的别名。`dry_run=True`（默认）只统计。
+    """
+    where = "n.wiki_content IS NOT NULL AND n.articleBody IS NULL"
+    params: dict = {}
+    if kb_id:
+        where += " AND n.kb_id = $kb"
+        params["kb"] = kb_id
+    if dry_run:
+        rows = _run("MATCH (n:BodhiInstance) WHERE %s RETURN count(n) AS n" % where, params)
+        return {"ok": True, "dry_run": True, "kb_id": kb_id or "all",
+                "pending": int((rows[0].get("n") if rows else 0) or 0)}
+    rows = _run("MATCH (n:BodhiInstance) WHERE %s SET n.articleBody = n.wiki_content "
+                "RETURN count(n) AS n" % where, params)
+    return {"ok": True, "dry_run": False, "kb_id": kb_id or "all",
+            "migrated": int((rows[0].get("n") if rows else 0) or 0)}
+
+
+def strip_wiki_content_attr(kb_id: str = "", dry_run: bool = True) -> dict:
+    """**迁移 · 清 PG 冗余正文键**：删掉 `page_metadata.ontology.attributes` 里的
+    `wikiContent` / `bmm:wikiContent` —— 正文事实源是图节点 `articleBody`，
+    属性里再存一份只会漂移（且页面/回执体积翻倍）✗。`dry_run=True`（默认）只报清单。
+    """
+    import ke_db  # noqa: PLC0415
+    cond = ("knowledge_base_id = %s AND " % ke_db.sql_str(kb_id)) if kb_id else ""
+    rows = ke_db.psql_csv(
+        "SELECT knowledge_base_id AS kb, slug FROM wiki_pages "
+        " WHERE deleted_at IS NULL AND %s"
+        "(COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) ? 'wikiContent' "
+        " OR COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) ? 'bmm:wikiContent')"
+        % cond)
+    pages = [{"kb_id": r["kb"], "slug": r["slug"]} for r in rows[:50]]
+    if dry_run:
+        return {"ok": True, "dry_run": True, "hits": len(rows), "pages": pages,
+                "truncated": len(rows) > 50}
+    for r in rows:
+        ke_db.psql(
+            "UPDATE wiki_pages SET page_metadata = jsonb_set(page_metadata, '{ontology,attributes}', "
+            "(COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb) - 'wikiContent' "
+            " - 'bmm:wikiContent'), false), updated_at = now() "
+            "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;"
+            % (ke_db.sql_str(r["kb"]), ke_db.sql_str(r["slug"])), stdin=True)
+    return {"ok": True, "dry_run": False, "cleaned": len(rows), "pages": pages}
+
+
 def rebuild_kb_wiki(kb_id: str, dry_run: bool = False) -> dict:
-    """**图→wiki 全量重建**（S-10）：按图节点 `wiki_content` 重建 PG `wiki_pages.content`，
-    并清空出入链（关系只在图里）。图节点无 `wiki_content` 的页（如 index/原生页）不动。"""
+    """**图→wiki 全量重建**（S-10）：按图节点正文（**`articleBody`**，兼容旧键 `wiki_content`）
+    重建 PG `wiki_pages.content`，并清空出入链（关系只在图里）。图节点无正文的页（如 index/原生页）不动。"""
     import ke_db
-    insts = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN n.slug AS slug, n.wiki_content AS wc",
+    insts = _run("MATCH (n:BodhiInstance {kb_id:$kb}) "
+                 "RETURN n.slug AS slug, coalesce(n.articleBody, n.wiki_content) AS wc",
                  {"kb": kb_id})
     wc_map = {r["slug"]: (r.get("wc") or "") for r in insts}
     rows = ke_db.psql_csv(
@@ -423,6 +472,8 @@ def upsert_node(kb_id: str, slug: str, title: str, page_type: str,
               "name": (title or "").strip() or (slug or "").rsplit("/", 1)[-1]}
     sets = ["n.page_type=$pt", "n.module=$module", "n.name=$name"]
     if wiki_content is not None:
+        # 2026-10-22：正文主键改 `articleBody`（schema.org 对齐）；旧键 `wiki_content` **双写**兼容
+        sets.append("n.articleBody=$wc")
         sets.append("n.wiki_content=$wc")
         params["wc"] = wiki_content
     for k, v in (attributes or {}).items():
@@ -572,7 +623,9 @@ def upsert_nodes_batch(kb_id: str, rows: list) -> int:
          "    n.module = coalesce(row.module, n.module), "
          "    n.name = coalesce(row.name, n.name), "
          "    n.tenant_id = coalesce(n.tenant_id, row.tenant), "
-         "    n.wiki_content = CASE WHEN row.wc IS NULL THEN n.wiki_content ELSE row.wc END "
+         "    n.wiki_content = CASE WHEN row.wc IS NULL THEN n.wiki_content ELSE row.wc END, "
+         "    n.articleBody = CASE WHEN row.wc IS NULL THEN coalesce(n.articleBody, n.wiki_content) "
+         "                         ELSE row.wc END "
          "SET n += row.attrs "
          "RETURN count(n) AS n",
          {"kb": kb_id, "rows": payload})
@@ -735,7 +788,7 @@ def audit_kb(kb_id: str, fix: bool = False) -> dict:
         "AND COALESCE(page_type,'') NOT IN ('index','summary')" % ke_db.sql_str(kb_id))
     page_map = {r["slug"]: r["pt"] for r in pages}
     insts = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN n.slug AS slug, n.page_type AS pt, "
-                 "n.wiki_content AS wc", {"kb": kb_id})
+                 "coalesce(n.articleBody, n.wiki_content) AS wc", {"kb": kb_id})
     inst_map = {r["slug"]: (r.get("pt") or "") for r in insts}
     wc_map = {r["slug"]: (r.get("wc") or "") for r in insts}
     out = {
