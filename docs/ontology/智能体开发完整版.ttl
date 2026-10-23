@@ -347,19 +347,6 @@
     rdfs:domain :Advice ;
     rdfs:range xsd:string .
 
-### 渲染模式：本模块的文档类「追加」到 bmm:wikiContent 的 domain（2026-10-09）
-# **知识渲染模式由本体决定，且只有两种**（用户口径）：声明了 `wikiContent` 的类 → `document`
-# （半结构化：调用方给整篇正文）；其余类 → `entity`（结构化知识单元：正文由数据属性渲染）。
-#
-# 为什么不是在本模块另声明一个 `agent:wikiContent`：编译器**禁止跨模块同名属性**
-# （实测 `[ERROR E3] wikiContent … 定义在 agent:wikiContent … bmm:wikiContent`），
-# 而"渲染模式"是**全局唯一**的语义，就该只有**一个**属性。
-#
-# 为什么这样写能生效：属性只在**声明它的模块**（bmm）里被抽出，但 `rdfs:domain`
-# 是从**合并图**读的（`loader.extract_properties` 用 `combined.objects(subject, RDFS_DOMAIN)`）
-# —— 所以在 agent 侧"追加 domain"即可，**bmm 模块不用动**。
-@prefix bmm: <http://example.org/bmm#> .
-
 # 2026-10-11：报告类改为**继承** `bmm:Report`（见上方 4 个类的 subClassOf），不再逐个追加 domain。
 
 # 模块短名（目录名/列表名；≤16 字符，导入时校验）
@@ -395,5 +382,5 @@
 :agentAssistsActivity rdf:type owl:ObjectProperty ;
     rdfs:label "协助活动"@zh ;
     rdfs:domain :Agent ;
-    rdfs:range bpmn:Activity ;
+    rdfs:range bpmn:Activity ; 
     rdfs:comment "智能体**协助**完成活动（活动下的任务由人或智能体执行，取决于任务的**实现手段**）。"@zh .

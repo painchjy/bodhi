@@ -11,9 +11,9 @@
 #
 # 参考 **BPMN 2.0**，但只落**当前需要的概念**：活动 / 任务 / 业务对象 / 角色，
 # 以及关键关联：**活动 ↔ 业务流程**（`processHasActivity` → bmm:BusinessProcess）、
-# **任务 → 业务规则**（`taskExecutesRule` → bmm:BusinessRule，故本模块 **imports bmm**）、
+# **任务 → 业务规则**（`taskExecutesRule` → bmm:BusinessRule**）、
 # **任务 → 角色**（`taskHasRole` → `Role`）、**活动 → 报告**（`activityProducesReport` → bmm:Report）。
-# `agent.ttl` **imports bpmn**：**智能体协助活动**（`agent:agentAssistsActivity`）。
+# `agent.ttl` **bpmn**：**智能体协助活动**（`agent:agentAssistsActivity`）。
 # 刻意**不落**：SequenceFlow / Gateway（顺序不固化）、Message / Collaboration / Choreography。
 # =====================================================================
 <http://example.org/bpmn> rdf:type owl:Ontology ;
@@ -31,7 +31,6 @@
 # 口径（2026-10-11 用户修订）：**为达成某个目标、由一个角色连续执行的工作单元**。
 # · **角色**用**关系**表达（`:taskHasRole` → `:Role`，角色实例在各**领域库**定义）；**目标**用 `taskGoal`；
 # · 人工 / 自动 / 线下取决于**实现的手段** —— 不建数据属性（需要时在活动/任务页说明），**不分子类**；
-# · 任务执行**业务规则**（`taskExecutesRule` → `bmm:BusinessRule`），可由**智能体协助**（`agent:agentAssistsActivity`）。
 :Task rdf:type owl:Class ;
     rdfs:label "任务"@zh ;
     rdfs:comment "为达成某个目标、由一个角色**连续执行**的工作单元（BPMN Task，是 Activity 的一种）：**角色**用关系表达（`taskHasRole`），**目标**用 `taskGoal`；执行一条/一组业务规则。"@zh ;

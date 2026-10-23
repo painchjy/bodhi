@@ -25,11 +25,13 @@ BODHI_TEST_ONTOLOGY_UPLOAD=1 python3 -m pytest tests/test_ontology_upload.py -q
 
 | # | 步骤 | 期望 |
 |---|---|---|
-| ① | 上传 `BMM完整版.ttl` | `sources/` **只剩 `bmm.ttl`**（bpmn/agent 属下游被级联删）；回执含 `cascade_purge` + `sources_backup`；产物含 `bmm` |
-| ② | 上传 `BPMN完整版.ttl` | `sources/` = `bmm.ttl + bpmn.ttl`；产物含 `bmm/bpmn` |
-| ③ | 上传 `智能体开发完整版.ttl` | `sources/` = **3 个 ttl**；产物含 `bmm/bpmn/agent` |
-| ④ | 产物完整性 | `ontology_index.json` 的**全量总数回到上传前**（模块集合一致 ⇒ 数字应一致） |
-| ⑤ | 报错恢复 | 传坏 TTL ⇒ `ttl_unparsable`，且 `sources/` 与产物**零改动** |
+| ① | 上传 `SCHEMA完整版.ttl`（**最上游**） | `sources/` **只剩 `schema.org.ttl`**（bmm/bpmn/agent 属下游被级联删）；回执含 `cascade_purge` + `sources_backup`；产物含 `schema.org` |
+| ② | 上传 `BMM完整版.ttl` | `sources/` = `schema.org.ttl + bmm.ttl`（**上游 schema 必须保留**） |
+| ③ | 上传 `BPMN完整版.ttl` | 3 个：`schema.org.ttl + bmm.ttl + bpmn.ttl` |
+| ④ | 上传 `智能体开发完整版.ttl` | **4 个 ttl**（回到起始状态）；产物模块 = `schema.org/bmm/bpmn/agent` |
+| ⑤ | schema 术语 | 产物 `classes` 含 `schema:CreativeWork`、`schema:DocumentTemplate` |
+| ⑥ | 产物完整性 | `ontology_index.json` 的**全量总数回到上传前** |
+| ⑦ | 报错恢复 | 传坏 TTL ⇒ `ttl_unparsable`，且 `sources/` 与产物**零改动** |
 
 实测（2026-10-23）：① `sources` 变为 `['bmm.ttl']`；② `['bmm.ttl','bpmn.ttl']`；
 ③ `['agent.ttl','bmm.ttl','bpmn.ttl']`；⑤ 坏 TTL 返回

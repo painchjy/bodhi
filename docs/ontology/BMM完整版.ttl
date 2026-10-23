@@ -648,12 +648,7 @@ skos:note rdf:type owl:AnnotationProperty ;
     rdfs:range xsd:string ;
     rdfs:comment "会话内定位：分页序号 + 轮次/消息/段落（或图坐标），用于可复核" .
 
-### 35. 渲染模式开关：文档类专属的正文属性（2026-10-09 新增）
-# **知识渲染模式由本体决定，且只有两种**（用户口径）：
-#   声明了 `wikiContent` 的类 → `document`（半结构化：调用方给整篇正文）；
-#   其余类 → `entity`（结构化知识单元：正文由数据属性渲染）。
-# 所以本属性**必须带 `rdfs:domain`**（不能是 owl:Thing）：不写 domain 就成了全局属性，
-# 会让**所有类**都变 document（ke_ontology.render_mode 只看 domains 显式命中来规避）。
+### 35. 旧report类正文数据属性，已被schema:articleBody代替
 :wikiContent rdf:type owl:DatatypeProperty ;
     rdfs:label "正文（兼容别名）"@zh ;
     rdfs:domain :Report ;
@@ -681,12 +676,10 @@ skos:note rdf:type owl:AnnotationProperty ;
 # ============================================================
 ### 36. 报告基类 Report（2026-10-11 新增）
 # **过程件基类**：报告/方案/评审/结项等**整篇正文**的载体，给人讨论·评审·反馈·溯源·取证；
-# **不参与机器判定**（机器判定只读 entity 资产）。谁继承它，谁就按 `document` 渲染
-# （`ke_ontology.render_mode` 的判据：类或祖先声明了带 domain 的 `wikiContent`）。
 :Report rdf:type owl:Class ;
     rdfs:label "报告"@zh ;
     rdfs:comment "过程件基类：承载整篇正文，供人讨论·评审·反馈·溯源·取证；不参与机器判定。继承它的类按 document 渲染。"@zh ;
-    rdfs:subClassOf owl:Thing, schema:CreativeWork .
+    rdfs:subClassOf schema:CreativeWork .
 
 ### 37. 需求分析报告 RequirementAnalysisReport（2026-10-11 新增；别名：需求规格说明书）
 :RequirementAnalysisReport rdf:type owl:Class ;
@@ -728,10 +721,3 @@ rdfs:label bodhi:aliasKey true .
 skos:altLabel bodhi:aliasKey true .
 :systemAbbr bodhi:aliasKey true .
 
-# ------------------------------------------------------------
-# 口径（2026-10-16 用户裁定）：**系统已管理的数据不本体化** ✗
-#   「开源软件清单」由 **IT 工作平台**维护/查询 ⇒ 它是 **DataObject 实例**（非本体类 ✗）：
-#     · 属性写在 DataObject 页的 `skos:definition`；测试样例写在 `skos:note`；
-#     · 查询由**挡板**提供（挡板输出 = 该 DataObject），对接后换正式接口 ✓。
-#   本文件不再新增 SoftwareProduct / softwareName / softwareVersion / certificationStatus。
-# ------------------------------------------------------------
