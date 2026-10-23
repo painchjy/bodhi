@@ -1391,9 +1391,9 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     if mode == "entity":
         content = render_entity_content(kb_id, {**spec, "slug": slug, "attributes": attrs})
     else:
-        content = spec.get("wiki_content")
+        content = spec.get("wiki_content") or spec.get("article_body")
         if not content:
-            raise ValueError("mode=%s 需要 wiki_content" % mode)
+            raise ValueError("mode=%s 需要 wiki_content（等价别名 article_body）" % mode)
         if mode == "document":
             content = "\n".join(_contract_head({**spec, "slug": slug})) + "\n" + content.lstrip()
         if render_attrs:

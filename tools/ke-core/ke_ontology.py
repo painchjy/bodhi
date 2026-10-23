@@ -433,18 +433,11 @@ def render_mode(type_name: str, meta: dict[str, dict] | None = None) -> str:
     # 2026-10-15 用户口径：**报告判定 = 是否是 `bmm:Report` 的子类**（不再看 `wikiContent` 的 domain）。
     # 理由：报告类已统一 `rdfs:subClassOf bmm:Report`（bmm.ttl 基类 + agent.ttl 的 4 个报告类），
     # 一处判定即可；`wikiContent` 的 domain 仍是"有整篇正文"的语义声明，但不再承担模式判定。
-    if key == "bmm:Report" or "bmm:Report" in chain:
+    # 2026-10-23 用户口径：**文档类判据 = 是否属于 `schema:CreativeWork` 谱系**（含自身）。
+    # `bmm:Report ⊑ schema:CreativeWork`、`schema:DocumentTemplate ⊑ schema:CreativeWork`
+    # 都自动覆盖；不再分别看 `bmm:Report` 或正文属性 —— 只留这一处判定。
+    if key == "schema:CreativeWork" or "schema:CreativeWork" in chain:
         return "document"
-    # 2026-10-23（4.2 模板）：**声明了正文属性的类同样按 document 渲染** ——
-    # `schema:DocumentTemplate`（以及 `schema:CreativeWork`）通过 `schema:articleBody` 的 domain 命中；
-    # 这与 2026-10-09 的原始口径一致（"谁声明了正文属性，谁就是文档类"），且仍然只认**显式 domain**。
-    try:
-        names = {str(v.get("prefixed") or n).split(":")[-1].lower()
-                 for n, v in (data_properties_for(key) or {}).items()}
-        if names & {"articlebody", "wikicontent"}:
-            return "document"
-    except Exception:  # noqa: BLE001  本体读不到 ⇒ 保持 entity（安全回落）
-        pass
     return "entity"
 
 
