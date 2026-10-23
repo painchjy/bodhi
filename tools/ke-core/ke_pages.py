@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
@@ -1098,47 +1099,119 @@ def render_entity_content(kb_id: str, spec: dict) -> str:
 SESSION_CLASS = "bmm:KnowledgeSession"
 
 
-def ensure_session_page(kb_id: str, session_no: str, *, session_name: str = "",
-                        agent_name: str = "", role: str = "", initial_question: str = "",
-                        tenant_id: int | None = None) -> dict:
-    """**核心会话页机制**（契约 §5.1 · 2026-10-09）：确保「会话页」存在；**智能体/角色切换 → 新建分页**。
+def _squash(text: str) -> str:
+    """归一化（去空白/标点，小写）——意图/文档标识比较用。"""
+    return re.sub(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/]+", "", (text or "").lower())
 
-    规则（用户口径）：
-    - 会话页**没有** → **创建**（起始页 `partNo=1`）；
-    - 会话页**已有**、且**场景指纹**（agent+role）与某分页一致 → **复用**该分页；
-    - 场景变了（**换智能体 / 换角色**）→ 建**新分页** `session/<no>/p<n>`，并在起始页「## 分页索引」登记。
 
-    这些都在**核心**做；外围智能体只要把 `session_no` + 场景（agent/role）传进来。
-    返回 `{slug, part_no, created, paginated}`（供内核写 `bmm:sourceSession` 边）。
+def session_part_plan(kb_id: str, session_no: str, *, agent_name: str = "", role: str = "",
+                      doc_id: str = "", intent: str = "") -> dict:
+    """**会话分页判定（只读）**——用户口径 2026-10-22（内网问题 4.6）。
+
+    分页规则（有判断依据、要留证据）：
+      · **强信号**（客观、确定性）：智能体 / 角色 / 文档变化 ⇒ 必须开新分页；
+      · **弱信号**（需人确认）：同一场景下 `intent`（任务意图）变化 ⇒ `need_confirm`，
+        由调用方问用户"是否进入新任务"，**不静默换任务** ✗；
+      · 都没变 ⇒ 复用当前分页。
+
+    返回 `{action: create|paginate|reuse|need_confirm, part_no, slug, reasons[], evidence,
+           ask_user, fingerprint}`（**只读，不建页**）。
     """
-    import json  # noqa: PLC0415
-    sno = str(session_no or "").strip()
+    sno = (session_no or "").strip()
     if not sno:
-        return {"slug": "", "created": False, "paginated": False, "reason": "缺 session_no"}
-    fp = "|".join([str(agent_name or "").strip(), str(role or "").strip()]).strip("|")
+        return {"action": "need_confirm", "reasons": [{"signal": "session_no", "why": "缺会话编号"}],
+                "ask_user": "缺少会话编号：请把 WeKnora 会话编号作为 session_no 传入"}
     rows = ke_db.psql_csv(
         "SELECT slug, COALESCE(page_metadata::text,'{}') AS md FROM wiki_pages "
         "WHERE knowledge_base_id=%s AND page_type=%s AND deleted_at IS NULL "
         "AND (content LIKE %s OR slug LIKE %s) ORDER BY length(slug) ASC"
         % (ke_db.sql_str(kb_id), ke_db.sql_str(SESSION_CLASS),
            ke_db.sql_str("%" + sno + "%"), ke_db.sql_str("session/" + sno + "%")))
+    if not rows:
+        return {"action": "create", "part_no": 1, "slug": "session/%s" % sno, "reasons": [],
+                "evidence": {"agent": agent_name, "role": role, "doc_id": doc_id, "intent": intent},
+                "fingerprint": "|".join([agent_name or "", role or "", doc_id or ""])}
+    base = rows[0]["slug"]
+    last = max(rows, key=lambda r: _part_no(r["slug"]))
+    md = {}
+    try:
+        md = json.loads(last.get("md") or "{}") or {}
+    except Exception:  # noqa: BLE001
+        md = {}
+    prev = (md.get("session_part") or {}) if isinstance(md, dict) else {}
+    attrs = ((md.get("ontology") or {}).get("attributes") or {}) if isinstance(md, dict) else {}
+    prev_agent = str(prev.get("agent") or attrs.get("bmm:agentName") or attrs.get("agentName") or "")
+    prev_role = str(prev.get("role") or attrs.get("bmm:role") or attrs.get("role") or "")
+    prev_doc = str(prev.get("doc_id") or "")
+    prev_intent = str(prev.get("intent") or "")
+    reasons = []
+    if agent_name and prev_agent and _squash(agent_name) != _squash(prev_agent):
+        reasons.append({"signal": "agent", "from": prev_agent, "to": agent_name})
+    if role and prev_role and _squash(role) != _squash(prev_role):
+        reasons.append({"signal": "role", "from": prev_role, "to": role})
+    if doc_id and prev_doc and _squash(doc_id) != _squash(prev_doc):
+        reasons.append({"signal": "doc", "from": prev_doc, "to": doc_id})
+    evidence = {"agent": agent_name or prev_agent, "role": role or prev_role,
+                "doc_id": doc_id or prev_doc, "intent": intent or prev_intent}
+    fp = "|".join([evidence["agent"], evidence["role"], evidence["doc_id"]])
+    if reasons:                                    # 强信号 ⇒ 开新分页（确定性，不需要问）
+        part_no = max([_part_no(x["slug"]) for x in rows] or [1]) + 1
+        return {"action": "paginate", "part_no": part_no,
+                "slug": "session/%s/p%d" % (sno, part_no), "reasons": reasons,
+                "evidence": evidence, "fingerprint": fp, "from_part": _part_no(last["slug"])}
+    if intent and prev_intent and _squash(intent) != _squash(prev_intent):
+        return {"action": "need_confirm", "part_no": _part_no(last["slug"]),
+                "slug": last["slug"], "evidence": evidence, "fingerprint": fp,
+                "reasons": [{"signal": "intent", "from": prev_intent, "to": intent}],
+                "ask_user": ("疑似进入新任务（意图已变化：%s → %s）。请确认："
+                             "① 开新分页（先建分页再写知识）；② 仍在原任务（带 "
+                             "acknowledge_intent_change=true 重试）" % (prev_intent, intent))}
+    return {"action": "reuse", "part_no": _part_no(last["slug"]), "slug": last["slug"],
+            "reasons": [], "evidence": evidence, "fingerprint": fp}
 
-    def _fp_of(md_text):
+def ensure_session_page(kb_id: str, session_no: str, *, session_name: str = "",
+                        agent_name: str = "", role: str = "", initial_question: str = "",
+                        tenant_id: int | None = None, doc_id: str = "", intent: str = "",
+                        acknowledge_intent_change: bool = False) -> dict:
+    """**核心会话页机制**（契约 §5.1；2026-10-22 扩成**四信号**）——确保「会话页/分页」存在。
+
+    判定在 `session_part_plan`（只读），这里只**执行**：
+    - 无会话页 ⇒ 建起始页（`partNo=1`）；
+    - **强信号**变化（智能体 / 角色 / **文档**）⇒ 建新分页 `session/<no>/p<n>` + 起始页「## 分页索引」登记；
+    - **弱信号**（意图变化）且未 ack ⇒ **不建页**，回 `need_confirm` + `ask_user`（让人确认是否进入新任务）；
+    - 每页把判定**证据**写进 `page_metadata.session_part`（谁→谁、哪条信号 ⇒ 可审计）。
+
+    返回 `{slug, part_no, created, paginated, need_confirm?, plan}`。
+    """
+    sno = str(session_no or "").strip()
+    if not sno:
+        return {"slug": "", "created": False, "paginated": False, "reason": "缺 session_no"}
+    plan = session_part_plan(kb_id, sno, agent_name=agent_name, role=role,
+                             doc_id=doc_id, intent=intent)
+    act = plan.get("action")
+    if act == "need_confirm":
+        if not acknowledge_intent_change:
+            return {"slug": plan.get("slug") or "", "part_no": int(plan.get("part_no") or 1),
+                    "created": False, "paginated": False, "need_confirm": True,
+                    "plan": plan, "ask_user": plan.get("ask_user", "")}
+        # 用户已确认"仍在原任务" ⇒ **复用当前分页**，并把新意图记进该页证据（否则每次写都会再问 ✗）
         try:
-            attrs = ((json.loads(md_text or "{}").get("ontology") or {}).get("attributes") or {})
+            _part = {**(plan.get("evidence") or {}), "action": "intent_change_acked",
+                     "at": ke_db.now_text()}
+            ke_db.psql("UPDATE wiki_pages SET page_metadata = COALESCE(page_metadata,'{}'::jsonb)"
+                       " || %s::jsonb, updated_at = now() WHERE knowledge_base_id = %s"
+                       " AND slug = %s AND deleted_at IS NULL"
+                       % (ke_db.sql_json({"session_part": _part}),
+                          ke_db.sql_str(kb_id), ke_db.sql_str(plan["slug"])))
         except Exception:  # noqa: BLE001
-            attrs = {}
-        return "|".join([str(attrs.get("agentName") or attrs.get("bmm:agentName") or "").strip(),
-                         str(attrs.get("role") or attrs.get("bmm:role") or "").strip()]).strip("|")
-
-    base = rows[0]["slug"] if rows else ""          # 最短 = 起始页
-    for r in rows:
-        if _fp_of(r["md"]) == fp:
-            return {"slug": r["slug"], "part_no": _part_no(r["slug"]), "created": False,
-                    "paginated": False}
-    # 需要新建：起始页（没有）或新分页（场景变了）
-    part_no = 1 if not base else (max([_part_no(x["slug"]) for x in rows] or [1]) + 1)
-    slug = ("session/%s" % sno) if part_no == 1 else ("session/%s/p%d" % (sno, part_no))
+            pass
+        return {"slug": plan["slug"], "part_no": int(plan["part_no"]), "created": False,
+                "paginated": False, "plan": plan, "intent_change_acked": True}
+    if act == "reuse":
+        return {"slug": plan["slug"], "part_no": int(plan["part_no"]), "created": False,
+                "paginated": False, "plan": plan}
+    part_no = int(plan.get("part_no") or 1)
+    slug = plan["slug"]
     title = (session_name.strip() if (part_no == 1 and session_name) else
              ("会话分页 p%d · %s" % (part_no, session_name or sno)))
     attrs = {"bmm:sessionNo": sno, "bmm:sessionName": session_name or title,
@@ -1156,13 +1229,32 @@ def ensure_session_page(kb_id: str, session_no: str, *, session_name: str = "",
     if part_no == 1 and initial_question:
         head += ["%s" % initial_question, ""]
     head += render_attributes_section(SESSION_CLASS, attrs)
-    if part_no > 1 and base:                     # 起始页登记分页索引
-        _register_session_part(kb_id, base, slug, title)
+    if plan.get("reasons"):                       # 分页理由（意图变更/场景变更的**证据**）
+        head += ["## 分页理由", ""]
+        head += ["- %s：`%s` → `%s`" % (r.get("signal"), r.get("from", ""), r.get("to", ""))
+                 for r in plan["reasons"]]
+        head += [""]
+    if part_no > 1:                               # 起始页登记分页索引
+        _base = ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id=%s AND page_type=%s "
+            "AND deleted_at IS NULL AND (content LIKE %s OR slug LIKE %s) "
+            "ORDER BY length(slug) ASC LIMIT 1"
+            % (ke_db.sql_str(kb_id), ke_db.sql_str(SESSION_CLASS),
+               ke_db.sql_str("%" + sno + "%"), ke_db.sql_str("session/" + sno + "%")))
+        if _base:
+            _register_session_part(kb_id, _base[0]["slug"], slug, title)
+    part_meta = {"action": act, "fingerprint": plan.get("fingerprint"),
+                 "at": ke_db.now_text()}
+    part_meta.update(plan.get("evidence") or {})
+    if plan.get("reasons"):
+        part_meta["reasons"] = plan["reasons"]
     upsert_page(kb_id, slug, title, SESSION_CLASS, "\n".join(head).rstrip() + "\n",
                 summary=(initial_question or title)[:200], tag=TAG_CONTRACT,
                 metadata={"ontology": {"model": "bmm", "class": SESSION_CLASS, "name": title,
-                                       "attributes": attrs, "generator": TAG_CONTRACT}})
-    return {"slug": slug, "part_no": part_no, "created": (part_no == 1), "paginated": (part_no > 1)}
+                                       "attributes": attrs, "generator": TAG_CONTRACT},
+                          "session_part": part_meta})
+    return {"slug": slug, "part_no": part_no, "created": (part_no == 1),
+            "paginated": (part_no > 1), "plan": plan}
 
 
 def _part_no(slug: str) -> int:
@@ -1187,6 +1279,29 @@ def _register_session_part(kb_id: str, base_slug: str, part_slug: str, part_titl
     ke_db.psql("UPDATE wiki_pages SET content=%s, version=version+1, updated_at=now() "
                "WHERE knowledge_base_id=%s AND slug=%s;"
                % (ke_db.sql_str(c), ke_db.sql_str(kb_id), ke_db.sql_str(base_slug)), stdin=True)
+
+
+def _register_session_output(kb_id: str, part_slug: str, page_slug: str, title: str) -> None:
+    """在**会话分页页**的「## 本轮产出」追加一条（幂等，溯源反列 ✓）。"""
+    if not (part_slug and page_slug):
+        return
+    row = ke_db.psql_csv("SELECT COALESCE(content,'') AS c FROM wiki_pages "
+                         "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
+                         % (ke_db.sql_str(kb_id), ke_db.sql_str(part_slug)))
+    if not row:
+        return
+    c = row[0]["c"]
+    if page_slug in c:
+        return
+    line = "- %s · %s" % (page_slug, title or page_slug)
+    if "## 本轮产出" in c:
+        c = c.rstrip() + "\n" + line + "\n"
+    else:
+        c = c.rstrip() + "\n\n## 本轮产出\n" + line + "\n"
+    ke_db.psql("UPDATE wiki_pages SET content=%s, version=version+1, updated_at=now() "
+               "WHERE knowledge_base_id=%s AND slug=%s;"
+               % (ke_db.sql_str(c), ke_db.sql_str(kb_id), ke_db.sql_str(part_slug)),
+               stdin=True)
 
 
 def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
@@ -1221,7 +1336,33 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     if strict_source and not (has_session or has_doc):
         raise ValueError("严格溯源（契约 §5）：source 需含会话(session_no/session_slug)或"
                          "文档(doc_refs/source_text/chunk_refs) 其一；否则拒写")
+    # 2026-10-22（4.6）：分页判定**提前**算 —— ① `sourceLocator` 必须精确到 `/pN`；
+    # ② 意图变化（弱信号）在未 ack 时拒写（见下方门禁）。
+    _part_plan = None
+    if src.get("session_no"):
+        try:
+            _part_plan = session_part_plan(
+                kb_id, str(src["session_no"]),
+                agent_name=str(src.get("agent_name") or ""),
+                role=str(src.get("role") or ""),
+                doc_id=str(src.get("doc_id") or next(iter(src.get("doc_refs") or []), "")),
+                intent=str(src.get("intent") or ""))
+        except Exception:  # noqa: BLE001  判定失败不阻断（graph 阶段仍会确保会话页）
+            _part_plan = None
+        if _part_plan and not src.get("locator"):
+            src["locator"] = "session/%s/p%d" % (src["session_no"],
+                                                 int(_part_plan.get("part_no") or 1))
     slug = (spec.get("slug") or "").strip() or _derive_slug(page_type, title)
+    # 2026-10-22（内网问题 4.6 · 1-C）：**apply 前门禁** —— 意图变化（弱信号）未 ack ⇒ 拒写。
+    # 判定已在上面提前算好（`_part_plan`）；这里只做 fail-closed 判断，并把结论原样回给调用方。
+    if (not dry_run and _part_plan and _part_plan.get("action") == "need_confirm"
+            and not src.get("acknowledge_intent_change")):
+        return {"ok": False, "applied": False, "created": False, "kb_id": kb_id,
+                "slug": slug, "title": title, "mode": mode,
+                "need_session_part": True, "session_part": _part_plan,
+                "ask_user": _part_plan.get("ask_user", ""),
+                "hint": ("疑似进入新任务（意图变化）：请先让用户确认；确认后带 "
+                         "`acknowledge_intent_change=true` 重试，或先建分页再写")}
     attrs = dict(spec.get("attributes") or {})
     # 2026-10-17（用户口径 ✓）：**属性必须是本体声明的数据属性** ✓ —— 否则拒写 ✗
     #   反例：`verdicts` / `ruleSet` / `columns`（统计与列规范 ✗）—— 统计写正文 ✓、
@@ -1372,11 +1513,15 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                                       session_name=src.get("session_name", ""),
                                       agent_name=src.get("agent_name", ""),
                                       role=src.get("role", ""),
-                                      initial_question=src.get("initial_question", ""))
+                                      initial_question=src.get("initial_question", ""),
+                                      doc_id=str(src.get("doc_id") or ""),
+                                      intent=str(src.get("intent") or ""),
+                                      acknowledge_intent_change=True)
             session_slug = (_sp.get("slug") or "")
             if _sp.get("created") or _sp.get("paginated"):
                 graph["session_page"] = {"slug": session_slug, "part_no": _sp.get("part_no"),
-                                         "created": _sp.get("created"), "paginated": _sp.get("paginated")}
+                                         "created": _sp.get("created"), "paginated": _sp.get("paginated"),
+                                         "reasons": (_sp.get("plan") or {}).get("reasons") or []}
         except Exception as exc:  # noqa: BLE001
             warnings.append("会话页确保失败：%s" % str(exc)[:160])
     if session_slug:
@@ -1387,6 +1532,8 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
                      "MATCH (b:BodhiInstance {kb_id:$kb, slug:$t}) "
                      "MERGE (a)-[r:`bmm:sourceSession`]->(b)",
                      {"kb": kb_id, "s": slug, "t": session_slug})
+            # 2026-10-22（4.6）：分页页**反列本轮产出** —— 知识→分页→会话双向可溯 ✓
+            _register_session_output(kb_id, session_slug, slug, title)
         except Exception as exc:  # noqa: BLE001
             warnings.append("会话溯源边写入失败：%s" % str(exc)[:160])
     return {"applied": True, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,

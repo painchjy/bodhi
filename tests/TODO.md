@@ -11,7 +11,8 @@
 | `[非功能]` **后置** | **B4**（幂等回执判 created）、**B7**（部分索引语义）、**A1/A2**（流程骨架数据缺口）、**B1/B2**（调用契约需按实际传参） | 记录 + xfail/skip ✓ **重构后再解决** |
 | `[功能]` 进行中 | P2 server.py 拆分（见 `docs/refactor-server-split.md`） | 现在做 ✓ |
 | `[功能]` **P5 内网问题** | **4.5 解绑**（`context_authority_apply{action:"detach"}`）｜**4.3 参考规范**（`reference_lookup` 代理/超时/白名单 + 结构化 `reason`） | **已落地 ✓**（2026-10-22，用例：`test_mcp_tools_context_detach.py` / `test_reference_lookup.py`） |
-| `[功能]` P5 待做 | 4.1+4.4 检索策略 v2（类模糊匹配 / `route` / `strategy`）、4.6 会话分页判定、4.2 报告模板化 | 见 `docs/p5-internal-issues.md` |
+| `[功能]` P5 已完成 | 4.5 解绑 ｜ 4.3 参考规范 ｜ **4.1+4.4 检索策略 v2** ｜ **4.6 会话分页** | 已落地 ✓（用例与口径见 `docs/p5-internal-issues.md`） |
+| `[功能]` P5 待做 | 4.2 报告模板化（`schema.org/CreativeWork` + `DocumentTemplate`，**最后**） | 见 `docs/p5-internal-issues.md` |
 
 ## A. 数据缺口（不是代码错，需要补数据）
 | # | 缺口 | 证据 | 处理 |

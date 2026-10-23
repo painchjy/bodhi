@@ -9,7 +9,7 @@
 | **4.3** | `reference_lookup` 内网 URL 超时（`urlopen error timed out`） | ✅ **已落地**（W1） | `ke_review._ref_fetch`：代理/超时/白名单 + 结构化 `reason` |
 | **4.1** | `knowledge_lookup` 不支持组合关键字，智能体反复试错 | ✅ **已落地**（W2） | `ke_lookup` v2：多词 AND/OR/短语/排除 + `plan`/`suggestions`/`strategy` + AND→OR 自动降级 |
 | **4.4** | 智能体只认领域库、不认本体；"流程→活动→任务"被当关键字 | ✅ **已落地**（W2） | 类模糊匹配（`ke_ontology.class_meta()`，强/弱证据）+ `mode="route"` 类型路径 + `ontology_types` 回 `parents/children` |
-| **4.6** | 会话分页判定过简、溯源缺环 | ⏳ W3 | 扩展 `ke_pages.ensure_session_page` + 弱信号 ack + 分页反列产出 |
+| **4.6** | 会话分页判定过简、溯源缺环 | ✅ **已落地**（W3） | `ke_pages.session_part_plan`（四信号 + 证据）+ `write_knowledge` 门禁 + `/pN` 定位 + 分页反列产出 |
 | **4.2** | report 基类 → `schema.org/CreativeWork` + 文档模板子类 | ⏳ W4（最后） | 图属性 `articleBody` + `schema:DocumentTemplate` + `applicableReportType` |
 
 ---
@@ -47,6 +47,28 @@
 **模式**：`keyword`（默认搜索）｜`instances`｜`route`｜`path`｜`rules`｜`semantic`（W2.5 未配置时结构化说明）。
 
 **用例**：`tests/cases/lookup_cases.json` + `tests/test_lookup_strategy.py`（C1–C9，走 MCP）。
+
+## 4.6 会话分页（已落地，2026-10-22 · 1-C）
+
+**分页规则（有判据、留证据）**：判定在 `ke_pages.session_part_plan()`（只读），执行在 `ensure_session_page()`。
+
+| 信号 | 类型 | 判据 | 处置 |
+|---|---|---|---|
+| 智能体变化 | **强** | 分页证据里的 `agent` ≠ 本次 | 自动开新分页 `session/<no>/p<n>` |
+| 用户角色变化 | **强** | `role` 不同 | 同上 |
+| **文档变化** | **强** | `doc_id`（缺省取 `doc_refs[0]`）不同 | 同上 |
+| **意图变化** | **弱** | `intent` 不同 | **拒写** + `need_session_part=true` + `ask_user`（问用户是否进入新任务）；带 `acknowledge_intent_change=true` 才放行，并**把新意图写回该分页证据**（否则每次都再问） |
+
+**证据与溯源**：
+- 每页 `page_metadata.session_part = {action, fingerprint, agent, role, doc_id, intent, reasons[], at}`；
+  开新分页时正文多一节「## 分页理由」（逐条 `signal: from → to`）；
+- 知识页 `bmm:sourceLocator` **必带 `/pN`**（起始页也算 `p1`）；
+- 分页页正文「## 本轮产出」**反列**本轮写的知识页 slug ⇒ 知识→分页→会话双向可溯。
+
+**门禁口径**：`write_knowledge` 在写之前判定（`dry_run` 不拦）；服务端 `save_knowledge` 遇内核
+`applied=False` **不得伪装成功**，原样透出 `need_session_part / session_part / ask_user`。
+
+**用例**：`tests/test_session_paging.py`（5 例：强信号换页 / 弱信号拒写 / ack 通过且不换页 / `/pN` 定位 / 反列产出）。
 
 ## 4.3 参考规范（已落地）
 

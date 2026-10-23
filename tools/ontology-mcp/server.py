@@ -1058,7 +1058,8 @@ def _session_part_no(kb_id: str, session_no: str) -> str:
     if not slug:
         return ""
     m = re.search(r"/p(\d+)$", slug)
-    return m.group(1) if m else ""
+    # 2026-10-22（4.6）：**起始页也算 p1** —— `sourceLocator` 必须精确到分页（`/pN` 不能缺 ✓）
+    return m.group(1) if m else "1"
 
 
 # ---------------------------------------------------------------------------
@@ -1388,7 +1389,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                    high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
                    session: dict | None = None, kb_ids: list | None = None,
                    confirm_kb_match: bool = False, context: str = "",
-                   session_no: str = "") -> dict:
+                   session_no: str = "", doc_id: str = "", intent: str = "",
+                   acknowledge_intent_change: bool = False) -> dict:
     """**设计落库（不调 LLM）**：两段式，复用抽取路径的 `save_elements`（相似度合并/待确认/版本/目录）。
 
     - `stage="report"`：把**概要设计报告 md** 整篇写成 wiki 页（索引页/父页）。
@@ -1563,6 +1565,10 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 "doc_title": doc_meta.get("title", ""),
                 "source_text": ctx["report_source"],
                 "derived_from": _upstream,
+                # 2026-10-22（4.6）：分页判定三件套（文档变化是**强信号**、意图变化是**弱信号**）
+                "doc_id": str(doc_id or doc_meta.get("id") or ""),
+                "intent": str(intent or ""),
+                "acknowledge_intent_change": bool(acknowledge_intent_change),
             },
             "metadata_extra": {"design": {"upstream": _upstream, "context": ctx["id"]}},
             "aliases": (report or {}).get("aliases") or [],
@@ -1574,6 +1580,14 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             kb_id, spec, dry_run=(mode != "apply"),
             strict_source=bool(doc_meta.get("id") or ident.get("ok")),
             sync_folders=not defer_maintenance)
+        if mode == "apply" and res.get("applied") is False:
+            # 2026-10-22（4.6）：内核**拒写**（如会话分页需确认）⇒ 不要把拒写伪装成成功 ✗
+            return {"ok": False, "applied": False, "stage": "report", "kb_id": kb_id,
+                    "slug": res.get("slug") or slug, "title": title,
+                    "need_session_part": res.get("need_session_part"),
+                    "session_part": res.get("session_part"), "ask_user": res.get("ask_user"),
+                    "hint": res.get("hint"),
+                    "engine": "kernel:write_knowledge/document"}
         _created = bool(res.get("created"))
         _action = ("created" if _created else "updated") if mode == "apply" else "preview"
         _graph = res.get("graph") or {}
@@ -2405,7 +2419,9 @@ def _call_tool_impl(name: str, args: dict) -> dict:
             session=args.get("session") or None, kb_ids=args.get("kb_ids") or None,
             confirm_kb_match=bool(args.get("confirm_kb_match")),
             context=str(args.get("context", "")),
-            session_no=str(args.get("session_no", "")))
+            session_no=str(args.get("session_no", "")),
+            doc_id=str(args.get("doc_id", "")), intent=str(args.get("intent", "")),
+            acknowledge_intent_change=bool(args.get("acknowledge_intent_change", False)))
     if name == "import_probe":
         return ke_sheet.probe(str(args["file"]), str(args.get("sheet", "")), int(args.get("sample", 3) or 3))
     if name == "import_plan":
