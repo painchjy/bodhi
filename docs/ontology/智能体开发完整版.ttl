@@ -9,7 +9,6 @@
 
 <http://example.org/agent> rdf:type owl:Ontology ;
     rdfs:label "智能体开发本体（业务智能体 + 技能/工具开发 + 评测与改进建议）"@zh ;
-    owl:imports <http://example.org/bmm> ;
     owl:versionIRI <http://example.org/agent/1.1> ;
     bodhi:expertRole "智能体架构师，精通业务智能体的技能/工具设计开发与效果评测"@zh .
 

@@ -8,7 +8,6 @@
 @prefix schema: <https://schema.org/> .
 
 <http://example.org/bmm> rdf:type owl:Ontology ;
-    owl:imports schema: ;
     rdfs:label "BMM 扩展本体（含信息来源追踪与枚举类型）"@zh ;
     owl:versionIRI <http://example.org/bmm/1.2> ;
     bodhi:expertRole "企业架构分析专家，精通 BMM 业务动机模型"@zh .

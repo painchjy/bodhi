@@ -58,10 +58,12 @@
 ## 2. 改 `docs/ontology/BMM完整版.ttl`
 
 ```turtle
-# 模块头：加 imports（bmm 依赖 schema）
+# 模块头：**不写 owl:imports**（2026-10-23 用户裁定：依赖靠**前缀引用**推断）
 <http://example.org/bmm> rdf:type owl:Ontology ;
-    owl:imports <https://schema.org/> ;       # ★ 新增这一行
+    rdfs:label "BMM 扩展本体（含信息来源追踪与枚举类型）"@zh ;
     ...
+```
+> 依赖边由 `schema:` / `bmm:` / `bpmn:` 的**前缀引用**自动推断：`schema ← bmm ← bpmn`，`agent → bmm + bpmn`（无环，已核查去注释后的真实引用）。
 
 # :Report 增加父类
 :Report rdf:type owl:Class ;
