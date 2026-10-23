@@ -190,6 +190,61 @@ def _check_by_template(md: str, sections: list) -> list:
     return warns
 
 
+def pick_template(items: list, report_type: str = "", template_slug: str = "") -> dict:
+    """**纯函数**：从候选模板（`[{slug,title,version,content,types,selector}]`）里选一个。
+
+    DB 路径（`resolve_template`）与巡检（已载入全库页）**共用**这段判定，避免两处口径不一 ✗。
+    """
+    if not items:
+        return {"found": False, "candidates": [], "ambiguous": False, "sections": [],
+                "reason": "本库没有 `schema:DocumentTemplate` 模板页"}
+    picked = []
+    for it in items:
+        if template_slug and it["slug"] != template_slug:
+            continue
+        if report_type and not template_slug and report_type not in (it.get("types") or []):
+            continue
+        picked.append(it)
+    if not picked:
+        return {"found": False, "candidates": [], "ambiguous": False, "sections": [],
+                "reason": ("指定的模板不存在：%s" % template_slug if template_slug
+                           else "没有模板声明适用于 `%s`（`applicableReportType`）" % report_type)}
+    ambiguous = False
+    if len(picked) > 1:
+        with_sel = [p for p in picked if p.get("selector")]
+        if len(with_sel) == 1:
+            picked = with_sel
+        else:
+            ambiguous = True
+    best = sorted(picked, key=lambda p: (-int(p.get("version") or 1), p["slug"]))[0]
+    return {"found": True, "slug": best["slug"], "title": best.get("title", ""),
+            "version": int(best.get("version") or 1), "selector": best.get("selector") or "",
+            "sections": parse_template_sections(best.get("content") or ""),
+            "candidates": [{"slug": p["slug"], "title": p.get("title", "")} for p in picked],
+            "ambiguous": ambiguous, "reason": ""}
+
+
+def template_items_from_pages(pages: list) -> list:
+    """把**已载入的页**（巡检用，避免 N 次查库）转成 `pick_template` 的候选结构。"""
+    out = []
+    for p in pages or []:
+        if (p.get("page_type") or "") != "schema:DocumentTemplate":
+            continue
+        try:
+            meta = json.loads(p.get("meta") or "{}") or {}
+        except Exception:  # noqa: BLE001
+            meta = {}
+        attrs = ((meta.get("ontology") or {}).get("attributes") or {})
+        types = attrs.get("schema:applicableReportType") or []
+        if isinstance(types, str):
+            types = [x for x in re.split(r"[,，、;\s]+", types) if x]
+        out.append({"slug": p.get("slug"), "title": p.get("title", ""),
+                    "version": int(p.get("version") or 1), "content": p.get("content", ""),
+                    "types": [str(t) for t in types],
+                    "selector": str(attrs.get("schema:templateSelector") or "")})
+    return out
+
+
 def resolve_template(kb_id: str, report_type: str = "", template_slug: str = "") -> dict:
     """按**本体属性**找模板页（不猜 ✗）：`schema:DocumentTemplate` + `applicableReportType`。
 
@@ -204,56 +259,12 @@ def resolve_template(kb_id: str, report_type: str = "", template_slug: str = "")
     import ke_db  # noqa: PLC0415
 
     rows = ke_db.psql_csv(
-        "SELECT slug, COALESCE(title,'') AS t, COALESCE(version,1) AS v, "
-        "       COALESCE(content,'') AS c, "
-        "       COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS attrs "
+        "SELECT slug, COALESCE(title,'') AS title, COALESCE(version,1) AS version, "
+        "       COALESCE(content,'') AS content, COALESCE(page_metadata::text,'{}') AS meta, "
+        "       'schema:DocumentTemplate' AS page_type "
         "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
         "   AND page_type = 'schema:DocumentTemplate'" % ke_db.sql_str(kb_id))
-    if not rows:
-        return {"found": False, "candidates": [], "ambiguous": False, "sections": [],
-                "reason": "本库没有 `schema:DocumentTemplate` 模板页"}
-
-    def _attr(d: dict, key: str) -> str:
-        try:
-            a = json.loads(d.get("attrs") or "{}") or {}
-        except Exception:  # noqa: BLE001
-            return ""
-        v = a.get(key)
-        if v is None:
-            v = a.get(key.split(":")[-1])
-        if isinstance(v, list):
-            v = ",".join(str(x) for x in v)
-        return str(v or "")
-
-    picked = []
-    for r in rows:
-        if template_slug and r["slug"] != template_slug:
-            continue
-        types = [x for x in re.split(r"[,，、;\s]+",
-                                     _attr(r, "schema:applicableReportType")) if x]
-        if report_type and not template_slug and report_type not in types:
-            continue
-        picked.append({"slug": r["slug"], "title": r["t"], "version": int(r["v"] or 1),
-                       "content": r["c"], "types": types,
-                       "selector": _attr(r, "schema:templateSelector")})
-    if not picked:
-        return {"found": False, "candidates": [], "ambiguous": False, "sections": [],
-                "reason": ("指定的模板不存在：%s" % template_slug if template_slug
-                           else "没有模板声明适用于 `%s`（`applicableReportType`）" % report_type)}
-    ambiguous = False
-    if len(picked) > 1:
-        with_sel = [p for p in picked if p.get("selector")]
-        if len(with_sel) == 1:
-            picked = with_sel
-        else:
-            ambiguous = True
-    best = sorted(picked, key=lambda p: (-p["version"], p["slug"]))[0]
-    return {"found": True, "slug": best["slug"], "title": best["title"],
-            "version": best["version"], "selector": best.get("selector") or "",
-            "sections": parse_template_sections(best["content"]),
-            "candidates": [{"slug": p["slug"], "title": p["title"]} for p in picked],
-            "ambiguous": ambiguous, "reason": ""}
-
+    return pick_template(template_items_from_pages(rows), report_type, template_slug)
 
 
 def _check_coverage(rows: list, rules: list) -> dict:

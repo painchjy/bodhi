@@ -2428,7 +2428,8 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return rebuild_wiki_from_graph(str(args.get("kb_id", "")), bool(args.get("dry_run", True)))
     if name == "audit_scan":
         return audit_scan(str(args.get("kb_id", "")), args.get("kb_ids") or None,
-                          str(args.get("scope", "all")), int(args.get("max_findings", 50)))
+                          str(args.get("scope", "all")), int(args.get("max_findings", 50)),
+                          str(args.get("template_kb_id", "") or ""))
     if name == "audit_plan":
         return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
                                    str(args.get("scope", "all")))

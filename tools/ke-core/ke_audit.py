@@ -72,7 +72,7 @@ SEV = {"high": 0, "medium": 1, "low": 2}
 # 企业标准定义「待评审」天数阈值（附录 A：draft 超过它 → G9 low）
 STANDARD_REVIEW_DAYS = 14
 SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling",
-          "similar")
+          "similar", "template")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
@@ -1979,11 +1979,128 @@ def check_summary_drift(ctx: dict, rep: Report) -> None:
                     "关系正本在图；这两列由核心写口强制清空 —— 保留观察，勿手工重算 in_links")
 
 
+def _template_kb(raw: str) -> str:
+    """模板库参数 → UUID（名称/UUID 都收；空或不存在 ⇒ 空 = 走"本库 → 跨库唯一"兜底）。
+
+    **直查 `knowledge_bases`**（不经进程内 60s 清单缓存 ✓）：刚建的库也能立刻解析，
+    且认不出时返回空（不猜 ✗）。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    if re.fullmatch(r"[0-9a-fA-F][0-9a-fA-F-]{31,35}", raw):
+        rows = ke_db.psql_csv("SELECT id FROM knowledge_bases WHERE deleted_at IS NULL "
+                              "AND id::text = %s" % ke_db.sql_str(raw))
+        return rows[0]["id"] if rows else ""
+    rows = ke_db.psql_csv("SELECT id FROM knowledge_bases WHERE deleted_at IS NULL "
+                          "AND name = %s" % ke_db.sql_str(raw))
+    if not rows:
+        rows = ke_db.psql_csv("SELECT id FROM knowledge_bases WHERE deleted_at IS NULL "
+                              "AND name ILIKE %s ORDER BY created_at LIMIT 1"
+                              % ke_db.sql_str("%" + raw + "%"))
+    return rows[0]["id"] if rows else ""
+
+
+def _template_items_of(kb_id: str = "") -> list:
+    """读模板候选（`kb_id` 空 ⇒ **全库**）；只读 `schema:DocumentTemplate` 页。"""
+    import ke_report  # noqa: PLC0415
+
+    where = ("knowledge_base_id = %s AND " % ke_db.sql_str(kb_id)) if kb_id else ""
+    rows = ke_db.psql_csv(
+        "SELECT knowledge_base_id AS kb_id, slug, COALESCE(title,'') AS title, "
+        "       COALESCE(version,1) AS version, COALESCE(content,'') AS content, "
+        "       COALESCE(page_metadata::text,'{}') AS meta, "
+        "       'schema:DocumentTemplate' AS page_type "
+        "  FROM wiki_pages WHERE %sdeleted_at IS NULL "
+        "   AND page_type = 'schema:DocumentTemplate'" % where)
+    return ke_report.template_items_from_pages(rows)
+
+
+def check_template_sections(ctx: dict, rep: Report) -> None:
+    """T1/T2 **模板章节完整性**（2026-10-23 · W4b T3；只读）。
+
+    - **T1（medium）**：文档类页（`render_mode=document`，即 `schema:CreativeWork` 谱系）按其
+      `applicableReportType` 找到模板后，缺模板声明的**必填**章节 ⇒ 每页一条 finding；
+    - **T2（low）**：模板页自身不可用 —— 解析不出章节表 / 没声明 `applicableReportType`；
+      本库无模板（**模板以领域库为准** ⇒ 用 `ctx["template_kb"]` 指定，不在全库乱扫 ✗）；
+      **多候选不静默**：同一报告类有多份模板 ⇒ 只报不选、也不判章节 ✓；
+
+    判定只依赖**本体类名/属性**，不含任何领域名词 ✓。
+    """
+    import ke_report  # noqa: PLC0415
+    import ke_ontology  # noqa: PLC0415
+
+    pages = ctx.get("pages") or []
+    want_kb = (ctx.get("template_kb") or "").strip()
+    items, source = (_template_items_of(want_kb), want_kb) if want_kb else (
+        _template_items_of(ctx.get("kb_id")), ctx.get("kb_id"))
+    data: dict = {"templates": len(items), "template_source": source,
+                  "checked_docs": 0, "docs_with_missing": 0, "missing_sections": 0,
+                  "no_template": 0, "ambiguous_pages": 0}
+    ctx.setdefault("data", {})["template_sections"] = data
+
+    if not items:
+        # 口径（2026-10-23 用户裁定）：**模板以领域库为准** ⇒ 不在全库乱扫、也不猜 ✗
+        rep.add("T2", "low", ctx.get("kb_id", ""),
+                "本库没有 `schema:DocumentTemplate` 模板页 ⇒ 未做章节判定",
+                "模板以**领域库**为准：巡检时用 `template_kb_id` 指定领域库（如「<领域>知识库」）")
+        return
+
+    # T2：模板页自身可用性（解析不出章节 / 未声明适用报告类型）
+    for it in items:
+        if not ke_report.parse_template_sections(it.get("content") or ""):
+            rep.add("T2", "low", it["slug"],
+                    "模板页解析不出章节表（正文需含 Markdown 表：| 序号 | 章节 | 必填 | 要求 |）",
+                    "在模板页正文补「章节结构」表：`save_knowledge(stage=\"report\")` 覆盖同 slug")
+        if not (it.get("types") or []):
+            rep.add("T2", "low", it["slug"],
+                    "模板未声明 `schema:applicableReportType`（报告类名，可多值）⇒ 无法被自动选中",
+                    "`page_attributes_set(patch={\"schema:applicableReportType\": \"<报告类>\"})`")
+
+    for page in pages:
+        ptype = (page.get("page_type") or "").strip()
+        if ptype == "schema:DocumentTemplate" or not _is_instance(ptype):
+            continue
+        try:
+            if ke_ontology.render_mode(ptype) != "document":
+                continue
+        except Exception:  # noqa: BLE001  本体不可用 ⇒ 跳过该类判定（不误报）
+            continue
+        tpl = ke_report.pick_template(items, ptype)
+        if not tpl.get("found"):
+            data["no_template"] += 1
+            continue
+        if tpl.get("ambiguous"):
+            # 多候选 ⇒ **不静默选**（用户口径 2026-10-23）：报出来，让用户定
+            data["ambiguous_pages"] += 1
+            rep.add("T2", "low", page["slug"],
+                    "模板多候选（%s 都声明适用于 `%s`）⇒ 未选、未判章节"
+                    % ("、".join(str(c.get("slug")) for c in (tpl.get("candidates") or [])), ptype),
+                    "把适用的那份留作唯一候选，或给候选补 `schema:templateSelector` 规则页")
+            continue
+        data["checked_docs"] += 1
+        warns = ke_report.check_report_md(page.get("content") or "", tpl.get("sections") or [])
+        if not warns:
+            continue
+        missing = [w.get("section") for w in warns]
+        data["docs_with_missing"] += 1
+        data["missing_sections"] += len(missing)
+        rep.add("T1", "medium", page["slug"],
+                "缺模板必填章节：%s（模板 `%s` v%s）" % ("、".join(map(str, missing)),
+                                                       tpl.get("slug"), tpl.get("version")),
+                "按模板 `%s` 的「章节结构」补齐后重写该页（同 slug 覆盖）" % tpl.get("slug"))
+
+
+
+
 def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
-          page_limit: int = 5000) -> dict:
+          page_limit: int = 5000, template_kb_id: str = "") -> dict:
     """只读一致性巡检（**不写任何数据**）。
 
-    scope：`all` / `wiki`(A) / `model`(B) / `source`(C) / `dupes`(D) / `governance`(F)。
+    scope：`all` / `wiki`(A) / `model`(B) / `source`(C) / `dupes`(D) / `governance`(F) /
+    `template`(T1/T2 模板章节完整性)。
+    `template_kb_id`：模板页所在库 —— **模板以领域库为准**（报告在任务库、模板在领域库 ⇒ 指定领域库）；
+    空则只看本库（不跨库乱扫 ✗）。多候选不静默（只报 T2、不判章节）。
     返回 `{summary, totals, findings[], data}`：`totals` 是**完整计数**，
     `findings` 最多 `max_findings` 条（按严重度排序）。
     """
@@ -2000,7 +2117,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     rep = Report(kb_id, scope, max_findings)
     ctx: dict = {"kb_id": kb_id, "pages": pages, "by_slug": {p["slug"]: p for p in pages},
                  "live": {p["slug"] for p in pages}, "model": None, "docs": None,
-                 "data": {}, "ontology_kb": ONTOLOGY_KB}
+                 "data": {}, "ontology_kb": ONTOLOGY_KB,
+                 "template_kb": _template_kb(template_kb_id)}
 
     if scope in ("all", "wiki", "model"):
         ctx["model"] = model_view()
@@ -2014,6 +2132,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_summary_drift(ctx, rep)      # W5/W6 摘要·别名一致性清单（只列，供人工核查）
         check_graph_pg_drift(ctx, rep)     # W10 图↔PG 属性漂移（"图为主"的验收断言）
         check_ontology_page_drift(ctx, rep)  # W11 本体库页 ↔ TTL 编译漂移
+    if scope in ("all", "wiki", "template"):
+        check_template_sections(ctx, rep)   # T3 模板章节完整性（T1 缺必填章节 / T2 模板不可用）
     if scope in ("all", "model"):
         check_graph_model(ctx, rep)
         check_ontology_artifacts(ctx, rep)

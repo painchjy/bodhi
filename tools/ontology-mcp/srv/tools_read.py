@@ -50,12 +50,14 @@ def context_authority(slug: str, master: str = "") -> dict:
 
 
 def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
-               max_findings: int = 50) -> dict:
+               max_findings: int = 50, template_kb_id: str = "") -> dict:
     """**只读**巡检（`ke_audit.audit` 的入口）。
 
     - 单库：传 `kb_id`；
     - **多库**：传 `kb_ids`（会话绑定的库清单）→ 逐库巡检，`per_kb[]` 里每库一份报告；
-      计数**不跨库合并**（同名不同类型/不同语义是常态，合并会误导）。
+      计数**不跨库合并**（同名不同类型/不同语义是常态，合并会误导）；
+    - `template_kb_id`：`scope="template"` 时模板页所在库 —— **模板以领域库为准**（报告在任务库、
+      模板在领域库 ⇒ 显式给领域库）；空则只看本库（不跨库乱扫 ✗），多候选只报不选。
     """
     ids = [str(x).strip() for x in (kb_ids or []) if str(x).strip()]
     if ids:
@@ -66,14 +68,14 @@ def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
             except ValueError as exc:
                 per.append({"asked": raw, "error": str(exc)[:200]})
                 continue
-            rep = ke_audit.audit(uid, scope, max_findings)
+            rep = ke_audit.audit(uid, scope, max_findings, template_kb_id=template_kb_id)
             per.append({"kb_id": uid, "kb_name": name, "report": rep})
         return {"multi": True, "count": len(per), "per_kb": per,
                 "note": "多库巡检：每库一份独立报告（findings 不跨库合并）"}
     if not (kb_id or "").strip():
         return {"error": "需要 kb_id（单库）或 kb_ids（多库，会话绑定的库清单）"}
     uid, note = resolve_kb_id(kb_id)
-    rep = ke_audit.audit(uid, scope, max_findings)
+    rep = ke_audit.audit(uid, scope, max_findings, template_kb_id=template_kb_id)
     rep["kb_id"] = uid
     if note:
         rep["resolved_note"] = note

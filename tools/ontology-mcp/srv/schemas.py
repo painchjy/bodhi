@@ -84,7 +84,9 @@ TOOL_SCHEMAS = [
                             "range 违反(B3)、模型库页与投影不一致(B4)、"
                             "**无来源文档的实例页(C1)**、**来源文档已删/不存在(C2)**、"
                             "同语义多页(D1)、软删残留(D2)、孤儿快照(D3)、"
-                            "**近似重复知识(S1，3-gram 相似度)**、**领域上下文之外的同名页(S2)**。"
+                            "**近似重复知识(S1，3-gram 相似度)**、**领域上下文之外的同名页(S2)**、"
+                            "**模板章节完整性(T1：文档类页缺模板必填章节 medium；"
+                            "T2：模板页解析不出章节表/未声明 applicableReportType low)**。"
                             "**建议每次 `save_knowledge` 落库后跑一次**（`scope=all` 已含 S1/S2）："
                             "落库已**不做相似度合并**，相似知识的裁决统一在巡检做（并入/补别名/跨库映射）。"
                             "返回 summary/totals/findings（每条含 severity、subject、detail、fix_hint）。"
@@ -96,9 +98,15 @@ TOOL_SCHEMAS = [
                     "kb_ids": {"type": "array", "items": {"type": "string"},
                                "description": "多库巡检：会话绑定的库 id 清单（每库一份独立报告）"},
                     "scope": {"type": "string", "enum": list(ke_audit.SCOPES),
-                              "description": "all(默认) / wiki(A) / model(B) / source(C) / dupes(D) / similar(S1/S2)"},
+                              "description": "all(默认) / wiki(A) / model(B) / source(C) / dupes(D) / "
+                                             "similar(S1/S2) / template(T1/T2 模板章节完整性)"},
                     "max_findings": {"type": "integer",
                                      "description": "最多返回多少条明细，默认 50（计数始终完整）"},
+                    "template_kb_id": {"type": "string",
+                                       "description": "`scope=template` 时模板页所在库（名称或 UUID）"
+                                                      "——**模板以领域库为准**：报告在任务库、"
+                                                      "模板在领域库 ⇒ 显式指定领域库；"
+                                                      "空则只看本库（不跨库乱扫 ✗）"},
                 },
                 "required": ["kb_id"],
             },

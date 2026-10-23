@@ -112,6 +112,106 @@ def test_missing_template_falls_back_with_reason(mcp, test_kb, session_no):
     assert r.get("template_fallback_reason"), "回落没给原因 ✗"
 
 
+def test_audit_flags_missing_template_sections(mcp, test_kb, session_no):
+    """T3：巡检 `scope="template"` 报 **T1（medium）** —— 文档类页缺模板必填章节。"""
+    _write_tpl(mcp, test_kb, session_no)
+    _write_report(mcp, test_kb, session_no, "review/_tpl-audit",
+                  "# 报告\n\n## ① 范围与依据\n- 缺 ②③\n")
+    r = mcp.call("audit_scan", {"kb_id": test_kb, "scope": "template"})
+    assert r.get("ok") is not False, json.dumps(r, ensure_ascii=False)[:300]
+    totals = r.get("totals") or {}
+    assert int(totals.get("T1") or 0) >= 1, "巡检未报缺必填章节 ✗：%s" % json.dumps(totals)
+    hit = next((f for f in (r.get("findings") or [])
+                if f.get("check") == "T1" and f.get("subject") == "review/_tpl-audit"), None)
+    assert hit, "T1 未指向该报告页 ✗：%s" % json.dumps(r.get("findings"), ensure_ascii=False)[:400]
+    assert hit.get("severity") == "medium", hit
+    assert "问题清单" in (hit.get("detail") or ""), hit
+    data = (r.get("data") or {}).get("template_sections") or {}
+    assert int(data.get("templates") or 0) == 1, data
+    assert int(data.get("docs_with_missing") or 0) >= 1, data
+
+
+def test_audit_flags_unusable_template(mcp, test_kb, session_no):
+    """T3：模板页没声明 `applicableReportType` ⇒ **T2（low）**（模板不可被自动选中）。"""
+    r0 = mcp.call("save_knowledge", {
+        "kb_id": test_kb, "stage": "report", "mode": "apply", "session_no": session_no,
+        "report": {"title": "无属性模板", "slug": "schema.org/documenttemplate/_tpl-bare",
+                   "page_type": "schema:DocumentTemplate",
+                   "content_md": "# 模板\n\n## 章节结构\n| 序号 | 章节 | 必填 | 要求 |\n"
+                                 "|---|---|---|---|\n| 1 | ① 范围与依据 | 是 | - |\n"}})
+    assert r0.get("applied") is True, json.dumps(r0, ensure_ascii=False)[:300]
+    r = mcp.call("audit_scan", {"kb_id": test_kb, "scope": "template"})
+    hit = next((f for f in (r.get("findings") or [])
+                if f.get("check") == "T2" and f.get("subject") == "schema.org/documenttemplate/_tpl-bare"),
+               None)
+    assert hit, "未报模板缺 applicableReportType ✗：%s" % json.dumps(
+        r.get("findings"), ensure_ascii=False)[:400]
+    assert hit.get("severity") == "low", hit
+
+
+def test_audit_template_from_domain_kb_and_ambiguity(mcp, test_kb, session_no):
+    """T3 口径（2026-10-23 用户裁定）：**模板以领域库为准** + **多候选不静默**。
+
+    ① 不给 `template_kb_id` ⇒ 只看本库：没有模板 ⇒ T2（low）提示指定领域库，**不跨库乱扫** ✗；
+    ② 给 `template_kb_id`（领域库）⇒ 用它判 T1；
+    ③ 该库里有多份模板同适用 ⇒ **只报歧义、不选、不判章节**。
+    """
+    import time
+
+    from kb_factory import TestKB
+    tpl_kb = TestKB("tpllib")
+    tpl_kb.create()
+    try:
+        t0 = time.time()
+        while True:
+            probe = mcp.call("knowledge_lookup", {"kb_id": tpl_kb.kb_id, "mode": "keyword",
+                                                  "query": "_t"})
+            if not (probe.get("kb_unresolved") or probe.get("need_kb_selection")
+                    or "知识库不存在" in str(probe.get("error") or "")):
+                break
+            assert time.time() - t0 < 90, "服务端 90s 内仍看不到模板库"
+            time.sleep(5)
+        r0 = _write_tpl(mcp, tpl_kb.kb_id, session_no)
+        assert r0.get("applied") is True, json.dumps(r0, ensure_ascii=False)[:300]
+        _write_report(mcp, test_kb, session_no, "review/_tpl-xkb",
+                      "# 报告\n\n## ① 范围与依据\n- 缺 ②③\n")
+
+        # ① 本库无模板 ⇒ 只提示（T2 low），不跨库乱扫
+        r = mcp.call("audit_scan", {"kb_id": test_kb, "scope": "template"})
+        data = (r.get("data") or {}).get("template_sections") or {}
+        assert int(data.get("templates") or 0) == 0, data
+        assert not (r.get("totals") or {}).get("T1"), "本库无模板却判了章节 ✗"
+        assert int((r.get("totals") or {}).get("T2") or 0) >= 1, json.dumps(r.get("totals"))
+
+        # ② 指定模板库（=领域库）⇒ 判 T1
+        r2 = mcp.call("audit_scan", {"kb_id": test_kb, "scope": "template",
+                                     "template_kb_id": tpl_kb.kb_id})
+        data2 = (r2.get("data") or {}).get("template_sections") or {}
+        assert data2.get("template_source") == tpl_kb.kb_id, data2
+        assert int(data2.get("templates") or 0) == 1, data2
+        assert int((r2.get("totals") or {}).get("T1") or 0) >= 1, json.dumps(r2.get("totals"))
+
+        # ③ 同库再来一份同适用模板 ⇒ 多候选：只报歧义、不选、不判章节
+        r3 = mcp.call("save_knowledge", {
+            "kb_id": tpl_kb.kb_id, "stage": "report", "mode": "apply", "session_no": session_no,
+            "report": {"title": "回归模板B", "slug": "schema.org/documenttemplate/_tpl-report-template-b",
+                       "page_type": "schema:DocumentTemplate",
+                       "content_md": "# 模板B\n\n## 章节结构\n| 序号 | 章节 | 必填 | 要求 |\n"
+                                     "|---|---|---|---|\n| 1 | ① 范围与依据 | 否 | - |\n",
+                       "attributes": {"schema:applicableReportType": "bmm:TechnicalReviewReport"}}})
+        assert r3.get("applied") is True, json.dumps(r3, ensure_ascii=False)[:300]
+        r4 = mcp.call("audit_scan", {"kb_id": test_kb, "scope": "template",
+                                     "template_kb_id": tpl_kb.kb_id})
+        data4 = (r4.get("data") or {}).get("template_sections") or {}
+        assert int(data4.get("ambiguous_pages") or 0) >= 1, data4
+        assert not (r4.get("totals") or {}).get("T1"), "多候选时不该硬判缺章 ✗"
+        hit = next((f for f in (r4.get("findings") or []) if f.get("check") == "T2"
+                    and "多候选" in (f.get("detail") or "")), None)
+        assert hit, "多候选未报 ✗：%s" % json.dumps(r4.get("findings"), ensure_ascii=False)[:400]
+    finally:
+        tpl_kb.drop()
+
+
 def test_graph_stage_skips_document_nodes(mcp, test_kb, session_no):
     """`stage="graph"` 只写实体类：文档类节点 ⇒ `skipped_document_nodes`（不放宽 ✓）。"""
     r = mcp.call("save_knowledge", {
