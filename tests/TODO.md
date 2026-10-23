@@ -12,7 +12,7 @@
 | `[功能]` 进行中 | P2 server.py 拆分（见 `docs/refactor-server-split.md`） | 现在做 ✓ |
 | `[功能]` **P5 内网问题** | **4.5 解绑**（`context_authority_apply{action:"detach"}`）｜**4.3 参考规范**（`reference_lookup` 代理/超时/白名单 + 结构化 `reason`） | **已落地 ✓**（2026-10-22，用例：`test_mcp_tools_context_detach.py` / `test_reference_lookup.py`） |
 | `[功能]` P5 已完成 | 4.5 解绑 ｜ 4.3 参考规范 ｜ **4.1+4.4 检索策略 v2** ｜ **4.6 会话分页** | 已落地 ✓（用例与口径见 `docs/p5-internal-issues.md`） |
-| `[功能]` P5 待做 | 4.2 报告模板化（`schema.org/CreativeWork` + `DocumentTemplate`，**最后**） | 见 `docs/p5-internal-issues.md` |
+| `[功能]` P5 待做 | —（4.1/4.2/4.3/4.4/4.5/4.6 全部落地 ✓） | 见 `docs/p5-internal-issues.md`；后续：域词退场（工具/技能只认类型与属性） |
 
 ## A. 数据缺口（不是代码错，需要补数据）
 | # | 缺口 | 证据 | 处理 |

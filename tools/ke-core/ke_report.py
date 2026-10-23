@@ -62,11 +62,75 @@ def _sec_of(head: str) -> str:
     return ""
 
 
-def check_report_md(md: str) -> list:
+def _plain(text: str) -> str:
+    """去编号/装饰后的纯文本（`① 范围与依据` → `范围与依据`），用于章节标题比对。"""
+    s = re.sub(r"[#*`\s]+", "", text or "")
+    s = re.sub(r"^[①②③④⑤⑥⑦⑧⑨⑩\d]+[、.．)）:：]?", "", s)
+    return s
+
+
+def parse_template_sections(body: str) -> list:
+    """从**模板正文**解析章节表 → `[{title, required, requirement}]`。
+
+    约定（模板页正文）：形如
+    ```
+    ## 章节结构
+    | 序号 | 章节 | 必填 | 要求 |
+    |---|---|---|---|
+    | 1 | ① 范围与依据 | 是 | … |
+    ```
+    找不到表时**回退**为「取 `##` 标题」（排除模板自身的元小节），且全部标 `required=False`
+    （不猜必填，宁缺勿错）。
+    """
+    lines = (body or "").splitlines()
+    tbl: list = []
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("|"):
+            tbl.append(s)
+        elif tbl and not s:
+            break
+    if len(tbl) >= 3:
+        def _cells(row: str) -> list:
+            return [c.strip() for c in row.strip().strip("|").split("|")]
+
+        head = _cells(tbl[0])
+        idx_title = next((i for i, c in enumerate(head) if "章节" in c), 1)
+        idx_req = next((i for i, c in enumerate(head) if "必填" in c), -1)
+        idx_req2 = next((i for i, c in enumerate(head) if "要求" in c or "说明" in c), -1)
+        out = []
+        for row in tbl[1:]:
+            if set(row.replace("|", "").strip()) <= set("-: "):
+                continue
+            cells = _cells(row)
+            if len(cells) <= idx_title:
+                continue
+            title = cells[idx_title]
+            if not title:
+                continue
+            req = bool(idx_req >= 0 and len(cells) > idx_req
+                       and cells[idx_req] in ("是", "必填", "Y", "y", "true"))
+            req_txt = cells[idx_req2] if 0 <= idx_req2 < len(cells) else ""
+            out.append({"title": title, "required": req, "requirement": req_txt})
+        if out:
+            return out
+    # 回退：按 `##` 标题（排除模板元小节）；不猜必填 ✓
+    skip = ("章节结构", "使用约束", "模板信息", "属性")
+    return [{"title": ln[3:].strip(), "required": False, "requirement": ""}
+            for ln in lines
+            if ln.startswith("## ") and not any(k in ln[3:] for k in skip)]
+
+
+def check_report_md(md: str, sections: list | None = None) -> list:
     """报告**只读校验**（2026-10-19 Q2=C ✓：只告警，不静默改 ✗）。
 
     章节识别兼容 `## ①` / `## 1` / `## 知识入库情况` ✓（2026-10-20 修：只认 ① 会误报 ✗）。
+
+    `sections`（2026-10-23 · 模板化）：**给定模板章节表**时按模板校验（必填章节缺失 ⇒ 告警），
+    不再用代码里的固定五节；为 `None` 时保留旧行为（向后兼容）。
     """
+    if sections:
+        return _check_by_template(md, sections)
     warns: list = []
     text = md or ""
     secs: dict = {}
@@ -108,6 +172,88 @@ def check_report_md(md: str) -> list:
                 if not rule and fp and fp not in ("—", "-"):
                     warns.append({"code": "fingerprint_unsolicited", "no": cells[0][:12]})
     return warns
+
+
+def _check_by_template(md: str, sections: list) -> list:
+    """按**模板章节表**校验：必填章节缺失 ⇒ `sections_missing`（**只告警** ✓，不静默改）。"""
+    heads = [_plain(ln[3:]) for ln in (md or "").splitlines() if ln.startswith("## ")]
+    warns: list = []
+    for sec in sections or []:
+        if not sec.get("required"):
+            continue
+        want = _plain(sec.get("title") or "")
+        if not want:
+            continue
+        if not any(want in h or (h and h in want) for h in heads):
+            warns.append({"code": "sections_missing", "section": sec.get("title"),
+                          "required": True})
+    return warns
+
+
+def resolve_template(kb_id: str, report_type: str = "", template_slug: str = "") -> dict:
+    """按**本体属性**找模板页（不猜 ✗）：`schema:DocumentTemplate` + `applicableReportType`。
+
+    - 给了 `template_slug` ⇒ 直接取（校验存在且属本库）；
+    - 否则按 `applicableReportType`（值=报告类名，支持多值）匹配；
+    - 多条候选且仅一条带 `templateSelector` ⇒ 取它；仍多 ⇒ `ambiguous=true` + `candidates`
+      （**不静默选**，交由调用方/用户定夺）；
+    - 找不到 ⇒ `found=false` + `reason`（调用方据此回落内置结构并回传原因）。
+
+    返回 `{found, slug, title, version, selector, sections[], candidates[], ambiguous, reason}`。
+    """
+    import ke_db  # noqa: PLC0415
+
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(title,'') AS t, COALESCE(version,1) AS v, "
+        "       COALESCE(content,'') AS c, "
+        "       COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS attrs "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+        "   AND page_type = 'schema:DocumentTemplate'" % ke_db.sql_str(kb_id))
+    if not rows:
+        return {"found": False, "candidates": [], "ambiguous": False, "sections": [],
+                "reason": "本库没有 `schema:DocumentTemplate` 模板页"}
+
+    def _attr(d: dict, key: str) -> str:
+        try:
+            a = json.loads(d.get("attrs") or "{}") or {}
+        except Exception:  # noqa: BLE001
+            return ""
+        v = a.get(key)
+        if v is None:
+            v = a.get(key.split(":")[-1])
+        if isinstance(v, list):
+            v = ",".join(str(x) for x in v)
+        return str(v or "")
+
+    picked = []
+    for r in rows:
+        if template_slug and r["slug"] != template_slug:
+            continue
+        types = [x for x in re.split(r"[,，、;\s]+",
+                                     _attr(r, "schema:applicableReportType")) if x]
+        if report_type and not template_slug and report_type not in types:
+            continue
+        picked.append({"slug": r["slug"], "title": r["t"], "version": int(r["v"] or 1),
+                       "content": r["c"], "types": types,
+                       "selector": _attr(r, "schema:templateSelector")})
+    if not picked:
+        return {"found": False, "candidates": [], "ambiguous": False, "sections": [],
+                "reason": ("指定的模板不存在：%s" % template_slug if template_slug
+                           else "没有模板声明适用于 `%s`（`applicableReportType`）" % report_type)}
+    ambiguous = False
+    if len(picked) > 1:
+        with_sel = [p for p in picked if p.get("selector")]
+        if len(with_sel) == 1:
+            picked = with_sel
+        else:
+            ambiguous = True
+    best = sorted(picked, key=lambda p: (-p["version"], p["slug"]))[0]
+    return {"found": True, "slug": best["slug"], "title": best["title"],
+            "version": best["version"], "selector": best.get("selector") or "",
+            "sections": parse_template_sections(best["content"]),
+            "candidates": [{"slug": p["slug"], "title": p["title"]} for p in picked],
+            "ambiguous": ambiguous, "reason": ""}
+
 
 
 def _check_coverage(rows: list, rules: list) -> dict:

@@ -554,8 +554,10 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         summary["skipped_document_nodes"] = [
             {"slug": k, "name": v["name"], "type": v["type"]} for k, v in sorted(_doc_skipped.items())]
         summary["skipped_document_note"] = (
-            "以下节点是**文档类**（本体 `render_mode=document`）：graph 阶段必须带 `wiki_content`（整篇正文）"
-            "才能入库；本批未带 → **未建页/未改页**。请改用 `stage=\"report\"` 落整篇正文（同一 slug 幂等覆盖）。")
+            "以下节点是**文档类**（本体 `render_mode=document`，即 `schema:CreativeWork` 谱系）："
+            "`stage=\"graph\"` **只写实体类**、不接受正文 → 本批**未建页/未改页**。"
+            "文档类（报告/模板/设计单…）请改用 `stage=\"report\"`（`report.page_type` 指定类、"
+            "`report.content_md` 给整篇正文，同一 slug 幂等覆盖）。")
     # 写库自证（2026-09-21 用户实测：`mode` 忘了传 → 默认 dry_run 只算不写，回执里只有一行
     # `dry_run: true`，极易被当成"已落库"，于是反复出现"回执成功但 wiki 没变"）：
     # 顶层给 `applied`（是否真写库）与 `write_note`，并附上被更新页的 version 变化。
@@ -1549,9 +1551,18 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 }
         _upstream = [s for s in ((report or {}).get("upstream") or []) if s]
         # 报告**只读校验**（2026-10-19 用户口径 Q2=C ✓：只告警，不静默改 ✗）
+        # 2026-10-23（T2）：章节口径来自**模板页**（`schema:DocumentTemplate` + `applicableReportType`）；
+        # 找不到模板 ⇒ 回落内置结构，并在回执给 `template_fallback_reason`（可追溯 ✓）。
+        _tpl = {}
         try:
             import ke_report as _kr  # noqa: PLC0415
-            _report_warns = _kr.check_report_md(body)
+            # 写模板页本身不必再找模板（否则回执里会多一条"无模板"噪音 ✓）
+            if _ptype == "schema:DocumentTemplate":
+                _report_warns = []
+            else:
+                _tpl = _kr.resolve_template(kb_id, _ptype, str((report or {}).get("template") or ""))
+                _report_warns = _kr.check_report_md(
+                    body, _tpl.get("sections") if _tpl.get("found") else None)
         except Exception:  # noqa: BLE001
             _report_warns = []
         spec = {
@@ -1626,6 +1637,25 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         }
         if _ptype_note:
             summary["page_type_adjusted"] = _ptype_note
+        # 2026-10-23（T2）：模板可见 —— 用了哪个模板、缺哪些必填章节、没用上模板的原因
+        if _ptype == "schema:DocumentTemplate":
+            pass  # 写的就是模板页本身，不报"无模板"
+        elif _tpl.get("found"):
+            summary["template"] = {"slug": _tpl.get("slug"), "title": _tpl.get("title"),
+                                   "version": _tpl.get("version"),
+                                   "sections": len(_tpl.get("sections") or []),
+                                   "required": sum(1 for s in (_tpl.get("sections") or [])
+                                                   if s.get("required")),
+                                   "ambiguous": bool(_tpl.get("ambiguous")),
+                                   "candidates": _tpl.get("candidates") or []}
+        else:
+            summary["template"] = {"found": False}
+            summary["template_fallback_reason"] = (_tpl.get("reason")
+                                                   or "无可用模板（按内置结构生成）")
+        _missing = [w.get("section") for w in (_report_warns or [])
+                    if w.get("code") == "sections_missing"]
+        if _missing:
+            summary["missing_required_sections"] = _missing
         if mode != "apply":
             summary["write_note"] = ("**未写库**（dry_run）：本回执只是预览。要真正落库请用**同一份载荷**、"
                                      "`mode=\"apply\"` 重跑。")

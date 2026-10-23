@@ -10,7 +10,7 @@
 | **4.1** | `knowledge_lookup` 不支持组合关键字，智能体反复试错 | ✅ **已落地**（W2） | `ke_lookup` v2：多词 AND/OR/短语/排除 + `plan`/`suggestions`/`strategy` + AND→OR 自动降级 |
 | **4.4** | 智能体只认领域库、不认本体；"流程→活动→任务"被当关键字 | ✅ **已落地**（W2） | 类模糊匹配（`ke_ontology.class_meta()`，强/弱证据）+ `mode="route"` 类型路径 + `ontology_types` 回 `parents/children` |
 | **4.6** | 会话分页判定过简、溯源缺环 | ✅ **已落地**（W3） | `ke_pages.session_part_plan`（四信号 + 证据）+ `write_knowledge` 门禁 + `/pN` 定位 + 分页反列产出 |
-| **4.2** | report 基类 → `schema.org/CreativeWork` + 文档模板子类 | ⏳ W4（最后） | 图属性 `articleBody` + `schema:DocumentTemplate` + `applicableReportType` |
+| **4.2** | report 基类 → `schema.org/CreativeWork` + 文档模板子类 | ✅ **已落地**（W4a/W4b） | 图属性 `articleBody` + `schema:DocumentTemplate` + `applicableReportType`；`stage="report"` 直写模板页；`ke_report` 按模板校验章节（`tests/test_report_template.py`） |
 
 ---
 
@@ -70,7 +70,7 @@
 
 **用例**：`tests/test_session_paging.py`（5 例：强信号换页 / 弱信号拒写 / ack 通过且不换页 / `/pN` 定位 / 反列产出）。
 
-## 4.2 报告模板化（进行中 · W4a 已完成正文主键）
+## 4.2 报告模板化（✅ 已完成：W4a 正文主键 + W4b 模板页/模板读取）
 
 ### W4a 正文主键 `articleBody`（图本，已完成）
 
@@ -85,13 +85,19 @@
 2. `page_metadata`：清掉属性里残留的 `wikiContent` 键（幂等）。
 用例：`tests/test_article_body.py`（写路径双写 / 迁移幂等 / 片段取自图正文）。
 
-### W4b 模板（待做）
+### W4b 模板（✅ 已完成）
 
-- 本体：`schema:CreativeWork`（本地子集一并编译，**不远程抓取**）→ `bmm:Report rdfs:subClassOf schema:CreativeWork`；
+- 本体：`schema:CreativeWork`（本地子集，**不远程抓取**）→ `bmm:Report rdfs:subClassOf schema:CreativeWork`；
   `schema:DocumentTemplate`（模板=实例页，章节**只在正文**）；`schema:articleBody`（DP）
 - 模板属性**只 3 个**：`applicableReportType`（多值，报告类型类名）、`templateSelector`（规则页 slug，可空）
-- `ke_report` 读模板生成（缺模板回落 + `template_fallback_reason`）；模板兼作**评审规则参考**（`bmm:ruleReference` 指模板页）
-- 顺带消化域词 79 处（`ke_report` 32 + `report_compose` 47）
+- **模板页维护**：`save_knowledge(stage="report")` + `report.page_type="schema:DocumentTemplate"` + `report.attributes`
+  —— 一次写入，**不需要 retag**（报告/模板同属 `schema:CreativeWork`）；`stage="graph"` 仍**只写实体类**
+- **模板读取**（`ke_report`）：`resolve_template`（按 `applicableReportType` 自动选；多候选按 `templateSelector`；
+  仍多 ⇒ `ambiguous` + `candidates`，**不静默选**）→ `parse_template_sections`（解析模板正文「章节结构」表）
+  → `check_report_md(md, sections)`（按模板**必填**章节校验，只告警不拒写）
+- **回执可追溯**：`template`（slug/version/章节数/必填数/候选）、`missing_required_sections`、
+  `template_fallback_reason`（没用上模板的原因）
+- 用例：`tests/test_report_template.py`（6 例：模板页直写 / 自动选中 / 缺必填章节 / 换模板 / 无模板回落 / graph 跳过文档类）
 
 ## 4.3 参考规范（已落地）
 
