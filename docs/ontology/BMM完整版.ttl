@@ -5,8 +5,10 @@
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix bodhi: <http://example.org/bodhi#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix schema: <https://schema.org/> .
 
 <http://example.org/bmm> rdf:type owl:Ontology ;
+    owl:imports schema: ;
     rdfs:label "BMM 扩展本体（含信息来源追踪与枚举类型）"@zh ;
     owl:versionIRI <http://example.org/bmm/1.2> ;
     bodhi:expertRole "企业架构分析专家，精通 BMM 业务动机模型"@zh .
@@ -654,10 +656,11 @@ skos:note rdf:type owl:AnnotationProperty ;
 # 所以本属性**必须带 `rdfs:domain`**（不能是 owl:Thing）：不写 domain 就成了全局属性，
 # 会让**所有类**都变 document（ke_ontology.render_mode 只看 domains 显式命中来规避）。
 :wikiContent rdf:type owl:DatatypeProperty ;
-    rdfs:label "正文"@zh ;
+    rdfs:label "正文（兼容别名）"@zh ;
     rdfs:domain :Report ;
     rdfs:range xsd:string ;
-    rdfs:comment "报告类的整篇正文（Markdown）。**声明它的类（或祖先）按 document 渲染**：报告是正文主体、数据属性只做结构化摘要；entity 类不要用本属性。"@zh .
+    owl:equivalentProperty schema:articleBody ;
+    rdfs:comment "报告类的整篇正文（Markdown）。**与 `schema:articleBody` 等价**（本文档的正文唯一口径）。"@zh .
 
 :sessionFor rdf:type owl:ObjectProperty ;
     rdfs:label "服务方案"@zh ;
@@ -684,7 +687,7 @@ skos:note rdf:type owl:AnnotationProperty ;
 :Report rdf:type owl:Class ;
     rdfs:label "报告"@zh ;
     rdfs:comment "过程件基类：承载整篇正文，供人讨论·评审·反馈·溯源·取证；不参与机器判定。继承它的类按 document 渲染。"@zh ;
-    rdfs:subClassOf owl:Thing .
+    rdfs:subClassOf owl:Thing, schema:CreativeWork .
 
 ### 37. 需求分析报告 RequirementAnalysisReport（2026-10-11 新增；别名：需求规格说明书）
 :RequirementAnalysisReport rdf:type owl:Class ;
