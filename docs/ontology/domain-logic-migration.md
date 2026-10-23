@@ -37,7 +37,16 @@
 | T3 | 巡检 `audit_kb` | 新增"模板章节完整性"：模板声明的必填章节 vs 生成报告实际章节；缺 ⇒ medium | 故意缺一节 ⇒ 巡检命中 |
 | T4 | `page_attributes_set` | 模板页属性写入放开这两个 schema 属性（属于 `schema:DocumentTemplate`，已在 `class_attributes` ✓） | 模板页可写 `applicableReportType`/`templateSelector` |
 
-## 4. 技能改造（域词从这里退场）
+## 3.1 模板页怎么维护（2026-10-23 口径）
+
+| 做法 | 说明 |
+|---|---|
+| ✅ **`save_knowledge(stage="report")` + `report.page_type`** | 报告与模板**同属 `schema:CreativeWork`** ⇒ 直接用 report 通道写：`report.page_type="schema:DocumentTemplate"`、`report.content_md=<章节表>`、`report.attributes={"schema:applicableReportType": "bmm:TechnicalReviewReport"}`。**不需要 retag**（实测 v3→v4 直接更新成功） |
+| ❌ `stage="graph"` 写文档类 | **不支持**：graph 阶段只处理**非 CreativeWork**（entity 类）；文档类节点仍会被 `skipped_document_nodes` 拒绝（这是期望行为，不要放宽） |
+| 判定依据 | `ke_ontology.render_mode()` = **是否属于 `schema:CreativeWork` 谱系**（含自身）；`bmm:Report`、`schema:DocumentTemplate` 自动覆盖 |
+
+> 「首个版本生成」等页头值按内核规则只在新建时写；同 slug 覆盖不会重置。
+
 
 | 技能 | 现状 | 改成 |
 |---|---|---|

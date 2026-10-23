@@ -939,13 +939,6 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "outputs": node.get("outputs") or [],
             "assertions": node.get("assertions") or [],
             "attributes": _attrs_with_identity(node, kb_id, injected_identity),
-            # 2026-10-23：**文档类节点必须带正文**才能落库 ⇒ 把 `wiki_content`（等价 `article_body`）
-            # 透传下去（此前只有 definition/attributes，导致 document 类被 skipped_document_nodes ✗）；
-            # 同时显式给 `mode`（由本体判定：`schema:CreativeWork` 谱系 = document），
-            # 避免下游分支各自猜模式、把文档类渲染成 entity ✗
-            "wiki_content": str(node.get("wiki_content") or node.get("article_body") or ""),
-            "mode": (ke_ontology.render_mode(str(node.get("type") or ""))
-                     if node.get("type") else ""),
             "retag": bool(node.get("retag")),   # true = 合并进既有页时**同时把该页类型改成 element 的类型**
             "incoming": incoming_map.get(name, []),
             "source_text": node.get("source_text") or ctx["no_quote"],
@@ -1566,6 +1559,9 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             "title": title, "page_type": _ptype, "type_label": _type_label_of(_ptype, ctx["report_label"]),
             "mode": "document",              # 报告=文档类；**不依赖本体判定**（legacy 的 `summary` 不是本体类）
             "wiki_content": body,
+            # 2026-10-23（用户口径）：`stage="report"` 可**直接写任意 document 类页**（报告/模板同属
+            # `schema:CreativeWork`），模板页因此**不需要再 retag**；属性随本调用一起写。
+            "attributes": dict((report or {}).get("attributes") or {}),
             "summary": (report or {}).get("summary") or "",
             "source": {
                 "doc_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
