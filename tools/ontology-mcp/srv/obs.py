@@ -92,6 +92,8 @@ def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = N
                 "retract_planned", "crud_matrix", "report_page", "page_versions", "count",
                 "catalog", "id", "name", "error", "how_to_use", "source", "note",
                 "images_found", "images", "by_document",
+                # 2026-10-24（需求 2）：检索遥测（variant / 会话 / 原问题 / 命中数 / 耗时）
+                "telemetry",
                 # P0/P0-b：落库性能与写图结果（便于内网自证"边有没有真的写进图"）
                 "graph_edges", "edge_errors", "folders_synced", "maintenance", "resume_hint",
                 "merge", "engine", "kernel")
@@ -132,6 +134,20 @@ def _log_tool_call(name: str, args: dict, result, ms: float, io: dict | None = N
         _log_line("%s\t%-26s\t%7.0fms\t%s\t%s\targs_file=%s\tresult=%s"
                   % (now_text(), name, ms, phase, io_txt, args_file or "-",
                      json.dumps(picked, ensure_ascii=False)[:500]))
+        # 2026-10-24（需求 2）：**A/B 分析专用侧车日志**（一行一 JSON）——
+        # 独立文件，不改主日志口径（`ke_eval`/回放用例照旧解析）✓
+        tel = summary.get("telemetry")
+        if isinstance(tel, dict):
+            try:
+                LOG_DIR.mkdir(parents=True, exist_ok=True)
+                side = LOG_DIR / ("lookup_ab_%s.jsonl" % datetime.now().strftime("%Y%m%d"))
+                rec = {"ts": now_text(), "tool": name, "ms": round(float(ms or 0)),
+                       "error": str(summary.get("error") or "")[:120],
+                       "telemetry": tel}
+                with side.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            except Exception:  # noqa: BLE001  遥测失败绝不影响工具结果
+                pass
     except Exception:  # noqa: BLE001  日志失败绝不影响工具结果
         pass
 

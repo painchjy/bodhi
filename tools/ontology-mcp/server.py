@@ -2578,7 +2578,10 @@ def _call_tool_impl(name: str, args: dict) -> dict:
             str(args.get("query", "")), str(args.get("spec", "")), str(args.get("start", "")),
             int(args.get("depth", 2) or 2), int(args.get("limit", 20) or 20),
             str(args.get("cls", "")), str(args.get("page_type", "")),
-            args.get("kb_ids") or None, bool(args.get("auto_widen", False)))
+            args.get("kb_ids") or None, bool(args.get("auto_widen", False)),
+            # 2026-10-24（需求 2）：本体提示开关 + 遥测字段（会话号/原问题仅入日志）
+            args.get("ontology_hint"), str(args.get("session_no", "") or ""),
+            str(args.get("question", "") or ""))
     if name == "rules_resolve":
         # 2026-10-16（用户口径）：**按步骤解析规则**（direct/policy 递归/ask/task 兼容/path 预留）
         return ke_review.rules_resolve(str(args.get("kb_id", "")), str(args.get("spec", "")),

@@ -399,6 +399,15 @@ TOOL_SCHEMAS = [
                 "kb_ids": {"type": "array", "items": {"type": "string"}},
                 "auto_widen": {"type": "boolean",
                                "description": "保留位（默认 false：父类扩大只在 suggestions 里给 args）"},
+                # 2026-10-24（需求 2 · A/B）：本体提示开关 + 遥测字段
+                "ontology_hint": {"type": "boolean",
+                                  "description": ("是否**提示用本体规划查询**（默认取 env `BODHI_ONTOLOGY_HINT`=on）："
+                                                  "true ⇒ 回 `plan/strategy/suggestions/next`；"
+                                                  "false ⇒ 只回 `hits/counts`（对照组基线，**不猜**）")},
+                "session_no": {"type": "string",
+                               "description": "会话编号（**只进遥测日志**，不参与检索；用于按会话统计成败）"},
+                "question": {"type": "string",
+                             "description": "用户**原始问题**（只进遥测日志/同类问题聚类；检索仍用 `query`）"},
                 "limit": {"type": "integer"}},
                 "required": ["kb_id"]},
         },

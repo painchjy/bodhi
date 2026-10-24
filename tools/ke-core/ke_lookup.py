@@ -12,7 +12,9 @@
 """
 
 import json
+import os
 import re
+import time
 
 _PUNCT = re.compile(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/]+")
 
@@ -221,10 +223,10 @@ def _cross_kb(types: list, kb: str) -> dict:
             "why": "本库没有这些类型的实例；它们在本会话的其它库里有（换 kb_id 再查 ✓）"}
 
 
-def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
-                     spec: str = "", start: str = "", depth: int = 2,
-                     limit: int = 20, cls: str = "", page_type: str = "",
-                     kb_ids: list | None = None, auto_widen: bool = False) -> dict:
+def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
+                 spec: str = "", start: str = "", depth: int = 2,
+                 limit: int = 20, cls: str = "", page_type: str = "",
+                 kb_ids: list | None = None, auto_widen: bool = False) -> dict:
     import ke_db as _db
     import ke_review as _rv
 
@@ -475,3 +477,80 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
         # JSON 便于外部复算 hash ✓（调用方可自行序列化）
 
     raise ValueError("mode 只能是 rules / keyword / instances / route / path / semantic（收到 %r）" % mode)
+
+
+# ---------------------------------------------------------------------------
+# 对外入口（2026-10-24 需求 2）：**本体提示开关 + 调用遥测**
+# ---------------------------------------------------------------------------
+# 目的：可对比"是否用本体信息规划查询"对智能体检索成败的影响。
+#   · `ontology_hint=True`（默认 / env `BODHI_ONTOLOGY_HINT=on`）：
+#       回执带 `plan` / `strategy` / `suggestions` / `next` / `cross_kb_hint`
+#       —— 这就是"提示智能体用本体规划查询"的能力面；
+#   · `ontology_hint=False`（对照组）：**剥掉**上述提示，只回 `hits/counts/kb/query`
+#       —— 模拟"没有本体提示、只能看原始命中"的基线；
+#   · 两种情况下都回 `telemetry`（variant / 会话 / 原问题 / 命中数 / 耗时），
+#     供 `logs/lookup_ab_*.jsonl` 与 `ke_ab_report.py` 统计。
+_HINT_KEYS = ("plan", "strategy", "suggestions", "next", "cross_kb_hint")
+
+
+def _hint_enabled(ontology_hint=None) -> bool:
+    """开关解析：显式布尔 > env `BODHI_ONTOLOGY_HINT`（默认 on）。"""
+    if isinstance(ontology_hint, bool):
+        return ontology_hint
+    raw = (os.environ.get("BODHI_ONTOLOGY_HINT") or "on").strip().lower()
+    return raw not in ("0", "false", "off", "no", "n")
+
+
+_QKEY_PUNCT = re.compile(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/？?！!…\"'“”‘’]+")
+
+
+def _question_key(text: str) -> str:
+    """问题归一化键（同类问题聚类用）：小写 + 去标点/空白（含全角 ？ ！）。"""
+    return _QKEY_PUNCT.sub("", (text or "").lower())[:80]
+
+
+def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
+                     spec: str = "", start: str = "", depth: int = 2,
+                     limit: int = 20, cls: str = "", page_type: str = "",
+                     kb_ids: list | None = None, auto_widen: bool = False,
+                     ontology_hint: bool | None = None, session_no: str = "",
+                     question: str = "") -> dict:
+    """**统一检索入口**（原实现 + 本体提示开关 + 遥测）。
+
+    向后兼容：前 11 个参数与旧签名完全一致 ✓（旧调用方无需改动）。
+    `session_no` / `question` **只进遥测**，不参与检索（检索仍用 `query`）。
+    """
+    t0 = time.time()
+    hint = _hint_enabled(ontology_hint)
+    r = _lookup_impl(kb_id, mode, query, spec, start, depth, limit, cls, page_type,
+                     kb_ids, auto_widen)
+    variant = "hint" if hint else "plain"
+    if not hint:
+        for key in _HINT_KEYS:
+            r.pop(key, None)
+    counts = r.get("counts") or {}
+    hits = counts.get("hits")
+    if hits is None:
+        hits = counts.get("paths")
+    if hits is None:
+        # **route 模式没有 hits/paths**：以 `recipe` 步数计"可用的出路"（否则恒 0 ✗）
+        hits = (len(r.get("hits") or []) or len(r.get("rules") or [])
+                or len(r.get("paths") or []) or len(r.get("recipe") or []))
+    top = ""
+    first = (r.get("hits") or [{}])[0] if isinstance(r.get("hits"), list) else {}
+    if isinstance(first, dict):
+        top = str(first.get("slug") or "")
+    plan = r.get("plan") or {}
+    r["telemetry"] = {
+        "variant": variant, "ontology_hint": hint,
+        "session_no": str(session_no or ""), "question": str(question or ""),
+        "question_key": _question_key(question or query or spec),
+        "query": str(query or spec or "")[:120], "mode": r.get("mode") or mode,
+        "hits": int(hits or 0), "top_slug": top,
+        "relaxed_by": str(plan.get("relaxed_by") or ""),
+        "ambiguity": bool(plan.get("ambiguity")), "scope_by": str(plan.get("scope_by") or ""),
+        "ms": int((time.time() - t0) * 1000),
+        "assignment": "manual",
+    }
+    return r
+
