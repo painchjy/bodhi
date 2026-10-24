@@ -30,6 +30,7 @@ STAGES = [
 ]
 ALLOWED = set().union(*[s[1] for s in STAGES]) | {
     "ontology_types", "skills", "audit_scan", "audit_plan", "page_attributes_set",
+    "clean_alias_noise",
     "job_status", "context_lookup", "kb_export", "import_plan", "import_apply",
     "import_probe", "retag_preview", "retag_apply", "context_scan", "context_page",
     "context_concept_apply", "context_authority", "reference_lookup", "extract_state",

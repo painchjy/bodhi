@@ -302,6 +302,19 @@ TOOL_SCHEMAS = [
             },
         },
         {
+            "name": "clean_alias_noise",
+            "description": ("**维护·清别名噪音（写，默认 dry_run）**：删掉页面 `aliases` 里**与标题同名**的标签"
+                            "（历史写入把标题也塞进了 aliases ⇒ 巡检 W7 报低风险噪音）。"
+                            "只删**完全相同**的项，真别名（缩写/英文名）一律保留 ✓；"
+                            "执行时**先写 `wiki_page_revisions` 快照**再改，`version+1`（可回退）。"
+                            "`dry_run=true`（默认）只念清单。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "空 = 全库（建议先单库 dry-run）"},
+                "dry_run": {"type": "boolean", "description": "默认 true：只统计，不写"},
+                "limit": {"type": "integer", "description": "最多扫描多少页（默认 2000）"}},
+            },
+        },
+        {
             "name": "audit_purge",
             "description": ("**巡检清理·一步硬删（写）**：只要调用者对该知识库**有写权限**就执行，不需要后台 plan/confirm。"
                             "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理）；"

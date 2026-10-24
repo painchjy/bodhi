@@ -31,7 +31,7 @@
 | B5 | `ke_pages.write_knowledge` 最终返回**漏了 `before_version`** ⇒ `page_versions[].before` 恒为 null | 实测修前后：`before: None` → `before: 0` | **已修** ✓（`ke_pages.py:1392` 起加字段） |
 | B7 | `wiki_pages` 的唯一索引是 **部分索引**：`UNIQUE (knowledge_base_id, slug) WHERE deleted_at IS NULL` | 实测 `pg_indexes`（2026-10-21）：软删后可再插同名页（**设计 ✓**），但"按 slug 取最新"必须显式 `deleted_at IS NULL`，否则拿到死行 ✗ | ✅ **已加行为级用例（2026-10-24）**：`tests/test_soft_delete_isolation.py` —— 放一条软删"诱饵行"（version=9、内容带 DECOY），验证 ① 面板读 ② 检索 ③ 覆盖写 三条路径都**只认活行**，且死行不被改动（3 例全绿） |
 | B6 | `ke_db` kb 清单**60s 进程缓存** ⇒ 刚建的库写不进去（`kb_unresolved: not_found`，但 `candidates` 里就有它 ✗） | 实测（本轮多次复现） | **已修** ✓：`_kb_rows(force=True)` + `resolve_kb_id`/`resolve_kb_candidate` 未命中时**强制刷新一次**（不放宽口径 ✓） |
-
+| W7 | 别名里含与标题同名的标签（旧写入路径把标题塞进 `aliases`） | 领域库 34 条（2026-10-24 实测） | ✅ **已提供清理工具并清零**：`clean_alias_noise(kb_id, dry_run=true)` —— 只删**与标题完全相同**的别名（真别名保留），执行前写 `wiki_page_revisions` 快照、`version+1`（可回退）。领域库实跑：dry-run 34 → apply cleaned=34 → 巡检 **0 high/0 medium/0 low**，二次 dry-run `hits=0`（幂等）。用例：`tests/test_clean_alias_noise.py`（3） |
 ## C. 测试脚手架踩坑（已修 ✓）
 | # | 坑 | 修法 |
 |---|---|---|

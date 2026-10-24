@@ -1,5 +1,6 @@
 [
  "audit_kb",
+ "clean_alias_noise",
  "context_concept_rollback",
  "graph_query_legacy",
  "import_apply",

@@ -1913,7 +1913,7 @@ def check_graph_pg_drift(ctx: dict, rep: Report) -> None:
         rep.add("W10", "low", kb, "页面在图里没有节点：%s" % slug,
                 "rebuild_kb_graph，或确认该页是否新建未同步")
     if not drift and not no_node:
-        # 2026-10-24：**通过项不记 finding**（"✓ 一致"出现在问题清单里只会制造噪音 ✗）⇒ 放 data
+        # 2026-10-24：**通过项不记 finding**（"✓ 一致"出现在发现列表里只会制造噪音 ✗）⇒ 放 data
         ctx.setdefault("data", {})["graph_pg_drift"] = {"checked": len(g), "drift": 0, "no_node": 0}
 
 

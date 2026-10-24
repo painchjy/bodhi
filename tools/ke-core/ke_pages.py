@@ -197,6 +197,62 @@ def replica_guard(kb_id: str, slug: str, tag: str) -> None:
            hit.get("concept_slug") or slug))
 
 
+def clean_alias_noise(kb_id: str = "", dry_run: bool = True, limit: int = 2000) -> dict:
+    """**维护 · 清别名噪音**：删掉 `aliases` 里**与标题同名**的标签（历史写入把标题塞进 aliases ✗）。
+
+    - `dry_run=True`（默认）只念清单 ✓；
+    - 执行时：**先快照**（`wiki_page_revisions`）→ 只改 `aliases` → `version+1`（可回退 ✓）；
+    - 其它别名（真别名，如缩写/英文名）**一律保留** ✓；空数组不写 `[]` 而是保持原样（仅当全部是噪音才置 `[]`）；
+    - `kb_id` 空 ⇒ 全库（运维口径），建议先在单库 dry-run 看清单 ✓。
+
+    为什么需要：W7 巡检会把"别名=标题"当低风险噪音报出来（34 条），但它只是**冗余**、
+    不影响读写；清理后 W7 归零，别名列表也更好读。
+    """
+    import json  # noqa: PLC0415
+
+    cond = ("knowledge_base_id = %s AND " % ke_db.sql_str(kb_id)) if kb_id else ""
+    rows = ke_db.psql_csv(
+        "SELECT knowledge_base_id AS kb, slug, COALESCE(title,'') AS t, "
+        "       COALESCE(aliases::text,'[]') AS a "
+        "  FROM wiki_pages WHERE %sdeleted_at IS NULL AND aliases IS NOT NULL "
+        "   AND aliases::text <> '[]' ORDER BY slug LIMIT %d" % (cond, int(limit) + 1))
+    truncated = len(rows) > int(limit)
+    hits, cleaned = [], 0
+    for r in rows[:int(limit)]:
+        try:
+            aliases = json.loads(r["a"] or "[]")
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(aliases, list):
+            continue
+        title = str(r["t"] or "").strip()
+        if not title:
+            continue
+        keep = [str(x) for x in aliases if str(x).strip() and str(x).strip() != title]
+        noise = [str(x) for x in aliases if str(x).strip() == title]
+        if not noise:
+            continue
+        hits.append({"kb_id": r["kb"], "slug": r["slug"], "title": title,
+                     "removed": noise, "kept": keep})
+        if dry_run:
+            continue
+        stmt = ("BEGIN;\n%s\nUPDATE wiki_pages SET aliases = %s::jsonb, "
+                "version = COALESCE(version,1) + 1, updated_at = now(), "
+                "last_edit_source = 'bodhi-ops-edit' "
+                "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL;\nCOMMIT;\n"
+                % (_snapshot_stmt(r["kb"], r["slug"], "bodhi-ops-edit"),
+                   ke_db.sql_json(keep), ke_db.sql_str(r["kb"]), ke_db.sql_str(r["slug"])))
+        ke_db.psql(stmt, stdin=True)
+        cleaned += 1
+    return {"ok": True, "dry_run": dry_run, "scanned": min(len(rows), int(limit)),
+            "truncated": truncated, "hits": len(hits),
+            **({"cleaned": cleaned} if not dry_run else {}),
+            **({"pages": hits[:50]} if hits else {}),
+            "note": ("只删**与标题同名**的别名；其它别名保留。执行会先写 `wiki_page_revisions` 快照并 `version+1`。"
+                     if dry_run else "已清理并按页快照 + 版本 +1（可回退）。")}
+
+
+
 def _snapshot_stmt(kb_id: str, slug: str, tag: str) -> str:
     """把当前版本快照进 wiki_page_revisions（沿用 server.py 的合并语义）。"""
     return ("INSERT INTO wiki_page_revisions (id, tenant_id, knowledge_base_id, page_id, slug, version, "

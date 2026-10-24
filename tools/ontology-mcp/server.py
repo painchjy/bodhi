@@ -2536,6 +2536,13 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                 "page_metadata": _kg.strip_wiki_content_attr(_kid, dry_run=_dry),
                 "note": ("正文事实源 = 图节点 `articleBody`（旧键 `wiki_content` 仅兼容）；"
                          "PG `content` 是渲染缓存，`page_metadata` 不再存正文")}
+    if name == "clean_alias_noise":
+        # 2026-10-24：运维清理 —— 删掉 aliases 里**与标题同名**的冗余标签（默认 dry_run 只念清单）
+        _kid = str(args.get("kb_id", "") or "")
+        if _kid:
+            _kid, _n = resolve_kb_id(_kid)
+        return ke_pages.clean_alias_noise(_kid, bool(args.get("dry_run", True)),
+                                          int(args.get("limit", 2000) or 2000))
     if name == "audit_purge":
         return ke_audit.purge(str(args.get("kb_id", "")), str(args.get("kinds", "all")), "all", 5000,
                               args.get("slugs") or None, None, bool(args.get("dry_run", False)))
