@@ -114,6 +114,8 @@ def load_telemetry(pattern: str = "") -> list:
                          "degraded": bool(retr.get("degraded")),
                          "io_ms": int(retr.get("io_ms") or io.get("ms") or 0),
                          "has_io": bool(io or retr),
+                         # 2026-10-25：自检样本隔离（`session_no` 以 selftest 开头 ⇒ 默认不进统计 ✓）
+                         "selftest": str(tel.get("session_no") or "").startswith("selftest"),
                          "source": os.path.basename(f)})
     return rows
 
@@ -213,7 +215,7 @@ def group_rows(rows: list, threshold: float = 0.62) -> list:
             by_qid[qid] = gid
         r["question_group"] = gid
     labels = {g["gid"]: g["label"] for g in groups}
-    labels["G0"] = "（未传 question：无法归组）"
+    labels["G0"] = "（无问题文本，常见于 mode=instances 调用）"
     for r in rows:
         r["group_label"] = labels.get(r.get("question_group") or "", "")
     return rows
@@ -401,31 +403,55 @@ def _row_date(r: dict) -> str:
     return ts[:10] if len(ts) >= 10 else ""
 
 
+def _row_ts(r: dict) -> str:
+    """行时间戳 `YYYY-MM-DD HH:MM:SS`（**精确到秒**，支持"--since 2026-10-25 05:00" ✓）"""
+    ts = (r.get("ts") or r.get("at") or "").strip()
+    return ts[:19] if len(ts) >= 19 else (ts + " " * (19 - len(ts)))[:19] if ts else ""
+
+
 def apply_filters(rows: list, since: str = "", until: str = "", version: str = "",
-                  cohort: str = "c1", first_step_only: bool = True) -> tuple:
+                  cohort: str = "c1", first_step_only: bool = True,
+                  strict_self_report: bool = False, drop_selftest: bool = True) -> tuple:
     """按**时间窗 / 版本 / 首步口径**筛选，返回 (保留行, 排除计数)。
 
     排除原因（报告必须**逐条计数**，不能悄悄丢样本 ✗）：
       · `out_of_range`           时间窗之外；
       · `version_mismatch`       版本不匹配（`--version` 模糊匹配）；
       · `turn_missing`           没有 `turn_id`/`turn_first_retrieval` ⇒ 无法证明首步（历史数据/未传参）；
-      · `first_retrieval_other`  本轮首个检索动作**不是** knowledge_lookup（如先 context_lookup/doc_outline）；
-      · `self_report_false`      智能体自报 `first_step=false`。
+      · `first_retrieval_other`  本轮首个**检索**动作**不是** knowledge_lookup（如先 context_lookup/doc_outline）；
+      · `selftest`               自动化自检留下的样本（`session_no` 以 `selftest` 开头）；
+      · `self_report_false`      **只在 `strict_self_report=True` 时排除**（默认不排除 ↓）。
+
+    2026-10-25 修（用户口径）：开轮纪律要求**第一步工具是 `lookup_turn_begin`**，所以
+    自报 `first_step=false` 是**常态**，不能当排除理由（旧实现把真实 B 组样本整批判掉了 ✗）。
+    "首个检索动作是不是 knowledge_lookup" 一律以**服务端裁决** `turn_first_retrieval` 为准 ✓
 
     `cohort="c3"`：不做首步门禁（只按会话首调取样），仅作旁证 ✓
     模拟行（`source=sim`）**不受首步门禁约束**（确定性基线，本来就是逐题一问一调 ✓）。
     """
     kept, excl = [], {}
     for r in rows:
-        d = _row_date(r)
-        if since and d and d < since:
-            excl["out_of_range"] = excl.get("out_of_range", 0) + 1
-            continue
-        if until and d and d > until:
-            excl["out_of_range"] = excl.get("out_of_range", 0) + 1
-            continue
+        # 时间窗：`--since/--until` 允许**精确到分钟**（"2026-10-25 05:00"），按字符串前缀比较 ✓
+        ts, d = _row_ts(r), _row_date(r)
+        if since:
+            if len(since) > 10 and ts and ts < since:
+                excl["out_of_range"] = excl.get("out_of_range", 0) + 1
+                continue
+            if len(since) <= 10 and d and d < since:
+                excl["out_of_range"] = excl.get("out_of_range", 0) + 1
+                continue
+        if until:
+            if len(until) > 10 and ts and ts > until:
+                excl["out_of_range"] = excl.get("out_of_range", 0) + 1
+                continue
+            if len(until) <= 10 and d and d > until:
+                excl["out_of_range"] = excl.get("out_of_range", 0) + 1
+                continue
         if version and not _vmatch(str(r.get("lookup_version") or "unknown"), version):
             excl["version_mismatch"] = excl.get("version_mismatch", 0) + 1
+            continue
+        if drop_selftest and r.get("selftest"):
+            excl["selftest"] = excl.get("selftest", 0) + 1
             continue
         if cohort == "c3" or (r.get("source") or "").startswith("sim"):
             kept.append(r)
@@ -437,7 +463,7 @@ def apply_filters(rows: list, since: str = "", until: str = "", version: str = "
         if first and first != "knowledge_lookup":
             excl["first_retrieval_other"] = excl.get("first_retrieval_other", 0) + 1
             continue
-        if first_step_only and r.get("first_step") is False:
+        if strict_self_report and first_step_only and r.get("first_step") is False:
             excl["self_report_false"] = excl.get("self_report_false", 0) + 1
             continue
         kept.append(r)
@@ -455,11 +481,19 @@ def _vmatch(actual: str, pattern: str) -> bool:
     return actual.split("-")[0] == pattern or actual.startswith(pattern)
 
 
-def by_version(rows: list) -> dict:
-    """版本 → 行（**跨版本不能混比**：程序改了、数据也可能改了 ✗）"""
+def by_version(rows: list, key: str = "algo") -> dict:
+    """版本 → 行。
+
+    **跨版本不能混比**（程序改了、数据也可能改了 ✗），但"版本"有两个粒度：
+      · `algo`（默认）= `ALGO_VERSION`（检索**语义**位：v2）—— 同一语义下的代码小改
+        （加埋点、改日志）**可以**合并比较，否则一次观测性改动就把 A/B 数据切成两半 ✗；
+      · `code` = 完整 `v2-<8位指纹>` —— 最严格（任何改动即分表）。
+    """
     out: dict = {}
     for r in rows:
-        out.setdefault(str(r.get("lookup_version") or "unknown"), []).append(r)
+        raw = str(r.get("lookup_version") or "unknown")
+        ver = raw.split("-")[0] if key == "algo" else raw
+        out.setdefault(ver or "unknown", []).append(r)
     return out
 
 
@@ -542,32 +576,36 @@ def by_group(rows: list) -> list:
 
 
 def _trace_table(trace: list) -> list:
-    """C2 真值表：**端到端耗时**（含 LLM 思考）与**真·首步**（不再自报 ✓）"""
+    """C2 真值表：**端到端耗时**（含 LLM 思考）与**真·首检索**（不再自报 ✓）"""
     if not trace:
         return []
     lines = ["## 3. C2 真值（WeKnora `agent_steps` + `agent_duration_ms`）", "",
-             "| 组 | 问数 | 端到端耗时 中位 | 端到端 P90 | 检索耗时占比 | 真·首步=knowledge_lookup | 原生检索先行 | 平均工具调用 |",
-             "|---|---|---|---|---|---|---|---|"]
+             "| 组 | 问数 | 端到端耗时 中位 | 端到端 P90 | 检索耗时占比 | "
+             "首工具=turn_begin | 首**检索**=knowledge_lookup | 原生检索先行 | 平均工具调用 |",
+             "|---|---|---|---|---|---|---|---|---|"]
     for variant in ("hint", "plain", "unknown"):
         sub = [t for t in trace if t.get("variant") == variant]
         if not sub:
             continue
         dur = sorted(int(t.get("agent_ms") or 0) for t in sub)
         linked = [t for t in sub if t.get("linked")]
+        tb = sum(1 for t in sub if t.get("turn_begin_first"))
         first_ok = sum(1 for t in sub if t.get("first_is_lookup"))
         native = sum(1 for t in sub if (t.get("first_retrieval") or "") not in
-                     ("", "knowledge_lookup"))
-        # 检索耗时占比 = 我方 lookup 合计 / 端到端（只看连上的样本）
+                     ("", "knowledge_lookup", "lookup_turn_begin"))
         io_ms = sum(int(t.get("lookup_ms") or 0) for t in linked)
         e2e = sum(int(t.get("agent_ms") or 0) for t in linked)
-        lines.append("| %s | %d | %dms | %dms | %s | %s（%d/%d） | %d | %.1f |"
+        lines.append("| %s | %d | %dms | %dms | %s | %s（%d/%d） | %s（%d/%d） | %d | %.1f |"
                      % (variant, len(sub), int(statistics.median(dur)) if dur else 0,
                         _p90(dur), _pct(io_ms / e2e) if e2e else "-",
-                        _pct(first_ok / len(sub)) if sub else "-", first_ok, len(sub),
+                        _pct(tb / len(sub)), tb, len(sub),
+                        _pct(first_ok / len(sub)), first_ok, len(sub),
                         native, (sum(int(t.get("tool_calls") or 0) for t in sub)
                                  / float(len(sub)))))
     lines += ["", "> `端到端耗时` 来自 `messages.agent_duration_ms`（真值，含 LLM 思考）；"
               "`检索耗时占比` = 本轮 `knowledge_lookup` 合计 / 端到端（只统计能与遥测连上的样本）。",
+              "> **首工具必然是 `lookup_turn_begin`**（开轮纪律要求的），所以「首步」要看**首个检索类动作** —— "
+              "`首检索=knowledge_lookup` 才是 A/B 关心的指标 ✓",
               "> `unknown` = **未能与服务端遥测连上**的问（旧日志没传 `session_no`/`question`）；"
               "它只作端到端耗时旁证，**不参与 A/B 差异** ✓", ""]
     return lines
@@ -665,10 +703,9 @@ def render_md(rep: dict, rows: list, expects: dict, title: str) -> str:
             lines.append("- `%s`：plain %d 轮 / hint **0 轮** ⇒ 同样缺一组，不可比 ⚠️" % (src, np_))
         else:
             lines.append("- `%s`：hint %d 轮 / plain %d 轮；**问题组** %d vs %d，交集 %d"
-                         "（仅 hint %d / 仅 plain %d）%s"
+                         "（仅 hint %d / 仅 plain %d）"
                          % (src, nh, np_, len(sh), len(sp), len(sh & sp),
-                            len(sh - sp), len(sp - sh),
-                            "✅" if (sh & sp) else "⚠️ 无交集，仍不可比"))
+                            len(sh - sp), len(sp - sh)))
     lines.append("- 全局配对：hint 组 %d / plain 组 %d / **交集 %d** ⇒ %s"
                  % (pair["hint_groups"], pair["plain_groups"], pair["paired"],
                     ("可比 ✓" if pair["comparable"] else "**不可比**（缺 %s 臂）⚠️"
@@ -695,9 +732,10 @@ def render_md(rep: dict, rows: list, expects: dict, title: str) -> str:
             if r.get("first_step") is None:
                 continue
             tot += 1
-            agree += (bool(r.get("first_step")) == bool(t.get("first_is_lookup")))
+            # 自报 `first_step` = "这是本轮第一步" ⇒ 与**真值首工具**比（不是与首检索比 ✓）
+            agree += (bool(r.get("first_step")) == (t.get("first_tool") == "knowledge_lookup"))
         if tot:
-            lines.append("- **自报 vs 真值一致率**（`first_step` ⇄ `agent_steps` 首个工具）：%.1f%%（n=%d）"
+            lines.append("- **自报 vs 真值一致率**（`first_step` ⇄ `agent_steps` 首工具）：%.1f%%（n=%d）"
                          "—— 这才是真口径（旧版“首步一致率”只是自报 vs 服务端裁决）"
                          % (100.0 * agree / tot, tot))
             done = True
@@ -710,8 +748,8 @@ def render_md(rep: dict, rows: list, expects: dict, title: str) -> str:
                         is not (r.get("first_step") is False))
             lines.append("- 首步一致率（自报 vs 服务端裁决，**未接入 C2 真值**）：%.1f%%（n=%d）"
                          % (100.0 * agree / len(judged), len(judged)))
-    lines.append("- 问题集覆盖：%d 题（问题集共 %d 题）"
-                 % (len(q_hint | q_plain), len(expects) or len(q_hint | q_plain)))
+    lines.append("- 问题集覆盖：问题键 %d 个（固定问题集 14 题；自建问题按第 5 节归组 ✓）"
+                 % len(q_hint | q_plain))
     missing = [k for k in (q_hint | q_plain) if k and k not in expects]
     if missing:
         lines.append("- ℹ️ 未在**固定问题集**里的 %d 个（只统计命中率、不判解决）：%s"
@@ -744,14 +782,25 @@ def main() -> int:
     ap.add_argument("--out", default="", help="写入 Markdown 文件")
     ap.add_argument("--no-telemetry", action="store_true",
                     help="忽略真实遥测（只看模拟报告；冒烟/联调产生的日志会稀释样本 ✓）")
+    # 2026-10-25（用户口径）：**默认只看"今天 + 真实调用"**，模拟/历史不进主表（避免"14 个 plain"误解）
+    ap.add_argument("--source", default="real", choices=["real", "sim", "all"],
+                    help="统计来源：real=真实调用（默认）/ sim=确定性模拟 / all=两者混（会分源展示）")
+    ap.add_argument("--days", type=int, default=1,
+                    help="时间窗 = 最近 N 天（含今天；默认 1=今天。给了 --since/--until 则以它们为准）")
+    ap.add_argument("--strict-self-report", action="store_true",
+                    help="把自报 first_step=false 也当排除理由（默认不排：turn_begin 必然排第一 ✓）")
+    ap.add_argument("--include-selftest", action="store_true",
+                    help="把自动化自检样本（session_no=selftest*）也计入（默认排除）")
     # 2026-10-24（A/B 四维）：时间窗 / 版本 / 准入口径 / 最小样本
     ap.add_argument("--since", default="", help="起始日期 YYYY-MM-DD（含）")
     ap.add_argument("--until", default="", help="结束日期 YYYY-MM-DD（含）")
     ap.add_argument("--version", default="", help="版本过滤：`v2` / `v2-*` / 精确 `v2-1a2b3c4d`")
+    ap.add_argument("--version-key", default="algo", choices=["algo", "code"],
+                    help="分表粒度：algo=检索语义位 v2（默认，仅加埋点不切表 ✓）/ code=完整指纹（最严格）")
     ap.add_argument("--cohort", default="c1", choices=["c1", "c3"],
                     help="c1=首步即 knowledge_lookup 才纳入（默认）；c3=不看首步（仅旁证）")
     ap.add_argument("--no-first-step-gate", action="store_true",
-                    help="忽略智能体自报 `first_step=false`（只看服务端裁决）")
+                    help="（已默认生效）自报 first_step 不再作为门禁，只看服务端裁决 turn_first_retrieval ✓")
     ap.add_argument("--min-sample", type=int, default=20,
                     help="每格最小样本；不足则只报 n（默认 20）")
     # 2026-10-25（口径 v2）：C2 真值 + 问题归组
@@ -763,7 +812,10 @@ def main() -> int:
     args = ap.parse_args()
 
     expects = load_questions(args.questions)
-    reps = load_sim_reports(args.sim)
+    # 来源选择（默认只统计**真实调用**；模拟是 CI 基线，混进主表会误导 ✗）
+    want_sim = args.source in ("sim", "all") or args.no_telemetry
+    want_real = args.source in ("real", "all") and not args.no_telemetry
+    reps = load_sim_reports(args.sim) if want_sim else []
     if reps:
         # 取**行数最多、且最新**的一份（测试会写小样本报告，若取"最后一份"会把全量模拟悄悄挤掉 ✗）
         reps = [max(reps, key=lambda r: (len(r.get("rows") or []), r.get("at") or ""))]
@@ -777,13 +829,22 @@ def main() -> int:
             # 旧版模拟报告没写 `source` ⇒ 它**就是**模拟行（否则会被 C1 门禁当"无 turn"丢掉 ✗）
             row.setdefault("source", "sim")
         rows += sub
-    real = [] if args.no_telemetry else load_telemetry(args.telemetry)
+    real = load_telemetry(args.telemetry) if want_real else []
     raw_n = len(rows) + len(real)
     rows += real
 
-    rows, excl = apply_filters(rows, since=args.since, until=args.until, version=args.version,
+    # 时间窗：显式 --since/--until 优先；否则取最近 --days 天（默认今天）
+    since, until = args.since, args.until
+    if not since and not until and args.days > 0:
+        until = time.strftime("%Y-%m-%d")
+        since = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400 * (args.days - 1)))
+    if args.include_selftest:
+        rows = [r for r in rows]          # 保留 selftest（apply_filters 里 selftest 标记仍会命中）
+    rows, excl = apply_filters(rows, since=since, until=until, version=args.version,
                                cohort=args.cohort,
-                               first_step_only=not args.no_first_step_gate)
+                               first_step_only=True,
+                               strict_self_report=args.strict_self_report,
+                               drop_selftest=not args.include_selftest)
     if not rows:
         print(json.dumps({"ok": False,
                           "error": "没有可用数据（先跑 tests/ab_runner.py 或真实调用）",
@@ -795,10 +856,11 @@ def main() -> int:
     trace = [] if args.no_trace else link_trace(load_trace(args.trace), rows,
                                                 threshold=args.group_threshold)
 
-    versions = {ver: summarize_rows(sub, expects) for ver, sub in by_version(rows).items()}
+    versions = {ver: summarize_rows(sub, expects) for ver, sub in
+                by_version(rows, args.version_key).items()}
     # 版本 × 类目（四维里的第 2、3 维交叉）
     cats: dict = {}
-    for ver, sub in by_version(rows).items():
+    for ver, sub in by_version(rows, args.version_key).items():
         for cat, d in by_category(sub).items():
             cats[(ver, cat)] = d
     summary = summarize_rows(rows, expects)
@@ -810,12 +872,14 @@ def main() -> int:
            "cohort_note": ("C1（首步即 knowledge_lookup；排除项逐条计数 ✓）" if args.cohort == "c1"
                            else "C3（不判首步，仅旁证）")}
     md = render_md(rep, rows, expects,
-                   "模拟 %d 份 / 真实调用 %d 条 / 纳入 %d 条 / 问题组 %d 个"
-                   % (len(reps), len(real), len(rows), len(rep["groups"])))
+                   "来源=%s ｜ 窗口 %s~%s ｜ 真实调用 %d 条 / 纳入 %d 条 / 问题组 %d 个"
+                   % ({"real": "真实调用", "sim": "确定性模拟", "all": "真实+模拟"}[args.source],
+                      since or "-", until or "-", len(real), len(rows), len(rep["groups"])))
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(md)
         print(json.dumps({"ok": True, "out": args.out, "rows": len(rows),
+                          "source": args.source, "since": since, "until": until,
                           "versions": sorted(versions), "excluded": excl,
                           "groups": len(rep["groups"]), "pairing": rep["pairing"],
                           "trace_rows": len(trace),

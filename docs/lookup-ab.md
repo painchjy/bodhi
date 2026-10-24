@@ -195,3 +195,21 @@ lookup_calls / native_retrieval_calls / agent_ms`。
 
 **诚实边界**：C2 与遥测的配对键是 `(session_no, question_key)`；旧日志没传 `session_no`/`question`
 时退化为「同会话 + 时间最近（±10min）」，再不行就记 `unknown`（只作耗时旁证，不参与 A/B 差异）。
+
+### 6.6 第二轮修正（2026-10-25 深夜，用户实测反馈）
+
+第一轮 v2 报告出来后暴露了 4 个口径错，已修：
+
+| 问题 | 现象 | 修正 |
+|---|---|---|
+| **模拟样本混进主表** | 总览写 "plain 14 样本"，但真实 plain 明明是 0 ⇒ 看着像矛盾 | `--source`（默认 **real**）只看真实调用；模拟是 CI 基线，用 `--source sim` 单独出 |
+| **自报 `first_step` 被当排除理由** | 开轮纪律要求第一枪是 `lookup_turn_begin` ⇒ `first_step=false` 是**常态**，结果真实 B 组样本被整批判掉（`self_report_false=42`） | 默认**不再**用自报排除，只看服务端裁决 `turn_first_retrieval`；要旧行为加 `--strict-self-report` |
+| **C2 "首步=knowledge_lookup" 恒为 0** | 我用 `first_tool` 判，而首工具必然是 `turn_begin` ⇒ 结构上永远 0 | 改判**首个检索类动作** `first_retrieval`；表里同时给「首工具=turn_begin」列 |
+| **一个埋点改动把 A/B 数据切成两半** | A 组跑在 `v2-a87ca3e5`、B 组跑在 `v2-0141df2c`（只是加了 IO 埋点）⇒ 报告分两张表，没法比 | `--version-key`（默认 **algo**）：按**检索语义位** `v2` 合并；`--version-key code` 才是最严格指纹 |
+
+另外三条可用性改动：
+
+- **默认只看今天**：`--days N`（默认 1）；`--since/--until` 支持**精确到分钟**（`"2026-10-25 05:00"`）；
+- **自检不再污染真实会话**：`tests/ab_runner.py` / `test_lookup_ab.py` 统一用 `session_no=selftest`
+  （`knowledge_lookup` 的 `session_no` 只进遥测不校验），报告默认按前缀排除（`--include-selftest` 放开）；
+- **数据质量逐来源只报计数**：可比/不可比的判定只在**全局**给一次，避免"某一天文件无交集 ⚠️"与"全局可比 ✓"打架。

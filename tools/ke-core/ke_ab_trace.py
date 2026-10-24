@@ -114,7 +114,10 @@ def build_row(rec: dict) -> dict:
         "q_shape": shape["q_shape"], "kw_bucket": shape["kw_bucket"], "level": shape["level"],
         "tool_seq": seq,
         "first_tool": first_tool, "first_retrieval": first_retr,
-        "first_is_lookup": first_tool == "knowledge_lookup",
+        # 2026-10-25 修（用户口径）：**首工具必然是 `lookup_turn_begin`**（开轮纪律要求的），
+        # 所以"首步是不是 knowledge_lookup"必须看**首个检索类动作**，不能看 first_tool ✗
+        "first_is_lookup": first_retr == "knowledge_lookup",
+        "turn_begin_first": first_tool == "lookup_turn_begin",
         "lookup_calls": seq.count("knowledge_lookup"),
         "retrieval_calls": sum(1 for n in seq if n in BODHI_RETRIEVAL),
         "native_retrieval_calls": sum(1 for n in seq if n in NATIVE_RETRIEVAL),
