@@ -109,6 +109,23 @@
 （`_job_brief` / `load_skills` / `save_knowledge` 的写库编排 / `image_extract` / `context_*`），
 按 `srv/knowledge_write.py` → `srv/design.py` → `srv/meta.py` 三片搬完即可清零。
 
+#### A1-6（2026-10-24，✅ 完成）「退役工具的**死代码**清理」
+- `server.py` 删 3 个**只剩死引用**的函数：`service_overview_tool` / `start_overview_job` /
+  `rebuild_wiki_from_graph`（工具已退役 ⇒ 无入口；冗余的 P3-0i3 段头一并去掉）
+- **保留**：`refresh_service_overview`（`tools/ontology-mcp/refresh_design.py --overview` 仍在用）、
+  `service_overview_lines` / `service_design_summary`（`/bodhi/overview` 路由在用）、
+  `link_source_session`（`save_knowledge` 内部 + `/bodhi/source-session` 路由在用）
+- 效果：`server.py` **2566 → 2454 行**；`tools=37` / `dispatchers=38`（schema ∪ 分发入口）
+- 验证：`py_compile` ✓ / 重启 `active+success+8765` ✓ / 实调用 `job_status`（空任务表）、`skills`（8 个技能）、
+  `knowledge_lookup`（命中）、`service_overview`（退役回执）✓ / `test_coverage_gaps`+`test_agent_tool_lists`+
+  `test_mcp_tools_read` **15 项全绿** ✓
+
+#### 下一轮（批 3b，需先做前置）
+`save_knowledge`(443 行) / `design_elements`(177) / `save_elements`(324) / `ontology_types`(153) 搬家前必须：
+① `_req_cache` 显式化为上下文对象；② `skills()`→`ontology_types()`→`load_engine()` 的链与 `SKILLS_DIR`/`JOBS`
+等模块级状态一起搬进 `srv/meta.py`；③ `refresh_service_overview`→`save_knowledge` 的依赖方向要先定向
+（`srv/knowledge_write.py` 不反向 import `srv/meta.py`）。三者都在**写库路径**上，必须单独一轮做 + 全量回归。
+
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓
 - 所有切片有对应**单测或回归用例**（`tests/` 现有 126 项即为验收基线 ✓）

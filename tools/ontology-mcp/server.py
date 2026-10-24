@@ -2236,84 +2236,9 @@ def context_authority_apply(action: str, slug: str, master: str = "", kb: str = 
     return {"error": "action 只能是 decide / pull / detach"}
 
 
-def rebuild_wiki_from_graph(kb_id: str = "", dry_run: bool = True) -> dict:
-    """**运维 · 图→wiki 全量重建**：按图节点的 `wiki_content` 重写 PG `wiki_pages.content`。
-
-    用途（2026-10-10 纳入运维）：**正本是图、正文是派生** —— PG 正文被误改/丢失而图仍完整时，
-    用它把正文从图恢复。图节点没有 `wiki_content` 的页（index / 原生页）**不动**；
-    关系只在图里、不回写正文（重建后出入链清空）。
-    `dry_run=True`（默认）只报影响面。**改本体类型 / 迁移 slug 不走这里**（仍走两段式 retag）。
-    """
-    import ke_graph as _kg  # noqa: PLC0415
-    kid = (kb_id or "").strip()
-    if not kid:
-        return {"ok": False, "reason": "缺少 kb_id"}
-    real_kb, note = resolve_kb_id(kid)
-    res = _kg.rebuild_kb_wiki(real_kb, dry_run=bool(dry_run))
-    out = {"ok": True, "kb_id": real_kb, "kb_note": note, "dry_run": bool(dry_run),
-           "note": "图→PG 正文重建（运维恢复手段）；关系只在图里，正文不写回关系；"
-                   "图节点无 wiki_content 的页保持不动"}
-    if isinstance(res, dict):
-        out.update(res)
-    return out
-
-
-
-
-
-def service_overview_tool(kb_id: str, apply: bool = False, slug: str = "", title: str = "",
-                          preview_lines: int = 25) -> dict:
-    """工具面：`service_overview(kb_id)` 只读预览；`apply=True` → 落库（异步，见 start_overview_job）。"""
-    data = service_design_summary(kb_id)  # 只聚合一次（~30s），渲染与统计共用
-    lines = service_overview_lines(kb_id, with_audit=True, data=data)
-    if not lines:
-        return {"error": "这个库里还没有已详设的 IT 服务：先按 service_detailed_design 技能做详设"}
-    return {"markdown_lines": len(lines),
-            "service_count": data["service_count"],
-            "operations": sum(len(s["model"]["operations"]) for s in data["services"].values()),
-            "attributes": len(data["attributes"]), "cross_service_deps": len(data["deps"]),
-            "preview": "\n".join(lines[:max(1, int(preview_lines))]),
-            "applied": False, "overview_slug": slug or OVERVIEW_SLUG,
-            "note": ("只读预览。要生成/刷新总览页请再调本工具 **apply=true**"
-                     "（异步落库，用 job_status(job_id=...) 查回执；落库版会带上巡检结论）。")}
-
-
-def start_overview_job(args: dict) -> dict:
-    """异步刷新总览页（渲染 + 写页要 1-3 分钟，超过 app 侧 MCP 60s 硬超时）。"""
-    kb_id, kb_note, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
-                                            bool(args.get("confirm_kb_match")))
-    if block:
-        return block
-    args = {**args, "kb_id": kb_id}
-    slug = str(args.get("slug", "") or OVERVIEW_SLUG)
-    key = "overview:%s:%s" % (kb_id, slug)
-    with JOBS_LOCK:
-        for job_id in reversed(list(JOBS)):
-            job = JOBS[job_id]
-            if job.get("key") == key and job.get("status") == "running":
-                return {"status": "running", "job_id": job_id, "reused": True,
-                        "note": "同一总览页正在刷新，请用 job_status(job_id=...) 查回执。"}
-        job_id = uuid.uuid4().hex[:12]
-        JOBS[job_id] = {"status": "running", "started_at": now_text(), "key": key, "tool": "service_overview"}
-
-    def _run() -> None:
-        try:
-            result = refresh_service_overview(kb_id, slug, str(args.get("title", "")))
-            with JOBS_LOCK:
-                JOBS[job_id].update({"status": "done", "finished_at": now_text()})
-                if isinstance(result, dict):
-                    JOBS[job_id].update(result)
-        except Exception as exc:  # noqa: BLE001
-            print("[mcp] 总览刷新失败 job=%s：%s" % (job_id, exc))
-            with JOBS_LOCK:
-                JOBS[job_id].update({"status": "failed", "finished_at": now_text(), "error": str(exc)})
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"status": "started", "job_id": job_id, "started_at": now_text(), "slug": slug,
-            "note": ("总览页刷新已受理（渲染 12 个服务约 1-3 分钟）。请用 job_status(job_id=...) "
-                     "查回执；**不要**重复调用 apply=true。")}
-
-
+# （2026-10-24 批 3a：`service_overview` 工具已退役 ⇒ `service_overview_tool` / `start_overview_job`
+#  已删除；总览页刷新仍可由 CLI `tools/ontology-mcp/refresh_design.py --overview` 走
+#  `refresh_service_overview`（内部调 save_knowledge）✓）
 # ---------------------------------------------------------------------------
 # P3-0i3（2026-10-10）：**同载荷重入保护** —— 客户端超时重发不再写出重复版本
 #
