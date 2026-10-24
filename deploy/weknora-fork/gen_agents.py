@@ -61,8 +61,9 @@ DESCRIPTIONS = {
     "dev": "**一个入口、按技能做事**（设计与开发）：`skill_development` 主技能 —— 先出设计单（业务智能体/"
            "业务技能：目标·触发·技能面·工具面·工作知识库范围·人机分工）→ 用户确认 → 落 `skills/<id>/SKILL.md`"
            "（front-matter 单行值）→ 交付安装指引（含工具状态表：挡板/已投产）与挡板计划。"
-           "知识库边界：只写领域知识库；企业本体模型=手工维护（不写）、企业共享概念模型=仅运维智能体可写（只读）、"
-           "企业知识管理领域=暂不纳入。不改本体（需要就写改进建议：adviceCategory=本体类）。",
+           "知识库边界：只写领域知识库；企业本体模型=手工维护（不写）、企业共享概念模型=仅运维智能体可写（只读）；"
+           "其余知识库（含原「企业知识管理领域」）一律按**普通领域库**对待、不设特殊边界。"
+           "不改本体（需要就写改进建议：adviceCategory=本体类）。",
 }
 ALLOWED_TOOLS = [
     # 读片段（一次）+ 写页；**不放 thinking / todo_write**：
@@ -89,6 +90,8 @@ OPS_TOOLS = [
     #   + 知识库导出/导入（导出落 exports/ 并可经 /bodhi/kb-export 下载；导入默认做 PG+Neo4j 六项比对）
     "mcp_bodhi_ontology_skills",
     "mcp_bodhi_ontology_kb_export", "mcp_bodhi_ontology_kb_import",
+    # 维护清理（2026-10-24）：清别名噪音（默认 dry_run 只念清单；执行前写版本快照）
+    "mcp_bodhi_ontology_clean_alias_noise",
 ]
 # 「EA 概要设计」智能体：只读 wiki + 看本体类型 + **设计落库工具**（不给原生写页、不给抽取）
 DESIGN_TOOLS = [

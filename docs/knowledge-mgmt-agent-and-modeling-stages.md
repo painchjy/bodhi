@@ -206,7 +206,7 @@
 
 | 项 | 设计 |
 |---|---|
-| **落在哪个库** | **企业知识管理领域**（`BODHI_KNOWLEDGE_MGMT_KB_ID`，实测 `6effde80-…`）—— 与本智能体的技能/工具定义同库 |
+| **落在哪个库** | **企业知识管理领域**（`6effde80-…`）—— 按**普通领域知识库**使用（2026-10-24 起不再是 `.env` 特殊库），与本智能体的技能/工具定义同库 |
 | **流程主体** | 一页：**「企业知识管理流程」**，`page_type = bmm:BusinessProcess`（**已有类**），**entity 模式**（不是报告类） |
 | **每个活动** | **A1–A4 各一页**：`page_type = bmm:CourseOfAction`（行动方案，最贴 BPMN 的 Activity）或 `bmm:BusinessProcess`（子流程）；与主流程页用 `bmm:realizesProcess` / `bmm:realizedBy` 相连（语义不合就用正文小节列，关系只作弱关联） |
 | **每活动页承载** | `activityId` · **本体模型范围** · 启动条件 · 产出报告（类型 + 标题规范） · 产出资产 · 结束条件（**质检项 + 问题项反馈要求**） · 技能/工具 · 谁做（人/智能体） —— 写进 `definition` 与 data 属性（entity 渲染即可读） |
