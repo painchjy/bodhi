@@ -5,6 +5,10 @@
 
 留在 `server.py` 的两个**已归一化**别名（`rules_of_task` / `graph_query`，只返回静态 `deprecated` 回执）
 不属于本切片 —— 它们没有实现可搬，挪动不会带来任何结构收益 ✓
+
+2026-10-24（A1-8 批 3c）：删除 `graph_query_legacy` —— 它注册了一个**不在 schema 里**的名字，
+等于给已退役的"直接拼 Cypher"开了个后门（`_RETIRED_TOOLS["graph_query"]` 明令不再接受 Cypher ✗）。
+图查询的 REST 入口 `/bodhi/graph/query` 保留（运维面，有自己的鉴权口径）。
 """
 from __future__ import annotations
 
@@ -71,11 +75,6 @@ def rules_resolve(args: dict) -> dict:
     # 2026-10-16（用户口径）：**按步骤解析规则**（direct/policy 递归/ask/task 兼容/path 预留）
     return ke_review.rules_resolve(str(args.get("kb_id", "")), str(args.get("spec", "")),
                                    int(args.get("limit", 300) or 300))
-
-
-@handle("graph_query_legacy")
-def graph_query_legacy(args: dict) -> dict:
-    return ke_review.graph_query(str(args.get("cypher", "")), int(args.get("limit", 200) or 200))
 
 
 @handle("doc_outline")

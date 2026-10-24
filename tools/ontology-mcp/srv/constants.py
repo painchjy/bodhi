@@ -27,3 +27,11 @@ SERVER_VERSION = "0.1.0"
 
 LOG_DIR = REPO / "logs"
 ARGS_DIR = LOG_DIR / "args"
+
+# 生成器标签（A1-8 从 `server.py` 迁来）：写进 `wiki_pages.last_edit_source` /
+# `wiki_page_revisions.edit_source`，那是 **varchar(16)**，超长会让整批写入回滚（2026-09 踩过）。
+TOOL_TAG = "bodhi-onto-mcp"
+assert len(TOOL_TAG) <= 16, "TOOL_TAG 超过 last_edit_source 的 varchar(16)"
+
+# 匹配阈值（A1-8 从 `server.py` 迁来；`save_elements` / `save_knowledge` 的默认参数用它）
+DEFAULT_HIGH, DEFAULT_LOW = 0.90, 0.75

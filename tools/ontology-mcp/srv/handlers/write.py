@@ -1,10 +1,10 @@
-"""页面写切片（A1-4）：`page_copy` / `rule_publish` / `metric_compute` / `page_attributes_set`。
+"""页面写切片（A1-4 + A1-8）：`save_knowledge` / `page_copy` / `rule_publish` / `metric_compute` / `page_attributes_set`。
 
 迁移来源：`server.py::_call_tool_impl` 里对应的 `if name == "…"` 分支（**参数解析逐字照搬**）✓
-实现：`ke_page_ops` / `ke_rule_publish` / `ke_metrics` / `ke_pages`
+实现：`srv/knowledge_write.py`（写库编排，A1-8 迁入）/ `ke_page_ops` / `ke_rule_publish` / `ke_metrics` / `ke_pages`
 
-**`save_knowledge` 暂不迁**：它依赖 `server.py` 内的写库编排（`resolve_write_kb` 之外的预算/意图/复用逻辑），
-要先把那些内部函数抽到 `srv/` 才能搬 —— 留作 A1 最后一片 ✓
+2026-10-24（A1-8）：`save_knowledge` 已迁入 `srv/knowledge_write.py` ⇒ 本切片接管它的分发，
+`server.py` 的 if 链**清零**（注册表 37/37 全覆盖 ✓）。
 
 `page_attributes_set.dry_run` 做**字符串布尔**兼容（MCP 客户端可能传 `"false"`），原样保留 ✓
 """
@@ -15,6 +15,7 @@ import ke_page_ops
 import ke_pages
 import ke_rule_publish
 from srv.handlers import handle
+from srv.knowledge_write import save_knowledge
 
 
 @handle("page_copy")
@@ -45,3 +46,20 @@ def page_attributes_set(args: dict) -> dict:
                                         args.get("patch") or {},
                                         actor=str(args.get("actor", "")),
                                         dry_run=bool(_pa_dry))
+
+
+@handle("save_knowledge")
+def save_knowledge_tool(args: dict) -> dict:
+    """写库唯一入口（`stage=graph|report`）。**参数解析逐字照搬**原 `if name == "save_knowledge"` 分支 ✓"""
+    return save_knowledge(
+        str(args["kb_id"]), stage=str(args.get("stage", "report")),
+        model=str(args.get("model", "bmm")), report=args.get("report"),
+        nodes=args.get("nodes") or [], edges=args.get("edges") or [],
+        mode=str(args.get("mode", "dry_run")),
+        confirmed_new_applications=args.get("confirmed_new_applications") or [],
+        session=args.get("session") or None, kb_ids=args.get("kb_ids") or None,
+        confirm_kb_match=bool(args.get("confirm_kb_match")),
+        context=str(args.get("context", "")),
+        session_no=str(args.get("session_no", "")),
+        doc_id=str(args.get("doc_id", "")), intent=str(args.get("intent", "")),
+        acknowledge_intent_change=bool(args.get("acknowledge_intent_change", False)))

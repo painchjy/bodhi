@@ -28,7 +28,7 @@
 | S7 | `srv/render.py` | `_design_sections` + `SKILL_CONTEXTS` + `_type_label_of` + `context_meta`（纯渲染；`build_new_page` 留 S8） | `srv.text`/`ke_pages`/`ke_ontology` | 低 | **✅ 完成** |
 | S8 | `srv/schemas.py`（**S8a ✅**）+ `srv/tools_read.py`（**S8b-1 ✅**）+ `srv/tools_ops.py`（**S8b-2a ✅**）+ 危险工具/`save_knowledge`（S8b-2b 待做） | schema 559 行；只读 5 个；运维 `kb_export`/`kb_import` | `ke_audit`/`ke_context`/`kb_transfer` | 中 | **S8a ✅ S8b-1 ✅ S8b-2a ✅** |
 | S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | **✅ 完成**（`server.main()` 只做 `srv.http.bind(globals())` 委托） |
-| **A1** | `srv/handlers/*` | **工具处理注册表**（`@handle` 登记 + 注册表优先分发，旧 if 链兜底） | `srv.tools_*` | 中 | **A1-0…A1-7 ✅（注册表 37 个工具）；if 链只剩 `save_knowledge`** |
+| **A1** | `srv/handlers/*` | **工具处理注册表**（`@handle` 登记 + 注册表优先分发，旧 if 链兜底） | `srv.tools_*` | 中 | **A1-0…A1-8 ✅（注册表 37/37，if 链已清零）** |
 
 ### A1 记录（2026-10-24，**结构拆分，工具面不变**）
 - 新增 `srv/handlers/__init__.py`：`REGISTRY` + `@handle("<工具名>")` + `dispatch(name, args)`（未登记 ⇒ 返回 `None`）
@@ -150,6 +150,30 @@
 ② 定依赖方向：`srv/knowledge_write.py` ← `srv/elements.py` / `srv/session_link.py`，**不得**反向 import
 `srv/meta.py`（`refresh_service_overview` 在 server 里调 `save_knowledge`，方向应为 server → knowledge_write）。
 ⇒ 单独一轮做 + 写库全量回归（`test_mcp_tools_write` / `test_replay_mined` / 真实 apply 一次）。
+
+#### A1-8（2026-10-24，✅ 完成）「写库编排群搬进 `srv/`：**`server.py` 482 行**，if 链清零」
+新增 5 个模块（**实现逐字搬家**：一次性脚本按「行区间 + 首尾签名」双校验）：
+
+| 模块 | 行数 | 内容 |
+|---|---|---|
+| `srv/reqctx.py` | 38 | 请求级只读 memo（`_REQ_CACHE` / `_req_cache()` / `_reset_request_cache()`） |
+| `srv/clock.py` | 20 | `now_text()`（转发 `ke_db.now_text`） |
+| `srv/session_link.py` | 277 | `IDENTITY_CLASS` / `_UUID_RE` / `_pick_session_no` / `_session_page_ref` / `_session_part_no` / `SOURCE_SESSION_*` / `_upsert_source_session_line` / `_resolve_session_for` / `link_source_session` / `adopt_session` |
+| `srv/elements.py` | 790 | `TYPE_PENDING` / `fetch_existing_pages` / `element_slug` / `element_page_slug` / `build_new_page` / **`save_elements`** / `_graph_target_*` / `_other_kb_same_name` / **`design_elements`** / `_attrs_with_identity` / `_chunk_locator` / `_as_chunk_index` / `_tenant_name` / `_page_slug_by_title` / `retract_relations` |
+| `srv/knowledge_write.py` | 464 | **`save_knowledge`**（428 行编排） |
+
+- 常量归位：`TOOL_TAG`（含 `varchar(16)` 断言）→ `srv/constants.py`；`DEFAULT_HIGH/LOW` 同处；`TYPE_PENDING` → `srv/elements.py`
+- `save_knowledge` 分发迁入 `srv/handlers/write.py` ⇒ **`_call_tool_impl` 的 if 链清零**（注册表 37/37 全覆盖 ✓）
+- **删死代码 3 处**：`locate_chunk` / `union_list` / `PAGE_COLUMNS`（全仓无调用点）
+- **堵一个后门**：`srv/handlers/query.py` 的 `graph_query_legacy` 注册了**不在 schema 里**的名字，
+  等于绕过 `_RETIRED_TOOLS["graph_query"]`（明令"不再接受直接拼 Cypher"）跑裸 Cypher ⇒ 删除；
+  图查询的 REST 入口 `/bodhi/graph/query` 保留（运维面，另有鉴权口径）
+- 效果：`server.py` **1989 → 482 行**（累计 2700+ → 482，**完成判据 ≤800 行达标** ✓）；
+  当前只剩：imports + `refresh_service_overview` + `tool_definitions` + `_reentry_receipt` + `call_tool` /
+  `_call_tool_impl` / `tool_result` / `main`
+- 验证：`check_undefined` **0** ✓ → `import server`（tools=37 / registry=37）✓ → 重启 `active+success+8765` ✓ →
+  **真调用** `save_knowledge` 三态（无会话号 ⇒ `need_session` 拒写 ✓ / graph `dry_run` 注入真实身份且
+  violations 正常回报 ✓ / report `dry_run` 出 `page_versions` 预览 ✓）→ 全量回归见下
 
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓

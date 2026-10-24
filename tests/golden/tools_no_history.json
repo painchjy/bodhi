@@ -1,7 +1,6 @@
 [
  "clean_alias_noise",
  "context_concept_rollback",
- "graph_query_legacy",
  "import_apply",
  "import_plan",
  "import_probe",
