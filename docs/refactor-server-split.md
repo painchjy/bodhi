@@ -121,7 +121,7 @@
 （`srv/knowledge_write.py` 不反向 import `srv/meta.py`）。三者都在**写库路径**上，必须单独一轮做 + 全量回归。
 
 #### A1-7（2026-10-24，✅ 完成）「**模块级状态 + 薄封装**搬进 `srv/`：8 个 live 分支清掉 7 个」
-- 新增 5 个模块（**实现逐字搬家**，行区间 + 首尾签名双校验由脚本 `logs/_move3b.py` 保证）：
+- 新增 5 个模块（**实现逐字搬家**：一次性脚本按「行区间 + 首尾签名」双校验，抄错位置会直接 assert 失败）：
   - `srv/engine.py`：`load_engine()`（只做 `sys.path` + `import extract`，无状态）
   - `srv/jobs.py`：`JOBS` / `JOBS_LOCK` / `DETAIL_KEYS` / `_job_brief` / `job_status`
   - `srv/images.py`：`_IMG_REF_RE` / `_image_root` / `_resolve_image_path` / `image_extract`
@@ -138,8 +138,9 @@
   =8/`job_status`=0/`image_extract`=2 图/3 个 context 写返回**业务错误而非 NameError**）✓ →
   REST `/bodhi/context/concept/rollback` **200** ✓ → 回归 `coverage_gaps`+`agent_tool_lists`+`mcp_tools_read`+
   `no_business_semantics`+`skills_manifest`+`page_attributes_*` **24 项全绿** ✓
-- **新增静态自检**（`logs/_undef.py`，等价 pyflakes undefined-name）：搬家后逐文件核对"引用了但没定义/导入"的
-  名字 —— `http.py` 那 34 个是 `bind()` 注入面（已知豁免），其余模块必须 **0** ✓
+- **新增静态自检** `tools/ontology-mcp/check_undefined.py`（零依赖，等价 pyflakes F821）：逐文件核对
+  "引用了但没定义/导入"的名字 —— `srv/http.py` 的 34 个 `bind()` 注入名走**显式白名单**，其余必须 **0**
+  （当前全树 **0** ✓）。搬家后**先跑它再重启服务**，可避免 S9 那种"服务 active 但每请求 NameError"。
 
 #### A1-8（待做：只剩 1 个工具）
 `save_knowledge`(428 行) + 它的写库编排群（`save_elements` 322 / `design_elements` 150 / `link_source_session` 63 /
