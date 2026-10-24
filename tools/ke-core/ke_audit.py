@@ -89,7 +89,17 @@ NON_INSTANCE_PREFIX = ("ontology:",)
 KNOWN_SOURCES = ("bodhi-onto-mcp", "ontology-wiki", "bodhi-type-edit", "bodhi-rel-edit",
                  "bodhi-page-del", "bodhi-ops-edit", "pipeline", "agent", "",
                  # 结构化批量建模（2026-09-29）：last_edit_source 是短 tag `bi-xxxxxxxx`（varchar(16) 限制）
-                 "bodhi-import", "bodhi-review")
+                 "bodhi-import", "bodhi-review",
+                 # 2026-10-24：前端/智能体的合法写入器（用户实测这些 tag 被误报为未知生成器 ✗）
+                 "bodhi-write", "bodhi-attr-edit", "bodhi-body-sweep", "ingest", "prompt-min")
+# 智能体轮次 tag（`bodhi-r0` / `bodhi-r4` …）：按**前缀**认，不穷举轮次数
+KNOWN_SOURCE_PREFIXES = ("bi-", "bodhi-r")
+
+
+def _known_source(src: str) -> bool:
+    """`last_edit_source` 是否已知（白名单 + 前缀）。"""
+    s = (src or "").strip()
+    return s in KNOWN_SOURCES or any(s.startswith(p) for p in KNOWN_SOURCE_PREFIXES)
 
 
 def _is_instance(page_type: str) -> bool:
@@ -247,7 +257,7 @@ def check_wiki_graph(ctx: dict, rep: Report) -> None:
         if not _page_meta(page["meta"]):
             rep.add("A6", "low", page["slug"], "缺 page_metadata.ontology（老数据/手写页）",
                     "按需补元数据（非必须）")
-        elif page["src"] not in KNOWN_SOURCES and not str(page["src"]).startswith("bi-"):
+        elif not _known_source(page["src"]):
             rep.add("A6", "low", page["slug"], "未知生成器 last_edit_source=%s" % page["src"],
                     "确认来源，必要时补记生成器（结构化导入用 `bi-xxxxxxxx`）")
     # A7 slug 与类型错位（2026-09-27 用户口径）：改本体类型必须**迁移 slug**（`模块/类/名称`），
@@ -259,6 +269,10 @@ def check_wiki_graph(ctx: dict, rep: Report) -> None:
             continue
         parts = (page["slug"] or "").split("/")
         if len(parts) != 3 or not all(parts):
+            continue
+        if parts[0] == "session":
+            # 2026-10-24：**会话分页页**用 `session/<会话号>/pN` 是既定契约（4.6 的 `/pN` 定位），
+            # 不参与"slug 段=模块/类"的类型迁移判定（否则每页必报 A7 ✗）
             continue
         cls_meta = meta_all.get(page["page_type"]) or {}
         want_module = str(cls_meta.get("module") or "")
@@ -1899,7 +1913,8 @@ def check_graph_pg_drift(ctx: dict, rep: Report) -> None:
         rep.add("W10", "low", kb, "页面在图里没有节点：%s" % slug,
                 "rebuild_kb_graph，或确认该页是否新建未同步")
     if not drift and not no_node:
-        rep.add("W10", "low", kb, "图↔PG 属性一致（已比对 %d 页 ✓）" % len(g), "")
+        # 2026-10-24：**通过项不记 finding**（"✓ 一致"出现在问题清单里只会制造噪音 ✗）⇒ 放 data
+        ctx.setdefault("data", {})["graph_pg_drift"] = {"checked": len(g), "drift": 0, "no_node": 0}
 
 
 def check_summary_drift(ctx: dict, rep: Report) -> None:

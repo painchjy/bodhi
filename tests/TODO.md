@@ -18,8 +18,8 @@
 ## A. 数据缺口（不是代码错，需要补数据）
 | # | 缺口 | 证据 | 处理 |
 |---|---|---|---|
-| A1 | 领域库 3 个流程里 **2 个没有活动边**（`bpmn:processHasActivity`） | `test_flow_skeleton::test_processes_have_activities` → `['bmm/businessprocess/评审问题管理', 'bmm/businessprocess/评审规则维护']`；两页正文只有定义+来源（**无活动清单**）⇒ 不能据实补，属**领域数据待补** | 用例 xfail 且给出**具体清单 + 补法**（缺活动的流程 / 未挂流程的活动 / `save_knowledge(stage="graph", edges=[…])` 示例）；领域补齐后自动转绿 ✓ |
-| A2 | `knowledge_lookup(mode="path", start=…)` 起点写死导致 0 路径 | 2026-10-21 起**已改为动态取**「有出边的活动」作起点；无出边则 xfail 并指向 A1 | ✅ **已按 A1 同类处置**（不再是独立问题） |
+| A1 | 领域库 3 个流程里 **2 个没有活动边**（`bpmn:processHasActivity`） | ✅ **已由领域建模智能体修复（2026-10-24）**：现 2 个流程各 ≥1 活动（`技术方案评审流程→评审执行→逐项评审`；`评审问题管理→问题跟踪→{知识入库,问题核实}`），`test_flow_skeleton` **4 项全绿**（不再 xfail） | 验证：`pytest tests/test_flow_skeleton.py tests/test_mcp_tools_read.py` = 13 项通过 ✓ |
+| A2 | `knowledge_lookup(mode="path", start=…)` 起点写死导致 0 路径 | 起点已改**动态取**（有出边的活动）；A1 修好后 path 用例同时转绿 | ✅ 已关闭 |
 
 ## B. 契约/文档不一致（代码行为对，调用方要按实际传参）
 | # | 事实 | 证据 | 处理 |
