@@ -49,7 +49,7 @@ NATIVE_RETRIEVAL = ("wiki_search", "grep_chunks", "list_knowledge_chunks",
 SQL = """
 select m.id                         as message_id,
        m.session_id                 as session_no,
-       m.created_at::text           as ts,
+       (m.created_at at time zone 'Asia/Shanghai')::text as ts,
        coalesce(m.agent_duration_ms, 0) as agent_ms,
        m.agent_steps::text          as steps,
        (select u.content

@@ -215,7 +215,7 @@ def group_rows(rows: list, threshold: float = 0.62) -> list:
             by_qid[qid] = gid
         r["question_group"] = gid
     labels = {g["gid"]: g["label"] for g in groups}
-    labels["G0"] = "（无问题文本，常见于 mode=instances 调用）"
+    labels["G0"] = "（无问题文本：instances 调用）"
     for r in rows:
         r["group_label"] = labels.get(r.get("question_group") or "", "")
     return rows
@@ -229,6 +229,18 @@ def pairing(rows: list) -> dict:
             "only_hint": sorted(h - p), "only_plain": sorted(p - h),
             "arm_missing": ("plain" if not p else ("hint" if not h else "")),
             "comparable": bool(h and p and (h & p))}
+
+
+def paired_rows(rows: list) -> list:
+    """**只保留"两组都跑过"的问题组** —— A/B 结论只能看这个子集。
+
+    为什么必须单列：全量表里 hint/plain 的**问题构成不同**（各问各的），
+    命中率差异可能只是"谁问了更难的问题"，而不是提示有没有用 ✗。
+    """
+    h = {r["question_group"] for r in rows if r.get("variant") == "hint" and r.get("question_group")}
+    p = {r["question_group"] for r in rows if r.get("variant") == "plain" and r.get("question_group")}
+    keep = h & p
+    return [r for r in rows if r.get("question_group") in keep]
 
 
 def link_trace(trace: list, rows: list, threshold: float = 0.62) -> list:
@@ -247,19 +259,11 @@ def link_trace(trace: list, rows: list, threshold: float = 0.62) -> list:
         t = dict(t)
         key = (t.get("session_no") or "", t.get("question_key") or "")
         cands = idx.get(key) or []
-        if not cands:
-            best, best_sim = [], 0.0
-            for (sno, _k), rs in idx.items():
-                if sno != key[0]:
-                    continue
-                s = _sim(t.get("question_core") or _core(t.get("question") or ""),
-                         rs[0].get("question_core") or _core(rs[0].get("question") or ""))
-                if s > best_sim:
-                    best, best_sim = rs, s
-            cands = best if best_sim >= threshold else []
         if not cands and key[0]:
-            # 再退一层：旧遥测没有 question 文本 ⇒ **同会话 + 时间最近（±10min）** 也算连上
-            # （诚实边界：这不是精确配对，报告里只用于"端到端耗时/真首步"的旁证 ✓）
+            # 主口径（2026-10-25 修）：**同会话 + 时间最近（±30min）**
+            # 为什么不用"问题文本相同"做主键：C2 的 `question` 是**用户消息**（含编号/文件名），
+            # 而遥测里的 `question` 是**智能体自报的子任务**（"取六条规则的 ruleHash"）⇒ 文本几乎不相等 ✗；
+            # 一个会话里每次助手消息 = 一轮，按时间就近配最稳 ✓
             t_ts = _ts_secs(t.get("ts"))
             best, best_d = [], 1e9
             for (sno, _k), rs in idx.items():
@@ -272,7 +276,18 @@ def link_trace(trace: list, rows: list, threshold: float = 0.62) -> list:
                     d = abs(t_ts - r_ts)
                     if d < best_d:
                         best, best_d = [r], d
-            cands = best if best_d <= 600 else []
+            cands = best if best_d <= 1800 else []
+        if not cands:
+            # 兜底：语义最近（跨会话也要先同会话；没有 session_no 时才放开）
+            best, best_sim = [], 0.0
+            for (sno, _k), rs in idx.items():
+                if key[0] and sno != key[0]:
+                    continue
+                s = _sim(t.get("question_core") or _core(t.get("question") or ""),
+                         rs[0].get("question_core") or _core(rs[0].get("question") or ""))
+                if s > best_sim:
+                    best, best_sim = rs, s
+            cands = best if best_sim >= threshold else []
         hit = cands[0] if cands else {}
         t["variant"] = hit.get("variant") or "unknown"
         t["hits"] = max([c.get("hits") or 0 for c in cands], default=0)
@@ -280,6 +295,7 @@ def link_trace(trace: list, rows: list, threshold: float = 0.62) -> list:
         t["lookup_ms"] = sum(int(c.get("ms") or 0) for c in cands)
         t["queries"] = sum(int(c.get("queries") or 0) for c in cands)
         t["empty_queries"] = sum(int(c.get("empty_queries") or 0) for c in cands)
+        t["degraded"] = any(c.get("degraded") for c in cands)
         t["question_group"] = hit.get("question_group") or ""
         t["linked"] = bool(cands)
         out.append(t)
@@ -367,6 +383,15 @@ def summarize_rows(rows: list, expects: dict) -> dict:
                               if withio else None),
             "ok_rate": (sum(1 for r in withio if (r.get("hits") or 0) > 0) / len(withio)
                         if withio else None),
+            # 2026-10-25（用户口径）：命中要**分降级/未降级**看 —— 降级命中是"换招才找到"，
+            # 与"一次就中"在策略评估里含义完全不同（不能混成一个命中率 ✗）
+            "hit_nod_rate": (sum(1 for r in withio if (r.get("hits") or 0) > 0
+                                 and not r.get("degraded")) / len(withio)) if withio else None,
+            "hit_deg_rate": (sum(1 for r in withio if (r.get("hits") or 0) > 0
+                                 and r.get("degraded")) / len(withio)) if withio else None,
+            "ok_nod_n": sum(1 for r in withio if (r.get("hits") or 0) > 0 and not r.get("degraded")),
+            "ok_deg_n": sum(1 for r in withio if (r.get("hits") or 0) > 0 and r.get("degraded")),
+            "deg_n": sum(1 for r in withio if r.get("degraded")),
         }
     return out
 
@@ -501,10 +526,14 @@ def _metrics_table(s: dict) -> list:
     """单版本指标表（hint vs plain）"""
     lines = ["| 指标 | hint（本体提示开） | plain（关） | 差 |", "|---|---|---|---|"]
     h, p = s.get("hint", {}), s.get("plain", {})
-    spec = [("样本数（调用）", "n"), ("覆盖问题数", "questions"),
-            ("命中率（hits>0）", "found_rate"), ("解决率（按问题集判定）", "case_ok_rate"),
+    spec = [("样本数（调用）", "n"), ("问题组数（去重）", "questions"),
+            ("命中率（hits>0）", "found_rate"), ("固定题集解决率", "case_ok_rate"),
             ("平均调用次数 / 问题", "avg_attempts"), ("≤3 次收敛率", "converged_3"),
             ("有出路率（建议/降级/歧义可见）", "guidance_rate"),
+            # 2026-10-25（用户口径）：命中要拆开看 —— 一次就中 vs 降级后才中
+            ("未降级命中率", "hit_nod_rate"),
+            ("降级命中率", "hit_deg_rate"),
+            ("降级调用数", "deg_n"),
             # 2026-10-25（口径 v2）：**真实库访问**（MCP 调用次数不等于库访问次数 ✗）
             ("带 IO 的样本数", "io_n"),
             ("真实库访问/次（中位）", "queries_median"),
@@ -523,7 +552,8 @@ def _metrics_table(s: dict) -> list:
     for label, key in spec:
         hv, pv = h.get(key), p.get(key)
         if hv is None or pv is None:
-            lines.append("| %s | %s | %s | - |" % (label, _cell(hv, key), _cell(pv, key)))
+            lines.append("| %s | %s | %s | - |"
+                         % (label, _cell_kv(hv, key, h), _cell_kv(pv, key, p)))
             continue
         if isinstance(hv, float) and isinstance(pv, float) and key != "avg_attempts":
             diff = "%+.1f%%" % ((hv - pv) * 100)
@@ -531,8 +561,21 @@ def _metrics_table(s: dict) -> list:
             diff = "%+dms" % (hv - pv)
         else:
             diff = "%+.2f" % (hv - pv) if key == "avg_attempts" else "%+g" % (hv - pv)
-        lines.append("| %s | %s | %s | %s |" % (label, _cell(hv, key), _cell(pv, key), diff))
+        lines.append("| %s | %s | %s | %s |"
+                     % (label, _cell_kv(hv, key, h), _cell_kv(pv, key, p), diff))
     return lines
+
+
+def _cell_kv(v, key: str, cell: dict) -> str:
+    """带**样本量提示**的单元格：`固定题集解决率` 必须让 n 可见（n=2 的 100% 会骗人 ✗）"""
+    if key == "case_ok_rate":
+        n = int(cell.get("decided_n") or 0)
+        if not n:
+            return "-（n=0：无固定题）"
+        if v is None:
+            return "-（n=%d）" % n
+        return "%s（n=%d%s）" % (_pct(v), n, "，样本太少" if n < 5 else "")
+    return _cell(v, key)
 
 
 
@@ -651,7 +694,17 @@ def render_md(rep: dict, rows: list, expects: dict, title: str) -> str:
         lines += ["## 2. 指标（版本 `%s`）" % only, ""] \
             + _metrics_table(rep.get("summary") or {}) + [""]
 
-    # ---- 表3：C2 真值（端到端耗时 + 真首步） ----
+    # ---- 表2b：配对子集（A/B 结论只看这里） ----
+    if rep.get("paired"):
+        sub = rep["paired"]
+        pr = pairing(sub)
+        lines += ["## 2b. 配对子集（同题两组都有样本 —— **A/B 结论以这张表为准**）", "",
+                  "> 全量表里两组的**问题构成不同**（各问各的），命中率差异可能只是「问了不同的题」✗；"
+                  "本表只保留两组都跑过的问题组（交集 **%d** 组 / hint %d 组 / plain %d 组）✓"
+                  % (pr["paired"], pr["hint_groups"], pr["plain_groups"]), ""]
+        lines += _metrics_table(summarize_rows(sub, expects)) + [""]
+
+    # ---- 表3：C2 真值（端到端耗时 + 真首检索） ----
     lines += _trace_table(rep.get("trace") or [])
 
     # ---- 表4：版本 × 问题类目 ----
@@ -866,8 +919,9 @@ def main() -> int:
     summary = summarize_rows(rows, expects)
     rep = {"summary": summary, "versions": versions, "categories": cats, "excluded": excl,
            "cohort": args.cohort,
-           # 2026-10-25（口径 v2）：真值 / 归组 / 配对体检
+           # 2026-10-25（口径 v2.2）：**配对子集**（A/B 结论只看它）+ 真值 + 归组 + 配对体检
            "trace": trace, "groups": by_group(rows), "pairing": pairing(rows),
+           "paired": paired_rows(rows),
            "group_threshold": args.group_threshold,
            "cohort_note": ("C1（首步即 knowledge_lookup；排除项逐条计数 ✓）" if args.cohort == "c1"
                            else "C3（不判首步，仅旁证）")}

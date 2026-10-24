@@ -14,7 +14,7 @@
 | `[功能]` P5 已完成 | 4.5 解绑 ｜ 4.3 参考规范 ｜ **4.1+4.4 检索策略 v2** ｜ **4.6 会话分页** | 已落地 ✓（用例与口径见 `docs/p5-internal-issues.md`） |
 | `[功能]` P5 待做 | —（4.1/4.2/4.3/4.4/4.5/4.6 全部落地 ✓） | 见 `docs/p5-internal-issues.md`；后续：域词退场（工具/技能只认类型与属性） |
 | `[口径]` 域词退场 | ✅ **已清零**（2026-10-23）：`tools/**`+`skills/**` 活跃面 **394 → 0**；`test_no_business_semantics` 改为**硬断言 0**（golden=`{}`）；规则链 4 模块归档到 `tools/ke-core/_deprecated/` | `docs/ontology/domain-logic-migration.md` §7 |
-| `[口径]` A/B v2 | ✅ **已落地**（2026-10-25）：查询次数改按**真实 PG/Neo4j 往返**统计（**空记录=失败**）、耗时分三层（单次/每问合计/端到端真值）、问题按 `qid`+语义归组、C2 真值直读 `messages.agent_steps` | `docs/lookup-ab.md` §6；用例 `test_lookup_ab`（+4 项） |
+| `[口径]` A/B v2 | ✅ **已落地**（2026-10-25 两轮）：①查询次数按**真实 PG/Neo4j 往返**（**空记录=失败**）、耗时分三层（单次/每问合计/端到端真值）、问题按 `qid`+语义归组、C2 真值直读 `messages.agent_steps`；②修二阶错：模拟不再混主表（`--source real` 默认）、**自报 `first_step` 不再当门禁**（turn_begin 必然第一）、C2 首步改判 `first_retrieval`、版本按语义位 `v2` 合并（`--version-key algo`）、自检用 `session_no=selftest` 隔离 | `docs/lookup-ab.md` §6.1–§6.6；用例 `test_lookup_ab`（10 项） |
 
 ## A. 数据缺口（不是代码错，需要补数据）
 | # | 缺口 | 证据 | 处理 |
