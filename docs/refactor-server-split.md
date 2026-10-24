@@ -73,6 +73,21 @@
   `list_link_candidates`（退役回执）✓ / 回归 `test_coverage_gaps`+`test_mcp_tools_read`+`test_lookup_ab`+
   `test_clean_alias_noise`+`test_page_attributes_matrix`+`test_no_business_semantics` 全绿 ✓
 
+#### A1-4（2026-10-24，✅ 完成）
+| 模块 | 工具 | 实现来源 |
+|---|---|---|
+| `srv/handlers/write.py` | `page_copy` / `rule_publish` / `metric_compute` / `page_attributes_set` | `ke_page_ops` / `ke_rule_publish` / `ke_metrics` / `ke_pages` |
+
+- 注册表 33 → **37**；`server.py` if 链剩 **15** 个名字
+- `page_attributes_set.dry_run` 的**字符串布尔**兼容（`"false"/"0"/"no"/"off"` ⇒ False）原样保留 ✓
+- **`save_knowledge` 仍未迁**（依赖 server 内的写库编排：预算/意图/复用 ⇒ 需先抽到 `srv/`，留作 A1 末片）
+- 验证：`py_compile` ✓ / 重启 `active+success+8765` ✓ / 实调用 `page_attributes_set`（无变化 no-op）、
+  `metric_compute`（`pages_total=60`）、`rule_publish`（同名 hash ⇒ ok=false 但结构完整）、`page_copy`（空源 ⇒ 结构化 error）✓
+- **剩余 15 个 if 分支全部依赖 `server.py` 内部函数**（`job_status`/`ontology_types`/`skills`/`service_overview`/
+  `rebuild_wiki_from_graph`/`link_source_session`/`recategorize`/`save_knowledge`/`image_extract`/`review_apply`/
+  `context_concept_*`/`context_authority_apply` + 2 个静态 `deprecated` 回执）⇒ 下一片需要**先把这些内部函数抽到 `srv/`**
+  （等价于 P2 的 S7/S8 模式），属于**下一次重构任务**，不在本次"结构注册表"范围内 ✓
+
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓
 - 所有切片有对应**单测或回归用例**（`tests/` 现有 126 项即为验收基线 ✓）

@@ -2434,17 +2434,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     _handled = _handler_dispatch(name, args)
     if _handled is not None:
         return _handled
-    if name == "page_copy":
-        import ke_page_ops as _po  # noqa: PLC0415
-        return _po.copy_page(str(args.get("kb_id", "")), str(args.get("src_slug", "")),
-                             str(args.get("new_slug", "")), str(args.get("new_title", "")),
-                             bool(args.get("copy_relations", True)))
-    if name == "rule_publish":
-        import ke_rule_publish as _rp  # noqa: PLC0415
-        return _rp.publish_with_hash(str(args.get("kb_id", "")), str(args.get("spec", "")), bool(args.get("apply", False)))
-    if name == "metric_compute":
-        import ke_metrics as _mt  # noqa: PLC0415
-        return _mt.compute(str(args.get("kb_id", "")), str(args.get("spec", "")), bool(args.get("with_rules", False)))
     if name == "job_status":
         return job_status(str(args.get("job_id", "")))
     # （原 `list_pending_merges` / `resolve_pending_merge` 两个工具已随「相似度合并永久取消」删除，2026-10-10）
@@ -2485,14 +2474,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     if name == "image_extract":
         return image_extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
                              int(args.get("figure_no", 0) or 0))
-    if name == "page_attributes_set":
-        _pa_dry = args.get("dry_run", True)
-        if isinstance(_pa_dry, str):
-            _pa_dry = _pa_dry.strip().lower() not in ("0", "false", "no", "off", "")
-        return ke_pages.set_page_attributes(str(args.get("kb_id", "")), str(args.get("slug", "")),
-                                            args.get("patch") or {},
-                                            actor=str(args.get("actor", "")),
-                                            dry_run=bool(_pa_dry))
     if name == "rules_of_task":
         # 2026-10-18（用户口径 ✓）：**已下架** ✗ —— 旧"任务→规则（taskExecutesRule）"路径已删除 ✓
         return {"ok": False, "deprecated": True, "error": "rules_of_task 已下架",
