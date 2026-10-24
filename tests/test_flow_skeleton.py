@@ -34,7 +34,16 @@ def test_processes_have_activities(kbs):
     # ⇒ 有缺口时 xfail 并列出清单（驱动补数据 ✓），全缺才算硬失败 ✗
     assert len(no_act) < len(rows), "所有流程都没有活动 ✗：%s" % no_act
     if no_act:
-        pytest.xfail("流程骨架数据缺口（待补 bpmn:processHasActivity）：%s" % no_act)
+        # 2026-10-24：把缺口说**具体**（哪些流程缺、哪些活动是孤立的、怎么补），
+        # 便于领域专家一次补齐 —— 补数据属领域侧，代码**不编造**活动 ✗
+        orphan = [r["s"] for r in _q(
+            "MATCH (a:BodhiInstance {kb_id:$kb, page_type:'bpmn:Activity'}) "
+            "WHERE NOT ()-[:`bpmn:processHasActivity`]->(a) RETURN a.slug AS s", kbs["domain"])]
+        pytest.xfail(
+            "流程骨架数据缺口（待补 `bpmn:processHasActivity`）：缺活动的流程=%s ｜ 未挂流程的活动=%s"
+            " ｜ 补法：`save_knowledge(stage=\"graph\", nodes=[{name,type:\"bpmn:Activity\"}], "
+            "edges=[{from:<流程slug>, type:\"bpmn:processHasActivity\", to:<活动slug>}])`"
+            % (no_act, orphan))
 
 
 def test_activities_have_tasks(kbs):

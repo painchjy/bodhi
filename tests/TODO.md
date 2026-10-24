@@ -18,18 +18,18 @@
 ## A. 数据缺口（不是代码错，需要补数据）
 | # | 缺口 | 证据 | 处理 |
 |---|---|---|---|
-| A1 | 领域库 3 个流程里 **2 个没有活动边**（`bpmn:processHasActivity`） | `test_flow_skeleton::test_processes_have_activities` → `['bmm/businessprocess/评审问题管理', 'bmm/businessprocess/评审规则维护']` | 用例已 `xfail` 并列出清单；补边后自动转绿 ✓ |
-| A2 | `knowledge_lookup(mode="path", start="bpmn/activity/规则工程")` 返回 0 路径 | 早前手工调用回执 | 先确认该活动是否真有 `activityContainsTask` 出边；无 ⇒ 属 A1 同类 |
+| A1 | 领域库 3 个流程里 **2 个没有活动边**（`bpmn:processHasActivity`） | `test_flow_skeleton::test_processes_have_activities` → `['bmm/businessprocess/评审问题管理', 'bmm/businessprocess/评审规则维护']`；两页正文只有定义+来源（**无活动清单**）⇒ 不能据实补，属**领域数据待补** | 用例 xfail 且给出**具体清单 + 补法**（缺活动的流程 / 未挂流程的活动 / `save_knowledge(stage="graph", edges=[…])` 示例）；领域补齐后自动转绿 ✓ |
+| A2 | `knowledge_lookup(mode="path", start=…)` 起点写死导致 0 路径 | 2026-10-21 起**已改为动态取**「有出边的活动」作起点；无出边则 xfail 并指向 A1 | ✅ **已按 A1 同类处置**（不再是独立问题） |
 
 ## B. 契约/文档不一致（代码行为对，调用方要按实际传参）
 | # | 事实 | 证据 | 处理 |
 |---|---|---|---|
-| B1 | `save_knowledge` **必须**有真实会话身份，否则 `need_session=true` 拒写 | 回执 `reason/hint`（server.py:2081-2086） | 测试需 `session` fixture：从 `sessions`/会话页取**真实** `session_no` ✓（**不许自编** ✗） |
-| B2 | 写库目标库解析走 `resolve_write_kb` → `ke_db.resolve_kb_candidate`（**完整 uuid 或精确库名**；模糊要 `confirm_kb_match=true`） | server.py:713-746 | 测试库必须能被该解析器看见（见 C1） |
+| B1 | `save_knowledge` **必须**有真实会话身份，否则 `need_session=true` 拒写 | 回执 `reason/hint`（server.py:2081-2086） | ✅ **已按实际传参**：`tests/conftest.py::session_no` fixture 从 `sessions` 取**真实**会话编号（**不许自编** ✗），全部写类用例已用它 |
+| B2 | 写库目标库解析走 `resolve_write_kb` → `ke_db.resolve_kb_candidate`（**完整 uuid 或精确库名**；模糊要 `confirm_kb_match=true`） | server.py:713-746 | ✅ **已按实际传参**：`test_kb` fixture 用 UUID + 轮询到服务端可见（配合 B6 的强制刷新），无需 `confirm_kb_match` |
 | B3 | `kb_export` 回执**没有** `out_dir`/`saved` 键 | 实测回执 | 断言改为"任一含 dir/export/path 的字段" ✓（已修） |
 | B4 | **`save_knowledge` 幂等被判 `created`**（同库同 slug 二次写） | ✅ **已修（2026-10-24）**：真因是 **同载荷重入保护**（`P3-0i3`）—— 第二次**没有写库**（正确），但把第一次的回执原样返回 ⇒ 看起来像"又建了一页" ✗。现在去重回执按库中现值刷新：`action="unchanged"` / `before=<当前版本>` / `created=[]`（`server._reentry_receipt`）。用例改为断言这些（不再是 xfail） | `tests/test_mcp_tools_write.py::test_save_knowledge_document_idempotent` |
 | B5 | `ke_pages.write_knowledge` 最终返回**漏了 `before_version`** ⇒ `page_versions[].before` 恒为 null | 实测修前后：`before: None` → `before: 0` | **已修** ✓（`ke_pages.py:1392` 起加字段） |
-| B7 | `wiki_pages` 的唯一索引是 **部分索引**：`UNIQUE (knowledge_base_id, slug) WHERE deleted_at IS NULL` | 实测 `pg_indexes`（2026-10-21） | ⇒ **软删后可再插同名页**（旧行留作历史，这是设计 ✓），但任何"按 slug 取最新"的逻辑**必须显式** `deleted_at IS NULL`，否则会拿到死行 ✗。当前 `(kb,slug)` 重复组 = **0** ✓，软删 57 / 总 427 ✓ |
+| B7 | `wiki_pages` 的唯一索引是 **部分索引**：`UNIQUE (knowledge_base_id, slug) WHERE deleted_at IS NULL` | 实测 `pg_indexes`（2026-10-21）：软删后可再插同名页（**设计 ✓**），但"按 slug 取最新"必须显式 `deleted_at IS NULL`，否则拿到死行 ✗ | ✅ **已加行为级用例（2026-10-24）**：`tests/test_soft_delete_isolation.py` —— 放一条软删"诱饵行"（version=9、内容带 DECOY），验证 ① 面板读 ② 检索 ③ 覆盖写 三条路径都**只认活行**，且死行不被改动（3 例全绿） |
 | B6 | `ke_db` kb 清单**60s 进程缓存** ⇒ 刚建的库写不进去（`kb_unresolved: not_found`，但 `candidates` 里就有它 ✗） | 实测（本轮多次复现） | **已修** ✓：`_kb_rows(force=True)` + `resolve_kb_id`/`resolve_kb_candidate` 未命中时**强制刷新一次**（不放宽口径 ✓） |
 
 ## C. 测试脚手架踩坑（已修 ✓）
