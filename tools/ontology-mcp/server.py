@@ -2462,16 +2462,10 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                      int(args.get("preview_lines", 25)))
     if name == "rebuild_wiki_from_graph":
         return rebuild_wiki_from_graph(str(args.get("kb_id", "")), bool(args.get("dry_run", True)))
-    if name == "audit_plan":
-        return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
-                                   str(args.get("scope", "all")))
     if name == "link_source_session":
         return link_source_session(str(args.get("kb_id", "")), str(args.get("session_no", "")),
                                    slugs=args.get("slugs") or None, all_pages=bool(args.get("all")),
                                    dry_run=not bool(args.get("apply")))
-    if name == "audit_kb":
-        import ke_graph  # noqa: PLC0415
-        return ke_graph.audit_kb(str(args.get("kb_id", "")), fix=bool(args.get("fix")))
     if name == "recategorize":
         return recategorize(str(args.get("kb_id", "")), dry_run=not bool(args.get("apply")),
                             depth=int(args.get("depth", 1) or 1))
@@ -2488,59 +2482,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
             session_no=str(args.get("session_no", "")),
             doc_id=str(args.get("doc_id", "")), intent=str(args.get("intent", "")),
             acknowledge_intent_change=bool(args.get("acknowledge_intent_change", False)))
-    if name == "import_probe":
-        return ke_sheet.probe(str(args["file"]), str(args.get("sheet", "")), int(args.get("sample", 3) or 3))
-    if name == "import_plan":
-        return ke_import.plan(kind=str(args.get("kind", "")), target=str(args.get("target", "")),
-                              file=str(args.get("file", "")), kb_id=str(args.get("kb_id", "")),
-                              sheet=str(args.get("sheet", "")), mapping=args.get("mapping") or {},
-                              key_column=str(args.get("key_column", "")), title=str(args.get("title", "")),
-                              aliases=args.get("aliases") or [],
-                              source_key_column=str(args.get("source_key_column", "")),
-                              target_key_column=str(args.get("target_key_column", "")),
-                              source_class=str(args.get("source_class", "")),
-                              target_class=str(args.get("target_class", "")),
-                              unknown_to_description=bool(args.get("unknown_to_description", True)),
-                              prune=bool(args.get("prune", False)),
-                              enums=args.get("enums") or None,
-                              batch_id=str(args.get("batch_id", "")), limit=int(args.get("limit", 0) or 0))
-    if name == "import_apply":
-        return ke_import.apply(str(args.get("ticket", "")), actor=str(args.get("actor", "agent:import")),
-                               prune=bool(args["prune"]) if "prune" in args else None)
-    if name == "import_refresh":
-        return ke_import.refresh_metadata(str(args.get("kb_id", "")), bool(args.get("dry_run", False)),
-                                          int(args.get("limit", 5000) or 5000))
-    if name == "reference_lookup":
-        _to = args.get("timeout")
-        return ke_review.reference_lookup(str(args.get("kb_id", "")), str(args.get("reference", "")),
-                                          bool(args.get("allow_fetch", False)),
-                                          int(args.get("max_chars", 6000) or 6000),
-                                          float(_to) if _to not in (None, "") else 8.0)
-    if name == "import_state":
-        return ke_import.state(str(args.get("batch", "")))
-    if name == "migrate_article_body":
-        # 2026-10-22（4.2 前置）：**正文主键迁移** —— 图 `wiki_content → articleBody`
-        # + 清 PG 里冗余的 `wikiContent` 属性键（默认 dry_run，只报影响面 ✓）
-        import ke_graph as _kg  # noqa: PLC0415
-        _dry = bool(args.get("dry_run", True))
-        _kid = str(args.get("kb_id", "") or "")
-        if _kid:
-            _kid, _n2 = resolve_kb_id(_kid)
-        return {"ok": True, "kb_id": _kid or "all", "dry_run": _dry,
-                "graph": _kg.backfill_article_body(_kid, dry_run=_dry),
-                "page_metadata": _kg.strip_wiki_content_attr(_kid, dry_run=_dry),
-                "note": ("正文事实源 = 图节点 `articleBody`（旧键 `wiki_content` 仅兼容）；"
-                         "PG `content` 是渲染缓存，`page_metadata` 不再存正文")}
-    if name == "clean_alias_noise":
-        # 2026-10-24：运维清理 —— 删掉 aliases 里**与标题同名**的冗余标签（默认 dry_run 只念清单）
-        _kid = str(args.get("kb_id", "") or "")
-        if _kid:
-            _kid, _n = resolve_kb_id(_kid)
-        return ke_pages.clean_alias_noise(_kid, bool(args.get("dry_run", True)),
-                                          int(args.get("limit", 2000) or 2000))
-    if name == "audit_purge":
-        return ke_audit.purge(str(args.get("kb_id", "")), str(args.get("kinds", "all")), "all", 5000,
-                              args.get("slugs") or None, None, bool(args.get("dry_run", False)))
     if name == "image_extract":
         return image_extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
                              int(args.get("figure_no", 0) or 0))

@@ -46,6 +46,20 @@
   `context_authority_apply`）、`import_`（`import_plan`/`import_run`）、`ops`（`retag_*`/`clean_alias_noise`/`overview`）、
   `write`（`save_knowledge`/`page_copy`，**最后做**）
 
+#### A1-2（2026-10-24，✅ 完成）
+| 模块 | 工具 | 实现来源 |
+|---|---|---|
+| `srv/handlers/ops.py` | `audit_plan` / `audit_purge` / `audit_kb` / `migrate_article_body` / `clean_alias_noise` | `ke_audit` / `ke_graph` / `ke_pages` |
+| `srv/handlers/import_.py` | `import_probe` / `import_plan` / `import_apply` / `import_refresh` / `import_state` / `reference_lookup` | `ke_sheet` / `ke_import` / `ke_review` |
+
+- `server.py` 对应 **11 个 `if name == …` 分支已删**（注册表 7 → **18**，if 链剩 34 个名字）
+- 三处"容易搬错"的点已按原样保留：`import_apply.prune` **三态**（缺省 `None` = 沿用票据）、
+  `migrate_article_body` / `clean_alias_noise` 的 `kb_id` **空 ⇒ 全部库**、`audit_kb`/`import_state`
+  **仍先被 `_RETIRED_TOOLS` 拦截**（回执 `deprecated` 不变 ✓）
+- 验证：`py_compile` ✓ / 重启 `active+success+8765` ✓ / 实调用 `audit_plan`（出 plan_id）、`clean_alias_noise`
+  （dry_run 扫 2/命中 0）、`migrate_article_body`（dry_run pending 54）、`reference_lookup`（found=false 结构化）✓；
+  `test_coverage_gaps` 绿（`tools_without_dispatcher=[]`、`nonretired_no_dispatch=[]`）✓
+
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓
 - 所有切片有对应**单测或回归用例**（`tests/` 现有 126 项即为验收基线 ✓）

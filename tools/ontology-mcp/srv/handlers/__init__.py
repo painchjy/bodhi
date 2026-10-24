@@ -52,3 +52,5 @@ def names() -> list:
 
 # 各切片按"域"导入，导入即登记（顺序无关：只影响注册表填充，不影响分发）
 from srv.handlers import read as _read  # noqa: E402,F401
+from srv.handlers import ops as _ops  # noqa: E402,F401
+from srv.handlers import import_ as _import  # noqa: E402,F401
