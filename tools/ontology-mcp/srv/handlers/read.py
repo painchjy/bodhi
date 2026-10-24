@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+from srv import ab_turn
 from srv.handlers import handle
 from srv.tools_ops import kb_export as _kb_export, kb_import as _kb_import
 from srv.tools_read import (
@@ -17,7 +18,6 @@ from srv.tools_read import (
     context_lookup as _context_lookup, context_page as _context_page,
     context_scan as _context_scan,
 )
-
 
 @handle("audit_scan")
 def audit_scan(args: dict) -> dict:
@@ -47,6 +47,10 @@ def context_scan(args: dict) -> dict:
 
 @handle("context_lookup")
 def context_lookup(args: dict) -> dict:
+    # A/B C1：与 knowledge_lookup 同轮时认领"首个检索动作"（顺序判定用 ✓）
+    _turn = str(args.get("turn_id", "") or "")
+    if _turn:
+        ab_turn.claim(_turn, "context_lookup")
     return _context_lookup(args.get("kb_ids") or None, str(args.get("q", "")),
                            str(args.get("slug", "")))
 

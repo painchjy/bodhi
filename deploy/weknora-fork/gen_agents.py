@@ -37,6 +37,19 @@ OUT_SQL = CONFIG / "agents.sql"
 TEMPLATE_IDS = {"bmm": "ontology_extract_agent_bmm", "ea": "ontology_extract_agent_ea",
                 "ops": "knowledge_ops_agent", "design": "ea_overview_design_agent",
                 "modeler": "skill_modeler_agent", "dev": "skill_development_agent"}
+
+# 2026-10-24（检索 A/B · C1 口径）：**每问第一个工具调用必须是 `lookup_turn_begin`**，
+# 再 `knowledge_lookup(..., turn_id=<回执>, first_step=true|false, session_no=…, question=…)`。
+# 为什么写进提示词：服务端看不到 WeKnora 原生检索（`wiki_search`/`grep_chunks`），
+# 只能靠"轮次边界 + 自报"判"首步是不是 knowledge_lookup"⇒ 这是 A/B 样本准入的纪律 ✓
+LOOKUP_DISCIPLINE = (
+    "\n\n【检索纪律（A/B 样本准入，2026-10-24）】收到**每一个**用户问题后，**第一个工具调用**必须是 "
+    "`lookup_turn_begin(session_no=<当前会话编号>, question=<用户原问题>)`；随后查知识用 "
+    "`knowledge_lookup(..., turn_id=<回执的 turn_id>, first_step=true, session_no=…, question=…)`"
+    "（若本问在此之前已经调用过 `wiki_search`/`grep_chunks`/`context_lookup` 等其它检索，则 `first_step=false` ✓）；"
+    "**不要**在本问里先做 wiki 检索再回来调 `knowledge_lookup`（那样这一问不计入对比 ✗）。"
+)
+
 NAMES = {"bmm": "本体知识提取 · BMM 业务动机模型", "ea": "本体知识提取 · EA 企业架构",
          "ops": "知识运维 · 一致性巡检与清理",
          "design": "EA 概要设计 · IT 服务与系统定位",
@@ -172,7 +185,9 @@ def load_templates(only: str = "") -> dict[str, str]:
             continue
         if tid not in by_id:
             raise SystemExit("模板 %s 不存在（先跑 gen_agent_config.py）" % tid)
-        out[key] = by_id[tid]
+        # 2026-10-24：**统一追加检索纪律**（A/B C1：每问先 lookup_turn_begin）——
+        # 与技能文档的分工：这是"每次交互的行为纪律"，不属于任何单个业务技能 ✓
+        out[key] = (by_id[tid] or "").rstrip() + LOOKUP_DISCIPLINE
     if not out:
         raise SystemExit("没有匹配的智能体 key：%s" % only)
     return out

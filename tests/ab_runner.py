@@ -89,7 +89,11 @@ def simulate(mcp, kb: str, q: dict, hint: bool, session_no: str) -> dict:
             "guidance": _guidance(first), "used_suggestion": used_suggestion,
             "ms": int((time.time() - t0) * 1000),
             "question_key": (first.get("telemetry") or {}).get("question_key", ""),
-            "relaxed_by": (first.get("telemetry") or {}).get("relaxed_by", "")}
+            "relaxed_by": (first.get("telemetry") or {}).get("relaxed_by", ""),
+            # 2026-10-24（A/B 四维）：模拟报告也要带**程序版本 + 问题种类**，才能和真实遥测同构 ✓
+            "lookup_version": (first.get("telemetry") or {}).get("lookup_version", ""),
+            "q_category": (first.get("telemetry") or {}).get("q_category", ""),
+            "at": time.strftime("%Y-%m-%d %H:%M:%S")}
 
 
 def summarize(rows: list) -> dict:
@@ -121,7 +125,10 @@ def run_paired(mcp, kb: str, session_no: str, questions: list | None = None) -> 
             row["source"] = "sim"
             rows.append(row)
     rep = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "kb": kb, "questions": len(qs),
-           "design": "paired", "summary": summarize(rows), "rows": rows}
+           "design": "paired", "summary": summarize(rows), "rows": rows,
+           # 版本指纹（取自真实回执 telemetry ⇒ 模拟与真实同构，跨版本不可混比 ✓）
+           "lookup_version": next((r.get("lookup_version") for r in rows if r.get("lookup_version")), ""),
+           "cohort": "sim（逐题一问一调，天然满足首步口径 ✓）"}
     outdir = REPO / "logs" / "ab"
     outdir.mkdir(parents=True, exist_ok=True)
     path = outdir / ("lookup_ab_%s.json" % time.strftime("%Y%m%d-%H%M%S"))

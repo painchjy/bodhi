@@ -65,17 +65,58 @@ python3 tools/ke-core/ke_ab_report.py --no-telemetry --out docs/lookup-ab-report
 - `plain` 组没有建议 ⇒ 只拿原始结果（1 次）。
 ⇒ 这正是两种策略的差别，**且完全确定**（可复现、可进 CI）。
 
-### 3.2 真实 LLM 端到端（结论以此为准）
+### 3.2 真实 LLM 端到端（结论以此为准 · **C1 口径**）
 
-1. 在 WeKnora 里用同一批问题（`tests/cases/lookup_ab_questions.json`）各跑 2 轮：
-   - A 组：提示词里要求 `knowledge_lookup(..., ontology_hint=true, session_no=<会话编号>, question=<原问题>)`；
-   - B 组：同参数但 `ontology_hint=false`；
-   每组 **20 问 × 2 轮**（共 ~80 次调用）。
-2. 跑报告：
+#### 3.2.1 样本准入（用户口径 2026-10-24）
+
+> 用户问题提出后，**第一步就调 `knowledge_lookup`** 的才纳入对比；若首步是 wiki 检索（`wiki_search`），
+> 那不是我们要比的问题 ⇒ **不纳入**。
+
+服务端**看不到** WeKnora 原生检索（`wiki_search`/`grep_chunks`/`list_knowledge_chunks`/`get_document_info`/
+`wiki_read_page` 都不经过 bodhi-mcp ✗）⇒ 用 **C1 口径**：*轮次边界 + 服务端裁决 + 自报*。
+
+| 步骤 | 谁做 | 内容 |
+|---|---|---|
+| ① 开轮 | 智能体（提示词纪律） | **每问第一个工具调用**：`lookup_turn_begin(session_no, question)` → 拿 `turn_id`（**不做检索**） |
+| ② 检索 | 智能体 | `knowledge_lookup(..., turn_id=<回执>, first_step=true/false, session_no=…, question=…)` |
+| ③ 裁决 | 服务端 | 检索类白名单（`knowledge_lookup`/`context_lookup`/`doc_outline`/`extract_candidates`/`reference_lookup`）**首个被认领者**记入 `telemetry.turn_first_retrieval`（**不覆盖** ✓） |
+| ④ 过滤 | 报告器 | `--cohort c1`（默认）：`turn_first_retrieval == knowledge_lookup` 且 `first_step != false` 才纳入 |
+
+**排除项逐条计数**（写进报告「数据质量」，不悄悄丢样本 ✗）：
+`out_of_range`（时间窗外）｜`version_mismatch`（版本不符）｜`turn_missing`（没传 turn_id ⇒ 无法证明首步）｜
+`first_retrieval_other`（首检索是别的工具）｜`self_report_false`（自报非首步）。
+
+**诚实边界**：`first_step` 仍是**智能体自报**，所以报告同时给 **首步一致率**（自报 vs 服务端裁决）——
+一致率低就说明纪律没执行到位，结论要打折 ✓。想彻底摆脱自报，需要接 WeKnora 侧 tool_calls 序列（C2，未做）。
+
+#### 3.2.2 版本维度（区分"改了检索程序"）
+
+- `ke_lookup.py`：`ALGO_VERSION`（**人工语义位**，检索口径/排序/放宽变了才 bump）+ `CODE_REV`
+  （本文件 sha1 前 8 位，**任何改动即变**）⇒ `telemetry.lookup_version = "v2-<8位>"`；
+- 报告按 `lookup_version` **分表**（跨版本不混比 ✓）；历史 jsonl 没有该字段 ⇒ 归 `unknown` 桶；
+- 模拟报告（`tests/ab_runner.py`）也写同一字段 ⇒ 模拟/真实**同构可比**。
+
+#### 3.2.3 问题种类维度
+
+`telemetry.q_category` —— **只看查询形态、不看结果**（避免循环论证 ✗）：
+`instances→实例`｜`route/path→路径`｜`rules→规则`｜`keyword: 单词/多词/空查询`。
+已知题优先用问题集里的 `category`（报告侧 `by_category` 会先取它 ✓）。
+
+#### 3.2.4 怎么跑
+
+1. WeKnora 里用同一批问题各跑 2 轮（每组 20 问 × 2 轮）：
+   - A 组：提示词要求 `ontology_hint=true`（默认）；
+   - B 组：同参数 `ontology_hint=false`；
+   - **两组都要遵守 3.2.1 的开轮纪律**（否则样本会被判 `turn_missing` 排除）。
+2. 出报告（四维：版本 × A/B × 类目 × 时间窗）：
    ```bash
-   python3 tools/ke-core/ke_ab_report.py --out docs/lookup-ab-report.md
+   python3 tools/ke-core/ke_ab_report.py --out docs/lookup-ab-report.md            # 默认 C1、当日窗口
+   python3 tools/ke-core/ke_ab_report.py --since 2026-10-24 --until 2026-10-30 \
+            --version 'v2-*' --cohort c1 --out docs/lookup-ab-report.md
+   python3 tools/ke-core/ke_ab_report.py --cohort c3 --out /tmp/ab-side.md         # 旁证：不判首步
    ```
-   （默认读当日 `logs/lookup_ab_*.jsonl` + 最新模拟快照；联调噪声大时用 `--no-telemetry`）
+   联调噪声大时加 `--no-telemetry`（只看模拟）；样本不足 `--min-sample` 的格子只报 n、不解读 ✓。
+
 
 ## 4. 看报告
 

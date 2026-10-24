@@ -6,6 +6,7 @@
  "import_plan",
  "import_probe",
  "job_status",
+ "lookup_turn_begin",
  "metric_compute",
  "migrate_article_body",
  "page_copy",

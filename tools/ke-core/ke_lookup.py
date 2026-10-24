@@ -18,6 +18,28 @@ import time
 
 _PUNCT = re.compile(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/]+")
 
+# ---------------------------------------------------------------------------
+# **版本指纹**（2026-10-24，A/B 的"程序版本"维度）
+#   · `ALGO_VERSION` —— **人工语义位**：检索口径/排序/放宽策略变了才 bump；
+#   · `CODE_REV`     —— **自动指纹**：本文件文本的 sha1 前 8 位（任何改动即变 ⇒ 改了忘 bump 也能区分 ✓）；
+#   ⇒ 报告按 `lookup_version` 分组，避免"程序改过却混在一起比" ✗
+# ---------------------------------------------------------------------------
+ALGO_VERSION = "v2"
+
+
+def _code_rev() -> str:
+    try:
+        import hashlib
+        import pathlib
+
+        return hashlib.sha1(pathlib.Path(__file__).read_bytes()).hexdigest()[:8]
+    except Exception:  # noqa: BLE001  取不到指纹也不能让检索失败
+        return "unknown"
+
+
+CODE_REV = _code_rev()
+LOOKUP_VERSION = "%s-%s" % (ALGO_VERSION, CODE_REV)
+
 
 def _norm(text: str) -> str:
     """归一化：小写 + 去空白/标点（中文标签匹配用）。"""
@@ -43,6 +65,31 @@ def _parse_query(query: str) -> dict:
         else:
             words.append(tok)
     return {"phrases": phrases, "words": words, "ors": ors, "excludes": excludes}
+
+
+def _q_category(mode: str, query: str = "", spec: str = "") -> str:
+    """**问题种类**（A/B 的分组维度）—— **只看查询形态，不看结果** ✓
+
+    为什么不看结果：用"有没有命中"反推问题类型是**循环论证** ✗（结论会自己证明自己）。
+    这里只按 `mode` + query 的**语法形态**（单词/多词/短语/OR）给一个粗粒度标签；
+    问题集里写了 `category` 的（已知 14 题）在报告侧优先用问题集口径 ✓
+    """
+    m = (mode or "").strip().lower()
+    if m == "instances":
+        return "实例"
+    if m in ("route", "path"):
+        return "路径"
+    if m == "rules":
+        return "规则"
+    if m == "semantic":
+        return "语义"
+    if m == "keyword":
+        p = _parse_query(query)
+        n = len(p.get("words") or []) + len(p.get("phrases") or []) + len(p.get("ors") or [])
+        if n <= 0:
+            return "空查询"
+        return "多词" if n > 1 else "单词"
+    return "未分类"
 
 
 def _class_candidates(term: str, idx: dict | None = None, top: int = 3) -> list:
@@ -514,11 +561,12 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
                      limit: int = 20, cls: str = "", page_type: str = "",
                      kb_ids: list | None = None, auto_widen: bool = False,
                      ontology_hint: bool | None = None, session_no: str = "",
-                     question: str = "") -> dict:
-    """**统一检索入口**（原实现 + 本体提示开关 + 遥测）。
+                     question: str = "", turn_id: str = "", first_step: bool | None = None,
+                     turn_first: str = "") -> dict:
+    """**统一检索入口**（原实现 + 本体提示开关 + 遥测 + A/B 轮次口径）。
 
-    向后兼容：前 11 个参数与旧签名完全一致 ✓（旧调用方无需改动）。
-    `session_no` / `question` **只进遥测**，不参与检索（检索仍用 `query`）。
+    向后兼容：前 14 个参数与旧签名完全一致 ✓（旧调用方无需改动）。
+    `session_no` / `question` / `turn_id` / `first_step` / `turn_first` **只进遥测**，不参与检索。
     """
     t0 = time.time()
     hint = _hint_enabled(ontology_hint)
@@ -543,6 +591,11 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     plan = r.get("plan") or {}
     r["telemetry"] = {
         "variant": variant, "ontology_hint": hint,
+        # 2026-10-24（A/B 四维）：程序版本（语义位 + 代码指纹）／问题种类／轮次判定
+        "lookup_version": LOOKUP_VERSION, "code_rev": CODE_REV,
+        "q_category": _q_category(r.get("mode") or mode, query, spec),
+        "turn_id": str(turn_id or ""), "first_step": first_step,
+        "turn_first_retrieval": str(turn_first or ""),
         "session_no": str(session_no or ""), "question": str(question or ""),
         "question_key": _question_key(question or query or spec),
         "query": str(query or spec or "")[:120], "mode": r.get("mode") or mode,

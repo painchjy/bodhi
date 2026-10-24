@@ -57,3 +57,4 @@ from srv.handlers import import_ as _import  # noqa: E402,F401
 from srv.handlers import query as _query  # noqa: E402,F401
 from srv.handlers import pages as _pages  # noqa: E402,F401
 from srv.handlers import write as _write  # noqa: E402,F401
+from srv.handlers import ab as _ab  # noqa: E402,F401

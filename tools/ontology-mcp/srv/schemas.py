@@ -358,6 +358,8 @@ TOOL_SCHEMAS = [
                 "domain_kb": {"type": "string", "description": "规则所在库（领域模型）"},
                 "task": {"type": "string", "description": "任务（可空）"},
                 "other_kbs": {"type": "array", "description": "文档缺时查哪些库（可选）"},
+                "turn_id": {"type": "string",
+                            "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）"},
                 "limit_items": {"type": "integer"}},
                 "required": ["kb_id", "knowledge_id"]},
         },
@@ -408,8 +410,29 @@ TOOL_SCHEMAS = [
                                "description": "会话编号（**只进遥测日志**，不参与检索；用于按会话统计成败）"},
                 "question": {"type": "string",
                              "description": "用户**原始问题**（只进遥测日志/同类问题聚类；检索仍用 `query`）"},
+                # 2026-10-24（A/B · C1 口径）：问-轮边界（`lookup_turn_begin` 的 turn_id）
+                "turn_id": {"type": "string",
+                            "description": ("本轮编号（先调 `lookup_turn_begin` 拿）：用于判"
+                                            "\"本轮首个检索动作是否就是本工具\"，**只进遥测** ✓")},
+                "first_step": {"type": "boolean",
+                               "description": ("自报\"本工具是本轮第一个检索动作\"（true/false）；"
+                                               "与门禁判定不一致会计入数据质量 ⚠️")},
                 "limit": {"type": "integer"}},
                 "required": ["kb_id"]},
+        },
+        {
+            "name": "lookup_turn_begin",
+            "description": ("**A/B 轮次边界（只读，不做检索）**：每收到一个用户问题，**第一个工具调用**应当是它。"
+                            "返回 `turn_id`，随后调 `knowledge_lookup(..., turn_id=…, first_step=true/false, "
+                            "session_no=…, question=…)`。它只落一行边界日志（`logs/lookup_turns_*.jsonl`），"
+                            "**不查库、不改数据、不影响命中** ✓ —— 存在的唯一理由：让服务端能判"
+                            "\"这一问的首个检索动作是不是 knowledge_lookup\"（检索 A/B 的样本准入条件）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "session_no": {"type": "string", "description": "WeKnora 会话编号（必填：按会话统计成败）"},
+                "question": {"type": "string", "description": "用户原始问题（必填：同类问题聚簇）"},
+                "kb_ids": {"type": "array", "items": {"type": "string"},
+                           "description": "本问打算检索的库（可选，仅记录）"}},
+                "required": ["session_no", "question"]},
         },
         {
             "name": "page_attributes_set",
@@ -444,7 +467,9 @@ TOOL_SCHEMAS = [
                 "allow_fetch": {"type": "boolean", "description": "允许抓取 http(s) URL（默认 false）"},
                 "max_chars": {"type": "integer"},
                 "timeout": {"type": "number",
-                            "description": "单次抓取超时秒（默认 8；也可用 BODHI_REF_TIMEOUT）"}},
+                            "description": "单次抓取超时秒（默认 8；也可用 BODHI_REF_TIMEOUT）"},
+                "turn_id": {"type": "string",
+                            "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）"}},
                 "required": ["reference"]},
         },
         {
@@ -477,6 +502,8 @@ TOOL_SCHEMAS = [
                 "cursor": {"type": "integer", "description": "从第几个上下文单元开始（上一批的 next_cursor）"},
                 "batches": {"type": "integer", "description": "本次取几批（默认 1）"},
                 "with_text": {"type": "boolean", "description": "是否返回本批正文（默认 true）"},
+                "turn_id": {"type": "string",
+                            "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）"},
             }, "required": ["kb_id", "knowledge_id"]},
         },
         {
@@ -555,6 +582,8 @@ TOOL_SCHEMAS = [
                 "q": {"type": "string", "description": "关键词（按 slug/标题模糊找，再展开跨库同名组）"},
                 "kb_ids": {"type": "array", "items": {"type": "string"},
                            "description": "会话绑定的库（仅回显/限定）"},
+                "turn_id": {"type": "string",
+                            "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）"},
             }, "required": []},
         },
         {

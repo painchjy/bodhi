@@ -12,6 +12,7 @@ from __future__ import annotations
 import ke_import
 import ke_review
 import ke_sheet
+from srv import ab_turn
 from srv.handlers import handle
 
 
@@ -45,6 +46,9 @@ def import_apply(args: dict) -> dict:
 
 @handle("reference_lookup")
 def reference_lookup(args: dict) -> dict:
+    _turn = str(args.get("turn_id", "") or "")
+    if _turn:
+        ab_turn.claim(_turn, "reference_lookup")
     _to = args.get("timeout")
     return ke_review.reference_lookup(str(args.get("kb_id", "")), str(args.get("reference", "")),
                                       bool(args.get("allow_fetch", False)),

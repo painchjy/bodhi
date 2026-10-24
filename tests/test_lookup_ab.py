@@ -10,6 +10,7 @@
 """
 import json
 import os
+import re
 import sys
 import time
 
@@ -99,3 +100,79 @@ def test_paired_dataset_complete(mcp, kbs, session_no):
     assert os.path.exists(side), "遥测侧车日志未生成 ✗（%s）" % side
     last = json.loads(open(side, encoding="utf-8").read().strip().splitlines()[-1])
     assert last["telemetry"]["variant"] in ("hint", "plain")
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-24（A/B 四维）：版本 / 首步口径 / 问题类目
+# ---------------------------------------------------------------------------
+def test_telemetry_has_version_and_category(mcp, kbs, session_no):
+    """遥测必须带**程序版本**（`v<语义>-<8位指纹>`）与**问题种类**（形态推断，不看结果 ✓）。"""
+    r = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
+                                     "query": "流程 活动", "session_no": session_no,
+                                     "question": "流程和活动是什么关系？"})
+    tel = r.get("telemetry") or {}
+    ver = str(tel.get("lookup_version") or "")
+    assert re.match(r"^v\d+-[0-9a-f]{8}$", ver), "版本指纹格式应为 v<数字>-<8位hex> ✗（实测 %r）" % ver
+    assert tel.get("code_rev") and tel["lookup_version"].endswith(tel["code_rev"])
+    assert tel.get("q_category") == "多词", "两个词的 keyword 查询应归为『多词』✗（实测 %r）" % tel.get("q_category")
+    # 形态推断**不看结果**：同一 query 在负样例（不存在词）里类目仍按形态 ✓
+    neg = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
+                                        "query": "zzz不存在词xxxx", "session_no": session_no,
+                                        "question": "zzz不存在词xxxx"})
+    assert (neg.get("telemetry") or {}).get("q_category") == "单词", "负样例仍应按形态归『单词』✗"
+
+
+def test_turn_begin_and_first_step_gate(mcp, kbs, session_no):
+    """`lookup_turn_begin` 只开边界；`knowledge_lookup` 带 `turn_id` 后能判"首步" ✓"""
+    turn = mcp.call("lookup_turn_begin", {"session_no": session_no, "question": "流程有哪些？"})
+    assert turn.get("ok") and turn.get("turn_id"), "turn 边界工具应返回 turn_id ✗：%r" % turn
+    tid = turn["turn_id"]
+
+    first = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
+                                          "query": "流程", "session_no": session_no,
+                                          "question": "流程有哪些？", "turn_id": tid,
+                                          "first_step": True})
+    tel = first.get("telemetry") or {}
+    assert tel.get("turn_id") == tid
+    assert tel.get("first_step") is True
+    assert tel.get("turn_first_retrieval") == "knowledge_lookup", \
+        "同轮第一个检索动作应是 knowledge_lookup ✗（实测 %r）" % tel.get("turn_first_retrieval")
+
+    # 同一轮里再调一次：**首个动作不会被覆盖**（仍是 knowledge_lookup ✓）
+    again = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
+                                         "query": "活动", "session_no": session_no,
+                                         "question": "流程有哪些？", "turn_id": tid})
+    assert (again.get("telemetry") or {}).get("turn_first_retrieval") == "knowledge_lookup"
+
+
+def test_report_filters_version_and_first_step(tmp_path):
+    """报告器：C1 门禁会**排除并计数**（不是悄悄丢样本 ✗），版本可过滤且分表。"""
+    sys.path.insert(0, os.path.join(ab_runner.REPO, "tools", "ke-core"))
+    import ke_ab_report as rep_mod  # noqa: PLC0415
+
+    base = {"variant": "hint", "question_key": "q", "hits": 1, "ms": 10, "source": "t.jsonl",
+            "ts": "2026-10-24 10:00:00 +0800", "lookup_version": "v2-aaaaaaaa", "first_step": True}
+    rows = [
+        dict(base, turn_id="t1", turn_first_retrieval="knowledge_lookup"),          # 纳入
+        dict(base, turn_id="t2", turn_first_retrieval="context_lookup"),            # 首步不是它
+        dict(base),                                                                # 无 turn（历史数据）
+        dict(base, turn_id="t4", turn_first_retrieval="knowledge_lookup", first_step=False),  # 自报否
+        dict(base, turn_id="t5", turn_first_retrieval="knowledge_lookup", lookup_version="v1-bbbbbbbb"),
+    ]
+    kept, excl = rep_mod.apply_filters(rows, cohort="c1", first_step_only=True)
+    assert len(kept) == 2, "应保留 2 条（C1 合规 + v1 的 1 条）✗ 实得 %d" % len(kept)
+    assert excl.get("first_retrieval_other") == 1
+    assert excl.get("turn_missing") == 1
+    assert excl.get("self_report_false") == 1
+
+    kept_v2, excl_v2 = rep_mod.apply_filters(rows, cohort="c1", version="v2-aaaaaaaa")
+    assert all(r["lookup_version"] == "v2-aaaaaaaa" for r in kept_v2)
+    assert excl_v2.get("version_mismatch") == 1
+
+    # c3（不判首步）只排除无 turn 的样本，且**不排除**首步为其他工具的行
+    kept_c3, _ = rep_mod.apply_filters(rows, cohort="c3")
+    assert len(kept_c3) == 5
+
+    # 时间窗
+    kept_t, excl_t = rep_mod.apply_filters(rows, since="2026-10-25", cohort="c3")
+    assert not kept_t and excl_t.get("out_of_range") == 5
