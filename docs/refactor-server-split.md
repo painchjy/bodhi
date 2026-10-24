@@ -28,6 +28,23 @@
 | S7 | `srv/render.py` | `_design_sections` + `SKILL_CONTEXTS` + `_type_label_of` + `context_meta`（纯渲染；`build_new_page` 留 S8） | `srv.text`/`ke_pages`/`ke_ontology` | 低 | **✅ 完成** |
 | S8 | `srv/schemas.py`（**S8a ✅**）+ `srv/tools_read.py`（**S8b-1 ✅**）+ `srv/tools_ops.py`（**S8b-2a ✅**）+ 危险工具/`save_knowledge`（S8b-2b 待做） | schema 559 行；只读 5 个；运维 `kb_export`/`kb_import` | `ke_audit`/`ke_context`/`kb_transfer` | 中 | **S8a ✅ S8b-1 ✅ S8b-2a ✅** |
 | S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | 待做 |
+| **A1** | `srv/handlers/*` | **工具处理注册表**（`@handle` 登记 + 注册表优先分发，旧 if 链兜底） | `srv.tools_*` | 中 | **A1-0 ✅ A1-1 ✅（7 个只读/运维工具）；A1-2…A1-8 待做** |
+
+### A1 记录（2026-10-24，**结构拆分，工具面不变**）
+- 新增 `srv/handlers/__init__.py`：`REGISTRY` + `@handle("<工具名>")` + `dispatch(name, args)`（未登记 ⇒ 返回 `None`）
+- `server._call_tool_impl` 在 `_reset_request_cache()` 之后**先查注册表**，未命中继续走原 `if name == …` 链 ⇒ **双轨、零行为变化** ✓
+- **A1-1 `srv/handlers/read.py`**：迁移 7 个"纯参数搬运"工具 —— `audit_scan` / `kb_export` / `kb_import` /
+  `context_scan` / `context_lookup` / `context_page` / `context_authority`（实现仍在 `srv/tools_read|tools_ops`，
+  参数解析**逐字照搬**原分支）；`server.py` 对应分支已删
+- `tests/_helpers.py::dispatcher_names()` 改为 **旧 if 链 ∪ `@handle`**（否则结构搬家会让"分发器覆盖"少名字 ✗；
+  同时**禁止在 `srv/handlers/**` docstring 里写真实工具名**，否则会被当成已注册工具 ✗）
+- 验证：`py_compile` ✓ / 导入冒烟（`tools=36 handlers=7`）✓ / `active+Result=success+8765` ✓ /
+  7 个工具**实调用**回执正常（`audit_scan` 仍 0 high/0 medium/0 low；`kb_export` ok；`kb_import` 非法源结构化失败）✓ /
+  `test_coverage_gaps` + `test_mcp_tools_read` + `test_lookup_ab` **13 项全绿** ✓
+- 后续切片（按域）：`meta`（`ontology_types`/`skills`/`job_status`，依赖 server 内函数，需先抽出到 `srv/`）、
+  `extract`（`image_extract`/`extract_*`）、`audit`（`audit_plan`/`audit_purge`）、`context`（`context_concept_*`/
+  `context_authority_apply`）、`import_`（`import_plan`/`import_run`）、`ops`（`retag_*`/`clean_alias_noise`/`overview`）、
+  `write`（`save_knowledge`/`page_copy`，**最后做**）
 
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓

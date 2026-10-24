@@ -87,7 +87,18 @@ def retired_tools() -> set:
 
 
 def dispatcher_names() -> set:
-    return set(re.findall(r'if name == "([a-z_0-9]+)":', read(SERVER)))
+    """分发器拥有的工具名 = **旧 if 链** ∪ **A1 注册表**（`srv/handlers/*.py` 的 `@handle("x")`）。
+
+    2026-10-24 A1 切片：工具处理函数逐个搬进 `srv/handlers/`，`server.py` 里的 `if name == …`
+    会相应减少 —— 只解析 server.py 会**误判"没人处理"** ✗，所以两边都读。
+    """
+    out = set(re.findall(r'if name == "([a-z_0-9]+)":', read(SERVER)))
+    hdir = os.path.join(REPO, "tools", "ontology-mcp", "srv", "handlers")
+    if os.path.isdir(hdir):
+        for fn in sorted(os.listdir(hdir)):
+            if fn.endswith(".py"):
+                out |= set(re.findall(r'@handle\("([a-z_0-9]+)"\)', read(os.path.join(hdir, fn))))
+    return out
 
 
 def load_or_init_golden(name: str, value, update: bool = False):

@@ -202,6 +202,8 @@ from srv.constants import (  # noqa: E402,F401  （P2 切片 S3/S8b-2a ✓ 取�
     CHARS_PER_TOKEN, DEFAULT_ROUND_BUDGET, DOMAIN_STATE_DIR, EXPORT_DIR,
 )
 from srv.tools_ops import kb_export, kb_import  # noqa: E402,F401  （P2 切片 S8b-2a ✓）
+# A1 切片（2026-10-24）：工具处理注册表 —— **注册表优先，未命中回落旧 if 链**（双轨，零行为变化 ✓）
+from srv.handlers import dispatch as _handler_dispatch, names as _handler_names  # noqa: E402
 
 
 from srv.state import (  # noqa: E402,F401  （P2 切片 S3 ✓ 状态读写，实现逐字未改）
@@ -2428,6 +2430,10 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     # P3-0f（2026-10-10）：每次工具调用先清**请求级只读 memo**（页 id / 属主 / 会话页引用）。
     # 放在这里而不是各工具里：唯一入口、线程局部、绝不会把上一次调用的结果带进来。
     _reset_request_cache()
+    # A1 切片：**注册表优先**（已迁移的工具直接走 `srv/handlers/*`）；未登记的工具仍走下面的 if 链 ✓
+    _handled = _handler_dispatch(name, args)
+    if _handled is not None:
+        return _handled
     if name == "page_copy":
         import ke_page_ops as _po  # noqa: PLC0415
         return _po.copy_page(str(args.get("kb_id", "")), str(args.get("src_slug", "")),
@@ -2454,19 +2460,8 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return service_overview_tool(str(args["kb_id"]), False,
                                      str(args.get("slug", "")), str(args.get("title", "")),
                                      int(args.get("preview_lines", 25)))
-    if name == "kb_export":
-        return kb_export(str(args.get("kb_id", "")), str(args.get("out_dir", "")),
-                         bool(args.get("make_zip", True)))
-    if name == "kb_import":
-        return kb_import(str(args.get("source", "")), str(args.get("kb_id", "")),
-                         str(args.get("new_kb", "")), bool(args.get("keep_ids", False)),
-                         bool(args.get("verify", True)))
     if name == "rebuild_wiki_from_graph":
         return rebuild_wiki_from_graph(str(args.get("kb_id", "")), bool(args.get("dry_run", True)))
-    if name == "audit_scan":
-        return audit_scan(str(args.get("kb_id", "")), args.get("kb_ids") or None,
-                          str(args.get("scope", "all")), int(args.get("max_findings", 50)),
-                          str(args.get("template_kb_id", "") or ""))
     if name == "audit_plan":
         return ke_audit.build_plan(str(args["kb_id"]), args.get("kinds", "all"),
                                    str(args.get("scope", "all")))
@@ -2662,15 +2657,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         if block:
             return block
         return ke_pages.retag_rollback(kb_id, str(args.get("ticket", "")))
-    if name == "context_scan":
-        return context_scan(args.get("kb_ids") or None, int(args.get("limit", 200) or 200),
-                            bool(args.get("write", True)))
-    if name == "context_lookup":
-        return context_lookup(args.get("kb_ids") or None, str(args.get("q", "")),
-                              str(args.get("slug", "")))
-    if name == "context_page":
-        return context_page(str(args.get("kb_id", "")), str(args.get("slug", "")),
-                            str(args.get("q", "")))
     if name == "context_concept_apply":
         return context_concept_apply(str(args.get("slug", "")), str(args.get("ticket", "")),
                                      args.get("acknowledge_risks") or [],
@@ -2679,8 +2665,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                      str(args.get("actor", "")))
     if name == "context_concept_rollback":
         return context_concept_rollback(str(args.get("ticket", "")))
-    if name == "context_authority":
-        return context_authority(str(args.get("slug", "")), str(args.get("master", "")))
     if name == "context_authority_apply":
         return context_authority_apply(str(args.get("action", "")), str(args.get("slug", "")),
                                        str(args.get("master", "")), str(args.get("kb", "")),
