@@ -154,6 +154,8 @@ class OntProperty(Term):
     restrictions: list[Restriction] = field(default_factory=list)
     # `?self bodhi:aliasKey true` ⇒ 该属性的值进页面 `aliases`（见 config.ALIAS_KEY）
     alias_key: bool = False
+    # `?self bodhi:hiddenFromEditor true` ⇒ 不进属性面板 / 写口拒收（见 config.HIDDEN_FROM_EDITOR）
+    hidden_from_editor: bool = False
 
     @property
     def is_object(self) -> bool:

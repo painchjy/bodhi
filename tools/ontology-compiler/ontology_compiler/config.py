@@ -36,6 +36,10 @@ GENERATED_AT_ENV = "BODHI_GENERATED_AT"
 #   消费方：编译产物 `ontology_index.json` 的 `alias_keys`（顶层=全局；`models[].alias_keys`=本模块）
 #   → 内核 `ke_pages.derive_aliases()`（经 `ke_ontology.alias_keys()`）。
 ALIAS_KEY = "http://example.org/bodhi#aliasKey"
+# `?prop bodhi:hiddenFromEditor true` ⇒ **不进数据属性编辑面板**、写口拒收（2026-10-24）
+#   典型：整篇正文的载体（`schema:articleBody` 及其等价别名 `bmm:wikiContent`）——
+#   正文走页面正文（`save_knowledge(stage="report")`），不是"数据属性"。
+HIDDEN_FROM_EDITOR = "http://example.org/bodhi#hiddenFromEditor"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ONTOLOGY_DIR = REPO_ROOT / "ontology"

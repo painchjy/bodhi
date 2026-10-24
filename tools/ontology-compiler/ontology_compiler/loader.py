@@ -498,6 +498,8 @@ def extract_properties(
             sub_property = combined.value(subject, RDFS_SUBPROPERTY)
             # `?prop bodhi:aliasKey true` ⇒ 该属性的值进页面 aliases（前端标题下方的「别名」标签）
             alias_key = _truthy(combined.value(subject, URIRef(_alias_key_iri())))
+            # `?prop bodhi:hiddenFromEditor true` ⇒ 不进属性面板 / 写口拒收（正文载体就是这种）
+            hidden = _truthy(combined.value(subject, URIRef(_hidden_from_editor_iri())))
             properties.append(
                 OntProperty(
                     iri=str(subject),
@@ -520,6 +522,7 @@ def extract_properties(
                     sub_property_of=str(sub_property) if isinstance(sub_property, URIRef) else None,
                     characteristics=characteristics,
                     alias_key=alias_key,
+                    hidden_from_editor=hidden,
                 )
             )
     return properties
@@ -550,6 +553,12 @@ def _alias_key_iri() -> str:
     """`bodhi:aliasKey` 的完整 IRI（延迟导入 config，避免与 config 形成导入环）。"""
     from ontology_compiler.config import ALIAS_KEY  # noqa: PLC0415
     return ALIAS_KEY
+
+
+def _hidden_from_editor_iri() -> str:
+    """`bodhi:hiddenFromEditor` 的完整 IRI（延迟导入 config，同上）。"""
+    from ontology_compiler.config import HIDDEN_FROM_EDITOR  # noqa: PLC0415
+    return HIDDEN_FROM_EDITOR
 
 
 def _truthy(node) -> bool:

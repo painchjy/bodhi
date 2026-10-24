@@ -32,7 +32,8 @@ schema:articleBody rdf:type owl:DatatypeProperty ;
     rdfs:label "正文"@zh ;
     rdfs:domain schema:CreativeWork ;
     rdfs:range xsd:string ;
-    rdfs:comment "整篇正文（Markdown）。事实源是**图节点 articleBody**；PG content 是渲染缓存，page_metadata 不存正文。"@zh .
+    bodhi:hiddenFromEditor true ;
+    rdfs:comment "整篇正文（Markdown）。事实源是**图节点 articleBody**；PG content 是渲染缓存，page_metadata 不存正文。**不进数据属性面板**（正文走页面正文）。"@zh .
 
 # ============================================================
 # 4. 模板选择属性（都属于 DocumentTemplate）

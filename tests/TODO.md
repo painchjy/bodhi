@@ -8,7 +8,7 @@
 | 类别 | 条目 | 处置 |
 |---|---|---|
 | `[功能]` 已修 | B5 `before_version` 漏传、B6 kb 清单缓存阻塞新库写入、D1-D4 技能清单、C1-C4 脚手架、B3 导出回执断言 | 已修 ✓ |
-| `[非功能]` **后置** | **B4**（幂等回执判 created）、**B7**（部分索引语义）、**A1/A2**（流程骨架数据缺口）、**B1/B2**（调用契约需按实际传参） | 记录 + xfail/skip ✓ **重构后再解决** |
+| `[非功能]` **后置** | **B7**（部分索引语义）、**A1/A2**（流程骨架数据缺口）、**B1/B2**（调用契约需按实际传参） | 记录 + xfail/skip ✓ **重构后再解决** |
 | `[功能]` 进行中 | P2 server.py 拆分（见 `docs/refactor-server-split.md`） | 现在做 ✓ |
 | `[功能]` **P5 内网问题** | **4.5 解绑**（`context_authority_apply{action:"detach"}`）｜**4.3 参考规范**（`reference_lookup` 代理/超时/白名单 + 结构化 `reason`） | **已落地 ✓**（2026-10-22，用例：`test_mcp_tools_context_detach.py` / `test_reference_lookup.py`） |
 | `[功能]` P5 已完成 | 4.5 解绑 ｜ 4.3 参考规范 ｜ **4.1+4.4 检索策略 v2** ｜ **4.6 会话分页** | 已落地 ✓（用例与口径见 `docs/p5-internal-issues.md`） |
@@ -27,7 +27,7 @@
 | B1 | `save_knowledge` **必须**有真实会话身份，否则 `need_session=true` 拒写 | 回执 `reason/hint`（server.py:2081-2086） | 测试需 `session` fixture：从 `sessions`/会话页取**真实** `session_no` ✓（**不许自编** ✗） |
 | B2 | 写库目标库解析走 `resolve_write_kb` → `ke_db.resolve_kb_candidate`（**完整 uuid 或精确库名**；模糊要 `confirm_kb_match=true`） | server.py:713-746 | 测试库必须能被该解析器看见（见 C1） |
 | B3 | `kb_export` 回执**没有** `out_dir`/`saved` 键 | 实测回执 | 断言改为"任一含 dir/export/path 的字段" ✓（已修） |
-| B4 | **`save_knowledge` 幂等被判 `created`**（同库同 slug 二次写） | **⚠️ 上一轮的"并发竞态"结论作废**：诊断字段打在 `return`（在 INSERT **之后**）⇒ 看到的 1 行可能正是本次插入的 ✗。仍然成立：① 调用前测试进程查 PG 有 1 行（`version=1, del=f`）② 服务端 `existing` 查到 0 行 ③ 该次走 create 分支。⇒ 只剩两种可能：**(a) 服务端与测试进程看到的不是同一行/同一库** **(b) 调用前该行已被服务端软删** | 用例 xfail 带证据；下一步：一次诊断同时回传**行 id + deleted_at + psql 目标容器名**，与测试侧对比即可定案 |
+| B4 | **`save_knowledge` 幂等被判 `created`**（同库同 slug 二次写） | ✅ **已修（2026-10-24）**：真因是 **同载荷重入保护**（`P3-0i3`）—— 第二次**没有写库**（正确），但把第一次的回执原样返回 ⇒ 看起来像"又建了一页" ✗。现在去重回执按库中现值刷新：`action="unchanged"` / `before=<当前版本>` / `created=[]`（`server._reentry_receipt`）。用例改为断言这些（不再是 xfail） | `tests/test_mcp_tools_write.py::test_save_knowledge_document_idempotent` |
 | B5 | `ke_pages.write_knowledge` 最终返回**漏了 `before_version`** ⇒ `page_versions[].before` 恒为 null | 实测修前后：`before: None` → `before: 0` | **已修** ✓（`ke_pages.py:1392` 起加字段） |
 | B7 | `wiki_pages` 的唯一索引是 **部分索引**：`UNIQUE (knowledge_base_id, slug) WHERE deleted_at IS NULL` | 实测 `pg_indexes`（2026-10-21） | ⇒ **软删后可再插同名页**（旧行留作历史，这是设计 ✓），但任何"按 slug 取最新"的逻辑**必须显式** `deleted_at IS NULL`，否则会拿到死行 ✗。当前 `(kb,slug)` 重复组 = **0** ✓，软删 57 / 总 427 ✓ |
 | B6 | `ke_db` kb 清单**60s 进程缓存** ⇒ 刚建的库写不进去（`kb_unresolved: not_found`，但 `candidates` 里就有它 ✗） | 实测（本轮多次复现） | **已修** ✓：`_kb_rows(force=True)` + `resolve_kb_id`/`resolve_kb_candidate` 未命中时**强制刷新一次**（不放宽口径 ✓） |

@@ -654,7 +654,8 @@ skos:note rdf:type owl:AnnotationProperty ;
     rdfs:domain :Report ;
     rdfs:range xsd:string ;
     owl:equivalentProperty schema:articleBody ;
-    rdfs:comment "报告类的整篇正文（Markdown）。**与 `schema:articleBody` 等价**（本文档的正文唯一口径）。"@zh .
+    bodhi:hiddenFromEditor true ;
+    rdfs:comment "报告类的整篇正文（Markdown）。**与 `schema:articleBody` 等价**（本文档的正文唯一口径）；**不进数据属性面板**（正文走页面正文）。"@zh .
 
 :sessionFor rdf:type owl:ObjectProperty ;
     rdfs:label "服务方案"@zh ;

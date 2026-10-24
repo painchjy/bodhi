@@ -130,7 +130,7 @@
 
 | 位置 | 行为 |
 |---|---|
-| `ke_ontology` | `is_body_property()` / `body_properties()`（按本体属性名识别 `schema:articleBody` 及等价别名 `bmm:wikiContent`；单一事实源） |
+| `ke_ontology` | **本体标记驱动**：`hidden_properties()` 读投影里 `bodhi:hiddenFromEditor true`（`schema:articleBody` / `bmm:wikiContent` 已在 TTL 标注）；`is_body_property()` 只剩"投影还没该字段"的过渡兜底 |
 | `GET /bodhi/page/attributes` | `allowed` **不列**正文键；三处现值里剔出正文键，另回 `body_keys` + `body_hint`；`hint` 按模式区分（document ⇒ 正文走 `stage="report"`） |
 | `page_attributes_set` / `write_knowledge` | 正文键**拒收/剔除**（拒收时指路 `stage="report"`） |
 | `migrate_article_body` | 清 PG 残留（键清单来自 `body_properties()`，不再写死两个键） |

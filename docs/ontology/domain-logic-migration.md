@@ -91,6 +91,11 @@
 3. 规则链**归档**（无活引用）：`ke_rule_review` / `ke_rule_ledger` / `ke_rule_stats` / `ke_rule_copy`
    → `tools/ke-core/_deprecated/`（见该目录 README；`ke_rule_publish`/`check`/`eval` 仍在用，保留）；
 4. CLI 默认值里的真实库名/策略名一律去掉（改空 + 显式传参）。
+5. **`bodhi:hiddenFromEditor` 已实现**（2026-10-24）：本体标记 → 编译（`config.HIDDEN_FROM_EDITOR` /
+   `OntProperty.hidden_from_editor` / `loader` 解析）→ 投影（`hidden_from_editor` 布尔，**裸 true/false**
+   不写成字符串）→ 内核（`ke_ontology.hidden_properties()` 优先读标记；`is_body_property()` 只剩"投影无该字段"
+   的过渡兜底）→ 面板/写口（不列、拒收）。TTL 侧给 `schema:articleBody` 与 `bmm:wikiContent` 各加
+   `bodhi:hiddenFromEditor true`（`docs/ontology/*完整版.ttl`，走上传→编译→回放投影）。
 
 > 判据复核：① 模板/规则逻辑已在领域库可查 ✓；② 工具自动定位有用例（`test_report_template` /
 > `test_template_alignment_real` / `test_lookup_strategy`）✓；③ 技能流程化且回归通过 ✓。

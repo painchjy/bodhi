@@ -2326,6 +2326,47 @@ from srv.reentry import (  # noqa: E402,F401  (P3 slice E)
 )
 
 
+def _reentry_receipt(prev: dict, args: dict) -> dict:
+    """重入去重时的回执（2026-10-24 修 B4）：**不能原样复用第一次的回执** ✗
+
+    重入**没有写库** ⇒ 第一次的 `created` / `before=0` 已经过时，会让调用方以为"又建了一页"。
+    这里按**库中现值**刷新：`before` = 当前版本、`action="unchanged"`，`created` 挪进 `merged`。
+    """
+    out = dict(prev)
+    out["reentry"] = {"deduped": True, "note": (
+        "同一份载荷已由本服务处理（客户端超时重发）：**未重复写库**；"
+        "回执已按库中现值刷新（`action=unchanged`）。")}
+    pvs = out.get("page_versions") or []
+    kb = str((args or {}).get("kb_id") or "")
+    if kb:
+        try:
+            kb_id = resolve_kb_id(kb)[0]
+        except Exception:  # noqa: BLE001
+            kb_id = kb
+        for pv in pvs:
+            slug = str((pv or {}).get("slug") or "")
+            if not slug:
+                continue
+            try:
+                rows = ke_db.psql_csv(
+                    "SELECT COALESCE(version,1) AS v FROM wiki_pages WHERE "
+                    "knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
+                    % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+            except Exception:  # noqa: BLE001
+                rows = []
+            if rows:
+                pv["before"] = int(rows[0]["v"] or 1)
+                pv["action"] = "unchanged"
+                pv["applied"] = True
+    if out.get("created"):
+        out["merged"] = (out.get("merged") or []) + [
+            {"name": c.get("name"), "type": c.get("type"), "into": c.get("slug"),
+             "similarity": 1.0, "note": "同载荷重入：未重复写库（页已是该版本）"}
+            for c in out["created"] if isinstance(c, dict)]
+        out["created"] = []
+    return out
+
+
 def call_tool(name: str, args: dict) -> dict:
     """工具**唯一入口**：同载荷重入保护（P3-0i3）→ 真正实现（`_call_tool_impl`）。"""
     key = _reentry_key(name, args)
@@ -2344,11 +2385,7 @@ def call_tool(name: str, args: dict) -> dict:
         slot["event"].wait(timeout=REENTRY_WINDOW_S)     # 等正在跑的那一次出结果
         prev = slot.get("result")
         if isinstance(prev, dict):
-            out = dict(prev)
-            out["reentry"] = {"deduped": True, "note": (
-                "同一份载荷已由本服务处理（客户端超时重发）：**未重复写库**，"
-                "本回执与那一次完全一致。")}
-            return out
+            return _reentry_receipt(prev, args)
         with _REENTRY_LOCK:                              # 上一次没留下回执（异常/中断）→ 自己跑
             slot = {"event": threading.Event(), "result": None, "done": False, "at": time.time()}
             _REENTRY[key] = slot

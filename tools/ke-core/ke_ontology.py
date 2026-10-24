@@ -756,12 +756,16 @@ def data_properties() -> dict:
                 "OPTIONAL MATCH (p)-[:BODHI_DOMAIN]->(d:BodhiOntClass) "
                 "RETURN p.prefixed AS prefixed, coalesce(p.label,'') AS label, "
                 "       coalesce(p.module,'') AS module, coalesce(p.range_literal,'') AS range_literal, "
+                "       coalesce(p.hidden_from_editor,false) AS hidden_from_editor, "
                 "       collect(DISTINCT d.prefixed) AS domains ORDER BY p.prefixed"):
             name = row.get("prefixed")
             if not name:
                 continue
             props[name] = {"prefixed": name, "label": row.get("label") or name,
                            "module": row.get("module") or "", "range_literal": row.get("range_literal") or "",
+                           # 布尔可能是真 `true`，也可能是历史投影留下的字符串 `"True"` ⇒ 统一归一 ✓
+                           "hidden_from_editor": str(row.get("hidden_from_editor")).strip().lower()
+                           in ("true", "1", "yes"),
                            "domains": [d for d in (row.get("domains") or []) if d]}
     except Exception as exc:  # noqa: BLE001  JSON 产物只有计数、没有名单 → 只能空表兜底
         source = "unavailable: %s" % exc
@@ -801,8 +805,28 @@ BODY_PROPERTY_LOCALS = ("articlebody", "wikicontent")
 
 
 def is_body_property(name: str) -> bool:
-    """该属性名是否「正文载体」（按本地名，忽略模块前缀与大小写）。"""
-    return str(name or "").split(":")[-1].strip().lower() in BODY_PROPERTY_LOCALS
+    """该属性是否「不进属性面板」的**正文载体**（本体标记优先，未投影时按本地名过渡）。"""
+    local = str(name or "").split(":")[-1].strip().lower()
+    if not local:
+        return False
+    flagged = hidden_properties()            # `bodhi:hiddenFromEditor true` 的属性（本地名集合）
+    if flagged:
+        return local in flagged
+    return local in BODY_PROPERTY_LOCALS     # 过渡：投影还没有该标记时按名字兜底
+
+
+def hidden_properties() -> set:
+    """本体里标了 `bodhi:hiddenFromEditor true` 的属性（**本地名小写**集合）。
+
+    含义：这类属性**不进数据属性编辑面板**、写口拒收（典型是整篇正文的载体）。
+    读自投影（`ke_ontology.data_properties()`）；投影没有该字段 ⇒ 空集（调用方走过渡兜底）。
+    """
+    try:
+        return {str(k).split(":")[-1].lower()
+                for k, meta in (data_properties().get("properties") or {}).items()
+                if (meta or {}).get("hidden_from_editor")}
+    except Exception:  # noqa: BLE001
+        return set()
 
 
 def body_properties() -> list[str]:

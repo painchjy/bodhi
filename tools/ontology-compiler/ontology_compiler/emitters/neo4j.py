@@ -116,8 +116,17 @@ def render_constraints(bundle: OntologyBundleView) -> str:
 
 
 def node_map(pairs: list[tuple[str, object]]) -> str:
-    """`SET n += {..}` 里用的 Cypher map（值已转义）。"""
-    return "{" + ", ".join("%s: %s" % (key, cypher_str(value)) for key, value in pairs) + "}"
+    """`SET n += {..}` 里用的 Cypher map（值已转义）。
+
+    布尔值写成**裸** `true` / `false`（2026-10-24）：否则会落成字符串 `"True"`，
+    下游 `WHERE p.hidden_from_editor = true` 永远不命中 ✗。
+    """
+    def _val(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        return cypher_str(v)
+
+    return "{" + ", ".join("%s: %s" % (key, _val(value)) for key, value in pairs) + "}"
 
 
 def map_set(variable: str, pairs: list[tuple[str, object]]) -> str:
@@ -153,6 +162,8 @@ def property_pairs(prop) -> list[tuple[str, object]]:
         # 数据属性的 range 是**字面量类型**（xsd:string 等），不是类：单独记在属性上，
         # 不再建"外部占位类"（否则界面会显示「未定义 … range · external」，见用户 2026-09-21 反馈）。
         ("range_literal", ",".join(prop.range_iris) if getattr(prop, "is_datatype", False) else ""),
+        # 2026-10-24：`bodhi:hiddenFromEditor true` ⇒ 不进属性面板 / 写口拒收（正文载体就是这种）
+        ("hidden_from_editor", bool(getattr(prop, "hidden_from_editor", False))),
         ("bodhi_projection", "ontology"),
     ]
 

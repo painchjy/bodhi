@@ -33,12 +33,17 @@ def _page(mcp, kb, slug):
 
 
 def test_save_knowledge_document_idempotent(mcp, test_kb, session_no):
+    """同 slug 同载荷连写两次 ⇒ **不重复写库**，且回执如实（不谎报 created）✓
+
+    B4（已修 2026-10-24）：第二次是**同载荷重入**（`P3-0i3` 去重，窗口内不再写库），
+    但旧实现把第一次的回执原样返回（`created` / `before=0`）⇒ 看起来像"又建了一页" ✗。
+    现在去重回执按库中现值刷新：`action="unchanged"`、`before=<当前版本>`、`created=[]`。
+    """
     args = {"kb_id": test_kb, "stage": "report", "mode": "apply", "session_no": _sess(session_no),
             "report": {"title": "回归测试报告", "slug": "review/_t-report",
                        "content_md": "# 回归测试报告\n\n## ① 范围与依据\n- x\n"}}
     r1 = mcp.call("save_knowledge", args)
     assert r1.get("applied") is True, json.dumps(r1, ensure_ascii=False)[:300]
-    # 诊断：第一次保存后页是否真的在库里（决定"第二次 created"是真幂等 bug 还是写入丢失 ✗）
     seen = _page(mcp, test_kb, "review/_t-report")
     import ke_db
     probe = ke_db.psql_csv(
@@ -47,18 +52,20 @@ def test_save_knowledge_document_idempotent(mcp, test_kb, session_no):
     r2 = mcp.call("save_knowledge", args)
     assert r2.get("applied") is True
     pv = (r2.get("page_versions") or [{}])[0]
-    ev = ("page_versions=%s ｜ r2.created=%s ｜ r1.created=%s ｜ 检索到页=%s ｜ PG行=%s ｜ 库=%s"
+    ev = ("page_versions=%s ｜ r2.created=%s ｜ r2.merged=%s ｜ reentry=%s ｜ 检索到页=%s ｜ 库=%s"
           % (json.dumps(r2.get("page_versions"), ensure_ascii=False),
              json.dumps(r2.get("created"), ensure_ascii=False),
-             json.dumps(r1.get("created"), ensure_ascii=False),
-             "是" if seen else "否", json.dumps(probe, ensure_ascii=False), test_kb))
-    if int(pv.get("before") or 0) < 1:
-        # 2026-10-21 实测（证据见消息体）：PG 里**确实有且仅有 1 行**（同库/同 slug/未删/version=1），
-        # 但第二次 `save_knowledge` 仍判 `created`、`before=0` ⇒ `upsert_page` 的 `existing`
-        # 查询在服务端没命中 ✗。已记 tests/TODO.md B4（待追）。**先不阻塞回归** ✓
-        import pytest
-        pytest.xfail("幂等回执缺陷（见 tests/TODO.md B4）：%s" % ev)
-    assert int(pv.get("before") or 0) >= 1, ev
+             json.dumps(r2.get("merged"), ensure_ascii=False),
+             json.dumps(r2.get("reentry"), ensure_ascii=False),
+             "是" if seen else "否", test_kb))
+    assert int(pv.get("before") or 0) >= 1, "回执仍谎报 before=0 ✗：" + ev
+    assert not (r2.get("created") or []), "重入却报 created ✗：" + ev
+    assert pv.get("action") in ("updated", "unchanged"), "重入动作应为 unchanged ✗：" + ev
+    # 库中只有一份（没有重复写出版本 2）
+    ver = ke_db.psql_csv(
+        "SELECT COALESCE(version,1) AS v FROM wiki_pages WHERE knowledge_base_id = %s "
+        "AND slug = 'review/_t-report' AND deleted_at IS NULL" % ke_db.sql_str(test_kb))
+    assert ver and int(ver[0]["v"] or 1) == 1, "重入写入了新版本 ✗：%s ｜ %s" % (ver, ev)
 
 
 def test_page_attributes_set_and_guard(mcp, test_kb, session_no):
