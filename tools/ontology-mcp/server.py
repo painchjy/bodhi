@@ -2493,35 +2493,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                             args.get("patch") or {},
                                             actor=str(args.get("actor", "")),
                                             dry_run=bool(_pa_dry))
-    if name == "extract_candidates":
-        # 2026-10-17：**候选抽取**（只定位 ✓ 不判定 ✗）—— 判读交给知识提取技能/模型 ✓
-        import ke_extract  # noqa: PLC0415
-        return ke_extract.extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
-                                  str(args.get("domain_kb", "")),
-                                  str(args.get("task", "") or ""),
-                                  args.get("other_kbs") or None,
-                                  int(args.get("limit_items", 20) or 20))
-    if name == "evidence_score":
-        # 2026-10-17：**证据/结论可信度**（只读纯函数 ✓，口径唯一 ✓，智能体不必自己算 ✗）
-        import ke_score  # noqa: PLC0415
-        return ke_score.score_rule(args.get("facts") or [], args.get("checks") or [],
-                                   float(args.get("threshold", 0.60) or 0.60))
-    if name == "knowledge_lookup":
-        # 2026-10-22：**统一检索入口**（rules / keyword 类范围+多词 / instances / route / path / semantic）
-        import ke_lookup  # noqa: PLC0415
-        return ke_lookup.knowledge_lookup(
-            str(args.get("kb_id", "")), str(args.get("mode", "rules") or "rules"),
-            str(args.get("query", "")), str(args.get("spec", "")), str(args.get("start", "")),
-            int(args.get("depth", 2) or 2), int(args.get("limit", 20) or 20),
-            str(args.get("cls", "")), str(args.get("page_type", "")),
-            args.get("kb_ids") or None, bool(args.get("auto_widen", False)),
-            # 2026-10-24（需求 2）：本体提示开关 + 遥测字段（会话号/原问题仅入日志）
-            args.get("ontology_hint"), str(args.get("session_no", "") or ""),
-            str(args.get("question", "") or ""))
-    if name == "rules_resolve":
-        # 2026-10-16（用户口径）：**按步骤解析规则**（direct/policy 递归/ask/task 兼容/path 预留）
-        return ke_review.rules_resolve(str(args.get("kb_id", "")), str(args.get("spec", "")),
-                                       int(args.get("limit", 300) or 300))
     if name == "rules_of_task":
         # 2026-10-18（用户口径 ✓）：**已下架** ✗ —— 旧"任务→规则（taskExecutesRule）"路径已删除 ✓
         return {"ok": False, "deprecated": True, "error": "rules_of_task 已下架",
@@ -2529,14 +2500,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                          "spec=\"policy:<策略>\" | \"direct:<规则slug,…>\" | \"ask\")` ✓；"
                          "若要按策略取全部规则：spec=\"policy:<策略页名>\" ✓"),
                 "since": "2026-10-18"}
-    if name == "rules_of_task_legacy":
-        # 2026-10-16（用户口径）：**按任务取规则契约**（图边 taskExecutesRule + 页面属性真读；
-        # 带 needs_extract 分流 / required_fields / source 出处 / hash 指纹 ⇒ 反假断言可验）
-        return ke_review.rules_of_task(str(args.get("kb_id", "")), str(args.get("task", "")),
-                                       int(args.get("limit", 300) or 300))
-    if name == "rules_of_policy":
-        return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
-                                         int(args.get("limit", 300) or 300))
     if name == "graph_query":
         # 2026-10-18（用户口径 ✓）：**归一化到 knowledge_lookup** ✗ 不再建议直接拼 Cypher
         return {"ok": False, "deprecated": True, "error": "graph_query 已归一化到 knowledge_lookup",
@@ -2544,8 +2507,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                          "查多跳：`knowledge_lookup(mode=\"path\", start=<slug>, depth=2)` ✓；"
                          "取规则：`knowledge_lookup(mode=\"rules\", spec=…)` ✓"),
                 "since": "2026-10-18"}
-    if name == "graph_query_legacy":
-        return ke_review.graph_query(str(args.get("cypher", "")), int(args.get("limit", 200) or 200))
     if name == "review_apply":
         _rv_sno, _rv_sslug = _resolve_session_for(str(args.get("kb_id", "")),
                                                   str(args.get("session_no", "")))
@@ -2556,48 +2517,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                                       page_type=str(args.get("page_type", "") or "bmm:TechnicalReviewReport"),
                                       actor=str(args.get("actor", "agent:document_review")),
                                       session_no=_rv_sno, session_slug=_rv_sslug)
-    if name == "doc_outline":
-        return doc_outline(str(args["kb_id"]), str(args.get("knowledge_id", "")),
-                           int(args.get("budget_tokens", 0) or 0), int(args.get("cursor", 0) or 0),
-                           int(args.get("batches", 1) or 1),
-                           bool(args.get("with_text", True)))
-    if name == "extract_state":
-        return extract_state(str(args["kb_id"]), str(args.get("knowledge_id", "")),
-                             str(args.get("action", "get")))
-    if name == "link_candidates":
-        return link_candidates(str(args["kb_id"]), str(args.get("source_slug", "")),
-                               str(args.get("relation", "")), args.get("candidates") or [],
-                               str(args.get("knowledge_id", "")), int(args.get("round_no", 0) or 0),
-                               kb_ids=args.get("kb_ids") or None,
-                               confirm_kb_match=bool(args.get("confirm_kb_match")))
-    if name == "list_link_candidates":
-        return list_link_candidates(str(args["kb_id"]), str(args.get("knowledge_id", "")),
-                                    str(args.get("status", "pending")))
-    if name == "resolve_link_candidate":
-        return resolve_link_candidate(str(args["kb_id"]), str(args.get("candidate_id", "")),
-                                      str(args.get("action", "")),
-                                      str(args.get("knowledge_id", "")),
-                                      kb_ids=args.get("kb_ids") or None,
-                                      confirm_kb_match=bool(args.get("confirm_kb_match")))
-    if name == "retag_preview":
-        kb_id, _n, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
-                                            bool(args.get("confirm_kb_match")))
-        if block:
-            return block
-        return ke_pages.retag_preview(kb_id, str(args["slug"]), str(args["new_type"]))
-    if name == "retag_apply":
-        kb_id, _n, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
-                                            bool(args.get("confirm_kb_match")))
-        if block:
-            return block
-        return ke_pages.retag_apply(kb_id, str(args["slug"]), str(args["new_type"]),
-                                    str(args.get("ticket", "")), args.get("acknowledge_risks") or [])
-    if name == "retag_rollback":
-        kb_id, _n, block = resolve_write_kb(str(args.get("kb_id", "")), args.get("kb_ids") or None,
-                                            bool(args.get("confirm_kb_match")))
-        if block:
-            return block
-        return ke_pages.retag_rollback(kb_id, str(args.get("ticket", "")))
     if name == "context_concept_apply":
         return context_concept_apply(str(args.get("slug", "")), str(args.get("ticket", "")),
                                      args.get("acknowledge_risks") or [],

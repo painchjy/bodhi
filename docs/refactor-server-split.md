@@ -60,6 +60,19 @@
   （dry_run 扫 2/命中 0）、`migrate_article_body`（dry_run pending 54）、`reference_lookup`（found=false 结构化）✓；
   `test_coverage_gaps` 绿（`tools_without_dispatcher=[]`、`nonretired_no_dispatch=[]`）✓
 
+#### A1-3（2026-10-24，✅ 完成）
+| 模块 | 工具 | 实现来源 |
+|---|---|---|
+| `srv/handlers/query.py` | `extract_candidates` / `evidence_score` / `knowledge_lookup` / `rules_resolve` / `rules_of_task_legacy` / `rules_of_policy` / `graph_query_legacy` / `doc_outline` / `extract_state` | `ke_extract`/`ke_score`/`ke_lookup`/`ke_review`/`srv.outline`/`srv.state` |
+| `srv/handlers/pages.py` | `retag_preview` / `retag_apply` / `retag_rollback` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate` | `ke_pages`（+`resolve_write_kb` 写库口径）/`srv.links` |
+
+- `server.py` 再删 **15 个 `if name == …` 分支**（注册表 18 → **33**；if 链剩 **19**）
+- `rules_of_task` / `graph_query` 两个**静态 `deprecated` 回执**留在 `server.py`（没有实现可搬 ✓）
+- 验证：`py_compile` ✓ / 重启 `active+success+8765` ✓ / 实调用 `knowledge_lookup`（2 命中，`graph+pg`）、
+  `evidence_score`（0.06/low/insufficient）、`rules_resolve`（ask 解析）、`retag_preview`（old/new 全字段）、
+  `list_link_candidates`（退役回执）✓ / 回归 `test_coverage_gaps`+`test_mcp_tools_read`+`test_lookup_ab`+
+  `test_clean_alias_noise`+`test_page_attributes_matrix`+`test_no_business_semantics` 全绿 ✓
+
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓
 - 所有切片有对应**单测或回归用例**（`tests/` 现有 126 项即为验收基线 ✓）
