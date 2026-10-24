@@ -26,11 +26,6 @@ def audit_purge(args: dict) -> dict:
                           args.get("slugs") or None, None, bool(args.get("dry_run", False)))
 
 
-@handle("audit_kb")
-def audit_kb(args: dict) -> dict:
-    return ke_graph.audit_kb(str(args.get("kb_id", "")), fix=bool(args.get("fix")))
-
-
 @handle("migrate_article_body")
 def migrate_article_body(args: dict) -> dict:
     # 2026-10-22（4.2 前置）：**正文主键迁移** —— 图 `wiki_content → articleBody`

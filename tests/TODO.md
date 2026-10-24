@@ -67,3 +67,4 @@
 | D2 | `domain_modeling` 工具名误拼 `list_image_extract` | 改 `image_extract` ✓ |
 | D3 | `session_provenance` 工具名误拼 `list_audit_scan` | 改 `audit_scan` ✓ |
 | D4 | `skill_development` 引用**已退役** `rules_of_policy` | 删（取规则统一 `knowledge_lookup(mode="rules")`）✓ |
+| D5 | **配置/文档 ↔ 代码漂移**（2026-10-24 复查） | 已清：`gen_agents.py` 9 个退役工具（ops 20→18、modeler 36→27）+ `skills/README.md` 4 行 + 4 处 SKILL.md；**新增 `tests/test_agent_tool_lists.py`** 4 项防回归（配置只在 schema 且非退役 / 技能文档不把退役工具当工具面 / 退役工具不留分发入口 / `ke_eval.RETIRED` 不含现役工具）✓ |

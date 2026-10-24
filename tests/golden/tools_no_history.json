@@ -1,25 +1,16 @@
 [
- "audit_kb",
  "clean_alias_noise",
  "context_concept_rollback",
  "graph_query_legacy",
  "import_apply",
  "import_plan",
  "import_probe",
- "import_refresh",
- "import_state",
  "job_status",
- "link_candidates",
- "list_link_candidates",
  "metric_compute",
  "migrate_article_body",
  "page_copy",
- "recategorize",
- "resolve_link_candidate",
  "retag_apply",
  "retag_preview",
  "retag_rollback",
- "rule_publish",
- "rules_of_task_legacy",
- "service_overview"
+ "rule_publish"
 ]

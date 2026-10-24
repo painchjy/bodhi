@@ -55,20 +55,6 @@ def rules_resolve(args: dict) -> dict:
                                    int(args.get("limit", 300) or 300))
 
 
-@handle("rules_of_task_legacy")
-def rules_of_task_legacy(args: dict) -> dict:
-    # 2026-10-16（用户口径）：**按任务取规则契约**（图边 taskExecutesRule + 页面属性真读；
-    # 带 needs_extract 分流 / required_fields / source 出处 / hash 指纹 ⇒ 反假断言可验）
-    return ke_review.rules_of_task(str(args.get("kb_id", "")), str(args.get("task", "")),
-                                   int(args.get("limit", 300) or 300))
-
-
-@handle("rules_of_policy")
-def rules_of_policy(args: dict) -> dict:
-    return ke_review.rules_of_policy(str(args.get("kb_id", "")), str(args.get("policy", "")),
-                                     int(args.get("limit", 300) or 300))
-
-
 @handle("graph_query_legacy")
 def graph_query_legacy(args: dict) -> dict:
     return ke_review.graph_query(str(args.get("cypher", "")), int(args.get("limit", 200) or 200))

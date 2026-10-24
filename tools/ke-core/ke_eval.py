@@ -38,8 +38,12 @@ ALLOWED = set().union(*[s[1] for s in STAGES]) | {
 RETIRED = {"review_apply", "graph_query", "rules_of_task", "rules_of_policy",
            "service_overview", "rebuild_wiki_from_graph", "link_candidates",
            "list_link_candidates", "resolve_link_candidate", "link_source_session",
-           "import_state", "import_refresh", "retag_rollback", "context_concept_rollback",
-           "context_authority_apply", "recategorize", "audit_kb", "kb_import"}
+           "import_state", "import_refresh", "recategorize", "audit_kb",
+           # 2026-10-24 校正：`retag_rollback` / `context_concept_rollback` /
+           # `context_authority_apply` / `kb_import` **是现役工具**（schema 里有、回执正常），
+           # 之前被误列进退役表 ⇒ 会让评测把正常调用记成"用了退役工具" ✗。
+           # 口径：本表必须与 `server._RETIRED_TOOLS` 一致（`tests/test_agent_tool_lists.py` 会查）✓
+           }
 
 LINE = re.compile(r"^\S+ \S+ \+0800\t(?P<tool>\S+)\s+\t\s*(?P<phase>BEGIN|DONE)")
 

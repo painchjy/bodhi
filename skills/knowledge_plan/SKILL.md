@@ -93,7 +93,7 @@ guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链
 
 - **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
   - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
-  - 旧调用 `rules_of_task(kb, task)` ≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+  - 旧「按任务取规则」入口（已退役）≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
 - **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
   每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
 - **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓

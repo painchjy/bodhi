@@ -27,8 +27,8 @@
 | S6 | `srv/links.py` | `_page_row_by_slug` / `link_candidates` / `list_link_candidates` / `resolve_link_candidate` | `srv.kbresolve`/`srv.state`/`ke_pages` | 中 | **✅ 完成** |
 | S7 | `srv/render.py` | `_design_sections` + `SKILL_CONTEXTS` + `_type_label_of` + `context_meta`（纯渲染；`build_new_page` 留 S8） | `srv.text`/`ke_pages`/`ke_ontology` | 低 | **✅ 完成** |
 | S8 | `srv/schemas.py`（**S8a ✅**）+ `srv/tools_read.py`（**S8b-1 ✅**）+ `srv/tools_ops.py`（**S8b-2a ✅**）+ 危险工具/`save_knowledge`（S8b-2b 待做） | schema 559 行；只读 5 个；运维 `kb_export`/`kb_import` | `ke_audit`/`ke_context`/`kb_transfer` | 中 | **S8a ✅ S8b-1 ✅ S8b-2a ✅** |
-| S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | 待做 |
-| **A1** | `srv/handlers/*` | **工具处理注册表**（`@handle` 登记 + 注册表优先分发，旧 if 链兜底） | `srv.tools_*` | 中 | **A1-0 ✅ A1-1 ✅（7 个只读/运维工具）；A1-2…A1-8 待做** |
+| S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | **✅ 完成**（`server.main()` 只做 `srv.http.bind(globals())` 委托） |
+| **A1** | `srv/handlers/*` | **工具处理注册表**（`@handle` 登记 + 注册表优先分发，旧 if 链兜底） | `srv.tools_*` | 中 | **A1-0…A1-5 ✅（注册表 33 个工具）；剩 8 个 live 分支待内部函数抽出** |
 
 ### A1 记录（2026-10-24，**结构拆分，工具面不变**）
 - 新增 `srv/handlers/__init__.py`：`REGISTRY` + `@handle("<工具名>")` + `dispatch(name, args)`（未登记 ⇒ 返回 `None`）
@@ -83,10 +83,31 @@
 - **`save_knowledge` 仍未迁**（依赖 server 内的写库编排：预算/意图/复用 ⇒ 需先抽到 `srv/`，留作 A1 末片）
 - 验证：`py_compile` ✓ / 重启 `active+success+8765` ✓ / 实调用 `page_attributes_set`（无变化 no-op）、
   `metric_compute`（`pages_total=60`）、`rule_publish`（同名 hash ⇒ ok=false 但结构完整）、`page_copy`（空源 ⇒ 结构化 error）✓
-- **剩余 15 个 if 分支全部依赖 `server.py` 内部函数**（`job_status`/`ontology_types`/`skills`/`service_overview`/
-  `rebuild_wiki_from_graph`/`link_source_session`/`recategorize`/`save_knowledge`/`image_extract`/`review_apply`/
-  `context_concept_*`/`context_authority_apply` + 2 个静态 `deprecated` 回执）⇒ 下一片需要**先把这些内部函数抽到 `srv/`**
-  （等价于 P2 的 S7/S8 模式），属于**下一次重构任务**，不在本次"结构注册表"范围内 ✓
+
+#### A1-5（2026-10-24，✅ 完成）「退役工具唯一事实源」
+- **`_RETIRED_TOOLS` 扩到 16 项**：`rules_of_task` / `graph_query` 的**静态回执分支已删**，并入退役表（hint 指向
+  `rules_resolve(spec="task:…")` / `knowledge_lookup(mode=…)`）；`service_overview` / `rebuild_wiki_from_graph` /
+  `link_source_session` / `recategorize` / `review_apply` 五个**不可达分支**一并删除
+- **handler 层清死代码**：`audit_kb`（ops.py）/ `import_state` + `import_refresh`（import_.py）/
+  `link_candidates` + `list_link_candidates` + `resolve_link_candidate`（pages.py）/ `rules_of_policy` +
+  `rules_of_task_legacy`（query.py）—— 注册表 37 → **31**，`dispatcher_names()` 与退役表**不再交叉**
+- **`ke_eval.RETIRED` 校正**：去掉被误列的 4 个**现役**工具（`kb_import` / `retag_rollback` /
+  `context_concept_rollback` / `context_authority_apply`）—— 否则评测把正常调用记成"用了退役工具" ✗
+- **智能体工具清单去漂移**：`gen_agents.py` 删 9 个退役工具（ops 20→**18**、modeler 36→**27**），
+  `config/agents.sql` 已重生成（66473 字节）；`skills/README.md` 4 行 + `skill_development`/`knowledge_extract`/
+  `knowledge_plan`/`rule_judge` 4 处文档同步
+- **REST 软退**：`GET /bodhi/review/rules` 保留兼容，但回执加 `deprecated:true` + `hint`（MCP 工具已退役）
+- **新增防回归用例** `tests/test_agent_tool_lists.py`（4 项）：① 配置里的 `mcp_bodhi_ontology_*` 必须在 schema 且不在退役表
+  ② `skills/**` 不得把退役工具当工具面（归档目录/带"退役"字样的沿革行豁免）③ 退役工具不得留分发入口
+  ④ `ke_eval.RETIRED ∩ 现役 schema = ∅`
+- 验证：`compileall` ✓ / `test_agent_tool_lists` + `test_coverage_gaps` + `test_replay_mined` 全绿 ✓ /
+  `agents.sql` 工具数与 schema 复核一致 ✓
+
+#### A1 剩余（下一轮，需先抽内部函数）
+`job_status` / `ontology_types` / `skills` / `save_knowledge` / `image_extract` / `context_concept_apply` /
+`context_concept_rollback` / `context_authority_apply` —— 8 个 live 分支，全部依赖 `server.py` 内部函数
+（`_job_brief` / `load_skills` / `save_knowledge` 的写库编排 / `image_extract` / `context_*`），
+按 `srv/knowledge_write.py` → `srv/design.py` → `srv/meta.py` 三片搬完即可清零。
 
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓

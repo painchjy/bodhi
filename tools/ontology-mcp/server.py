@@ -2404,7 +2404,9 @@ def call_tool(name: str, args: dict) -> dict:
 
 
 _RETIRED_TOOLS = {
-    "rules_of_policy": "改用 `rules_resolve(spec=…)`（同一份图本优先实现 ✓）",
+    "rules_of_policy": "改用 `knowledge_lookup(mode=\"rules\", spec=\"policy:<策略>\"|\"direct:<slug,…>\"|\"ask\")` 或 `rules_resolve(spec=…)` ✓",
+    "rules_of_task": "旧「任务→规则」路径已删除 ✓ —— 规则只按步骤解析：`knowledge_lookup(mode=\"rules\", spec=\"policy:<策略>\"|\"direct:<slug,…>\"|\"ask\")`；兼容旧口径可用 `rules_resolve(spec=\"task:<任务>\")` ✓",
+    "graph_query": "已归一化到 `knowledge_lookup` ⟹ 查知识 `mode=\"keyword\"`、查多跳 `mode=\"path\"`、取规则 `mode=\"rules\"` ✓（不再接受直接拼 Cypher ✗）",
     "review_apply": "判定结论改由 save_knowledge(mode=document) 落 `bmm:TechnicalReviewReport` 一页 ✓（本工具会产 `bmm:Assessment` 旧口径 ✗）",
     "service_overview": "旧「服务概览」，被 `knowledge_lookup` + `doc_outline` 覆盖 ✓",
     "rebuild_wiki_from_graph": "重建页已并入保存路径（图→PG 写序）✓，请用 `save_knowledge` / `recategorize`",
@@ -2443,21 +2445,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
                               bool(args.get("with_attributes", True)))
     if name == "skills":
         return skills(str(args.get("skill", "")), str(args.get("model", "")))
-    if name == "service_overview":
-        if args.get("apply"):
-            return start_overview_job(args)
-        return service_overview_tool(str(args["kb_id"]), False,
-                                     str(args.get("slug", "")), str(args.get("title", "")),
-                                     int(args.get("preview_lines", 25)))
-    if name == "rebuild_wiki_from_graph":
-        return rebuild_wiki_from_graph(str(args.get("kb_id", "")), bool(args.get("dry_run", True)))
-    if name == "link_source_session":
-        return link_source_session(str(args.get("kb_id", "")), str(args.get("session_no", "")),
-                                   slugs=args.get("slugs") or None, all_pages=bool(args.get("all")),
-                                   dry_run=not bool(args.get("apply")))
-    if name == "recategorize":
-        return recategorize(str(args.get("kb_id", "")), dry_run=not bool(args.get("apply")),
-                            depth=int(args.get("depth", 1) or 1))
     if name == "save_knowledge":
         return save_knowledge(
             str(args["kb_id"]), stage=str(args.get("stage", "report")),
@@ -2474,30 +2461,6 @@ def _call_tool_impl(name: str, args: dict) -> dict:
     if name == "image_extract":
         return image_extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
                              int(args.get("figure_no", 0) or 0))
-    if name == "rules_of_task":
-        # 2026-10-18（用户口径 ✓）：**已下架** ✗ —— 旧"任务→规则（taskExecutesRule）"路径已删除 ✓
-        return {"ok": False, "deprecated": True, "error": "rules_of_task 已下架",
-                "hint": ("规则只按步骤解析：`knowledge_lookup(kb_id=<领域库>, mode=\"rules\", "
-                         "spec=\"policy:<策略>\" | \"direct:<规则slug,…>\" | \"ask\")` ✓；"
-                         "若要按策略取全部规则：spec=\"policy:<策略页名>\" ✓"),
-                "since": "2026-10-18"}
-    if name == "graph_query":
-        # 2026-10-18（用户口径 ✓）：**归一化到 knowledge_lookup** ✗ 不再建议直接拼 Cypher
-        return {"ok": False, "deprecated": True, "error": "graph_query 已归一化到 knowledge_lookup",
-                "hint": ("查知识：`knowledge_lookup(mode=\"keyword\", query=…)` ✓；"
-                         "查多跳：`knowledge_lookup(mode=\"path\", start=<slug>, depth=2)` ✓；"
-                         "取规则：`knowledge_lookup(mode=\"rules\", spec=…)` ✓"),
-                "since": "2026-10-18"}
-    if name == "review_apply":
-        _rv_sno, _rv_sslug = _resolve_session_for(str(args.get("kb_id", "")),
-                                                  str(args.get("session_no", "")))
-        return ke_review.review_apply(kb_id=str(args.get("kb_id", "")), doc=str(args.get("doc", "")),
-                                      policy=str(args.get("policy", "")),
-                                      policy_slug=str(args.get("policy_slug", "")),
-                                      findings=args.get("findings") or [],
-                                      page_type=str(args.get("page_type", "") or "bmm:TechnicalReviewReport"),
-                                      actor=str(args.get("actor", "agent:document_review")),
-                                      session_no=_rv_sno, session_slug=_rv_sslug)
     if name == "context_concept_apply":
         return context_concept_apply(str(args.get("slug", "")), str(args.get("ticket", "")),
                                      args.get("acknowledge_risks") or [],

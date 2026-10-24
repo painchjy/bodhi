@@ -24,7 +24,7 @@ version: 0
 
 ## 1. 输入（从哪来，不要凭空造）
 - 领域建模产物：`model_recommendation` 的**建议单**、`domain_modeling` 的**知识页**、`session_provenance` 的**会话页/改进建议**；
-- 需求原文（`doc_outline`/`grep_chunks`）与现有规则（`rules_of_policy`）；
+- 需求原文（`doc_outline`/`grep_chunks`）与现有规则（`knowledge_lookup(mode="rules", spec=…)` / `rules_resolve`）；
 - **现有技能目录**：`skills()`（先看有没有现成的，能用就不新造）。
 
 ## 2. 设计（**先出设计单，不写文件**）

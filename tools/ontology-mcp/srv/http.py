@@ -534,8 +534,16 @@ class MCPHandler(BaseHTTPRequestHandler):
         if path in ("/bodhi/review/rules", "/bodhi/review/rules.json"):
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
-                self._json(ke_review.rules_of_policy(params.get("kb_id", ""), params.get("policy", ""),
-                                                     int(params.get("limit", 300) or 300)), 200, self.CORS)
+                # 2026-10-24（软退）：MCP 工具 `rules_of_policy` 已退役 ⇒ REST 路由**保留兼容但打标**，
+                # 回执里给明确替代路径（前端/脚本若还在打它，能读到 deprecated + hint 而不是无声漂移 ✗）
+                out = ke_review.rules_of_policy(params.get("kb_id", ""), params.get("policy", ""),
+                                               int(params.get("limit", 300) or 300))
+                if isinstance(out, dict):
+                    out.setdefault("deprecated", True)
+                    out.setdefault("hint", ("取规则统一走 MCP `knowledge_lookup(mode=\"rules\", "
+                                            "spec=\"policy:<策略>\"|\"direct:<slug,…>\"|\"ask\")` ✓"
+                                            "（本路由仅保留兼容）"))
+                self._json(out, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] /bodhi/review/rules 失败：%s" % exc)
                 self._json({"error": str(exc)}, 400, self.CORS)

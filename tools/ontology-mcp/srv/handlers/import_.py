@@ -43,17 +43,6 @@ def import_apply(args: dict) -> dict:
                            prune=bool(args["prune"]) if "prune" in args else None)
 
 
-@handle("import_refresh")
-def import_refresh(args: dict) -> dict:
-    return ke_import.refresh_metadata(str(args.get("kb_id", "")), bool(args.get("dry_run", False)),
-                                      int(args.get("limit", 5000) or 5000))
-
-
-@handle("import_state")
-def import_state(args: dict) -> dict:
-    return ke_import.state(str(args.get("batch", "")))
-
-
 @handle("reference_lookup")
 def reference_lookup(args: dict) -> dict:
     _to = args.get("timeout")

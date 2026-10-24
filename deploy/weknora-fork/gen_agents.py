@@ -81,9 +81,11 @@ OPS_TOOLS = [
     "mcp_bodhi_ontology_retag_preview",
     "mcp_bodhi_ontology_context_scan", "mcp_bodhi_ontology_context_lookup",
     "mcp_bodhi_ontology_context_page",
-    # 巡检清理（用户口径）：有库写权限即可一步硬删；文档评审取规则/图检索（只读）
+    # 巡检清理（用户口径）：有库写权限即可一步硬删；参考规范取文（只读）
     "mcp_bodhi_ontology_audit_purge",
-    "mcp_bodhi_ontology_rules_of_policy", "mcp_bodhi_ontology_graph_query",
+    # 2026-10-24：`rules_of_policy` / `graph_query` 是**已退役**工具（`server._RETIRED_TOOLS`
+    # 第一道拦截）⇒ 不再下发给智能体，否则只会拿到"已退役"回执（白烧 token ✗）。
+    # 取规则统一 `knowledge_lookup(mode="rules", spec="policy:…"|"direct:…"|"ask")` ✓
     "mcp_bodhi_ontology_reference_lookup",
     "mcp_bodhi_ontology_image_extract",     # 文档内嵌图识别（只读，2026-10-08）
     # 迁移运维（2026-10-12 用户口径 B+C）：**技能目录**（能看到/读出技能指令→按技能做事）
@@ -109,13 +111,11 @@ MODELER_TOOLS = [
     "mcp_bodhi_ontology_skills",
     "mcp_bodhi_ontology_ontology_types",
     # 领域建模 v2（2026-09-21）：按切片分批、可交互续跑 —— 不再用异步一次性抽取
+    # 2026-10-24：`link_candidates` / `list_link_candidates` / `resolve_link_candidate` 已退役
+    # （关系随 `save_knowledge` 的 relations 一次写入 ✓）⇒ 不再下发
     "mcp_bodhi_ontology_doc_outline", "mcp_bodhi_ontology_extract_state",
-    "mcp_bodhi_ontology_link_candidates", "mcp_bodhi_ontology_list_link_candidates",
-    "mcp_bodhi_ontology_resolve_link_candidate",
     "mcp_bodhi_ontology_save_knowledge",
-    "mcp_bodhi_ontology_rebuild_wiki_from_graph",
     "mcp_bodhi_ontology_audit_scan", "mcp_bodhi_ontology_audit_plan",
-    "mcp_bodhi_ontology_service_overview",
     # 改本体类型（2026-09-27）：**两段式** —— 先 retag_preview（只读）把影响面+风险念给用户，
     # 用户明确同意后用同一 ticket 调 retag_apply（缺 ticket/风险确认会被服务端拒）。
     "mcp_bodhi_ontology_retag_preview", "mcp_bodhi_ontology_retag_apply",
@@ -126,14 +126,15 @@ MODELER_TOOLS = [
     # 权威/副本（2026-09-29）：同义知识认定一个领域为权威，其它领域只读 + 只能从权威复制
     "mcp_bodhi_ontology_context_authority", "mcp_bodhi_ontology_context_authority_apply",
     # 结构化批量建模（2026-09-29）：一次一个类/一条关系；工具只执行，语义由技能理解
+    # 2026-10-24：`import_state` / `import_refresh` 已退役（进度看 `import_plan` 回执 ✓）⇒ 不再下发
     "mcp_bodhi_ontology_import_probe", "mcp_bodhi_ontology_import_plan",
-    "mcp_bodhi_ontology_import_apply", "mcp_bodhi_ontology_import_state",
-    "mcp_bodhi_ontology_import_refresh",
+    "mcp_bodhi_ontology_import_apply",
     # 巡检清理（2026-09-29 用户口径）：有库写权限即可**一步硬删**（不再走后台 plan/confirm）
     "mcp_bodhi_ontology_audit_purge",
-    # 文档评审（2026-09-29）：按策略下规则逐条评（LLM软规则 / 图检索 / 参考规范）
-    "mcp_bodhi_ontology_rules_of_policy", "mcp_bodhi_ontology_graph_query",
-    "mcp_bodhi_ontology_reference_lookup", "mcp_bodhi_ontology_review_apply",
+    # 文档评审所需的"参考规范取文"（只读）
+    # 2026-10-24：`rules_of_policy` / `graph_query` / `review_apply` 均已退役 ⇒ 不再下发；
+    # 取规则 → `knowledge_lookup(mode="rules", spec=…)`，落评审结论 → `save_knowledge`
+    "mcp_bodhi_ontology_reference_lookup",
     "mcp_bodhi_ontology_image_extract",     # 文档内嵌图识别（只读，2026-10-08）
 ]
 TOOLS_BY_AGENT = {"bmm": ALLOWED_TOOLS, "ea": ALLOWED_TOOLS, "ops": OPS_TOOLS,
