@@ -129,3 +129,69 @@ python3 tools/ke-core/ke_ab_report.py --no-telemetry --out docs/lookup-ab-report
 - `session_no`/`question` **不参与检索**，只入日志（避免"为了统计而改变行为"）；
 - 遥测写入失败**绝不影响**工具返回（`srv/obs.py` 里 `try/except` 吞掉）；
 - 本仓库不保存用户原始问题到业务库（只落日志文件，按天滚动）。
+
+## 6. 口径 v2（2026-10-25，四条修正）
+
+第一轮真实数据暴露了四个口径问题，已全部改掉（`docs/lookup-ab-report.md` 由脚本重生成）：
+
+### 6.1 查询次数 = **真实库访问**，不是 MCP 调用次数
+
+`knowledge_lookup` 内部会自动换招：AND 空 ⇒ 降级 OR；图不可用 ⇒ 退 PG。
+所以**一次工具调用可能打 1–5 次库/图**，用"调用次数"衡量"查了多少次"是错的 ✗。
+
+现在 `ke_stats` 在 **`ke_db.psql()` / `ke_neo4j.query()`** 里逐次回填**返回行数**：
+
+| 字段 | 含义 |
+|---|---|
+| `telemetry.io` | `{queries, rows, hit, empty, unknown, ms, empty_rate, ok}`（跨 PG/图汇总） |
+| `telemetry.retrieval` | `{queries, pg, neo4j, empty_queries, hit_queries, unknown_queries, io_ms, degraded, ok}` |
+
+**成功/失败口径（用户原话：空记录算失败）**：
+`rows>0` ⇒ 这次往返算**成功**；`rows==0` ⇒ 算**失败**（`empty`）；脚本执行等无法判行的 ⇒ `unknown`（**不冒充成功**）。
+一次调用是否"查到了"看 `retrieval.ok`（= 最终 `hits>0`）。
+
+### 6.2 总耗时分三层
+
+| 层级 | 字段 | 说明 |
+|---|---|---|
+| 单次检索 | `median_ms` / `p90_ms` | 一次 `knowledge_lookup` 的墙钟 |
+| **每问检索总耗时** | `group_ms_median` / `group_ms_p90` | 同一问题**多轮合计**（"两轮评审"就是这个口径） |
+| **端到端** | `agent_duration_ms`（C2） | 含 LLM 思考与全部工具，**真值** |
+
+### 6.3 「hint 35 / plain 0；集合不一致（23 vs 0）」是什么意思
+
+`23` = hint 侧**不同 `question_key` 的个数**（问题文本归一化去重后的键数），`0` = plain 侧个数。
+一侧为 0 时"两个集合相等"必然不成立 ⇒ 旧报告会打 ⚠️，但**真实含义是"对照臂为空、不可比"**，
+不是数据脏。现在报告**先判对照臂**（`pairing().arm_missing`），再判配对（组交集），并逐来源写明。
+
+### 6.4 问题归组：不按"问题集"，按**语义**
+
+实际跑法常是「选文件 + 给编号 + 要求评审」，不是按题库逐题：同一编号评审两次是**同问题的两轮**，
+不同编号但语义相近也**可以**当同一问题比；而**关键字数量/层次不同**应算**不同类问题**。落法：
+
+| 维度 | 来源 | 规则 |
+|---|---|---|
+| `qid` | `ke_lookup._extract_qid` | 抽业务编号（`评审编号 YYYYMM-889999`）⇒ **同编号必同组** |
+| `question_core` | `ke_lookup._question_core` | 去编号/版本/文件名/轮次/礼貌语 ⇒ 归一语义核 |
+| `q_shape` | `ke_lookup._q_shape` | **词数档**（0/1/2/3+）× **层次**（类／类+文本／文本／实例） |
+| `question_group` | `ke_ab_report.group_rows` | 同 `qid` ⇒ 同组；否则语义核 **bigram 相似度 ≥ 0.62** ⇒ 同组（`--group-threshold` 可调） |
+
+报告第 5 节按组列出「轮次 / 命中 / 查询 / 空查询 / 每问总耗时」，形态差异并列显示（不拆组 ✓）。
+
+### 6.5 C2 真值：直接读 WeKnora 的工具轨迹
+
+不需要再靠智能体自报 `first_step`：
+
+```bash
+python3 tools/ke-core/ke_ab_trace.py --since-days 3     # → logs/ab/trace_<日期>.jsonl
+python3 tools/ke-core/ke_ab_report.py --out docs/lookup-ab-report.md
+```
+
+数据源：`messages.agent_steps`（jsonb 数组，每轮 `thought/iteration/tool_calls`）+
+`messages.agent_duration_ms`；抽成一行一问：`tool_seq / first_tool / first_retrieval /
+lookup_calls / native_retrieval_calls / agent_ms`。
+报告第 3 节给「端到端耗时 / 真·首步=knowledge_lookup / 原生检索先行 / 平均工具调用」，
+数据质量里给**自报 vs 真值一致率**（旧版"首步一致率"只是自报 vs 服务端裁决）。
+
+**诚实边界**：C2 与遥测的配对键是 `(session_no, question_key)`；旧日志没传 `session_no`/`question`
+时退化为「同会话 + 时间最近（±10min）」，再不行就记 `unknown`（只作耗时旁证，不参与 A/B 差异）。

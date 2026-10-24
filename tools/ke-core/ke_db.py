@@ -33,6 +33,11 @@ import sys
 import time
 from datetime import datetime, timezone
 
+try:      # CSV 单字段上限（默认仅 128KB）：`messages.agent_steps` 这类大 JSON 列必然超 ✗
+    csvlib.field_size_limit(10 ** 7)
+except Exception:  # noqa: BLE001
+    pass
+
 try:                                     # IO 统计（P1 观测性；同目录，缺失则退化为"不统计"）
     import ke_stats as _stats
 except Exception:  # noqa: BLE001
@@ -192,6 +197,30 @@ def _psql_prefix() -> list[str]:
                                DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME]
 
 
+_PG_TAG = re.compile(r"^(INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|BEGIN|COMMIT|"
+                     r"ROLLBACK|SET|DO|COPY|VACUUM|ANALYZE|GRANT|REVOKE)\b", re.I)
+
+
+def _count_rows(out: str, stdin: bool = False, csv: bool = False):
+    """数**本次往返返回的记录数**（2026-10-25 A/B 口径 v2：空记录=失败）。
+
+    为什么在这一层数：一次 `psql()` = **一个子进程 + 一次往返**（实测 ≈272ms），
+    它才是"实际打了库几次"的最小单位；只看 MCP 调用次数会把"打 5 次全空"记成 1 次成功 ✗。
+    · `stdin=True`（整段脚本、多语句）⇒ 行数无意义 ⇒ `None`（记 unknown，**不冒充成功** ✓）；
+    · `csv=True`（`--csv` 带表头）⇒ 行数 - 1；
+    · 默认（`-t -A`：一行一记录、无表头）⇒ 非空行数；
+    · 命令标签（`INSERT 0 1` 这类写操作）⇒ `None`（写路径不参与"检索成功/失败"判定 ✓）。
+    """
+    if stdin:
+        return None
+    lines = [ln for ln in (out or "").splitlines() if ln.strip()]
+    if not lines:
+        return 0
+    if len(lines) == 1 and _PG_TAG.match(lines[0].strip()):
+        return None
+    return max(0, len(lines) - 1) if csv else len(lines)
+
+
 def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
     """跑一次 psql（**每次 = 一个子进程 + 一次往返**）。
 
@@ -205,6 +234,7 @@ def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
             % _searched_hint())
     _t0 = time.perf_counter()
     _ok = True
+    _rows = None
     try:
         cmd = _psql_prefix()
         env = dict(os.environ, PGPASSWORD=DB_PASSWORD) if DB_HOST else None
@@ -222,10 +252,12 @@ def psql(sql: str, stdin: bool = False, csv: bool = False) -> str:
         if done.returncode != 0:
             _ok = False
             raise RuntimeError("psql 失败：%s" % (done.stderr or done.stdout)[:600])
+        _rows = _count_rows(done.stdout, stdin=stdin, csv=csv)
         return done.stdout
     finally:
         if _stats.enabled():
-            _stats.record("pg", (time.perf_counter() - _t0) * 1000.0, _ok, who=_stats._who())
+            _stats.record("pg", (time.perf_counter() - _t0) * 1000.0, _ok, who=_stats._who(),
+                          rows=_rows)
 
 
 def psql_csv(sql: str) -> list[dict]:

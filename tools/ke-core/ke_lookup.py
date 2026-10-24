@@ -16,6 +16,27 @@ import os
 import re
 import time
 
+try:                                     # IO 统计（2026-10-25 A/B 口径 v2；缺失则退化为"不统计"）
+    import ke_stats
+except Exception:  # noqa: BLE001
+    class ke_stats:                      # type: ignore[no-redef]
+        @staticmethod
+        def enabled() -> bool:
+            return False
+
+        @staticmethod
+        def begin() -> dict:
+            return {}
+
+        @staticmethod
+        def snapshot():
+            return {}
+
+        @staticmethod
+        def reset() -> None:
+            return None
+
+
 _PUNCT = re.compile(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/]+")
 
 # ---------------------------------------------------------------------------
@@ -556,6 +577,82 @@ def _question_key(text: str) -> str:
     return _QKEY_PUNCT.sub("", (text or "").lower())[:80]
 
 
+# ---------------------------------------------------------------------------
+# **问题归组 / 形态分类**（2026-10-25，用户口径）
+# ---------------------------------------------------------------------------
+# 场景（用户实测）：不是在跑"问题集"，而是「选一个文件 → 给评审编号 → 要求评审」。
+#   · 同一个**编号**评审两次 ⇒ 是**同一个问题的两轮**（不能算两个问题 ✗）；
+#   · 编号不同但语义相似 ⇒ **可以当同一个问题**对比（报告侧用相似度归组）；
+#   · 关键字**数量**不同、**层次**不同（类 vs 实例组合）⇒ **算不同类问题**（`q_shape`）。
+# 服务端只落**可复算的原始特征**（编号 / 词数 / 层次），归组与阈值放报告侧
+# （`ke_ab_report.group_rows`）—— 口径可调、不用重启发服务 ✓
+# ---------------------------------------------------------------------------
+_QID_PAT = (
+    re.compile(r"(?:评审|流程|任务|单据|报告)?编号\s*[：:#]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{3,})"),
+    re.compile(r"\b(?:no|no\.|id)\s*[：:#]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{3,})", re.I),
+)
+_POLITE = re.compile(r"(请问|帮我|麻烦|谢谢|一下|能否|请)")
+
+
+def _extract_qid(question: str) -> str:
+    """问题里的**业务编号**（如 `评审编号 YYYYMM-889999`）——同编号 ⇒ 同问题（多轮）。
+
+    取不到就回空串（报告侧退化为"语义相似度归组"✓）。
+    """
+    text = question or ""
+    for pat in _QID_PAT:
+        m = pat.search(text)
+        if m:
+            return m.group(1).strip().lower()
+    return ""
+
+
+def _q_shape(mode: str = "", query: str = "", cls: str = "", plan: dict | None = None) -> dict:
+    """查询**形态**（只看问题怎么问，不看结果 ✗）：词数档 × 关键字层次。
+
+    · `kw_terms`  —— 参与检索的词数（keyword 模式按解析结果；instances/rules 记 1）；
+    · `kw_bucket` —— `0` / `1` / `2` / `3+`（"数据量不同 ⇒ 不同类问题" ✓）；
+    · `level`     —— `类` / `类+文本` / `文本` / `实例`（"有实例有类的组合" ⇒ 不同类 ✓）。
+    """
+    plan = plan or {}
+    m = (mode or "").strip().lower()
+    terms = [t for t in (plan.get("text_terms") or []) if t]
+    if not terms and query:
+        terms = [t for t in re.split(r"[\s,，、]+", query.strip()) if t]
+    scope = [c for c in (plan.get("scope_classes") or []) if c]
+    if not scope and cls:
+        scope = [c for c in re.split(r"[,，\s]+", cls.strip()) if c]
+    kw = len(terms) if m in ("keyword", "route") else 1
+    if m == "instances":
+        level = "实例"
+    elif scope and terms:
+        level = "类+文本"
+    elif scope:
+        level = "类"
+    elif terms:
+        level = "文本"
+    else:
+        level = "无"
+    bucket = "0" if kw <= 0 else ("1" if kw == 1 else ("2" if kw == 2 else "3+"))
+    return {"kw_terms": kw, "kw_bucket": bucket, "level": level,
+            "q_shape": "%s|%s" % (bucket, level)}
+
+
+def _question_core(text: str) -> str:
+    """问题**语义核**：去编号/版本/文件名/礼貌语/标点（报告侧相似度归组的输入）。
+
+    例：`评审编号 YYYYMM-889999；评审文档 样例1-统一结算平台技术方案.docx；第一轮，开始评审`
+        ⇒ `评审编号评审文档样例统一结算平台技术方案开始评审`
+    """
+    t = (text or "").lower()
+    t = re.sub(r"https?://\S+", " ", t)
+    t = re.sub(r"\.(docx?|pdf|xlsx?|pptx?|wps|md|txt|csv)\b", " ", t)      # 文件后缀
+    t = re.sub(r"[A-Za-z]{0,4}\d[\dA-Za-z\-_./]*", " ", t)          # 编号/版本/样例1
+    t = re.sub(r"第\s*[0-9一二三四五六七八九十百]+\s*[轮版次阶段步章节]", " ", t)
+    t = _POLITE.sub(" ", t)
+    return _question_key(t)
+
+
 def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
                      spec: str = "", start: str = "", depth: int = 2,
                      limit: int = 20, cls: str = "", page_type: str = "",
@@ -570,8 +667,19 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     """
     t0 = time.time()
     hint = _hint_enabled(ontology_hint)
-    r = _lookup_impl(kb_id, mode, query, spec, start, depth, limit, cls, page_type,
-                     kb_ids, auto_widen)
+    # 2026-10-25（A/B 口径 v2）：**真实 IO 统计** —— 打了库/图几次、几次空手而归。
+    #   · 走 MCP 时 `srv/http.py` 已经 `begin()`，这里只读快照（**不重复计数** ✓）；
+    #   · CLI / 测试直接调用时自己开一个桶，结束后 `reset()`（**不影响外层** ✓）。
+    own_bucket = not ke_stats.enabled()
+    if own_bucket:
+        ke_stats.begin()
+    try:
+        r = _lookup_impl(kb_id, mode, query, spec, start, depth, limit, cls, page_type,
+                         kb_ids, auto_widen)
+    finally:
+        snap = ke_stats.snapshot() or {}
+        if own_bucket:
+            ke_stats.reset()
     variant = "hint" if hint else "plain"
     if not hint:
         for key in _HINT_KEYS:
@@ -589,6 +697,24 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     if isinstance(first, dict):
         top = str(first.get("slug") or "")
     plan = r.get("plan") or {}
+    # 2026-10-25（用户口径）：问题归组的原始特征 + 查询形态（不同类问题要分开看 ✓）
+    shape = _q_shape(r.get("mode") or mode, query, cls, plan)
+    by_src = (counts.get("by_source") or {})
+    io_sub = snap.get("io") or {}
+    detail = snap.get("detail") or {}
+    retrieval = {
+        "queries": int(io_sub.get("queries") or 0),
+        "pg": int((detail.get("pg") or {}).get("n", 0)),
+        "neo4j": int((detail.get("neo4j") or {}).get("n", 0)),
+        "empty_queries": int(io_sub.get("empty") or 0),      # **空记录 = 失败**（用户口径）
+        "hit_queries": int(io_sub.get("hit") or 0),          # 有结果的往返 = 成功
+        "unknown_queries": int(io_sub.get("unknown") or 0),
+        "empty_rate": io_sub.get("empty_rate"),
+        "io_ms": int(round(io_sub.get("ms") or 0)),
+        # "降级"= 检索中途换过招：AND→OR，或图没命中只能靠 PG 兜底
+        "degraded": bool(plan.get("relaxed_by")) or (bool(by_src.get("pg")) and not by_src.get("graph")),
+        "ok": bool(hits),                                     # 本次调用是否**拿到结果**
+    }
     r["telemetry"] = {
         "variant": variant, "ontology_hint": hint,
         # 2026-10-24（A/B 四维）：程序版本（语义位 + 代码指纹）／问题种类／轮次判定
@@ -598,6 +724,13 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
         "turn_first_retrieval": str(turn_first or ""),
         "session_no": str(session_no or ""), "question": str(question or ""),
         "question_key": _question_key(question or query or spec),
+        # 2026-10-25：编号（同编号=同问题多轮）/ 语义核（相似度归组）/ 形态（不同类问题）
+        "qid": _extract_qid(question or query or spec),
+        "question_core": _question_core(question or query or spec),
+        "q_shape": shape["q_shape"], "kw_terms": shape["kw_terms"],
+        "kw_bucket": shape["kw_bucket"], "level": shape["level"],
+        # 2026-10-25：**真实库访问**（不是 MCP 调用次数 ✓）+ 是否有结果
+        "io": io_sub, "retrieval": retrieval,
         "query": str(query or spec or "")[:120], "mode": r.get("mode") or mode,
         "hits": int(hits or 0), "top_slug": top,
         "relaxed_by": str(plan.get("relaxed_by") or ""),

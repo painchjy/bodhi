@@ -176,3 +176,112 @@ def test_report_filters_version_and_first_step(tmp_path):
     # 时间窗
     kept_t, excl_t = rep_mod.apply_filters(rows, since="2026-10-25", cohort="c3")
     assert not kept_t and excl_t.get("out_of_range") == 5
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-25（口径 v2，用户四条意见）
+#   ① 查询次数要看**真实 PG/Neo4j 往返**，且**空记录算失败**；
+#   ② 要**总耗时**（单次 / 每问合计 / 端到端）；
+#   ③ "hint 35 / plain 0；问题集合不一致（23 vs 0）"要能自解释；
+#   ④ 问题要能按"语义相近"归组（不同编号 = 同一问题的多轮），形态不同算不同类。
+# ---------------------------------------------------------------------------
+def test_telemetry_counts_real_db_queries(mcp, kbs, session_no):
+    """**1 次 MCP 调用 ≠ 1 次查库**：遥测必须给真实往返数与空结果数 ✓"""
+    hit = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
+                                        "query": "流程", "session_no": session_no,
+                                        "question": "流程有哪些？"})
+    tel = hit.get("telemetry") or {}
+    retr, io = tel.get("retrieval") or {}, tel.get("io") or {}
+    assert retr and io, "遥测缺 retrieval/io（口径 v2 必须给真实 IO）✗ telemetry=%s" % sorted(tel)
+    assert retr["queries"] >= 1, "一次命中检索至少要打一次库/图 ✗"
+    assert io.get("queries") == retr["queries"], "io 与 retrieval 的往返数必须一致 ✗"
+    assert retr["pg"] + retr["neo4j"] == retr["queries"], "PG+图 应等于总往返数 ✗"
+    assert retr["ok"] is True and tel["hits"] > 0
+    assert retr["hit_queries"] >= 1, "命中场景应有**有结果的往返** ✗"
+
+    # 负样例：往返照样发生，但**没有一次返回记录** ⇒ 空查询>0、ok=False（空=失败 ✓）
+    miss = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
+                                         "query": "zzz不存在词xxxx", "session_no": session_no,
+                                         "question": "zzz不存在词xxxx"})
+    m = (miss.get("telemetry") or {}).get("retrieval") or {}
+    assert m["queries"] >= 1, "查不到也要有往返记录（否则等于没统计）✗"
+    assert m["empty_queries"] >= 1, "空记录必须计入失败 ✗"
+    assert m["ok"] is False, "0 命中的调用不能算成功 ✗"
+
+
+def test_question_group_and_shape():
+    """同编号=同问题多轮；编号/文件名/轮次不同但语义相近 ⇒ 同一语义核；形态不同 ⇒ 不同类 ✓"""
+    sys.path.insert(0, os.path.join(ab_runner.REPO, "tools", "ke-core"))
+    import ke_lookup as kl  # noqa: PLC0415
+
+    q1 = "评审编号：YYYYMM-889999；评审文档：样例1-统一结算平台技术方案.pdf；第一轮，开始评审"
+    q2 = "评审编号：YYYYMM-889998；评审文档：样例1-统一结算平台技术方案.docx；第二轮，开始评审"
+    assert kl._extract_qid(q1) == "yyyymm-889999", "应能抽出业务编号 ✗"
+    assert kl._extract_qid("流程有哪些？") == "", "没有编号时应回空串 ✗"
+    c1, c2 = kl._question_core(q1), kl._question_core(q2)
+    assert c1 == c2, "编号/文件名/轮次不同 ⇒ 语义核应相同 ✗（%r vs %r）" % (c1, c2)
+
+    s1 = kl._q_shape("keyword", "流程", "", {})["q_shape"]
+    s3 = kl._q_shape("keyword", "技术方案 评审 角色", "", {})["q_shape"]
+    assert s1 != s3, "词数不同 ⇒ 形态应不同（不同类问题）✗"
+    assert s1.startswith("1|") and s3.startswith("3+|"), "词数档应为 1 / 3+ ✗（%r, %r）" % (s1, s3)
+    inst = kl._q_shape("instances", "", "bpmn:Activity", {})["q_shape"]
+    assert inst.endswith("实例"), "instances 模式的层次应为『实例』✗（实测 %r）" % inst
+    both = kl._q_shape("keyword", "流程", "bpmn:Process", {})["q_shape"]
+    assert both.endswith("类+文本"), "有类又有文本 ⇒ 层次『类+文本』✗（实测 %r）" % both
+
+
+def test_report_pairing_explains_single_arm():
+    """只有一组数据时，报告必须说**对照臂为空、不可比**（不是「集合不一致」✗）"""
+    sys.path.insert(0, os.path.join(ab_runner.REPO, "tools", "ke-core"))
+    import ke_ab_report as rep_mod  # noqa: PLC0415
+
+    rows = [
+        {"variant": "hint", "question": "评审编号 A，开始评审", "question_key": "评审编号a开始评审",
+         "qid": "a", "question_core": "评审编号开始评审", "q_shape": "1|文本",
+         "hits": 3, "ms": 120, "queries": 2, "empty_queries": 0, "has_io": True,
+         "ts": "2026-10-25 10:00:00", "source": "t.jsonl"},
+        {"variant": "hint", "question": "评审编号 B，开始评审", "question_key": "评审编号b开始评审",
+         "qid": "b", "question_core": "评审编号开始评审", "q_shape": "1|文本",
+         "hits": 3, "ms": 180, "queries": 2, "empty_queries": 1, "has_io": True,
+         "ts": "2026-10-25 10:05:00", "source": "t.jsonl"},
+    ]
+    rows = rep_mod.group_rows(rows, 0.62)
+    p = rep_mod.pairing(rows)
+    assert p["arm_missing"] == "plain" and not p["comparable"], "缺对照组时不可判可比 ✗"
+    assert p["hint_groups"] == 1, "同语义核（不同编号）应归为同一问题组 ✗（实测 %d）" % p["hint_groups"]
+    rep = {"summary": rep_mod.summarize_rows(rows, {}), "pairing": p,
+           "groups": rep_mod.by_group(rows), "versions": {}, "excluded": {},
+           "cohort": "c1", "cohort_note": "c1"}
+    md = rep_mod.render_md(rep, rows, {}, "单臂测试")
+    assert "对照臂为空" in md, "报告必须直说「对照臂为空」✗"
+    assert "23 vs 0" in md, "报告必须解释旧版 23 vs 0 的含义 ✗"
+    g = rep["groups"][0]
+    assert g["hint_runs"] == 2 and g["hint_queries"] == 4, "组内多轮应合并计数 ✗（%r）" % g
+    # 每问总耗时 = 组内多轮合计（用户要的"总耗时"）
+    assert rep["summary"]["hint"]["group_ms_median"] == 300, "每问总耗时应为 120+180=300 ✗"
+
+
+def test_trace_importer_parses_agent_steps():
+    """C2 真值：真实工具序列 + 真·首步 + 端到端耗时（不再靠自报 ✓）"""
+    sys.path.insert(0, os.path.join(ab_runner.REPO, "tools", "ke-core"))
+    import ke_ab_trace as tr  # noqa: PLC0415
+
+    steps = json.dumps([
+        {"iteration": 1, "tool_calls": [
+            {"name": "mcp_bodhi_ontology_lookup_turn_begin", "args": {}},
+            {"name": "mcp_bodhi_ontology_knowledge_lookup",
+             "args": {"mode": "keyword", "query": "流程"}}]},
+        {"iteration": 2, "tool_calls": [{"name": "wiki_search", "args": {"q": "x"}}]},
+    ], ensure_ascii=False)
+    row = tr.build_row({"message_id": "m1", "session_no": "s1", "ts": "2026-10-25 10:00:00.5",
+                        "agent_ms": 1234, "steps": steps,
+                        "question": "评审编号 YYYYMM-889999；第一轮，开始评审"})
+    assert row["tool_seq"] == ["lookup_turn_begin", "knowledge_lookup", "wiki_search"], \
+        "工具序列应按 iteration 展开并去掉 mcp_ 前缀 ✗（%r）" % row["tool_seq"]
+    assert row["first_tool"] == "lookup_turn_begin" and row["first_is_lookup"] is False, \
+        "真·首步是 turn_begin ⇒ first_is_lookup 必须为 False ✗"
+    assert row["first_retrieval"] == "knowledge_lookup", "首个**检索类**动作是 lookup ✗"
+    assert row["lookup_calls"] == 1 and row["native_retrieval_calls"] == 1
+    assert row["agent_ms"] == 1234, "端到端耗时必须带出来 ✗"
+    assert row["qid"] == "yyyymm-889999" and row["q_shape"].startswith("1|")

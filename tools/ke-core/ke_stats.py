@@ -28,7 +28,8 @@ _BUCKET = contextvars.ContextVar("bodhi_io_stats", default=None)
 
 def begin() -> dict:
     """开启本次调用统计（工具入口调用）。返回桶本身（调用方一般不看）。"""
-    bucket = {k: {"n": 0, "ms": 0.0, "err": 0} for k in _KINDS}
+    bucket = {k: {"n": 0, "ms": 0.0, "err": 0, "rows": 0,
+                  "hit": 0, "empty": 0, "unknown": 0} for k in _KINDS}
     bucket["started"] = time.time()
     bucket["phase"] = ""
     bucket["marks"] = []
@@ -60,8 +61,16 @@ def _who(skip: int = 2) -> str:
     return "%s.%s" % (frame.f_globals.get("__name__", "?"), frame.f_code.co_name)
 
 
-def record(kind: str, ms: float, ok: bool = True, who: str = "") -> None:
-    """记一次 IO（未开启统计时立即返回）。`who` = 调用者（**按 kind 分开累计**，见 P3-0i2）。"""
+def record(kind: str, ms: float, ok: bool = True, who: str = "", rows=None) -> None:
+    """记一次 IO（未开启统计时立即返回）。`who` = 调用者（**按 kind 分开累计**，见 P3-0i2）。
+
+    2026-10-25（A/B 口径 v2 · 需求"真实查询次数"）：新增 `rows` —— 本次往返**返回的记录数**。
+    为什么必须记行数：`knowledge_lookup` 内部有"AND 空 ⇒ 自动降级 OR"和"图不可用 ⇒ 退 PG"的
+    自动降级，**MCP 调用次数根本不等于库访问次数**；只看调用次数会把"打 5 次全空"记成 1 次成功。
+    · `rows>0` ⇒ `hit+1`（这次往返**有结果**，算成功）；
+    · `rows==0` ⇒ `empty+1`（**空记录 = 失败**，需求原话）；
+    · `rows is None` ⇒ `unknown+1`（脚本执行等无法判定行数的往返，**不冒充成功**）。
+    """
     bucket = _BUCKET.get()
     if bucket is None:
         return
@@ -72,6 +81,15 @@ def record(kind: str, ms: float, ok: bool = True, who: str = "") -> None:
     cell["ms"] += float(ms)
     if not ok:
         cell["err"] += 1
+    if rows is None:
+        cell["unknown"] = cell.get("unknown", 0) + 1
+    else:
+        n = int(rows)
+        cell["rows"] = cell.get("rows", 0) + n
+        if n > 0:
+            cell["hit"] = cell.get("hit", 0) + 1
+        else:
+            cell["empty"] = cell.get("empty", 0) + 1
     if who:
         # P3-0i2（2026-10-10）：归因挂在**各自类型**的格子里。此前 pg+neo4j 混在一张表，
         # `_resolve_page_id=66次` 这种看不出是打库还是打图（实测 neo4j 已降到 64 次、
@@ -91,16 +109,25 @@ def mark(label: str) -> None:
 
 
 def snapshot() -> dict | None:
-    """当前累计（未开启统计时返回 `None`）。"""
+    """当前累计（未开启统计时返回 `None`）。
+
+    2026-10-25：`detail[kind]` 增加 `rows / hit / empty / unknown`（**空记录=失败**口径），
+    并给一个跨类型汇总 `io` —— 报告与遥测只读 `io` 就能回答
+    "这次调用到底打了几次库、几次空手而归、几次真有结果"。
+    """
     bucket = _BUCKET.get()
     if bucket is None:
         return None
     out: dict = {"calls": 0, "ms": 0.0, "detail": {}}
     merged: dict = {}
+    io = {"queries": 0, "ms": 0.0, "rows": 0, "hit": 0, "empty": 0, "unknown": 0, "err": 0}
     for kind in _KINDS:
         cell = bucket.get(kind) or {"n": 0, "ms": 0.0, "err": 0}
         by = cell.get("who") or {}
-        out["detail"][kind] = {"n": cell["n"], "ms": round(cell["ms"], 1), "err": cell["err"]}
+        out["detail"][kind] = {"n": cell["n"], "ms": round(cell["ms"], 1), "err": cell["err"],
+                               "rows": cell.get("rows", 0), "hit": cell.get("hit", 0),
+                               "empty": cell.get("empty", 0),
+                               "unknown": cell.get("unknown", 0)}
         if by:
             out["detail"][kind]["top_callers"] = [
                 [k, v] for k, v in sorted(by.items(), key=lambda kv: -kv[1])[:6]]
@@ -108,7 +135,18 @@ def snapshot() -> dict | None:
                 merged[k] = merged.get(k, 0) + v
         out["calls"] += cell["n"]
         out["ms"] += cell["ms"]
+        io["queries"] += cell["n"]
+        io["ms"] += cell["ms"]
+        io["err"] += cell["err"]
+        for key in ("rows", "hit", "empty", "unknown"):
+            io[key] += cell.get(key, 0)
     out["ms"] = round(out["ms"], 1)
+    io["ms"] = round(io["ms"], 1)
+    # 判定口径：**有结果的往返才叫成功**；空记录算失败；无法判定的单独计（不合并 ✓）
+    known = io["hit"] + io["empty"]
+    io["empty_rate"] = round(io["empty"] / known, 4) if known else None
+    io["ok"] = bool(known) and io["hit"] > 0
+    out["io"] = io
     if bucket.get("started"):
         out["wall_ms"] = round((time.time() - bucket["started"]) * 1000.0, 1)
     if bucket.get("marks"):

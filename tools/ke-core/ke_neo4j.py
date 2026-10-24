@@ -72,9 +72,12 @@ def query(statement: str, params: dict | None = None, timeout: float = 20.0) -> 
     """执行一条 Cypher，返回 [{列名: 值}]。失败直接抛 RuntimeError（调用方决定降级）。
 
     P1（2026-10-09）：整段计入 `ke_stats`（kind=`neo4j`）——超时时能看出"图库打了多少次、花了多少"。
+    2026-10-25（A/B 口径 v2）：回填 `rows`（返回记录数）⇒ **空记录算一次失败**，
+    与 PG 侧同口径（否则"打 5 次图全空"会被记成 1 次成功 ✗）。
     """
     _t0 = time.perf_counter()
     _ok = True
+    _rows = None
     try:
         body = json.dumps({"statements": [{"statement": statement,
                                            "parameters": params or {}}]}).encode("utf-8")
@@ -101,13 +104,17 @@ def query(statement: str, params: dict | None = None, timeout: float = 20.0) -> 
             raise RuntimeError("Cypher 失败：%s" % json.dumps(errors, ensure_ascii=False)[:400])
         results = payload.get("results") or []
         if not results:
+            _rows = 0
             return []
         columns = results[0].get("columns") or []
-        return [dict(zip(columns, item.get("row") or []))
-                for item in (results[0].get("data") or [])]
+        out = [dict(zip(columns, item.get("row") or []))
+               for item in (results[0].get("data") or [])]
+        _rows = len(out)
+        return out
     finally:
         if _stats.enabled():
-            _stats.record("neo4j", (time.perf_counter() - _t0) * 1000.0, _ok, who=_stats._who())
+            _stats.record("neo4j", (time.perf_counter() - _t0) * 1000.0, _ok,
+                          who=_stats._who(), rows=_rows)
 
 
 def available(force: bool = False) -> bool:

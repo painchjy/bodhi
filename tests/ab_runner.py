@@ -83,16 +83,33 @@ def simulate(mcp, kb: str, q: dict, hint: bool, session_no: str) -> dict:
             break
     expect_min = int(q.get("expect_hits_min") or 0)
     case_ok = (hits >= expect_min) if expect_min > 0 else (hits == 0)
+    tel = first.get("telemetry") or {}
     return {"id": q.get("id"), "category": q.get("category"),
             "question": q.get("question"), "variant": "hint" if hint else "plain",
             "hits": hits, "attempts": attempts, "case_ok": bool(case_ok),
             "guidance": _guidance(first), "used_suggestion": used_suggestion,
             "ms": int((time.time() - t0) * 1000),
-            "question_key": (first.get("telemetry") or {}).get("question_key", ""),
-            "relaxed_by": (first.get("telemetry") or {}).get("relaxed_by", ""),
+            "question_key": tel.get("question_key", ""),
+            "relaxed_by": tel.get("relaxed_by", ""),
             # 2026-10-24（A/B 四维）：模拟报告也要带**程序版本 + 问题种类**，才能和真实遥测同构 ✓
-            "lookup_version": (first.get("telemetry") or {}).get("lookup_version", ""),
-            "q_category": (first.get("telemetry") or {}).get("q_category", ""),
+            "lookup_version": tel.get("lookup_version", ""),
+            "q_category": tel.get("q_category", ""),
+            # 2026-10-25（口径 v2）：归组/形态 + 真实 IO（模拟也走真检索 ⇒ 同样有 IO ✓）
+            "qid": tel.get("qid", ""),
+            "question_core": tel.get("question_core", ""),
+            "q_shape": tel.get("q_shape", ""),
+            "kw_terms": tel.get("kw_terms", 0),
+            "level": tel.get("level", ""),
+            "queries": (tel.get("retrieval") or {}).get("queries", 0),
+            "pg_queries": (tel.get("retrieval") or {}).get("pg", 0),
+            "neo4j_queries": (tel.get("retrieval") or {}).get("neo4j", 0),
+            "empty_queries": (tel.get("retrieval") or {}).get("empty_queries", 0),
+            "hit_queries": (tel.get("retrieval") or {}).get("hit_queries", 0),
+            "degraded": (tel.get("retrieval") or {}).get("degraded", False),
+            "io_ms": (tel.get("retrieval") or {}).get("io_ms", 0),
+            "has_io": bool(tel.get("io") or tel.get("retrieval")),
+            "first_step": tel.get("first_step"),
+            "turn_first_retrieval": tel.get("turn_first_retrieval", ""),
             "at": time.strftime("%Y-%m-%d %H:%M:%S")}
 
 
