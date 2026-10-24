@@ -6,12 +6,12 @@
   ① **一致性** = 一致条数 / 总条数（阈值 ≥0.90 ✓）
   ② **假断言** = 既有结论为「不符合」但可信度低/中（证据不足就下违规结论 ✗，阈值 =0 ✓）
   ③ **可信度分布** = 高 / 中 / 低（`ke_score` 口径 ✓）
-  ④ 覆盖度 = 每条规则是否有判定行（`ke_report._check_coverage` 同口径 ✓）
+  ④ 覆盖度 = 每条规则是否有判定行（覆盖度自算（同口径） ✓）
 
 结论：三项达标 ⇒ **可发布**；否则 ⇒ 退回「规则化」✗ / 补证据 ✓。
 
 CLI：
-  python3 ke_rule_eval.py [--kb 技术方案评审领域模型] [--write] [--work-kb 技术方案评审任务知识库]
+  python3 ke_rule_eval.py [--kb <领域库名>] [--write] [--work-kb <工作库名>]
 """
 from __future__ import annotations
 
@@ -103,8 +103,8 @@ def render_md(res: dict, kb: str) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="规则评测（规则工程 · 回放比对）")
-    ap.add_argument("--kb", default="技术方案评审领域模型")
-    ap.add_argument("--work-kb", default="技术方案评审任务知识库")
+    ap.add_argument("--kb", default="")
+    ap.add_argument("--work-kb", default="")
     ap.add_argument("--fixtures", default="", help="逗号分隔；空=自动取 tests/fixtures/facts_s*.json")
     ap.add_argument("--write", action="store_true", help="落库为 bmm:Report 页")
     a = ap.parse_args()

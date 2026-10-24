@@ -22,7 +22,7 @@
 
 CLI
 ---
-    python3 tools/ke-core/ke_sheet.py probe docs/cases/主子系统清单.xlsx [--sample 3] [--sheet 主系统]
+    python3 tools/ke-core/ke_sheet.py probe docs/cases/<主数据>.xlsx [--sample 3] [--sheet 主系统]
     python3 tools/ke-core/ke_sheet.py rows  <file> [--sheet S] [--limit 20]
 """
 

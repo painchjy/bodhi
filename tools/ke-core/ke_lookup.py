@@ -69,7 +69,7 @@ def _class_candidates(term: str, idx: dict | None = None, top: int = 3) -> list:
             score, strong = 100, True
         elif label and key in label:
             # **强证据**：词是标签的**词尾**（"流程"⊂"业务流程"✓）或占比 ≥75%；
-            # 否则只是"前缀修饰"（"技术方案"⊂"技术方案评审报告" ✗）⇒ 弱证据，不自动圈范围
+            # 否则只是"前缀修饰"（"方案"⊂"方案报告" ✗）⇒ 弱证据，不自动圈范围
             if label.endswith(key) or len(key) * 4 >= len(label) * 3:
                 score, strong = 90 - min(len(label) - len(key), 20), True
             else:
@@ -260,7 +260,7 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
             cc = _class_candidates(t, idx)
             strong_cc = [c for c in cc if c[3]]
             if not strong_cc:
-                if cc:                    # 弱证据 ⇒ 只进候选提示，**不自动圈范围**（"技术方案" ≠ 报告类）
+                if cc:                    # 弱证据 ⇒ 只进候选提示，**不自动圈范围**（"方案" ≠ 报告类）
                     cands.extend({"class": c[1], "label": c[2], "score": c[0], "strong": False}
                                  for c in cc[:2])
                 text_terms.append(t)

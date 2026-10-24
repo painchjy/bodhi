@@ -9,7 +9,7 @@
      required_fields 必须含 conclusion / evidence / severity / rule_ref ✓ 且 conclusion 枚举四态 ✓
 
 CLI：
-  python3 ke_rule_check.py [--kb 技术方案评审领域模型] [--spec policy:技术方案逐项评审策略] [--write]
+  python3 ke_rule_check.py [--kb <领域库名>] [--spec policy:<策略页名>] [--write]
 """
 from __future__ import annotations
 
@@ -91,10 +91,10 @@ def render_md(res: dict, kb: str, spec: str) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="规则体检（规则工程门禁）")
-    ap.add_argument("--kb", default="技术方案评审领域模型")
-    ap.add_argument("--spec", default="policy:技术方案逐项评审策略")
+    ap.add_argument("--kb", default="")
+    ap.add_argument("--spec", default="")
     ap.add_argument("--write", action="store_true", help="落库为 bmm:Report 页")
-    ap.add_argument("--work-kb", default="技术方案评审任务知识库")
+    ap.add_argument("--work-kb", default="")
     a = ap.parse_args()
     import ke_db  # noqa: PLC0415
 

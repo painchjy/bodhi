@@ -678,7 +678,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         # P3-0f：页已变 → 本请求的"会话页引用"memo 一律作废
         # （否则后续阶段——`link_source_session`、`sourceLocator`——会读到写之前的空结果）。
         _reset_request_cache()
-        # 写后对账（2026-09-24）：回执里的每个 slug 必须**在本库**查得到 ——
+        # 写后核对（2026-09-24）：回执里的每个 slug 必须**在本库**查得到 ——
         # 否则就是"回执成功、库里没有"（历史 bug：页 id 只按 slug 派生 → upsert 更新了别库那一行）。
         # 这里把它变成**显式的失败**：`applied` 回拨为 False + missing 清单，提示不要向用户汇报成功。
         wanted = [e.get("slug") for e in summary["created"]] \
@@ -1198,7 +1198,7 @@ def image_extract(kb_id: str = "", knowledge_id: str = "", figure_no: int = 0,
                          "markdown": m.group(0), "knowledge_id": r["knowledge_id"],
                          "chunk_index": r["chunk_index"]})
             by_doc[r["knowledge_id"]] = by_doc.get(r["knowledge_id"], 0) + 1
-    # 去重（2026-10-19 ✓）：同一张图常被多个 chunk 重复引用（样例2 实测 2 张图 → 4 条引用 ✗）
+    # 去重（2026-10-19 ✓）：同一张图常被多个 chunk 重复引用（实测 2 张图 → 4 条引用 ✗）
     seen, uniq = {}, []
     for x in imgs:
         key = x.get("image_ref") or ""
@@ -2272,7 +2272,7 @@ def service_overview_tool(kb_id: str, apply: bool = False, slug: str = "", title
             "attributes": len(data["attributes"]), "cross_service_deps": len(data["deps"]),
             "preview": "\n".join(lines[:max(1, int(preview_lines))]),
             "applied": False, "overview_slug": slug or OVERVIEW_SLUG,
-            "note": ("只读预览。要生成/刷新评审页请再调本工具 **apply=true**"
+            "note": ("只读预览。要生成/刷新总览页请再调本工具 **apply=true**"
                      "（异步落库，用 job_status(job_id=...) 查回执；落库版会带上巡检结论）。")}
 
 
@@ -2366,7 +2366,7 @@ def call_tool(name: str, args: dict) -> dict:
 
 _RETIRED_TOOLS = {
     "rules_of_policy": "改用 `rules_resolve(spec=…)`（同一份图本优先实现 ✓）",
-    "review_apply": "评审结论改由 save_knowledge(mode=document) 落 `bmm:TechnicalReviewReport` 一页 ✓（本工具会产 `bmm:Assessment` 旧口径 ✗）",
+    "review_apply": "判定结论改由 save_knowledge(mode=document) 落 `bmm:TechnicalReviewReport` 一页 ✓（本工具会产 `bmm:Assessment` 旧口径 ✗）",
     "service_overview": "旧「服务概览」，被 `knowledge_lookup` + `doc_outline` 覆盖 ✓",
     "rebuild_wiki_from_graph": "重建页已并入保存路径（图→PG 写序）✓，请用 `save_knowledge` / `recategorize`",
     "link_source_session": "会话溯源由 `save_knowledge` 自动写 `bmm:sourceSession` ✓",
@@ -2518,7 +2518,7 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         import ke_extract  # noqa: PLC0415
         return ke_extract.extract(str(args.get("kb_id", "")), str(args.get("knowledge_id", "")),
                                   str(args.get("domain_kb", "")),
-                                  str(args.get("task", "逐项评审") or "逐项评审"),
+                                  str(args.get("task", "") or ""),
                                   args.get("other_kbs") or None,
                                   int(args.get("limit_items", 20) or 20))
     if name == "evidence_score":
@@ -2544,7 +2544,7 @@ def _call_tool_impl(name: str, args: dict) -> dict:
         return {"ok": False, "deprecated": True, "error": "rules_of_task 已下架",
                 "hint": ("规则只按步骤解析：`knowledge_lookup(kb_id=<领域库>, mode=\"rules\", "
                          "spec=\"policy:<策略>\" | \"direct:<规则slug,…>\" | \"ask\")` ✓；"
-                         "若要按策略取全部规则：spec=\"policy:技术方案逐项评审策略\" ✓"),
+                         "若要按策略取全部规则：spec=\"policy:<策略页名>\" ✓"),
                 "since": "2026-10-18"}
     if name == "rules_of_task_legacy":
         # 2026-10-16（用户口径）：**按任务取规则契约**（图边 taskExecutesRule + 页面属性真读；

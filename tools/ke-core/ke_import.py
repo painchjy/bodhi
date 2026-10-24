@@ -451,7 +451,7 @@ def _merge_relation_section(prev: str, content: str) -> str:
     """类批次只维护「定义/属性/原文依据」；**已有**「## 本体关系」小节原样保留。
 
     为什么：`## 本体关系` 由**关系批次**（或人在页面上）维护——类批次重跑时若整页覆盖，
-    会把 `bmm:isDerivedFrom → [[策略页]]` 这类行擦掉（实测踩到：规则页的关系线被清空 → 评审取不到规则）。
+    会把 `bmm:isDerivedFrom → [[策略页]]` 这类行擦掉（实测踩到：规则页的关系线被清空 → 核对取不到规则）。
     本函数把旧小节的行与本批新生成的行**并集去重**后写回。
     """
     p_lines = (prev or "").splitlines()
@@ -484,7 +484,7 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
     import uuid
     module = page_type.split(":")[0]
     attrs = source.get("attrs") or {}
-    # `attributes` 用**本体数据属性名**为键（`bmm:ruleScope`）——机器口径（评审/巡检/智能体按本体名读）；
+    # `attributes` 用**本体数据属性名**为键（`bmm:ruleScope`）——机器口径（核对/巡检/智能体按本体名读）；
     # `attributes_by_column` 保留**中文列名**——人类口径（页详情页好看）。老数据只有中文键，读取方需兼容。
     by_column = {column: (row.get(column) or "").strip()
                  for column in attrs if (row.get(column) or "").strip()}
@@ -517,7 +517,7 @@ def _page_row(kb: str, kb_name: str, page_type: str, label: str, slug: str, titl
             "slug": slug, "title": title, "page_type": page_type, "content": content,
             # 2026-10-15（单一写核）：**summary 一律由核心派生** —— 调用方不得自拼。
             # 旧实现用 `bmm:description`（键已废）/ 标题拼，会在"建关系/合并"这一步把上游写对的
-            # summary 覆盖掉（实测事故：技术方案评审策略页 summary 变成第三段文字 ✗）。
+            # summary 覆盖掉（实测事故：规则页 summary 变成第三段文字 ✗）。
             "summary": ke_pages.derive_summary(page_type, attributes, title)[:500],
             "aliases": aliases, "metadata": metadata,
             "category_path": category_path,

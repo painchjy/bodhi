@@ -5,7 +5,7 @@
   ② `ke_rule_eval.eval_samples` —— 一致性 ≥0.90、假断言 =0 ✓
 发布动作：
   · 每条规则页 `skos:note` 追加一行发布戳：`已发布 <日期>｜hash <rules_hash>｜体检✓ 评测✓（一致性 x.xx）`✓
-  · 回执列出「可被任务步骤引用」的规则清单 ✓（未通过的不得引用 ✗）
+  · 回执列出「可被任务步骤引用」的规则行 ✓（未通过的不得引用 ✗）
 CLI：
   python3 ke_rule_publish.py [--kb …] [--spec …] [--apply]   # 默认 dry-run ✓
 """
@@ -77,8 +77,8 @@ def publish(kb: str, spec: str, apply: bool = False) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="规则发布（门禁：体检 + 评测）")
-    ap.add_argument("--kb", default="技术方案评审领域模型")
-    ap.add_argument("--spec", default="policy:技术方案逐项评审策略")
+    ap.add_argument("--kb", default="")
+    ap.add_argument("--spec", default="")
     ap.add_argument("--apply", action="store_true", help="真正写库（默认 dry-run ✓）")
     a = ap.parse_args()
     import ke_db

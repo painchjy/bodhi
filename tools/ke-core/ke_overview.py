@@ -203,7 +203,7 @@ def refresh_crud_matrix(kb_id: str, service_slugs: list) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 服务详细设计总览（评审用；确定性渲染，跨页聚合）
+# 服务详细设计总览（核对用；确定性渲染，跨页聚合）
 # ---------------------------------------------------------------------------
 OVERVIEW_SLUG = "ea/summary/it服务详细设计总览"
 OVERVIEW_TITLE = "IT 服务详细设计总览"
@@ -270,7 +270,7 @@ def service_design_summary(kb_id: str) -> dict:
 
 
 def service_overview_lines(kb_id: str, with_audit: bool = True, data: dict | None = None) -> list[str]:
-    """渲染「IT 服务详细设计总览」Markdown（评审用）。
+    """渲染「IT 服务详细设计总览」Markdown（核对用）。
 
     `with_audit=False` 时不跑巡检；`data` 可传入已算好的 `service_design_summary()`
     结果（避免重复聚合：实测一次聚合 ~30s，重复一次就翻倍）。

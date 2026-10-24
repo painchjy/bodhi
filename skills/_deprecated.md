@@ -1,6 +1,6 @@
 # 技能/智能体收敛清单（R6）
 
-> 2026-10-17 起，技术方案评审域的做事方式统一为**规则驱动**：
+> 2026-10-17 起，该领域的做事方式统一为**规则驱动**：
 > `rules_resolve` → `knowledge_plan` → `knowledge_extract` → `rule_judge` → `report_compose`
 > （`fact_check` 在 `rule_judge` 之前把关证据）。
 >
@@ -19,7 +19,7 @@
 | 技能 | `knowledge_extract` | 按计划取事实（一次并集 ✓，不逐规则重复读 ✗） |
 | 技能 | `fact_check` | 逐字证据 + 可回访定位 + 三类区分（fact/compliance/opinion）✓ |
 | 技能 | `rule_judge` | 规则契约 + 已抽事实 → passed/failed/**insufficient**（证据不足不得判 failed ✓） |
-| 技能 | `report_compose` | 五节报告（④ 问题清单 7 列表格 ✓） |
+| 技能 | `report_compose` | 模板驱动的报告（清单类小节用表格 ✓） |
 | 技能 | `rule_execute` | 执行单条规则的判定脚本（A/B 分流 ✓） |
 
 ## 二、已归档（2026-10-17 ✓ 移到 `skills/_deprecated/`，`git mv` 保留历史 ✓）
@@ -28,9 +28,9 @@
 | `document_review` | **已归档** ✓ | 被 `rule_judge` + `report_compose` 取代 ✓（它按"看文档复原规则"✗，正是要消除的 ✗） |
 | `tech_review_extraction` | **已归档** ✓ | 被 `knowledge_plan` + `knowledge_extract` 取代 ✓（旧版逐规则重复提取 ✗） |
 | `structured_modeling` | **已归档** ✓ | 与 `domain_modeling` 重叠 ✓；本体改动走 TTL 编译 ✓ |
-| `model_recommendation` | **已归档** ✓ | 与评审主链无关 ✓ |
+| `model_recommendation` | **已归档** ✓ | 与主链无关 ✓ |
 | `multimodal_extraction` | **保留**（工具能力 ✓） | `knowledge_extract` 调用它取图/表 ✓，不再作独立技能入口 ✓ |
-| `kb_transfer` / `session_provenance` / `revision_trace` / `skill_development` | **保留**（平台类 ✓） | 不作评审技能入口 ✓ |
+| `kb_transfer` / `session_provenance` / `revision_trace` / `skill_development` | **保留**（平台类 ✓） | 不作技能入口 ✓ |
 
 ## 四、报告生成能力盘点与统一（2026-10-17）
 
@@ -46,7 +46,7 @@
 ### 统一口径（唯一正确写法 ✓）
 ```python
 ke_pages.write_knowledge(kb_id, {
-    "title": "评审报告：{文档}（{流程号}·R{n}）",
+    "title": "报告：{文档}（{流程号}·R{n}）",
     "page_type": "bmm:TechnicalReviewReport",   # ← 必须用本体里的报告子类 ✓
     "mode": "document",                          # ← 由 render_mode(Report 子类) 决定 ✓
     "wiki_content": <五节正文>,                   # ← 正文由智能体/技能生成 ✓（数据属性不产正文 ✓）
@@ -72,10 +72,10 @@ report/composite 模式 = `page_type` 是 `bmm:Report` 的子类
 1. `report_compose` 技能补三条硬约束 ✓：报告类由本体定 ✓ / 章节按 comment ✓ / 数据属性不产正文 ✓；
 2. `ke_review.review_apply` 标 deprecated ✓（保留函数 ✓，但不再产 `bmm:Assessment` 报告 ✗）；
 3. `server.save_knowledge(stage="report")` 的报告阶段改用 `bmm:TechnicalReviewReport` ✓；
-4. 存量 4 份《评审报告：样例X…》（`bmm:Assessment` ✗）标注 **legacy** ✓，不参与新口径统计 ✓；
-5. 任务步骤 note 明确报告类型 ✓：`3) 生成评审报告（类型 bmm:TechnicalReviewReport，章节 ①-⑤）。技能：report_compose` ✓。
+4. 存量 4 份旧报告（`bmm:Assessment` ✗）标注 **legacy** ✓，不参与新口径统计 ✓；
+5. 任务步骤 note 明确报告类型 ✓：`3) 生成报告（类型=<报告类>，章节=模板页「章节结构」）。技能：report_compose` ✓。
 
-1. `systemCriticality` 的 TTL 注释补"**主系统定义、子系统继承；子系统可独立认定并覆盖**" ✓，
+1. `systemCriticality` 的 TTL 注释补"**主系统定义、子模块继承；子模块可独立认定并覆盖**" ✓，
    然后 `upload_ttl`（顺序 bmm → bpmn → agent ✓）；
 2. `rules_of_task` 在 MCP 描述里标 `[deprecated → rules_resolve]` ✓（行为保留 ✓）；
 3. 上述 deprecated 技能经你确认后移入 `skills/_deprecated/` ✓（git 历史保留 ✓）。

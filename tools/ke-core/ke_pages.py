@@ -330,7 +330,7 @@ def derive_summary(page_type: str, attributes: dict, fallback: str = "") -> str:
 #   规则（**不区分本体页/实例页**，来源驱动）：
 #     ① 页面属性里的**注释类别名**：`rdfs:label` / `skos:altLabel`
 #        （本体里已声明为 `owl:AnnotationProperty`；实例层若用了，就是别名的作用 —— 用户口径）；
-#     ② 被本体标记 `bodhi:aliasKey true` 的**数据属性**的值（如 `bmm:systemAbbr` 主/子系统简称）；
+#     ② 被本体标记 `bodhi:aliasKey true` 的**数据属性**的值（如 `bmm:systemAbbr` 主/子模块简称）；
 #     ③ 页面**已有** aliases（并集保留，不丢历史）；
 #   排除：与**标题相同**的值（同名标签是旧 `save_elements` 默认 `[name]` 留下的噪音）、空串、重复值。
 #   ⚠️ 不引入 `bodhi:alias` 实例属性：别名一律用「标记 + 已有属性」表达（用户口径）。

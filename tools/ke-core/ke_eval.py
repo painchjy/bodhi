@@ -7,7 +7,7 @@
   ④ 产出：Markdown《评测报告》✓；`--write` 时落 `bmm:Report` 页（版本化 ✓）。
 
 CLI:
-  python3 ke_eval.py [--log logs/mcp_calls_20261018.log] [--write] [--kb 技术方案评审任务知识库]
+  python3 ke_eval.py [--log logs/mcp_calls_20261018.log] [--write] [--kb <目标库名>]
 """
 from __future__ import annotations
 
@@ -138,8 +138,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="评测：意图识别准确度 + 流程符合度")
     ap.add_argument("--log", default="", help="mcp 调用日志；空=取最新的 mcp_calls_*.log")
     ap.add_argument("--write", action="store_true", help="落库为 bmm:Report 页")
-    ap.add_argument("--kb", default="技术方案评审任务知识库", help="落库目标库")
-    ap.add_argument("--last", type=int, default=0, help="只评最近 N 次调用（0=全部 ✓ 单次评审约 40-60 次）")
+    ap.add_argument("--kb", default="", help="落库目标库")
+    ap.add_argument("--last", type=int, default=0, help="只评最近 N 次调用（0=全部 ✓ 单次约 40-60 次）")
     a = ap.parse_args()
     log = a.log
     if not log:

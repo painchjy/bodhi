@@ -126,7 +126,7 @@ def build(domain_kb: str = "", task: str = "", policies: list | None = None,
 
     `spec` 五种：`direct:` / `policy:` / `ask` / `task:`（兼容，需任务页存在 ✓）/ `path:`；
     未给 `spec` 时：有 `policies` ⇒ `policy:<首个>` ✓；有 `task` ⇒ `task:<task>` ✓；
-    都没有 ⇒ 评审域默认 `policy:技术方案逐项评审策略` ✓。
+    都没有 ⇒ **必须显式给 `spec`**（代码不内置任何策略名 ✗）。
     """
     kb, kb_name, _n = ke_db.resolve_kb_id(domain_kb)
     sp = (spec or "").strip()
@@ -136,7 +136,7 @@ def build(domain_kb: str = "", task: str = "", policies: list | None = None,
         elif task:
             sp = "task:%s" % task
         else:
-            sp = "policy:技术方案逐项评审策略"
+            sp = ""
     rep = ke_review.rules_resolve(domain_kb, sp)
     rules = [r for r in (rep.get("rules") or []) if r.get("needs_extract")]
     if not rules:

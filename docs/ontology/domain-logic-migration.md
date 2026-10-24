@@ -72,3 +72,25 @@
 3. **T1 属性过滤** + **T3 巡检** + 用例
 4. **技能改写**（`report_compose` → 流程化）
 5. **最后**才删代码/技能里的域词（按 §4 判据逐条），基线归零后把 `test_no_business_semantics` 改为硬断言 0
+
+## 7. 收口结果（2026-10-23）
+
+| 项 | 前 | 后 |
+|---|---|---|
+| 域词命中（活跃面：`tools/**` + `skills/**`，排除 `/tests/`、`/_deprecated/`） | **394**（44 文件） | **0** ✓ |
+| 硬断言 | 只比基线（只降不升） | `test_no_business_semantics`：**域词命中 = 0** ✓（golden = `{}`） |
+| 技能 | `report_compose` 47 处 + `rule_judge` 15 处 + 其它 | 全部 0（`report_compose` 重写为**模板驱动流程** 0.2.0） |
+| 工具 | `ke_report` 32、`ke_extract` 34、`ke_audit` 19 … | 全部 0 |
+
+**同时清掉的死代码/硬编码**：
+
+1. `ke_report` 旧「固定五节 + 固定列」渲染器（`columns` / `SECTION_RULES` / `render` / `write` /
+   `_check_coverage`）—— 441 行 → 175 行；章节口径**只来自模板页** ✓；
+2. `ke_extract` 的**同义词表 `KW`**（deploy_fig/certified…）—— 改为「关键词来自规则页 `keywords` / `need`」✓；
+   策略名与库名默认值改由调用方/env（`BODHI_DOMAIN_KB_NAME` / `BODHI_WORK_KB_NAME`）给出；
+3. 规则链**归档**（无活引用）：`ke_rule_review` / `ke_rule_ledger` / `ke_rule_stats` / `ke_rule_copy`
+   → `tools/ke-core/_deprecated/`（见该目录 README；`ke_rule_publish`/`check`/`eval` 仍在用，保留）；
+4. CLI 默认值里的真实库名/策略名一律去掉（改空 + 显式传参）。
+
+> 判据复核：① 模板/规则逻辑已在领域库可查 ✓；② 工具自动定位有用例（`test_report_template` /
+> `test_template_alignment_real` / `test_lookup_strategy`）✓；③ 技能流程化且回归通过 ✓。

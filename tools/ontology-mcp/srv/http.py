@@ -150,7 +150,7 @@ class MCPHandler(BaseHTTPRequestHandler):
         **body 就是文件原始字节**（不是 JSON、不是 multipart）→ curl / 浏览器 fetch 都能发：
 
             curl -X POST --data-binary @kb-xfer.zip \\
-              "http://<mcp主机>:8765/bodhi/kb-upload?name=kb-xfer.zip&new_kb=技术方案评审领域模型&verify=1"
+              "http://<mcp主机>:8765/bodhi/kb-upload?name=kb-xfer.zip&new_kb=<目标库名>&verify=1"
 
         存到 `exports/uploads/<name>`；带 `new_kb`/`kb_id` 时**顺带导入**（默认 verify=1 → 回执含 `verify_ok`）。
         """
@@ -350,7 +350,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             "/bodhi/audit/purge":
                 lambda b: ke_audit.purge(str(b.get("kb_id", "")), str(b.get("kinds", "all")), "all", 5000,
                                          b.get("slugs") or None, None, bool(b.get("dry_run", False))),
-            # 文档评审
+            # 文档核对
             "/bodhi/review/apply":
                 lambda b: ke_review.review_apply(
                     kb_id=str(b.get("kb_id", "")), doc=str(b.get("doc", "")),
@@ -620,7 +620,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._json({"error": str(exc)}, 400, self.CORS)
             return
         if path in ("/bodhi/overview", "/bodhi/overview.md"):
-            # 「IT 服务详细设计总览」只读渲染（评审用）：不写库、与页面同源。
+            # 「IT 服务详细设计总览」只读渲染（核对用）：不写库、与页面同源。
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
                 kb = params.get("kb_id", "") or ""
@@ -775,7 +775,7 @@ class MCPHandler(BaseHTTPRequestHandler):
 或 <b>既有 kb_id</b>；<code>keep_ids</code> 仅跨实例迁移时勾（同实例会自动降级为重编 UUID）。</p>
 <form id="f">
   <p><input type="file" id="file" accept=".zip" required></p>
-  <p>新库名 <input name="new_kb" id="new_kb" size="32" placeholder="如：技术方案评审领域模型">
+  <p>新库名 <input name="new_kb" id="new_kb" size="32" placeholder="如：<目标库名>">
      或既有 kb_id <input name="kb_id" id="kb_id" size="36" placeholder="UUID"></p>
   <p><label><input type="checkbox" id="keep_ids" checked> keep_ids（跨实例迁移）</label></p>
   <p><button>上传并导入</button></p>

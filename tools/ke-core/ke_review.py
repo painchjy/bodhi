@@ -1,6 +1,6 @@
-"""ke-core · 文档评审（按业务策略下的业务规则逐条评）。
+"""ke-core · 文档核对（按业务策略下的业务规则逐条判定）。
 
-用户口径（2026-09-29）：对选定的**文档**（知识库文档或附件）选一条**业务策略**评审；
+用户口径（2026-09-29）：对选定的**文档**（知识库文档或附件）选一条**业务策略**核对；
 按该策略下的**业务规则逐条**处理：
 
 - 规则「实现方式」= **LLM软规则** → 交给大模型（智能体自己读范围章节判定）；
@@ -11,7 +11,7 @@
 本模块只提供三个**确定性**工具（语义判断由智能体做）：
     rules_of_policy(kb_id, policy)                 列出某策略下的规则（含级别/范围/实现方式/参考规范）
     graph_query(cypher, limit)                     **只读** Cypher（白名单校验），给"图检索"型规则出结论
-    review_apply(kb_id, doc, policy, findings)     把逐条结论写成**一页**评审报告（版本化、可回退）
+    review_apply(kb_id, doc, policy, findings)     把逐条结论写成**一页**报告（版本化、可回退）
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ sys.path.insert(0, str(HERE))
 import ke_db  # noqa: E402
 import ke_pages  # noqa: E402
 
-REPORT_TYPE = "bmm:TechnicalReviewReport"   # 2026-10-17：必须用 Report 子类 ✓（旧 Assessment ✗）          # 评审=对文档的评估（本体类；B1 干净）
+REPORT_TYPE = "bmm:TechnicalReviewReport"   # 2026-10-17：必须用 Report 子类 ✓（旧 Assessment ✗）  # 报告=对文档的评估（本体类；B1 干净）
 REVIEW_TAG = "bodhi-review"
 REL_SECTION = "## 本体关系"
 EVIDENCE_SECTION = "## 原文依据"
@@ -293,7 +293,7 @@ def rules_of_task(kb_id: str = "", task: str = "", limit: int = 300) -> dict:
     不带判定口径 ⇒ 智能体只能回去"看文档复原"✗）。
 
     数据来源（**真读图边 + 页面属性，不猜**）：
-      · 任务的 `bpmn:taskExecutesRule` **图边**（`ke_graph.relations_of`）→ 规则清单；
+      · 任务的 `bpmn:taskExecutesRule` **图边**（`ke_graph.relations_of`）→ 规则行；
       · 规则页属性：`bmm:ruleImplementation` / `bmm:knowledgeNeed` / `bmm:ruleScope` /
         `bmm:enforcementLevel` / `bmm:ruleReference`；`skos:definition`/`skos:note` 兜底定义；
       · 任务页自身：`skos:definition` 摘要 + `taskUsesDataObject`（输入/输出）+ `taskHasRole`（角色）；
@@ -717,7 +717,7 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
                  page_type: str = REPORT_TYPE, actor: str = "agent:document_review",
                  policy_slug: str = "", tenant: int | None = None,
                  session_no: str = "", session_slug: str = "") -> dict:
-    """把逐条评审结论写成**一页**（`slug=review/<doc>-<policy>`；版本化可回退）。
+    """把逐条判定结论写成**一页**（`slug=review/<doc>-<policy>`；版本化可回退）。
 
     `findings[]`：{rule, verdict(符合|不符合|不适用|无法判定), severity, scope, evidence, how, cypher, suggestion}
     2026-10-08 契约：走统一内核 `ke_pages.write_knowledge(mode="document")`——正文=报告体，
@@ -742,7 +742,7 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
     for f in items:
         verdicts[str(f.get("verdict") or "无法判定")] = verdicts.get(str(f.get("verdict") or "无法判定"), 0) + 1
     slug = "review/%s-%s" % (_slug(doc), _slug(policy))
-    title = "评审报告：%s × %s" % (doc, policy)
+    title = "报告：%s × %s" % (doc, policy)
     body = ["## 结论汇总", "", "| 结论 | 条数 |", "|---|---|"]
     for key in ("不符合", "符合", "不适用", "无法判定"):
         if verdicts.get(key):
@@ -769,19 +769,19 @@ def review_apply(kb_id: str = "", doc: str = "", policy: str = "", findings: lis
         body += ["", "#### 证据（逐字）", "", "> %s" % quote.replace("\n", "\n> "), ""]
     quotes = [str(f.get("evidence") or "").strip() for f in items if str(f.get("evidence") or "").strip()]
     body += [EVIDENCE_SECTION, ""] + (["> %s" % q.replace("\n", "\n> ") for q in quotes]
-                                      or ["> （本次评审未附逐字证据）"]) + [""]
+                                      or ["> （本次核对未附逐字证据）"]) + [""]
     # 统一内核（契约 §1/§2 · M-document）：正文=报告体；关系→图边；**补齐会话溯源**。
     rels = ([{"type": "bmm:promotesDirective", "target_slug": policy_slug}] if policy_slug else [])
     spec = {
         "mode": "document", "slug": slug, "title": title, "page_type": page_type,
-        "type_label": "评估", "generated_by": "文档评审技能（%s，按策略 %s）" % (REVIEW_TAG, policy),
+        "type_label": "评估", "generated_by": "文档核对技能（%s，按策略 %s）" % (REVIEW_TAG, policy),
         "wiki_content": "\n".join(body),
         "attributes": {"rules": len(items), "verdicts": verdicts},
         "relations": rels,
-        "summary": "按「%s」评审「%s」：%s" % (policy, doc,
+        "summary": "按「%s」核对「%s」：%s" % (policy, doc,
                                             "、".join("%s%d条" % (k, v) for k, v in verdicts.items())),
         "source": {"doc_title": doc, "doc_refs": [doc],
-                   "source_text": (quotes[0] if quotes else "（本次评审未附逐字证据）"),
+                   "source_text": (quotes[0] if quotes else "（本次核对未附逐字证据）"),
                    "session_no": session_no, "session_slug": session_slug},
         "metadata_extra": {"review": {"doc": doc, "policy": policy, "policy_slug": policy_slug,
                                       "rules": len(items), "verdicts": verdicts,

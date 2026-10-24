@@ -94,7 +94,7 @@ def alias_keys(page_type: str = "") -> list[str]:
 
     来源 = 编译产物 `artifacts/weknora/ontology_index.json`（TTL 里的 `bodhi:aliasKey true`）：
       · 顶层 `alias_keys`   —— **全局**标记，如 `rdfs:label` / `skos:altLabel`（任何页都算别名）；
-      · `models[].alias_keys` —— 本模块里被标记的属性，如 `bmm:systemAbbr`（主/子系统简称）。
+      · `models[].alias_keys` —— 本模块里被标记的属性，如 `bmm:systemAbbr`（主/子模块简称）。
     只读；随 `index_data()` 的指纹缓存自动刷新（重编译后无需重启进程）。
     本体侧未编译/未实现时返回空列表 ⇒ 内核只用内置键（fail-open）。
     """

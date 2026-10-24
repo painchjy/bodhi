@@ -879,7 +879,7 @@ def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = Tr
     KB 级清理，但它查的是 **`n.kb`**（旧属性名）—— 现网节点用的是 **`n.kb_id`** ⇒ 一直没匹配上，
     所以删库后图里仍有残留；巡检里那几条**裸 DELETE** 也只删 PG、不删图。
 
-    本函数**以 PG 的 `knowledge_bases` 为准**做全集对账：图上出现、PG 里没有的 kb_id →
+    本函数**以 PG 的 `knowledge_bases` 为准**做全集核对：图上出现、PG 里没有的 kb_id →
     该库节点（连同其边）整批 `DETACH DELETE`；另清 **没有 kb_id 的历史脏节点**。
     `dry_run=True` 只报清单（不改图），便于先看影响面。
     `include_soft_deleted=True`（默认）把 **`knowledge_bases.deleted_at IS NOT NULL`（软删库）**

@@ -52,7 +52,8 @@ def main() -> int:
     gone = sorted(set(base) - set(now))
     checks = {
         "无新增/加重（%d 个文件超基线）" % len(worse): not worse,
-        "基线总命中 = %d（当前 %d）" % (sum(base.values()), sum(now.values())): True,
+        # 2026-10-23（用户口径 ✓）：域词已清零 ⇒ **硬断言 0**（工具/技能只认类型与属性）
+        "域词命中 = 0（硬断言；当前 %d）" % sum(now.values()): sum(now.values()) == 0,
     }
     if worse:
         print("超基线：%s" % json.dumps(worse, ensure_ascii=False)[:600])

@@ -1,14 +1,14 @@
 """ke_core · 规则副本同步（工作库 ← 领域库 ✓）
 
-**为什么需要副本**：`ke_graph.add_edge` 只认同库目标 ✗（跨库边建不了），而评审要表达
+**为什么需要副本**：`ke_graph.add_edge` 只认同库目标 ✗（跨库边建不了），而核对要表达
 「报告 → 规则」「评测 → 规则」两类关系 ⇒ 规则页必须在**工作库**有一份副本 ✓。
 
 **责任方（用户口径 2026-10-19 ✓）**：按**关系**定副本，谁产出该关系，谁负责同步副本 ——
 | 关系 | 副本 | 责任任务步骤 |
 |---|---|---|
-| `agent:reportAppliesRule`（报告→规则） | 规则 | **逐项评审 / 生成评审报告**（写报告前同步 ✓） |
+| `agent:reportAppliesRule`（报告→规则） | 规则 | **成批核对 / 生成报告**（写报告前同步 ✓） |
 | `agent:evaluationOfRule`（评测→规则） | 规则 | **规则评测**（台账生成时校验副本存在 ✓） |
-| `agent:reportKnowledgeIngest`（报告→知识入库清单） | **不需要**（清单实例直接建在工作库 ✓） | 知识入库任务 |
+| `agent:reportKnowledgeIngest`（报告→入库清单） | **不需要**（清单实例直接建在工作库 ✓） | 入库任务 |
 | `evaluationUsesMetric`（评测→指标） | 指标 | 规则评测（用到指标时 ✓，暂未启用） |
 
 副本口径：**slug / 类型 / 正文保持一致** ✓，元数据标 `replica_of`（正本库与 slug ✓），
@@ -60,7 +60,7 @@ def sync_rules(work_kb: str, domain_kb: str, titles: list | None = None,
         ont = meta.get("ontology") or {}
         payload = {"ontology": {k: v for k, v in ont.items() if k in ("attributes", "comment", "label")}}
         payload["replica_of"] = {"kb_id": domain_kb, "slug": src["slug"],
-                                 "note": "副本：正本在领域库 ✓；本副本由评审/评测任务按需同步 ✓（勿单独编辑 ✗）"}
+                                 "note": "副本：正本在领域库 ✓；本副本由核对/评测任务按需同步 ✓（勿单独编辑 ✗）"}
         title = src["title"] + MARK if not str(src["title"]).endswith(MARK) else src["title"]
         try:
             r = ke_pages.upsert_page(work_kb, src["slug"], title, src["page_type"], src["content"],
@@ -73,9 +73,9 @@ def sync_rules(work_kb: str, domain_kb: str, titles: list | None = None,
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="规则副本同步（工作库 ← 领域库）")
-    ap.add_argument("--domain-kb", default="技术方案评审领域模型")
-    ap.add_argument("--work-kb", default="技术方案评审任务知识库")
-    ap.add_argument("--spec", default="policy:技术方案逐项评审策略")
+    ap.add_argument("--domain-kb", default="")
+    ap.add_argument("--work-kb", default="")
+    ap.add_argument("--spec", default="")
     ap.add_argument("--titles", default="", help="逗号分隔；给了就只同步这些 ✓")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()

@@ -3,7 +3,7 @@
 顺序（2026-10-19 用户口径 ✓）：
   ① `ke_rule_check`  规则体检（字段齐全/可机算/无歧义/可回溯）—— 不过 ⇒ 停 ✗
   ② `ke_rule_copy`   规则副本同步（工作库 ✓，报告/评测要同库建边 ✓）
-  ③ `ke_rule_ledger` 台账（一规则一页 `agent:RuleEvaluation` + 知识入库率 + 规则漏判 ✓）
+  ③ `ke_rule_ledger` 台账（一规则一页 `agent:RuleEvaluation` + 入库率 + 规则漏判 ✓）
   ④ `ke_rule_eval`   回放评测（一致性 ≥0.90、假断言=0 ✓）
   ⑤ `ke_rule_publish`（`--apply` 才执行）发布（双门禁 ✓）
 
@@ -23,9 +23,9 @@ FIX = os.path.join(ROOT, "tools", "ke-core", "tests", "fixtures")
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="规则工程一键闭环")
-    ap.add_argument("--domain-kb", default="技术方案评审领域模型")
-    ap.add_argument("--work-kb", default="技术方案评审任务知识库")
-    ap.add_argument("--spec", default="policy:技术方案逐项评审策略")
+    ap.add_argument("--domain-kb", default="")
+    ap.add_argument("--work-kb", default="")
+    ap.add_argument("--spec", default="")
     ap.add_argument("--apply", action="store_true", help="最后一步执行发布（默认 dry-run ✓）")
     a = ap.parse_args()
 

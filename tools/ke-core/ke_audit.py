@@ -69,7 +69,7 @@ except Exception:  # noqa: BLE001
     ke_docs = None  # type: ignore
 
 SEV = {"high": 0, "medium": 1, "low": 2}
-# 企业标准定义「待评审」天数阈值（附录 A：draft 超过它 → G9 low）
+# 企业标准定义「待复核」天数阈值（附录 A：draft 超过它 → G9 low）
 STANDARD_REVIEW_DAYS = 14
 SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling",
           "similar", "template")
@@ -367,7 +367,7 @@ def check_model_kb_pages(ctx: dict, rep: Report) -> None:
 def check_coupling(ctx: dict, rep: Report) -> None:
     """E（服务详细设计）：CRUD 矩阵推导出的耦合与完整性（**只读，不自动改**）。
 
-    E1 写耦合：同一业务属性被 **≥2 个 IT 服务**以 C/U/D 操作（服务边界/内聚性评审重点）；
+    E1 写耦合：同一业务属性被 **≥2 个 IT 服务**以 C/U/D 操作（服务边界/内聚性核对重点）；
     E2 读耦合：某服务读（R）的属性由**别的服务**写（跨服务读依赖）；
     E3 详设完整性：服务无操作 / 操作无被操作属性 / 缺 operationMethod / 写操作非幂等无幂等键；
     E4 键一致性：keyRole=FK 无 referencesAttribute；引用目标非 PK/UNIQUE；PK 未被函数依赖覆盖。
@@ -484,11 +484,11 @@ def check_coupling(ctx: dict, rep: Report) -> None:
                     "写耦合：业务属性被 %d 个服务写（%s）"
                     % (len(writers), "、".join(sorted(pages.get(w, {}).get("title") or w
                                                       for w in writers))),
-                    "评审服务边界（同一属性的写方应收敛到一个服务，或明确主从）")
+                    "核对服务边界（同一属性的写方应收敛到一个服务，或明确主从）")
         cross = readers - writers
         if writers and cross:
             # 读耦合细分（2026-09-21）：声明了 `operationDependsOnOperation` → **经接口**（合理耦合）；
-            # 否则 → **疑似直读**（要评审）。用户口径："E2 保留（合理读耦合）并说明是经接口读取"。
+            # 否则 → **疑似直读**（要核对）。用户口径："E2 保留（合理读耦合）并说明是经接口读取"。
             via, direct = [], []
             for reader in sorted(cross):
                 declared = any(service_of_op.get(dep) in writers
@@ -501,7 +501,7 @@ def check_coupling(ctx: dict, rep: Report) -> None:
                         "读耦合（**经接口**）：%s 通过声明的操作依赖（`easvc:operationDependsOnOperation`）"
                         "读取 %s 写的属性 —— 属合理耦合"
                         % (names(via), names(writers)),
-                        "确认依赖的是稳定对外接口；接口变更时按契约评审")
+                        "确认依赖的是稳定对外接口；接口变更时按契约核对")
             if direct:
                 rep.add("E2", "medium", attr_slug,
                         "读耦合（**疑似直读**）：%s 读由 %s 写的属性，但没有声明操作依赖"
@@ -621,7 +621,7 @@ def _import_source(page: dict) -> str:
     except Exception:  # noqa: BLE001
         return ""
     imp = meta.get("import") or {}
-    if meta.get("review"):                       # 文档评审页：依据=被评审文档，逐条带「原文依据」
+    if meta.get("review"):                       # 文档核对页：依据=被核对文档，逐条带「原文依据」
         return "review"
     return str(imp.get("file_sha256") or "")
 
@@ -706,7 +706,7 @@ def check_sources(ctx: dict, rep: Report) -> None:
 # ---------------------------------------------------------------------------
 # 历史 bug（用户实测）：页 id 只按 slug 派生（UUIDv5）→ 两个知识库里的同名页 id 相同 →
 # `INSERT … ON CONFLICT (id) DO UPDATE` 更新了**别的库**那一行，本库没有该页，回执却报成功
-# （目标库 11 页全部落在别的库）。已修：id 并入 kb + upsert 同库守卫 + 写后对账；
+# （目标库 11 页全部落在别的库）。已修：id 并入 kb + upsert 同库守卫 + 写后核对；
 # 本检查用来**发现存量**（哪些会话页落错、实际落在哪个库）。
 def check_session_pages(ctx: dict, rep: Report) -> None:
     kb_id = ctx["kb_id"]
@@ -747,7 +747,7 @@ def check_session_pages(ctx: dict, rep: Report) -> None:
                     "建模会话记着这一页，但**本库没有**它（实际落点：%s）—— 会话 %s"
                     % (where, path.stem[:24]),
                     "历史 bug：页 id 只按 slug 派生 → 跨库撞主键、upsert 更新了别库那一行。"
-                    "修复已上线（id 含库 + 同库守卫 + 写后对账）；存量请重跑该文档的建模批次"
+                    "修复已上线（id 含库 + 同库守卫 + 写后核对）；存量请重跑该文档的建模批次"
                     "落进本库，并人工核对别库那几页是否需回退/删除")
     ctx["data"]["session_pages"] = {"sessions": sessions, "pages": pages_seen,
                                     "missed": missed_total}
@@ -1109,7 +1109,7 @@ def check_context_map(ctx: dict, rep: Report) -> None:
                                     "pairs": len(cache.get("pairs") or []),
                                     "stale": cache.get("stale_count", 0)}
 
-    # ---- G9 企业标准定义治理状态（附录 A）：draft 超期未评审 / approved 后被改 ----------
+    # ---- G9 企业标准定义治理状态（附录 A）：draft 超期未复核 / approved 后被改 ----------
     ckb = ke_context.concept_kb().get("id") or ""
     if ckb:
         rows = ke_db.psql_csv(
@@ -1128,12 +1128,12 @@ def check_context_map(ctx: dict, rep: Report) -> None:
             age = int(float(row.get("age_days") or 0))
             if state in ("", "draft") and age >= STANDARD_REVIEW_DAYS:
                 rep.add("G9", "low", row["slug"],
-                        "企业标准定义**待评审**：状态=%s，已 %d 天未动（阈值 %d 天）"
+                        "企业标准定义**待复核**：状态=%s，已 %d 天未动（阈值 %d 天）"
                         % (state or "（未标）", age, STANDARD_REVIEW_DAYS),
-                        "评审后推进状态：`ke_context.py concept-state <slug> reviewed --by 谁`")
+                        "复核后推进状态：`ke_context.py concept-state <slug> reviewed --by 谁`")
             if state == "approved" and row["slug"] in stale_slugs:
                 rep.add("G9", "medium", row["slug"],
-                        "已 `approved` 的企业标准被改动（缓存指纹不一致）→ 需**重新评审**",
+                        "已 `approved` 的企业标准被改动（缓存指纹不一致）→ 需**重新复核**",
                         "复核后重新置 approved（或先退回 reviewed）")
         ctx["data"]["context_concept_states"] = counts
 
@@ -1416,7 +1416,7 @@ KIND_HELP = {
     "orphan_revisions": "孤儿版本快照（D3，没有对应页）→ 删",
     "dangling_edges": "悬空关系行（A1）→ 删该行（快照+版本+1）",
     "dup_edges": "重复/自环关系行（A5）→ 去重（快照+版本+1）",
-    "orphan_graph_nodes": ("图库对账：**全库**孤儿实例节点（对应知识库已删/软删）→ 删（含其边）；"
+    "orphan_graph_nodes": ("图库核对：**全库**孤儿实例节点（对应知识库已删/软删）→ 删（含其边）；"
                            "WeKnora 删库只删 PG 记录，不删图 ⇒ 此项让巡检清理与图库一致"
                            "（`all` 已包含；也可单独 kinds=orphan_graph_nodes 跑）"),
     "deleted_kb_residue": ("**已软删知识库的 PG 残留**（页/目录/版本快照/问题项）→ 硬删（全库动作）；"
@@ -1602,7 +1602,7 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
                                  "note": "Neo4j BodhiInstance（当前部署通常为 0）"}
     if "no_source_pages" in kinds:
         # 与 check_sources（C1）**同口径**：结构化导入页（page_metadata.import.file_sha256）与
-        # 文档评审页（page_metadata.review）的"来源"记在元数据里 → **豁免**，不列入清理计划。
+        # 文档核对页（page_metadata.review）的"来源"记在元数据里 → **豁免**，不列入清理计划。
         # （2026-09-30 修：此前 plan 侧没走豁免 → purge --kinds all 会把 33 页合法导入页硬删！）
         slugs, exempt = [], 0
         for page in pages:
@@ -1613,7 +1613,7 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
                 continue
             slugs.append(page["slug"])
         actions["no_source_pages"] = {"count": len(slugs), "slugs": sorted(slugs), "exempt": exempt,
-                                      "note": ("结构化导入页/评审页按口径豁免（来源=page_metadata.import.file_sha256 "
+                                      "note": ("结构化导入页/核对页按口径豁免（来源=page_metadata.import.file_sha256 "
                                                "/ page_metadata.review）；exempt=%d" % exempt)}
     if "deleted_source_pages" in kinds or "mixed_source_refs" in kinds:
         res = (ke_docs.residue(kb_id) if ke_docs is not None
@@ -2010,6 +2010,7 @@ def _template_items_of(kb_id: str = "") -> list:
         "SELECT knowledge_base_id AS kb_id, slug, COALESCE(title,'') AS title, "
         "       COALESCE(version,1) AS version, COALESCE(content,'') AS content, "
         "       COALESCE(page_metadata::text,'{}') AS meta, "
+        "       COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS attrs, "
         "       'schema:DocumentTemplate' AS page_type "
         "  FROM wiki_pages WHERE %sdeleted_at IS NULL "
         "   AND page_type = 'schema:DocumentTemplate'" % where)
@@ -2155,7 +2156,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     model = ctx["model"]
     rep.data = ctx["data"]
     rep.findings.sort(key=lambda f: (SEV.get(f["severity"], 9), f["check"], f["subject"]))
-    # P0-c-2（2026-10-10）：**图库对账**（只读）—— WeKnora 删库只删 PG、不删图，图里会留
+    # P0-c-2（2026-10-10）：**图库核对**（只读）—— WeKnora 删库只删 PG、不删图，图里会留
     # 幽灵节点；这里把"图上出现但 PG 已无该库"的节点数报出来（`scope=all/graph` 时才算）。
     graph_orphans = None
     if scope in ("all", "graph"):
@@ -2205,7 +2206,7 @@ def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 
         return {"ok": False, "error": "need_write_permission", "permission": acl,
                 "hint": ("巡检清理需要对该知识库的写权限（属主 / kb_shares 的 editor|writer|admin）；"
                          "调用者租户来自 MCP 头 X-Bodhi-Tenant 或 env BODHI_TENANT_ID")}
-    # P0-c-2（2026-10-10）：**图库对账**（全库孤儿节点）—— 显式指定 `orphan_graph_nodes`
+    # P0-c-2（2026-10-10）：**图库核对**（全库孤儿节点）—— 显式指定 `orphan_graph_nodes`
     # 或 `kinds=all`（已包含）时执行。放在 plan 之前：它是**全库**动作，而计划指纹依赖
     # "本库动作清单"（全库计数一变指纹就失效）；也只走 kinds 路径（不带 `slugs`），
     # 避免"删几页"时顺带做全库图操作。
@@ -2328,7 +2329,7 @@ if __name__ == "__main__":
 def check_ontology_page_drift(ctx: dict, rep: Report) -> None:
     """**W11 本体库与 TTL 编译漂移**（2026-10-18）✓
 
-    背景：有人**把本体当实例改**（直接动图/PG），导致「技术方案文档类的数据属性展示报错」✗
+    背景：有人**把本体当实例改**（直接动图/PG），导致「文档类的数据属性展示报错」✗
     （2026-10-18 实测：重传 3 个本体模型才恢复 ✓）。本体库是**只读**（`assert_writable_kb` ✓），
     正常路径只能是「改 `ontology/*.ttl` → 加载编译」✓；本检查比对**类页 label/comment**
     ↔ `ke_ontology.class_meta()`（编译结果的唯一读口 ✓），漂移即报 ✓。

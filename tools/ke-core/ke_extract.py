@@ -1,9 +1,8 @@
 """`ke_extract` —— **从源文档真抽取**（半自动 ✓，输出 7 字段 ✓）
 
 用法（示例）：
-    ke_extract.extract(kb_id="技术方案评审任务知识库",
-                       knowledge_id="样例1-统一结算平台技术方案.docx",
-                       domain_kb="技术方案评审领域模型", task="逐项评审")
+    ke_extract.extract(kb_id="<工作库>", knowledge_id="<文档名>",
+                       domain_kb="<领域库>", task="<任务名>", spec="policy:<策略页名>")
 
 逻辑（与 `knowledge_extract` 技能契约一致 ✓）：
 1. `ke_plan.build(domain_kb, task)` → 取 `needs_extract` 的 items ✓（规则声明的必需事实 ✓）；
@@ -17,16 +16,10 @@
 """
 
 import json
+import os
 import re
 
-KW = {
-    "deploy_fig": ["部署图", "部署架构", "图1", "图2"],
-    "devices": ["设备申请", "设备清单", "配置规格"],
-    "system": ["A 级", "B 级", "C 级", "系统等级", "等级"],
-    "deploy_text": ["同城", "异地", "双活", "热备", "多活"],
-    "software": ["Redis", "Nginx", "Kafka", "DM8", "版本", "组件"],
-    "certified": ["认证清单", "中心认证", "参考规范"],
-}
+# 检索关键词**来自规则声明**（`item.keywords` / `item.need`），代码里不内置任何同义词表 ✗
 SNIP = 120
 # 2026-10-18（用户口径 ✓）：**"知识来自文档中的图"** 的识别（图注 / 图内文字 / 引用图的句子 ✓）
 CAPTION = re.compile(r"图\s*\d+|图注|附图|见图|如下图|图一|图二|Figure\s*\d+")
@@ -103,9 +96,9 @@ def _doc_text(kb: str, knowledge_id: str) -> list:
     return out
 
 
-def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐项评审",
+def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "",
             other_kbs: list | None = None, limit_items: int = 20,
-            spec: str = "policy:技术方案逐项评审策略") -> dict:
+            spec: str = "") -> dict:
     """`spec` 决定取哪些规则 ✓（默认按**策略** ✓，不再依赖任务边 ✗）。"""
     import ke_db
     import ke_plan
@@ -128,10 +121,15 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
                          "（可先 `knowledge_lookup(mode=\"keyword\", query=<文档名>)` ✓）；"
                          "② 文档是否已解析出 `chunks` ✓；③ 是否需要先上传/重建索引 ✓。"
                          "**不要**据此判定「文档里没有」 ✗。")}
-    # 2026-10-18（用户口径 ✓）：**不再依赖 task/taskExecutesRule** ✗ —— spec 优先 ✓，失败再兜底 ✓
+    # 2026-10-18（用户口径 ✓）：**不再依赖 task/taskExecutesRule** ✗ —— spec 优先 ✓
+    # 2026-10-23（域词退场）：**不内置任何策略名/库名** ✗ —— `spec` 由调用方给；
+    #   领域库缺省取 env `BODHI_DOMAIN_KB_NAME`（未配置 ⇒ 只用调用方给的那个库）。
     plan = {}
-    for _dkb, _spec in ((dkb, spec or ""), (dkb, "policy:技术方案逐项评审策略"),
-                        ("技术方案评审领域模型", "policy:技术方案逐项评审策略")):
+    _cands = [(dkb, spec or "")]
+    _dom_env = (os.environ.get("BODHI_DOMAIN_KB_NAME") or "").strip()
+    if _dom_env and _dom_env != dkb:
+        _cands.append((_dom_env, spec or ""))
+    for _dkb, _spec in _cands:
         try:
             plan = ke_plan.build(_dkb, task, spec=_spec)
             if (plan.get("items") or []):
@@ -149,17 +147,22 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
         _seen.add(_id)
         _uniq.append(_it)
     todo = _uniq
-    others = other_kbs or ["技术方案评审领域模型", "技术方案评审任务知识库", "企业本体模型"]
+    others = other_kbs
+    if others is None:      # 2026-10-23（域词退场）：跨库提示库清单**来自 env**，不写死库名 ✗
+        others = [x.strip() for x in (os.environ.get("BODHI_DOMAIN_KB_NAME"),
+                                      os.environ.get("BODHI_WORK_KB_NAME")) if (x or "").strip()]
 
     items = []
     for it in todo[:limit_items]:
         iid = str(it.get("id") or "")
-        kws = KW.get(iid) or [str(it.get("need") or iid)[:12]]
+        # 关键词来源：① 规则页声明的 `keywords` ✓ ② 规则声明的 `need` 原文 ✓（不内置同义词表 ✗）
+        kws = [str(x).strip() for x in (it.get("keywords") or []) if str(x).strip()] \
+            or [str(it.get("need") or iid)[:12]]
         hits = [(t, ln) for t, ln in lines if any(k in ln for k in kws)][:5]
         kind = str(it.get("kind") or "text")
         stype = {"image": "image", "table": "doc_table", "class": "graph"}.get(kind, "doc_text")
         # 2026-10-17（用户口径 ✓）：本工具**只定位候选** ✓ —— `status` 交给 `knowledge_extract` 判读 ✗
-        #   （实测：关键词会命中"2.3 部署架构"这种章节标题 ✗，据此判 present 就是假断言 ✗）
+        #   （实测：关键词会命中章节标题本身 ✗，据此判 present 就是假断言 ✗）
         other_hint = []
         if not hits:
             for kbn in others:
@@ -175,7 +178,7 @@ def extract(kb_id: str, knowledge_id: str, domain_kb: str = "", task: str = "逐
             "quote": "", "locator": "",
             "candidates": [{"line": ln[:SNIP], "locator": t,
                             # 2026-10-18（用户口径 ✓）：**知识来自文档中的图** ⇒ 标 `doc_image` ✓
-                            #   （图不当知识入库 ✗；只标来源 ✓ 便于与文字来源对比验证 ✓）
+                            #   （图不作为入库知识 ✗；只标来源 ✓ 便于与文字来源对比验证 ✓）
                             "source_type_hint": ("doc_image" if CAPTION.search(t + " " + ln) else stype)}
                            for t, ln in hits],
             "hints_other_kb": other_hint,

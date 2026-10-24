@@ -307,7 +307,7 @@ TOOL_SCHEMAS = [
                             "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理）；"
                             "② 不给 → 按 `kinds`（all=清理异常+修问题；也可 no_source_pages/deleted_source_pages/"
                             "mixed_source_refs/soft_deleted_rows/orphan_revisions/**orphan_graph_nodes** 等）生成计划并立即执行。"
-                            "`orphan_graph_nodes` = **图库对账**（全库）：删掉「对应知识库已删除/软删」的孤儿实例节点"
+                            "`orphan_graph_nodes` = **图库核对**（全库）：删掉「对应知识库已删除/软删」的孤儿实例节点"
                             "（WeKnora 删库只删 PG、不删图）；已含在 `kinds=all` 里。"
                             "`dry_run=true` 只看影响面。**删除不可逆**，删前先 `audit_scan` 把 target 念给用户确认。"),
             "inputSchema": {"type": "object", "properties": {
@@ -341,9 +341,9 @@ TOOL_SCHEMAS = [
                             "哪都没有 ⇒ `unavailable` ✓。**不得**把章节标题命中当成事实命中 ✗（假断言 ✗）。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string", "description": "源文档所在库（任务知识库）"},
-                "knowledge_id": {"type": "string", "description": "文档 UUID / 标题 / 文件名（如 样例1-…docx）"},
+                "knowledge_id": {"type": "string", "description": "文档 UUID / 标题 / 文件名（如 <标题>.docx）"},
                 "domain_kb": {"type": "string", "description": "规则所在库（领域模型）"},
-                "task": {"type": "string", "description": "任务（默认 逐项评审）"},
+                "task": {"type": "string", "description": "任务（可空）"},
                 "other_kbs": {"type": "array", "description": "文档缺时查哪些库（可选）"},
                 "limit_items": {"type": "integer"}},
                 "required": ["kb_id", "knowledge_id"]},
@@ -409,7 +409,7 @@ TOOL_SCHEMAS = [
         },
                 {
             "name": "reference_lookup",
-            "description": ("**文档评审·取参考规范（只读）**：按规则里的「参考规范」（`bmm:ruleReference`，URL 或规范名）"
+            "description": ("**取参考规范（只读）**：按规则里的「参考规范」（`bmm:ruleReference`，URL 或规范名）"
                             "找**规范内容**：① 知识库文档/附件同名 → 回 `knowledge_id`（正文用 `doc_outline` 取）；"
                             "② 知识库 wiki 页标题/slug 命中 → 直接回正文片段；③ `allow_fetch=true` 且是 URL → 抓取并剥 HTML"
                             "（**内网友好**：`BODHI_HTTP_PROXY` 代理 / `BODHI_REF_TIMEOUT` 超时 / `BODHI_REF_HOSTS` 白名单；"

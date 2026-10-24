@@ -1760,7 +1760,7 @@ def main() -> int:
     p_state = sub.add_parser("concept-state", help="**写**：推进概念页治理状态（draft/reviewed/approved）")
     p_state.add_argument("slug")
     p_state.add_argument("state", choices=["draft", "reviewed", "approved"])
-    p_state.add_argument("--by", default="", help="评审人（记进元数据 reviewed_by）")
+    p_state.add_argument("--by", default="", help="复核人（记进元数据 reviewed_by）")
     p_state.add_argument("--note", default="")
     p_state.add_argument("--tenant", type=int, default=None)
     sub.add_parser("ensure-marks", help="给本体库/概念库自动补 wiki_config 标记（派生、幂等）")
