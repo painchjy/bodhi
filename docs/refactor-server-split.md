@@ -28,7 +28,7 @@
 | S7 | `srv/render.py` | `_design_sections` + `SKILL_CONTEXTS` + `_type_label_of` + `context_meta`（纯渲染；`build_new_page` 留 S8） | `srv.text`/`ke_pages`/`ke_ontology` | 低 | **✅ 完成** |
 | S8 | `srv/schemas.py`（**S8a ✅**）+ `srv/tools_read.py`（**S8b-1 ✅**）+ `srv/tools_ops.py`（**S8b-2a ✅**）+ 危险工具/`save_knowledge`（S8b-2b 待做） | schema 559 行；只读 5 个；运维 `kb_export`/`kb_import` | `ke_audit`/`ke_context`/`kb_transfer` | 中 | **S8a ✅ S8b-1 ✅ S8b-2a ✅** |
 | S9 | `srv/http.py` | HTTP/JSON-RPC 层（`ThreadingHTTPServer` + handler）与 `main()` | 协议 | 中 | **✅ 完成**（`server.main()` 只做 `srv.http.bind(globals())` 委托） |
-| **A1** | `srv/handlers/*` | **工具处理注册表**（`@handle` 登记 + 注册表优先分发，旧 if 链兜底） | `srv.tools_*` | 中 | **A1-0…A1-5 ✅（注册表 33 个工具）；剩 8 个 live 分支待内部函数抽出** |
+| **A1** | `srv/handlers/*` | **工具处理注册表**（`@handle` 登记 + 注册表优先分发，旧 if 链兜底） | `srv.tools_*` | 中 | **A1-0…A1-7 ✅（注册表 37 个工具）；if 链只剩 `save_knowledge`** |
 
 ### A1 记录（2026-10-24，**结构拆分，工具面不变**）
 - 新增 `srv/handlers/__init__.py`：`REGISTRY` + `@handle("<工具名>")` + `dispatch(name, args)`（未登记 ⇒ 返回 `None`）
@@ -103,12 +103,6 @@
 - 验证：`compileall` ✓ / `test_agent_tool_lists` + `test_coverage_gaps` + `test_replay_mined` 全绿 ✓ /
   `agents.sql` 工具数与 schema 复核一致 ✓
 
-#### A1 剩余（下一轮，需先抽内部函数）
-`job_status` / `ontology_types` / `skills` / `save_knowledge` / `image_extract` / `context_concept_apply` /
-`context_concept_rollback` / `context_authority_apply` —— 8 个 live 分支，全部依赖 `server.py` 内部函数
-（`_job_brief` / `load_skills` / `save_knowledge` 的写库编排 / `image_extract` / `context_*`），
-按 `srv/knowledge_write.py` → `srv/design.py` → `srv/meta.py` 三片搬完即可清零。
-
 #### A1-6（2026-10-24，✅ 完成）「退役工具的**死代码**清理」
 - `server.py` 删 3 个**只剩死引用**的函数：`service_overview_tool` / `start_overview_job` /
   `rebuild_wiki_from_graph`（工具已退役 ⇒ 无入口；冗余的 P3-0i3 段头一并去掉）
@@ -125,6 +119,36 @@
 ① `_req_cache` 显式化为上下文对象；② `skills()`→`ontology_types()`→`load_engine()` 的链与 `SKILLS_DIR`/`JOBS`
 等模块级状态一起搬进 `srv/meta.py`；③ `refresh_service_overview`→`save_knowledge` 的依赖方向要先定向
 （`srv/knowledge_write.py` 不反向 import `srv/meta.py`）。三者都在**写库路径**上，必须单独一轮做 + 全量回归。
+
+#### A1-7（2026-10-24，✅ 完成）「**模块级状态 + 薄封装**搬进 `srv/`：8 个 live 分支清掉 7 个」
+- 新增 5 个模块（**实现逐字搬家**，行区间 + 首尾签名双校验由脚本 `logs/_move3b.py` 保证）：
+  - `srv/engine.py`：`load_engine()`（只做 `sys.path` + `import extract`，无状态）
+  - `srv/jobs.py`：`JOBS` / `JOBS_LOCK` / `DETAIL_KEYS` / `_job_brief` / `job_status`
+  - `srv/images.py`：`_IMG_REF_RE` / `_image_root` / `_resolve_image_path` / `image_extract`
+  - `srv/meta.py`：`SKILLS_DIR` / `load_skills` / `skills` / `ontology_types` / `INDEX_PATH`
+  - `srv/context_write.py`：`context_concept_apply` / `context_concept_rollback` / `context_authority_apply`
+- 新增 3 个 handler 切片（注册表优先）：`srv/handlers/catalog.py`（`ontology_types`/`skills`/`job_status`）、
+  `srv/handlers/media.py`（`image_extract`）、`srv/handlers/context_.py`（3 个上下文写）
+- `srv/http.py` 改为**显式** import 上下文写 ⇒ REST 路由不再依赖 `bind()` 注入（消掉 S9 那类运行期 NameError 面）
+- 效果：`server.py` **2454 → 1989 行**（累计 2700+ → 1989）；`tools=37`；if 链**只剩 `save_knowledge` 1 个分支**
+- **搬家踩到并修掉的真 bug**：`srv/` 比 `server.py` 深一层 ⇒ `Path(__file__).resolve().parents[2]` 指到了
+  `tools/` ⇒ `ontology_types` 读不到 `artifacts/weknora/ontology_index.json`、`skills()` 列表为 **0**
+  （服务不报错，静默降级 ✗）。改为 `parents[3]` 后实测 `classes` 正常、`skills` **8 个** ✓
+- 验证：`import server` 冒烟 ✓ → 重启 `active+success+8765` ✓ → 实调用 7 个工具（`ontology_types`/`skills`
+  =8/`job_status`=0/`image_extract`=2 图/3 个 context 写返回**业务错误而非 NameError**）✓ →
+  REST `/bodhi/context/concept/rollback` **200** ✓ → 回归 `coverage_gaps`+`agent_tool_lists`+`mcp_tools_read`+
+  `no_business_semantics`+`skills_manifest`+`page_attributes_*` **24 项全绿** ✓
+- **新增静态自检**（`logs/_undef.py`，等价 pyflakes undefined-name）：搬家后逐文件核对"引用了但没定义/导入"的
+  名字 —— `http.py` 那 34 个是 `bind()` 注入面（已知豁免），其余模块必须 **0** ✓
+
+#### A1-8（待做：只剩 1 个工具）
+`save_knowledge`(428 行) + 它的写库编排群（`save_elements` 322 / `design_elements` 150 / `link_source_session` 63 /
+`adopt_session` 37 / `_session_page_ref` 37 / `_pick_session_no` 20 + 若干小工具）≈ **1100 行**，
+全在**写库路径**上。搬家前必须先做两件事：
+① `_req_cache()` 显式化为"请求上下文对象"（现在是 `threading.local()`，被这些函数隐式读取）；
+② 定依赖方向：`srv/knowledge_write.py` ← `srv/elements.py` / `srv/session_link.py`，**不得**反向 import
+`srv/meta.py`（`refresh_service_overview` 在 server 里调 `save_knowledge`，方向应为 server → knowledge_write）。
+⇒ 单独一轮做 + 写库全量回归（`test_mcp_tools_write` / `test_replay_mined` / 真实 apply 一次）。
 
 ## 3. 完成判据
 - `server.py` ≤ **800 行**（协议 + 注册 + 分发三段）✓

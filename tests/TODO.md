@@ -9,7 +9,7 @@
 |---|---|---|
 | `[功能]` 已修 | B5 `before_version` 漏传、B6 kb 清单缓存阻塞新库写入、D1-D4 技能清单、C1-C4 脚手架、B3 导出回执断言 | 已修 ✓ |
 | `[非功能]` **后置** | **B7**（部分索引语义）✅ 已补隔离用例 ｜ **A1/A2**（流程骨架数据缺口）✅ 数据已由用户补齐、`test_flow_skeleton` 绿 ｜ **B1/B2**（调用契约需按实际传参）✅ 已按实际传参 | 已解决 ✓（2026-10-24 复核） |
-| `[功能]` 进行中 | P2 server.py 拆分（见 `docs/refactor-server-split.md`）；A 层见 §A1 | 现在做 ✓ |
+| `[功能]` 进行中 | P2 server.py 拆分（见 `docs/refactor-server-split.md`）；A 层见 §A1（**A1-7 已完成**：注册表 37 个工具，if 链只剩 `save_knowledge`） | 现在做 ✓ |
 | `[功能]` **P5 内网问题** | **4.5 解绑**（`context_authority_apply{action:"detach"}`）｜**4.3 参考规范**（`reference_lookup` 代理/超时/白名单 + 结构化 `reason`） | **已落地 ✓**（2026-10-22，用例：`test_mcp_tools_context_detach.py` / `test_reference_lookup.py`） |
 | `[功能]` P5 已完成 | 4.5 解绑 ｜ 4.3 参考规范 ｜ **4.1+4.4 检索策略 v2** ｜ **4.6 会话分页** | 已落地 ✓（用例与口径见 `docs/p5-internal-issues.md`） |
 | `[功能]` P5 待做 | —（4.1/4.2/4.3/4.4/4.5/4.6 全部落地 ✓） | 见 `docs/p5-internal-issues.md`；后续：域词退场（工具/技能只认类型与属性） |

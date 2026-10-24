@@ -58,3 +58,6 @@ from srv.handlers import query as _query  # noqa: E402,F401
 from srv.handlers import pages as _pages  # noqa: E402,F401
 from srv.handlers import write as _write  # noqa: E402,F401
 from srv.handlers import ab as _ab  # noqa: E402,F401
+from srv.handlers import catalog as _catalog  # noqa: E402,F401
+from srv.handlers import context_ as _context  # noqa: E402,F401
+from srv.handlers import media as _media  # noqa: E402,F401

@@ -14,6 +14,9 @@ _CORE = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abs
 if _CORE not in sys.path:
     sys.path.insert(0, _CORE)
 from srv.constants import EXPORT_DIR, PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION  # noqa: E402
+from srv.context_write import (  # noqa: E402
+    context_concept_apply, context_concept_rollback,
+)
 from srv.tools_ops import kb_export, kb_import  # noqa: E402
 
 
