@@ -119,10 +119,19 @@ def _mcp(name: str, args: dict) -> dict:
 
 
 def ledger_items(review_no: str) -> list:
-    """台账条目（经 MCP 工具读，不直连文件 ✓）。"""
-    return list((_mcp("ext_issue_list", {"mode": "query", "action": "list",
-                                         "review_no": review_no, "view": "rows"})
-                 .get("rows") or []))
+    """台账条目：**先走 MCP 工具**（8766 it-platform）；工具不可用（本机未装该服务）时
+    回退到 `ke_ext_store` 的台账分片（同一体系的官方读写函数，只读 ✓）。"""
+    out = _mcp("ext_issue_list", {"mode": "query", "action": "list",
+                                  "review_no": review_no, "view": "rows"})
+    rows = out.get("rows")
+    if rows:
+        return list(rows)
+    try:
+        import ke_ext_store as S  # noqa: PLC0415
+        doc = S.read_json(S.shard_path("issues", review_no, subdir="issues"), {}) or {}
+        return list(doc.get("items") or [])
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _slug_of_rule(kb_id: str, rule: str) -> str:
