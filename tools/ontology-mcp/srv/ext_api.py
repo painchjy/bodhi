@@ -227,6 +227,41 @@ def update_payload(body: dict) -> dict:
         actor=str(body.get("actor") or ""), session_no=str(body.get("session_no") or ""))
 
 
+def _pipes(line: str) -> int:
+    """数"未转义的竖线"（`\\|` 是单元格里的字面竖线，不参与列数判断）。"""
+    return line.replace("\\|", "").count("|")
+
+
+def _table_span(lines: list, i: int, expect_cells: int) -> int:
+    """从表头行 `i` 扫到表格结束（含 **被写散的坏行**）→ 结束下标（不含）。
+
+    为什么需要它（2026-10-26 用户实测 bug）：
+      单元格里含换行时，old 渲染会把一行拆成多行（`| P-04 | … | 达梦数据库 DM8` / `业务库` /
+      `8.1.3.100` / `同城 | 不符合 | …`）。这些"裸行"不以 `|` 开头 ⇒ 旧扫描认为表格到此为止，
+      于是同步只替换了前几行，尾部坏行留在正文里 ⇒ 表格永远修不好（手工删行后一刷新又回来）。
+
+    规则：
+      - `|` 开头 ⇒ 属于本表；
+      - 空行 / 标题（`#`）/ 围栏（```）/ 引用块（`>`）⇒ 表格结束；
+      - 其它"裸行" ⇒ **仅当上一行是残缺行**（未转义竖线数 ≠ 表头列数+1）才并入；否则视为表后正文，结束。
+    这样正常表格不会被误吞，坏行能被整段替换掉 ✓。
+    """
+    expect = expect_cells + 1
+    j, n = i + 1, len(lines)
+    while j < n:
+        s = lines[j].strip()
+        if s.startswith("|"):
+            j += 1
+            continue
+        if not s or s.startswith(("#", "```", ">")):
+            break
+        if _pipes(lines[j - 1]) != expect:      # 上一行是被写散的残缺行 ⇒ 本行是它的续行
+            j += 1
+            continue
+        break
+    return j
+
+
 def _replace_section_table(content: str, table_md: str, label: str) -> tuple:
     """把"**表头单元格**含 `label`"的那张表换成 `table_md`（其余不动）。→ `(新正文, 是否替换)`
 
@@ -241,12 +276,9 @@ def _replace_section_table(content: str, table_md: str, label: str) -> tuple:
     i = 0
     while i < len(lines):
         if lines[i].lstrip().startswith("|"):
-            j = i
-            while j < len(lines) and lines[j].lstrip().startswith("|"):
-                j += 1
             cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
-            tables.append((i, j, cells))
-            i = j
+            tables.append((i, _table_span(lines, i, len(cells)), cells))
+            i = tables[-1][1]
         else:
             i += 1
     pick = None
@@ -278,13 +310,11 @@ def _dedupe_anchor_tables(content: str, label: str) -> tuple:
     spans, i = [], 0
     while i < len(lines):
         if lines[i].lstrip().startswith("|"):
-            j = i
-            while j < len(lines) and lines[j].lstrip().startswith("|"):
-                j += 1
             cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+            end = _table_span(lines, i, len(cells))
             if label in cells:
-                spans.append((i, j))
-            i = j
+                spans.append((i, end))
+            i = end
         else:
             i += 1
     if len(spans) <= 1:

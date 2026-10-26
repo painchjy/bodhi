@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 
 import ke_ext_store as S
@@ -117,8 +118,23 @@ def _md(items: list, schema: dict, columns=None) -> str:
     out = ["| " + " | ".join(labels.get(c, c) for c in cols) + " |",
            "|" + "---|" * len(cols)]
     for it in _sorted_items(items):
-        out.append("| " + " | ".join(str(it.get(c) or "").replace("|", "\\|") for c in cols) + " |")
+        out.append("| " + " | ".join(_cell(it.get(c)) for c in cols) + " |")
     return "\n".join(out)
+
+
+def _cell(v) -> str:
+    """单元格文本：**必须先压平换行**（2026-10-26 用户实测 bug）。
+
+    为什么：文档里表格行的摘录天然带 `\\n`（如「达梦数据库 DM8\\n业务库\\n8.1.3.100\\n同城」），
+    旧实现只转义了 `|` ⇒ 一行被写散成多行，Markdown 表格当场断掉（列数 11 → 5 混排），
+    报告页看起来就是"表格错位"，而且同步时只认连续 `|` 行 ⇒ 尾部坏行永远清不掉。
+
+    口径：换行 → `<br>`（报告是 HTML 渲染，语义保留 ✓）；竖线 → `\\|`；首尾空白去掉。
+    """
+    s = str(v if v is not None else "")
+    s = s.replace("\r\n", "\n").replace("\r", "\n").replace("|", "\\|")
+    parts = [p.strip() for p in s.split("\n")]
+    return "<br>".join(p for p in parts if p)
 
 
 def _columns(schema: dict, columns=None) -> list:

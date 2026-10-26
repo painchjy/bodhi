@@ -654,7 +654,34 @@ curl -s -X POST http://127.0.0.1:8765/bodhi/ext/sync-report -H 'Content-Type: ap
 里找到事发前的 `report.content_md`，把该段贴回后用 `save_knowledge(stage="report", mode="apply")`
 重写（页头「首个版本生成」保持首版时间 ✓），最后再跑一次 `sync-report` 让条目表归位。
 
-## 报告 ③ 的「规则指纹」是 `r-xxxxxx`（应为规则页 ruleHash）/ 台账 rev 大得离谱
+## 报告 ③ 表格"错位"（列数忽多忽少、点保存/刷新正文后更明显）
+
+**现象**：修改「专家反馈」→ 保存 → 面板「刷新正文」后，问题清单表某几行只有 5 列（其余 11 列），
+表体看起来错位；手工删掉这几行再刷新，坏行**又回来**。
+
+**根因（两个，缺一不可）**：
+1. **渲染没压平换行**：文档里表格行的「原文摘录」天然带 `\n`（`达梦数据库 DM8\n业务库\n8.1.3.100\n同城`），
+   `ke_ext_issues._md()` 旧实现只转义 `|` ⇒ 一行被写散成多行，Markdown 表格当场断掉；
+2. **同步的表格区段只认连续 `|` 行** ⇒ 只替换了前 3 行，尾部坏行留在正文里（所以"手工删行"没用：
+   下一次同步仍按台账重新生成坏行；而只替换前几行又清不掉残渣）。
+
+**已修（2026-10-26）**：
+- `ke_ext_issues._cell()`：换行 → `<br>`、`|` → `\|`、逐段去空白（**行数恒等于条目数 + 2**）；
+- `ext_api._table_span()`：扫描表格时容忍"被写散的坏行"（仅当上一行竖线数 ≠ 表头列数+1 才并入续行，
+  空行/标题/围栏/引用块一律视为表格结束）⇒ 一次同步即可把历史坏行**整段替换**掉；
+- 回归：`tests/test_ext_sync.py::test_replace_repairs_broken_multiline_rows` /
+  `test_md_escapes_newlines_in_cells`。
+
+**验收（实测）**：
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/bodhi/ext/sync-report -H 'Content-Type: application/json' \
+  -d '{"object":"bpmn/dataobject/问题清单","review_no":"YYYYMM-222444"}' | python3 -m json.tool
+# 第一次：changed=true + version+1；再跑：changed=false（幂等）
+# 报告 ③ 段应为：表行 = 条目数 + 2，且**每行列数 = 表头列数**（本例 12 条 → 14 行 × 11 列）
+```
+
+> 判据：正文里出现**不以 `|` 开头的裸行**（`业务库` / `8.1.3.100` 这类）= 还没修好，重跑同步即可。
 
 **症状**（2026-10-26 用户实测）：
 - ② 规则清单的指纹是 16 位 hex（`bmm:ruleHash` ✓），③ 问题清单却是 `r-f2f4a9` 这种短哈希；

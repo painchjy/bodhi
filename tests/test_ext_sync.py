@@ -73,3 +73,52 @@ def test_dedupe_keeps_single_anchor_table():
 def test_dedupe_noop_on_single_table():
     new, n = E._dedupe_anchor_tables(SEC3, "编号")
     assert n == 0 and new == SEC3
+
+
+# ── 2026-10-26 用户实测：专家反馈保存+刷新后「问题清单表格错位」 ──────────────
+BROKEN = """## ③ 问题清单
+
+| 编号 | 问题描述 | 触发规则 | 文档位置 | 原文摘录 | 判定 |
+|---|---|---|---|---|---|
+| P-01 | d1 | r1 | 2.1 | 摘录一 | 符合 |
+| P-02 | d2 | r2 | 2.2 | 达梦数据库 DM8
+业务库
+8.1.3.100
+同城 | 不符合 |
+| P-03 | d3 | r3 | 2.3 | 摘录三 | 无法判定 |
+
+> 表后补充：本表逐字来自台账回执。
+"""
+
+
+def test_replace_repairs_broken_multiline_rows():
+    """单元格含换行被写散的历史坏行 ⇒ 一次替换后**不留残行**（也不吞表后正文）。"""
+    table = ("| 编号 | 问题描述 | 触发规则 | 文档位置 | 原文摘录 | 判定 |\n"
+             "|---|---|---|---|---|---|\n"
+             "| P-01 | d1 | r1 | 2.1 | 摘录一 | 符合 |\n"
+             "| P-02 | d2 | r2 | 2.2 | 达梦数据库 DM8<br>业务库<br>8.1.3.100<br>同城 | 不符合 |\n"
+             "| P-03 | d3 | r3 | 2.3 | 摘录三 | 无法判定 |")
+    new, ok = E._replace_section_table(BROKEN, table, "编号")
+    assert ok is True
+    assert "业务库" in new and "业务库<br>" in new, "换行必须压成 <br> 回到单元格里"
+    assert "\n业务库\n" not in new, "坏行残片必须被替换掉（不能留裸行）"
+    assert new.count("| 编号 | 问题描述 |") == 1
+    assert "> 表后补充" in new, "表后正文不能被吞"
+    for ln in new.splitlines():
+        s = ln.strip()
+        assert not s or s.startswith(("|", "#", ">")) or s.startswith("表后"), "出现裸行：%r" % ln
+
+
+def test_md_escapes_newlines_in_cells():
+    """台账渲染：单元格内换行 → `<br>`，竖线 → `\\|`；行数必须 = 条目数 + 2。"""
+    import ke_ext_issues as ISS
+    schema = {"fields": ["issue_no", "quote"], "order": ["issue_no", "quote"],
+              "labels": {"issue_no": "编号", "quote": "原文摘录"},
+              "verdict_enum": [], "severity_enum": []}
+    items = [{"issue_no": "P-01", "quote": "达梦数据库 DM8\n业务库\n8.1.3.100\n同城"},
+             {"issue_no": "P-02", "quote": "a|b"}]
+    md = ISS._md(items, schema)
+    lines = md.splitlines()
+    assert len(lines) == 4, md
+    assert "达梦数据库 DM8<br>业务库<br>8.1.3.100<br>同城" in lines[2]
+    assert "a\\|b" in lines[3]

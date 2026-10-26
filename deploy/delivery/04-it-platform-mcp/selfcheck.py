@@ -58,7 +58,12 @@ def main() -> int:
         ok("种子 schema.json 存在（运行期 bootstrap 需要）", False, p2)
 
     # ③ 工具面
-    sys.path.insert(0, os.path.join(base, "tools", "ke-core"))   # 契约读取依赖 ke_ext_store
+    # 契约读取依赖 ke_ext_store（在 `ke-core`）：04 包不含它（与 02 共用）⇒ 依次找
+    for cand in (os.path.join(base, "tools", "ke-core"), os.environ.get("BODHI_KECORE", ""),
+                 "/opt/bodhi2/tools/ke-core", os.path.join(args.repo, "tools", "ke-core")):
+        if cand and os.path.isdir(cand):
+            sys.path.insert(0, cand)
+            break
     sys.path.insert(0, svc)
     try:
         import schemas  # noqa: PLC0415

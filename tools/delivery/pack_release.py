@@ -68,7 +68,14 @@ FRONTEND_PATCH_FILES = ("patch_frontend.py", "gen_frontend_types.py", "ontologyT
                         "bodhi_type_migration.ts")
 PACKAGES = (("01-frontend", "bodhi2-01-frontend.tar.gz"),
             ("02-mcp-server", "bodhi2-02-mcp-server.tar.gz"),
-            ("03-manual", "bodhi2-03-manual.tar.gz"))
+            ("03-manual", "bodhi2-03-manual.tar.gz"),
+            ("04-it-platform-mcp", "bodhi2-04-it-platform-mcp.tar.gz"))
+# 04 独立服务包口径（2026-10-26 用户裁定）：
+#   - `tools/it-platform-mcp/**` **只进 04**（02 排除，两个服务互不牵连）；
+#   - 只带文本种子（allowlist/denylist/issues/flows），**不带** docs/files/images 二进制；
+#   - `ke-core` 是 02/04 共用的运行时库 ⇒ **不复制**（重复内容会被去重断言拦），由 install.sh 指向 02 的 tools/ke-core。
+EXT_TOOL_DIR = "it-platform-mcp"
+EXT_SEED_SKIP = ("docs", "files", "images", "state")
 
 
 def run(cmd: list[str], cwd: pathlib.Path | None = None, check: bool = True) -> int:
@@ -148,9 +155,13 @@ def check_no_machine_ids(stage: pathlib.Path) -> dict:
 
 
 def check_no_duplicates(stage: pathlib.Path) -> dict:
-    """断言**三包之间 + 各包内部**没有内容相同的文件（用户口径：三包不应有重复内容）。
+    """断言**各包之间 + 各包内部**没有内容相同的文件（用户口径：包与包不应有重复内容）。
 
     以 sha256 判定「同一份内容」；空文件也算重复（所以占位文件必须带一行注释）。
+
+    **唯一例外（2026-10-26 用户裁定）**：`it-platform/schema.json`（数据契约）必须同时随
+    02 与 04 发布 —— 02 的 `x-ext`/快照回写要读标签，04 的服务本身要用它；
+    两处内容一致由 `deploy/delivery/04-it-platform-mcp/selfcheck.py` 断言（改了忘同步会红）。
     """
     seen: dict[str, tuple[str, str]] = {}
     dups: list[tuple[str, str, str]] = []
@@ -163,7 +174,11 @@ def check_no_duplicates(stage: pathlib.Path) -> dict:
             per_pkg[pkg.name] += 1
             h = sha256(f)
             if h in seen:
-                dups.append((seen[h][0], seen[h][1], rel))
+                prev = seen[h][1]
+                if rel.endswith("/schema.json") and prev.endswith("/schema.json") \
+                        and "it-platform" in rel and "it-platform" in prev:
+                    continue                       # 契约双份（02 读标签 / 04 服务）——见 docstring
+                dups.append((seen[h][0], prev, rel))
             else:
                 seen[h] = (pkg.name, rel)
     if dups:
@@ -284,7 +299,7 @@ def pkg_mcp(stage: pathlib.Path, version: str) -> dict:
     """
     d = stage / "02-mcp-server"
     d.mkdir(parents=True, exist_ok=True)
-    copy_tree(REPO / "tools", d / "tools", skip_top=TOOLS_MANUAL_PKG)
+    copy_tree(REPO / "tools", d / "tools", skip_top=TOOLS_MANUAL_PKG + (EXT_TOOL_DIR,))
     copy_tree(REPO / "skills", d / "skills")
     shutil.rmtree(d / "skills" / "dist", ignore_errors=True)
     copy_tree(REPO / "artifacts", d / "artifacts", skip_top=MCP_ARTIFACT_SKIP)
@@ -327,7 +342,6 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
     for fname in MANUAL_ROOT + MANUAL_PKG_03:
         if (DELIVERY / fname).is_file():
             shutil.copy2(DELIVERY / fname, d / fname)
-    copy_tree(REPO / "docs", d / "docs")
     # 本体真源（2026-09-30）：`ontology/sources/` 是**上传真源**；若它与根目录的出厂副本
     # （`BMM完整版.ttl` / `EA完整版.ttl`）内容相同，则**只带 sources/ 那份** ——
     # 同一份真源只放一个路径（否则去重断言会拦下"上传 bmm = 随包那份"的常见情形）。
@@ -340,12 +354,21 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
     src_hashes = {_sha(p) for p in src_dir.glob("*.ttl")} if src_dir.is_dir() else set()
     dup_root = tuple(p.name for p in (REPO / "ontology").glob("*完整版.ttl")
                      if _sha(p) in src_hashes)
+    # `docs/ontology/*.ttl` 是阅读用的副本（与 sources/ 逐字节相同）⇒ 真源只带一份，
+    # 否则去重断言会拦（2026-10-26 实测：4 份 docs 副本撞上 sources/）。
+    dup_docs = tuple(p.name for p in (REPO / "docs" / "ontology").glob("*.ttl")
+                     if _sha(p) in src_hashes) if (REPO / "docs" / "ontology").is_dir() else ()
+    copy_tree(REPO / "docs", d / "docs", skip_files=dup_docs)
+    if dup_docs:
+        print("   docs/：跳过与 ontology/sources/ 相同的副本 %s（真源只带一份）"
+              % "、".join(dup_docs))
     copy_tree(REPO / "ontology", d / "ontology",
               skip_names=("uploads",), skip_files=dup_root + ("_registry.json.tmp",))
     if dup_root:
         print("   ontology/：跳过与 sources/ 内容相同的出厂副本 %s（真源只带一份）" % "、".join(dup_root))
     copy_tree(seed_dir / "sql", d / "sql")
-    copy_tree(seed_dir / "seed", d / "seed")
+    # 2026-10-26 用户裁定：**知识库里的知识不出包**（本体模型库页面手工导出/导入内网），
+    # 所以不再复制 `seed/`（页面种子）。登记 SQL（sql/）仍要带：它是部署配置，不是知识内容。
     copy_tree(REPO / "tools" / "delivery", d / "tools" / "delivery")
     shutil.copy2(REPO / "deploy" / "weknora-fork" / "refresh_ontology_kb.sh",
                  d / "refresh_ontology_kb.sh")
@@ -359,18 +382,60 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
           "- `AGENTS-SQL.md` —— 智能体与 MCP 登记 SQL（可回滚）\n"
           "- `docs/` —— 设计与运维文档（`agent-design-flow.md` 是建模流程真源）\n"
           "- `ontology/` —— 本体真源：`*完整版.ttl`、`extensions/`、`shapes/`、`lexicon/`、`queries/`\n"
-          "- `seed/` `sql/` —— 本体模型知识库页面种子 + 智能体/MCP 登记 SQL\n"
+          "- `sql/` —— 智能体/MCP 登记 SQL（部署配置，不是知识内容 ✓）\n"
+          "- **知识库页面（`seed/`）不在本包**（2026-10-26 用户裁定：页面由用户手工导出/导入内网）\n"
           "- `tools/delivery/` —— 维护工具（外链体检 `offline_harden.py`、密钥审计 `scan_secrets.py`、\n"
           "  打包 `pack_release.py`、导出种子 `export_db.py`、版本徽标 `patch_version_badge.py`）\n"
           "- `refresh_ontology_kb.sh` —— 编译 TTL → 投影本体知识库（**需与 02 包解到同一父目录**：\n"
           "  它调用 02 包的 `tools/ontology-compiler` 与 `tools/ontology-extract/ontology_wiki.py`）\n\n"
-          "本包**不含**：前端材料（01 包）、MCP 服务与编译产物（02 包）。\n")
+          "本包**不含**：前端材料（01 包）、MCP 服务与编译产物（02 包）、ext 服务（04 包）。\n")
     pages = 0
     seed_sql = d / "seed" / "ontology_kb_pages.sql"
-    if seed_sql.is_file():
+    if seed_sql.is_file():                    # 保留能力：若将来重新带种子，这里会给出页数
         pages = sum(1 for ln in seed_sql.read_text(encoding="utf-8").splitlines()
                     if ln.startswith("INSERT INTO wiki_pages"))
-    return {"seed_pages": pages, "manuals": [f for f in MANUAL_ROOT + MANUAL_PKG_03 if (d / f).is_file()],
+    return {"seed_pages": pages,
+            "seed_note": ("知识库页面不出包：由用户手工导出后导入内网知识库"
+                          if not pages else "已带页面种子"),
+            "manuals": [f for f in MANUAL_ROOT + MANUAL_PKG_03 if (d / f).is_file()],
+            "layout": sorted(p.name for p in d.iterdir())}
+
+
+def pkg_ext(stage: pathlib.Path) -> dict:
+    """04 ext 服务包：**it-platform MCP 独立服务**（台账/文档/评审流程）+ 文本种子 + 安装/自检 + 配置矩阵。
+
+    口径（2026-10-26 用户裁定）：
+      - `tools/it-platform-mcp/**` 只在本包（02 已排除）；
+      - 种子只带文本（allowlist/denylist/issues/flows），**二进制目录不带**；
+      - `ke-core` 不复制（与 02 共用）——`install.sh` 会软链到 02 的 `tools/ke-core`；
+      - 智能体工具面/提示词**不由本包写**（走 `tools/delivery/apply_config.py`，真源在 `agent_tools.yaml`）。
+    """
+    d = stage / "04-it-platform-mcp"
+    d.mkdir(parents=True, exist_ok=True)
+    copy_tree(REPO / "tools" / EXT_TOOL_DIR, d / "tools" / EXT_TOOL_DIR)
+    copy_tree(REPO / "deploy" / "mock-ext" / "it-platform",
+              d / "deploy" / "mock-ext" / "it-platform", skip_names=EXT_SEED_SKIP)
+    for name in ("upload_doc.sh", "README.md"):
+        src = REPO / "deploy" / "mock-ext" / name
+        if src.is_file():
+            shutil.copy2(src, d / "deploy" / "mock-ext" / name)
+    copy_tree(DELIVERY / "04-it-platform-mcp", d / "deploy" / "delivery" / "04-it-platform-mcp")
+    if (DELIVERY / "CONFIG-MATRIX.md").is_file():
+        shutil.copy2(DELIVERY / "CONFIG-MATRIX.md", d / "CONFIG-MATRIX.md")
+    write(d / "README.txt",
+          "bodhi2 ext 服务包（04）：it-platform MCP\n"
+          "=======================================\n\n"
+          "先读 **deploy/delivery/04-it-platform-mcp/README.md**（与 02 的分工、安装、自检），\n"
+          "配置口径见 **CONFIG-MATRIX.md**（哪些能改 / 真源 / 命令 / 生效 / 校验）。\n\n"
+          "  tools/it-platform-mcp/       服务代码 + schema.json（**契约真源**，随服务版本走）\n"
+          "  deploy/mock-ext/it-platform/ 文本种子（allowlist / denylist / issues / flows）\n"
+          "  deploy/delivery/04-it-platform-mcp/  install.sh / selfcheck.py / .env.sample / systemd unit\n\n"
+          "安装：sudo bash deploy/delivery/04-it-platform-mcp/install.sh --prefix /opt/bodhi-ext\n"
+          "自检：python3 deploy/delivery/04-it-platform-mcp/selfcheck.py --base /opt/bodhi-ext\n\n"
+          "依赖：`tools/ke-core` **不在本包**（与 02 共用运行库），install.sh 会自动软链\n"
+          "      `/opt/bodhi2/tools/ke-core`（或用 `--kecore <路径>` 指定）。\n"
+          "本包**不含**：知识库页面/种子（用户手工导出导入）、二进制附件（docs/files/images 现场生成）。\n")
+    return {"files": sum(1 for p in d.rglob("*") if p.is_file()),
             "layout": sorted(p.name for p in d.iterdir())}
 
 
@@ -424,11 +489,12 @@ def main() -> int:
         run([sys.executable, str(HERE / "export_db.py"), "--ontology-kb", ONTOLOGY_KB,
              "--agents", "--out", str(seed_dir)])
 
-    print("== 2/6 暂存三个包")
+    print("== 2/6 暂存四个包")
     stage = pathlib.Path(tempfile.mkdtemp(prefix="bodhi-stage-"))
     fe = pkg_frontend(stage, not args.no_image)
     mcp = pkg_mcp(stage, args.version)
     man = pkg_manual(stage, seed_dir)
+    ext = pkg_ext(stage)
     dup = check_no_duplicates(stage)          # 零重复断言（跨包 + 包内）
     print("   去重断言通过：%d 个文件，无任何内容重复" % dup["unique_files"])
     for name, cnt in sorted(dup["per_package"].items()):
@@ -455,20 +521,24 @@ def main() -> int:
     if (DELIVERY / "MANUAL.md").is_file():
         shutil.copy2(DELIVERY / "MANUAL.md", out / "MANUAL.md")
     write(out / "README.md",
-          "# bodhi2 交付包 %s\n\n先读 **MANUAL.md**（安装部署总指引）。**三个包，内容互不重复**：\n\n"
+          "# bodhi2 交付包 %s\n\n先读 **MANUAL.md**（安装部署总指引）。**四个包，内容互不重复**：\n\n"
           "| 包 | 内容 | 手册 |\n|---|---|---|\n"
           "| `bodhi2-01-frontend.tar.gz` | UI 镜像 + nginx 模板 + overlay + 部署/补丁脚本 | FRONTEND.md |\n"
-          "| `bodhi2-02-mcp-server.tar.gz` | MCP 服务「仓库根形状」整包（tools/ artifacts/ skills/）+ Dockerfile/compose/systemd/自检 | MCP-SERVER.md |\n"
-          "| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源 TTL** + 页面种子 + 登记 SQL + 维护工具 + 其余 4 份手册 | MANUAL.md / ONTOLOGY-KB.md / KB-CONFIG.md / TROUBLESHOOTING.md / AGENTS-SQL.md |\n\n"
+          "| `bodhi2-02-mcp-server.tar.gz` | 本体 MCP 服务「仓库根形状」整包（tools/ artifacts/ skills/）+ Dockerfile/compose/systemd/自检 | MCP-SERVER.md |\n"
+          "| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源 TTL** + 登记 SQL + 维护工具 + 其余 4 份手册 | MANUAL.md / ONTOLOGY-KB.md / KB-CONFIG.md / TROUBLESHOOTING.md / AGENTS-SQL.md |\n"
+          "| `bodhi2-04-it-platform-mcp.tar.gz` | **ext MCP 独立服务**（台账/文档/评审流程）+ 文本种子 + 安装/自检 + `CONFIG-MATRIX.md` | 包内 `README.md`（04 目录）|\n\n"
+          "**知识库页面不在任何包里**（2026-10-26 用户裁定）：本体模型库的页面由用户手工导出、再导入内网知识库；\n"
+          "包内只带登记 SQL（`sql/`）与本体真源 TTL。\n\n"
           "## 手册在哪\n\n"
           "- **根目录只放 `MANUAL.md`**（总指引，免解压即可读）；\n"
-          "- 各包自带自己的部署手册（`FRONTEND.md` 在 01、`MCP-SERVER.md` 在 02），\n"
+          "- 各包自带自己的部署手册（`FRONTEND.md` 在 01、`MCP-SERVER.md` 在 02、04 的 README 在包内），\n"
           "  `ONTOLOGY-KB.md` / `KB-CONFIG.md` / `TROUBLESHOOTING.md` / `AGENTS-SQL.md` 与 `docs/`、`ontology/` 在 **`bodhi2-03-manual.tar.gz`** 里；\n"
           "- **交接/归档以包内为准**；单一来源是仓库 `deploy/delivery/*.md`，`MANIFEST.json` 的 "
           "`manual_sha256` 记录每份哈希，可自校验。\n\n"
           "## 为什么不重复（可选读）\n\n"
           "打包器对**所有暂存文件做 sha256 两两比对**（跨包 + 包内），一旦有重复内容即报错退出：\n"
           "本体编译产物 `artifacts/shacl/authored/*.ttl` 与真源 `ontology/shapes/*.ttl` 逐字节相同，故只留真源；\n"
+          "`tools/ke-core` 是 02/04 共用运行库 ⇒ 只随 02 交付，04 用 `install.sh --kecore` 软链；\n"
           "各包不再把手册复制成包内 `README.md`，改为包专属 `README.txt`。\n\n"
           "## 依赖（省心）\n\n"
           "MCP 服务**零第三方 Python 依赖**（标准库 + `psql`）；`rdflib`/`PyYAML` **只在本体编译时**需要\n"
@@ -488,14 +558,15 @@ def main() -> int:
                 "manuals_authoritative": ("按包归属：根目录 MANUAL.md；FRONTEND.md→01；MCP-SERVER.md→02；"
                                           "其余手册 + docs/ + ontology/(TTL 真源) + sql/ + seed/→03"),
                 "split_policy": {"01": "前端材料（镜像/模板/脚本/FRONTEND.md）",
-                                 "02": "MCP 服务：tools/**（除 tools/delivery）+ artifacts/**（除 artifacts/shacl）+ skills/** + 部署件",
-                                 "03": "文档 + 本体真源 ontology/** + sql/** + seed/** + tools/delivery/** + 其余手册"},
+                                 "02": "本体 MCP 服务：tools/**（除 tools/delivery、tools/it-platform-mcp）+ artifacts/**（除 artifacts/shacl）+ skills/** + 部署件",
+                                 "03": "文档 + 本体真源 ontology/** + sql/**（登记 SQL）+ tools/delivery/** + 其余手册（**知识库页面不出包**）",
+                                 "04": "ext MCP 独立服务：tools/it-platform-mcp/** + mock-ext 文本种子 + 04 安装/自检 + CONFIG-MATRIX.md"},
                 "runtime_deps": {"mcp_server": "零第三方 Python 依赖（标准库 + psql）",
                                  "ontology_compile": "rdflib + PyYAML（仅 tools/ontology-compiler）",
                                  "llm": "服务端不调 LLM（无 openai 依赖）"},
                 "secrets_note": "包内不含 API key / token / 数据库口令；请在内网重新配置（MANUAL.md §3）",
                 "packages": packs,
-                "detail": {"frontend": fe, "mcp": mcp, "manual": man}}
+                "detail": {"frontend": fe, "mcp": mcp, "manual": man, "ext": ext}}
     write(out / "MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     write(out / "SHA256SUMS",
           "".join("%s  %s\n" % (v["sha256"], k) for k, v in packs.items()))

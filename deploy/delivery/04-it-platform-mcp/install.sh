@@ -17,18 +17,33 @@ set -euo pipefail
 SRC="$(cd "$(dirname "$0")/../.." && pwd)"     # 仓库/包根
 PREFIX="/opt/bodhi-ext"
 DATA="/var/lib/bodhi-ext"
+KECORE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) PREFIX="$2"; shift 2 ;;
     --data) DATA="$2"; shift 2 ;;
+    --kecore) KECORE="$2"; shift 2 ;;
     *) echo "未知参数：$1"; exit 2 ;;
   esac
 done
 echo "源=$SRC 前缀=$PREFIX 数据=$DATA"
 
+# `tools/ke-core` 是 02/04 **共用运行库**（不在 04 包里，避免包间重复内容）：
+#   显式 --kecore > 本包内 tools/ke-core > 02 安装路径 /opt/bodhi2/tools/ke-core
+if [ -z "$KECORE" ]; then
+  for cand in "$SRC/tools/ke-core" "/opt/bodhi2/tools/ke-core" "/opt/bodhi-ext/tools/ke-core"; do
+    [ -d "$cand" ] && KECORE="$cand" && break
+  done
+fi
+if [ -z "$KECORE" ] || [ ! -d "$KECORE" ]; then
+  echo "✗ 找不到 ke-core（04 包不含它，与 02 共用）。请：sudo bash install.sh --kecore <02 安装目录>/tools/ke-core"
+  exit 3
+fi
+echo "ke-core=$KECORE"
+
 mkdir -p "$PREFIX" "$DATA"
 rsync -a --delete "$SRC/tools/it-platform-mcp/" "$PREFIX/tools/it-platform-mcp/"
-rsync -a --delete "$SRC/tools/ke-core/" "$PREFIX/tools/ke-core/"
+rsync -a --delete "$KECORE/" "$PREFIX/tools/ke-core/"
 mkdir -p "$PREFIX/deploy/mock-ext"
 rsync -a --delete \
   --exclude 'docs/' --exclude 'files/' --exclude 'images/' --exclude 'state/' \
