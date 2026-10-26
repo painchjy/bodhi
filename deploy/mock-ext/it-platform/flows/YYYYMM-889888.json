@@ -1,0 +1,17 @@
+{
+ "note": "评审流程档案（演示种子）：编号 → 流程/轮次/文档。真实内网由 IT 工作平台维护，本文件只是打样。",
+ "YYYYMM-889888": {
+  "review_no": "YYYYMM-889888",
+  "flow_no": "FLOW-2026-889888",
+  "name": "样例1-统一结算平台技术方案 评审",
+  "stage": "评审执行",
+  "status": "评审中",
+  "round": 1,
+  "rounds": [{"round": 1, "status": "进行中", "started_at": "2026-10-25 09:00:00", "ended_at": ""}],
+  "owner": "评审组长",
+  "reviewers": ["评审专家"],
+  "authority": "internal",
+  "rev": 1,
+  "updated_at": "2026-10-25 09:00:00"
+ }
+}

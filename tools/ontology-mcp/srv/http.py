@@ -197,6 +197,22 @@ class MCPHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._json({"error": str(exc)}, 400, self.CORS)
             return
+        if path in ("/bodhi/ext/update", "/bodhi/ext/describe", "/bodhi/ext/sync-report"):
+            # 面板写台账 / 刷新契约 / 快照回写（2026-10-25）：与 MCP 工具同一实现，只是换成普通 JSON 出入口
+            try:
+                from srv import ext_api                     # noqa: PLC0415
+                if path.endswith("update"):
+                    out = ext_api.update_payload(body)
+                elif path.endswith("sync-report"):
+                    out = ext_api.sync_report_payload(body)
+                else:
+                    out = ext_api.describe_payload(body)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] %s 失败：%s" % (path, exc))
+                self._json({"error": str(exc)}, 400, self.CORS)
+                return
+            self._json(out, 200 if out.get("ok") else 400, self.CORS)
+            return
         def _reject_if_failed(result, what: str):
             """门禁回执（`ok=False`）→ 抛 ValueError（HTTP 层映射成 400 `{"error": …}`）。
 
@@ -407,6 +423,19 @@ class MCPHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse.urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if path in ("/bodhi/ext/list", "/bodhi/ext/schema"):
+            # 面板读台账 / 读接口列清单（2026-10-25）：列口径与数据都来自外部服务回执；
+            # `kb_id` 可省（按 slug 反查）；`review_no` 可省（从页面上下文解析 ✓）
+            params = dict(urlparse.parse_qsl(parsed.query))
+            try:
+                from srv import ext_api                   # noqa: PLC0415
+                out = (ext_api.schema_payload(params) if path.endswith("/schema")
+                       else ext_api.list_payload(params))
+                self._json(out, 200 if out.get("ok") else 400, self.CORS)
+            except Exception as exc:  # noqa: BLE001
+                print("[mcp] %s 失败：%s" % (path, exc))
+                self._json({"error": str(exc)}, 400, self.CORS)
+            return
         if path in ("/bodhi/ontology/classes", "/bodhi/ontology/classes.json"):
             try:
                 self._json(ke_ontology.classes(), 200, self.CORS)
@@ -703,7 +732,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             try:
                 data = ke_audit.audit(params.get("kb_id", ""), params.get("scope", "all"),
                                       int(params.get("max_findings", 50) or 50),
-                                      int(params.get("page_limit", 5000) or 5000))
+                                      int(params.get("page_limit", 5000) or 5000),
+                                      params.get("template_kb_id", ""))
                 self._json(data, 200, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] %s 失败：%s" % (path, exc))

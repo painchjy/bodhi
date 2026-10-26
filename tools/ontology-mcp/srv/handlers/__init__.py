@@ -3,7 +3,7 @@
 为什么要有这一层
 ----------------
 `server.py` 原来是一个 2700+ 行的 `if name == "xxx":` 长链：新增/修改一个工具要在同一文件里
-翻几百行，且难以按"域"（读/写/抽取/巡检/上下文/导入）分开评审。
+翻几百行，且难以按"域"（读/写/抽取/巡检/上下文/导入）分开维护。
 
 做法（**双轨、零行为变化**）
 --------------------------
@@ -57,6 +57,7 @@ from srv.handlers import import_ as _import  # noqa: E402,F401
 from srv.handlers import query as _query  # noqa: E402,F401
 from srv.handlers import pages as _pages  # noqa: E402,F401
 from srv.handlers import write as _write  # noqa: E402,F401
+from srv.handlers import ext as _ext  # noqa: E402,F401
 from srv.handlers import ab as _ab  # noqa: E402,F401
 from srv.handlers import catalog as _catalog  # noqa: E402,F401
 from srv.handlers import context_ as _context  # noqa: E402,F401

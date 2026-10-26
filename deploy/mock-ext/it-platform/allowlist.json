@@ -1,0 +1,19 @@
+{
+  "rev": 4,
+  "updated_at": "2026-10-26 08:40:00",
+  "note": "白名单（模拟外部系统）：按 (software, version) 逐字比对（含补丁位）；也支持 versionRange（允许版本范围）与 expires_at（有效期）",
+  "items": [
+    {"software": "MySQL", "version": "8.0.32", "vendor": "Oracle", "license": "GPL-2.0", "status": "已认证", "updated_at": "2026-10-20 10:00:00"},
+    {"software": "Redis", "version": "7.2.4", "vendor": "Redis Ltd.", "license": "BSD-3-Clause", "status": "已认证", "updated_at": "2026-10-20 10:00:00"},
+    {"software": "Nginx", "version": "1.24.0", "vendor": "F5", "license": "BSD-2-Clause", "status": "已认证", "expires_at": "2020-01-01", "updated_at": "2026-10-20 10:00:00"},
+    {"software": "Apache Tomcat", "version": "9.0.85", "vendor": "Apache", "license": "Apache-2.0", "status": "已认证", "updated_at": "2026-10-20 10:00:00"},
+    {"software": "PostgreSQL", "version": "15.6", "vendor": "PGDG", "license": "PostgreSQL", "status": "未认证", "updated_at": "2026-10-20 10:00:00"},
+    {"software": "Kafka", "version": "", "vendor": "Apache", "license": "Apache-2.0", "status": "已认证",
+     "versionRange": {"min": "3.0.0", "max": "3.9.99"}, "expires_at": "2027-12-31",
+     "updated_at": "2026-10-26 08:40:00",
+     "note": "允许范围内任一补丁版本（逐字条目优先；范围仅作补充 ✓）"},
+    {"software": "达梦数据库 DM8", "version": "", "vendor": "达梦", "license": "商业", "status": "已认证",
+     "versionRange": {"min": "8.1.0", "max": "8.1.9"}, "expires_at": "2027-06-30",
+     "updated_at": "2026-10-26 08:40:00"}
+  ]
+}

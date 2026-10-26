@@ -11,3 +11,11 @@ painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl restart bodhi-mcp.service
 painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl stop bodhi-mcp.service
 painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl status bodhi-mcp.service
 painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bodhi-mcp.service
+# 2026-10-25：新增第二个 MCP 服务（it-platform-mcp，:8770）。wsl-up.sh 与它一起启停，
+# 不加这几行的话 `wsl-up.sh up` 会在 step 4 停在密码提示上。
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl enable bodhi-it-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl start bodhi-it-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl restart bodhi-it-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl stop bodhi-it-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl status bodhi-it-mcp.service
+painchjy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bodhi-it-mcp.service

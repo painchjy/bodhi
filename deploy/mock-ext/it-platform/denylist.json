@@ -1,0 +1,10 @@
+{
+  "rev": 2,
+  "updated_at": "2026-10-25 09:00:00",
+  "note": "黑名单（模拟外部系统）：命中 (software, version) 即拒，**优先于白名单**",
+  "items": [
+    {"software": "log4j-core", "version": "2.14.1", "reason": "已知高危版本（远程代码执行）", "added_at": "2026-09-01 09:00:00"},
+    {"software": "fastjson", "version": "1.2.80", "reason": "已知反序列化风险", "added_at": "2026-09-01 09:00:00"},
+    {"software": "spring-core", "version": "5.3.17", "reason": "存在已知漏洞，要求升级到 5.3.18+", "added_at": "2026-09-15 09:00:00"}
+  ]
+}

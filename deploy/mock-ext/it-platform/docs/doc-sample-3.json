@@ -1,0 +1,35 @@
+{
+ "doc_id": "doc-sample-3",
+ "title": "样例3-客户信息查询服务技术方案",
+ "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+ "size": 11430,
+ "round": 1,
+ "updated_at": "2026-10-26 00:00:00",
+ "sha256": "23f1ea5948a85fac",
+ "files": [
+  {
+   "name": "样例3-客户信息查询服务技术方案.docx",
+   "path": "files/doc-sample-3.docx",
+   "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+   "size": 11430,
+   "sha256": "23f1ea5948a85fac"
+  }
+ ],
+ "attachments": [
+  {
+   "name": "样例3-客户信息查询服务技术方案.docx",
+   "path": "files/doc-sample-3.docx",
+   "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+   "size": 11430,
+   "sha256": "23f1ea5948a85fac"
+  }
+ ],
+ "sections": [
+  {
+   "path": "全文",
+   "title": "全文",
+   "text": "1 现状与目标：客户信息查询目前由柜面系统直连客户主库，查询压力大；目标是新增独立查询服务，隔离查询负载，6 个月内投产。2 总体方案：新建客户信息查询服务（B 级），只读客户主库的只读副本，对外提供查询接口；与柜面系统通过接口交互，不共享数据库。3 部署架构：同城 + 异地部署，同城跨云双活、异地多云热备（文字描述，无部署图）。4 概述：本方案技术栈沿用中心已认证组件（未提供技术栈勾选表）。"
+  }
+ ],
+ "images": []
+}

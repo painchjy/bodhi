@@ -13,6 +13,8 @@
 #   docker.service            引擎
 #   WeKnora（compose profile neo4j）：app / frontend / docreader / postgres / redis / neo4j
 #   bodhi-mcp.service         本体知识提取 + MCP 保存工具（tools/ontology-mcp/server.py，端口 8765）
+#   bodhi-it-mcp.service      内网工作台接口（参考实现；tools/it-platform-mcp/server.py，端口 8770）
+#                             —— **与 bodhi-mcp 并列**的第二个 MCP 服务（WeKnora 里 name=it_platform）
 #
 # 策略提醒（2026-09-19 方案 A，见 docs/weknora-fork.md §11）：上游镜像只当「重活供应商」
 # （切片/向量/图谱存储/会话），**不再构建上游、不再抓 Go 代码**；自研一律 Python。
@@ -25,6 +27,23 @@
 # =====================================================================
 set -uo pipefail
 
+# --- 参考规范域名（内网直连；hosts 或 DNS 二选一）---------------------------
+# 规则里的「参考规范」常是内网 URL（如 http://techdoc.sdc.bocomm.com/...）。
+# `reference_lookup(allow_fetch=true)` 走**直连**（不假设代理）；WSL 每次启动会重生成
+# /etc/hosts，所以映射必须在这里幂等维护 ✓（IP 可用 env `BODHI_REF_HOST_IP` 覆盖）。
+BODHI_REF_HOST="${BODHI_REF_HOST:-techdoc.sdc.bocomm.com}"
+BODHI_REF_HOST_IP="${BODHI_REF_HOST_IP:-}"
+ensure_ref_host() {
+  [ -n "$BODHI_REF_HOST" ] || return 0
+  if getent hosts "$BODHI_REF_HOST" >/dev/null 2>&1; then return 0; fi
+  [ -n "$BODHI_REF_HOST_IP" ] || return 0
+  if ! grep -q "[[:space:]]$BODHI_REF_HOST\$" /etc/hosts 2>/dev/null; then
+    echo "$BODHI_REF_HOST_IP $BODHI_REF_HOST" >> /etc/hosts 2>/dev/null \
+      && echo "· 已补 /etc/hosts：$BODHI_REF_HOST_IP $BODHI_REF_HOST"
+  fi
+}
+ensure_ref_host
+
 # --- 前置自检（2026-10-12 新增）-------------------------------------------
 # 现象：Windows/WSL 重启后跑本脚本报 `permission denied ... /var/run/docker.sock`。
 # 原因：docker 组没有成员（套接字是 root:docker 660）。修法与判定都放这里，
@@ -33,6 +52,7 @@ SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
   # 探测必须用**白名单内的命令**（deploy/bodhi-ops.sudoers），否则 NOPASSWD 不匹配
   if sudo -n systemctl is-active bodhi-mcp.service >/dev/null 2>&1 \
+     || sudo -n systemctl is-active bodhi-it-mcp.service >/dev/null 2>&1 \
      || sudo -n systemctl is-active docker >/dev/null 2>&1; then SUDO="sudo"
   else echo "！非 root 且无免密 sudo：root-only 步骤会失败 —— 建议 sudo bash $0 $*"; fi
 fi
@@ -65,6 +85,12 @@ BODHI_DB_PASSWORD="${BODHI_DB_PASSWORD:-$(grep -hoP '^(?:DB|POSTGRES)_PASSWORD=\
 PG() { docker exec -e PGPASSWORD="$BODHI_DB_PASSWORD" WeKnora-postgres psql -U postgres -d WeKnora -t -A -c "$1" 2>&1; }
 MCP() { curl -s -m 15 -X POST http://localhost:8765/mcp -H 'Content-Type: application/json' \
         -H 'Accept: application/json' -d "$1" 2>&1; }
+# 第二个 MCP 服务（内网工作台接口的参考实现；端口 8770）
+MCP_IT() { curl -s -m 15 -X POST http://localhost:8770/mcp -H 'Content-Type: application/json' \
+        -H 'Accept: application/json' -d "$1" 2>&1; }
+# systemctl 包装：非 root 一律带 `-n`（免密），**绝不弹密码提示** —— 脚本是非交互的，
+# 一旦 `sudo` 需要密码就会挂住；不在白名单里的服务会立刻失败并给出提示。
+SCTL() { if [ -n "$SUDO" ]; then $SUDO -n systemctl "$@"; else systemctl "$@"; fi; }
 
 do_up() {
   step "1/6 docker 引擎"
@@ -84,11 +110,20 @@ do_up() {
     echo "  ... app=$st_app postgres=$st_pg"; sleep 4
   done
 
-  step "4/6 本体提取 / MCP 服务（systemd）"
-  $SUDO systemctl enable bodhi-mcp.service >/dev/null 2>&1 || echo "  ! enable 失败（需 root）"
-  $SUDO systemctl restart bodhi-mcp.service 2>&1 | tail -2
+  step "4/6 本体 / 外部接口 MCP 服务（systemd，两个并列）"
+  for s in bodhi-mcp.service bodhi-it-mcp.service; do
+    SCTL enable "$s" >/dev/null 2>&1 || echo "  ! $s enable 需要 root（见 deploy/bodhi-ops.sudoers）"
+    if SCTL restart "$s" 2>/dev/null; then
+      echo "  $s restarted"
+    else
+      echo "  ! $s 重启失败：不在免密白名单 → sudo install -m 440 deploy/bodhi-ops.sudoers /etc/sudoers.d/bodhi-ops"
+    fi
+  done
   sleep 3
-  echo "  $(systemctl is-active bodhi-mcp.service) / $(systemctl show bodhi-mcp.service -p MainPID --value)"
+  printf '  bodhi-mcp   : %s / %s\n' "$(systemctl is-active bodhi-mcp.service)" \
+    "$(systemctl show bodhi-mcp.service -p MainPID --value)"
+  printf '  bodhi-it-mcp: %s / %s\n' "$(systemctl is-active bodhi-it-mcp.service)" \
+    "$(systemctl show bodhi-it-mcp.service -p MainPID --value)"
 
   step "5/6 重启 frontend（nginx 缓存 app IP，必做）"
   docker restart WeKnora-frontend >/dev/null && sleep 6 && echo "  frontend restarted"
@@ -109,6 +144,8 @@ do_status() {
   printf '  docker     : %s\n' "$(systemctl is-active docker)"
   printf '  bodhi-mcp  : %s (enabled=%s)\n' "$(systemctl is-active bodhi-mcp.service)" \
     "$(systemctl is-enabled bodhi-mcp.service 2>/dev/null)"
+  printf '  bodhi-it-mcp: %s (enabled=%s)\n' "$(systemctl is-active bodhi-it-mcp.service)" \
+    "$(systemctl is-enabled bodhi-it-mcp.service 2>/dev/null)"
 
   step "HTTP"
   for u in /health /api/v1/agents; do
@@ -117,6 +154,9 @@ do_status() {
   done
   printf '  MCP tools/list         -> '
   MCP '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["result"]["tools"]), "tools")' 2>/dev/null || echo "(不可用)"
+  printf '  it-mcp tools/list      -> '
+  MCP_IT '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(", ".join(t["name"] for t in d["result"]["tools"]))' 2>/dev/null || echo "(不可用)"
 
   step "前端（自建镜像，见 docs/weknora-fork.md §11）"
@@ -141,11 +181,14 @@ do_status() {
 case "${1:-up}" in
   up)     do_up ;;
   status) do_status ;;
-  logs)   echo "== bodhi-mcp（Ctrl-C 退出） =="; journalctl -u bodhi-mcp -f -n 40 ;;
+  logs)   echo "== bodhi-mcp / bodhi-it-mcp（Ctrl-C 退出） =="; \
+          tail -n 40 -F /var/log/bodhi-mcp.log /var/log/bodhi-it-mcp.log \
+            /var/log/bodhi-mcp.err.log /var/log/bodhi-it-mcp.err.log 2>/dev/null ;;
   # 前端自建镜像的切换与验收（只在改了 Vue 补丁后才需要 build_frontend.sh 重建）
   fe)     bash "$BODHI/deploy/weknora-fork/deploy_frontend.sh" deploy ;;
   fe-check) bash "$BODHI/deploy/weknora-fork/deploy_frontend.sh" check ;;
-  down)   step "停止"; $SUDO systemctl stop bodhi-mcp.service 2>/dev/null; \
+  down)   step "停止"; SCTL stop bodhi-it-mcp.service 2>/dev/null; \
+          SCTL stop bodhi-mcp.service 2>/dev/null; \
           cd "$WK" && docker compose "${COMPOSE[@]}" --profile neo4j stop 2>&1 | tail -8; \
           echo "  （数据卷保留；再次 up 即可）" ;;
   *)      echo "用法: $0 [up|status|logs|fe|fe-check|down]"; exit 1 ;;

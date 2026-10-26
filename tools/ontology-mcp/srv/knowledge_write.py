@@ -292,12 +292,17 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             pass  # 写的就是模板页本身，不报"无模板"
         elif _tpl.get("found"):
             summary["template"] = {"slug": _tpl.get("slug"), "title": _tpl.get("title"),
-                                   "version": _tpl.get("version"),
+                                   "version": _tpl.get("version"), "found": True,
                                    "sections": len(_tpl.get("sections") or []),
                                    "required": sum(1 for s in (_tpl.get("sections") or [])
                                                    if s.get("required")),
                                    "ambiguous": bool(_tpl.get("ambiguous")),
                                    "candidates": _tpl.get("candidates") or []}
+            # **跨库**用到模板 ⇒ 明说（本库没有 ⇒ 全库唯一命中才用 ✓，不静默）
+            if _tpl.get("template_scope"):
+                summary["template"]["scope"] = _tpl.get("template_scope")
+                if _tpl.get("local_reason"):
+                    summary["template"]["local_reason"] = _tpl.get("local_reason")
         else:
             summary["template"] = {"found": False}
             summary["template_fallback_reason"] = (_tpl.get("reason")

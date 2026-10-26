@@ -86,7 +86,9 @@ TOOL_SCHEMAS = [
                             "同语义多页(D1)、软删残留(D2)、孤儿快照(D3)、"
                             "**近似重复知识(S1，3-gram 相似度)**、**领域上下文之外的同名页(S2)**、"
                             "**模板章节完整性(T1：文档类页缺模板必填章节 medium；"
-                            "T2：模板页解析不出章节表/未声明 applicableReportType low)**。"
+                            "T2：模板页解析不出章节表/未声明 applicableReportType low)**、"
+                            "**报告快照落后外部台账(G4：引用块 `rev` < 台账当前 `rev` low；"
+                            "台账/绑定不可读也从实报)**。"
                             "**建议每次 `save_knowledge` 落库后跑一次**（`scope=all` 已含 S1/S2）："
                             "落库已**不做相似度合并**，相似知识的裁决统一在巡检做（并入/补别名/跨库映射）。"
                             "返回 summary/totals/findings（每条含 severity、subject、detail、fix_hint）。"
@@ -99,7 +101,8 @@ TOOL_SCHEMAS = [
                                "description": "多库巡检：会话绑定的库 id 清单（每库一份独立报告）"},
                     "scope": {"type": "string", "enum": list(ke_audit.SCOPES),
                               "description": "all(默认) / wiki(A) / model(B) / source(C) / dupes(D) / "
-                                             "similar(S1/S2) / template(T1/T2 模板章节完整性)"},
+                                             "similar(S1/S2) / template(T1/T2 模板章节完整性) / "
+                                             "ext(G4 快照落后台账 + G5 模板·契约·正文三方一致)"},
                     "max_findings": {"type": "integer",
                                      "description": "最多返回多少条明细，默认 50（计数始终完整）"},
                     "template_kb_id": {"type": "string",
@@ -330,18 +333,46 @@ TOOL_SCHEMAS = [
                 "dry_run": {"type": "boolean"}},
                 "required": ["kb_id"]},
         },
-                {
+        {
+            "name": "ext_describe",
+            "description": ("**外部接口契约投射（写元数据，不写知识）**：读业务对象页的 4 个绑定属性"
+                            "（`bpmn:dataObjectInterface` / `AccessMode` / `KeyFields` / `InterfaceRef`），"
+                            "连该接口所在 MCP 服务取 `tools/list` 的 `x-ext`（列/标签/枚举/主键/模式 + `schemaHash`），"
+                            "把结果**投射**到 `page_metadata.ontology.projection`（带 `fetched_at`/`schemaHash`）"
+                            "并回 `drift`（与上次投影比是否变化）。"
+                            " ⇒ 页面/报告/前端面板都读投影，**不要再把列规范写进 `skos:note/definition`** ✓。"
+                            "服务地址来自 WeKnora `mcp_services`（可用 env `BODHI_EXT_SERVICE_URLS` 覆盖）。"
+                            "`write_projection=false` 只回契约不落库。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "业务对象所在库（必填）"},
+                "object": {"type": "string", "description": "业务对象页 slug（必填）"},
+                "tool": {"type": "string",
+                         "description": "指定接口名（省略 ⇒ 用该页第一个绑定）"},
+                "url": {"type": "string", "description": "直接给服务地址（省略 ⇒ 查注册表）"},
+                "write_projection": {"type": "boolean",
+                                     "description": "默认 true：把契约投射到页面元数据"},
+                "write_anchor": {"type": "boolean",
+                                 "description": ("默认 false：是否把契约卡锚点块"
+                                                 "（```bodhi-ext-contract）幂等写进页面正文")}},
+                "required": ["kb_id", "object"]},
+        },
+        {
             "name": "rules_resolve",
-            "description": ("**按步骤解析规则（只读，推荐用这个）**：任务由**步骤**组成，每步自选解析方式 —— "
+            "description": ("**按步骤解析规则（只读；= `knowledge_lookup(mode=\"rules\")` 的实现）**："
                             "`direct:<slug>[,<slug>…]` 直接指定；`policy:<策略名/slug片段>` 经策略**递归解析**"
-                            "（`isDerivedFrom` 入边 + `includesBusinessPolicy` 出边，支持策略包含策略）；"
-                            "`ask` **只回可选范围**（策略清单）由用户定；`task:<任务>` **已废弃** ✗（任务边 `bpmn:taskExecutesRule` 已删除 ✓，请用 policy/direct/ask ✓）；"
-                            "`path:` 预留。回执统一：`resolved_by` + `rules[…]`（含 `needs_extract` / "
-                            "`required_fields` / `source` / `strategies`）+ `hash`（可断言）。"
-                            "⚠️ 取规则请优先用本工具：它不假设\"任务=一组规则\"，而是**按步骤**解析。"),
+                            "（`includesBusinessPolicy` 出边，支持策略包含策略；规则边**双向**取："
+                            "规则→策略 `isDerivedFrom` + 策略→规则 `isBasisFor`）；"
+                            "`influencer:<影响因素名/slug片段>` **链路口径**（影响因素→影响手段→策略→规则，"
+                            "回执另带 `chain` 明细）；`ask` **只回可选范围**（策略清单、不含规则）由用户定；"
+                            "`task:<任务>` **已废弃** ✗（任务边 `bpmn:taskExecutesRule` 已删除）；`path:` 预留。"
+                            "回执统一：`resolved_by` + `rules[…]`（含 `needs_extract` / `required_fields` / "
+                            "`source` / `strategies`）+ `hash`（可断言）。"
+                            "⚠️ 智能体侧请统一用 `knowledge_lookup(mode=\"rules\", spec=…)`（同一实现 + 遥测），"
+                            "本工具保留为兼容入口。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string", "description": "领域库（规则/策略/任务都在这里）"},
-                "spec": {"type": "string", "description": "direct:<slug,…> | policy:<策略> | ask | task:<任务> | path:…"},
+                "spec": {"type": "string",
+                         "description": "direct:<slug,…> | policy:<策略> | influencer:<影响因素> | ask | task:<任务> | path:…"},
                 "limit": {"type": "integer"}},
                 "required": ["kb_id", "spec"]},
         },
@@ -379,7 +410,8 @@ TOOL_SCHEMAS = [
         },
         {
             "name": "knowledge_lookup",
-            "description": ("**统一检索入口（只读）**：`rules` 取规则契约（`spec`：direct:/policy:/ask，按步骤解析）；"
+            "description": ("**统一检索入口（只读）**：`rules` 取规则契约（`spec`：direct:/policy:/influencer:/ask，"
+                            "按步骤解析；回执带 `plan.route/plan.args/plan.expect`，链路口径另带 `chain`）；"
                             "`keyword` **类范围 + 多词**检索（先认本体类再定范围；`query` 支持 `a b`=AND、"
                             "`a|b`=OR、`\"短语\"`、`-排除`；命中片段来自**图里的 articleBody**，PG 只补属性）；"
                             "`instances` 列某类全部实例（`cls`）；`route` 把\"流程 活动 任务\"解析成**类型路径**"
@@ -392,7 +424,11 @@ TOOL_SCHEMAS = [
                          "description": "rules | keyword | instances | route | path | semantic（默认 rules）"},
                 "query": {"type": "string",
                           "description": "keyword/instances/route 的查询：`a b`=AND、`a|b`=OR、\"短语\"、-排除"},
-                "spec": {"type": "string", "description": "rules 模式的 spec（direct:/policy:/ask）"},
+                "spec": {"type": "string",
+                         "description": ("rules 模式的 spec：`direct:<规则slug,…>` | `policy:<策略名/slug 片段>` | "
+                                         "`influencer:<影响因素名/slug 片段>`（影响因素→影响手段→策略→规则的链路口径，"
+                                         "**影响类问题优先用它**）| `ask`（**只回策略清单、不含规则**，仅确需全量清单时用）"
+                                         "| `path:…`（预留）")},
                 "cls": {"type": "string",
                         "description": "显式本体类（instances 必填；keyword 可给多个用逗号分隔）"},
                 "page_type": {"type": "string", "description": "只查某页类型（可与 cls 并用）"},
