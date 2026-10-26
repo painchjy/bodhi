@@ -43,6 +43,12 @@ assert max(len(TAG_REL), len(TAG_TYPE), len(TAG_DEL), len(TAG_OPS)) <= 16
 REL_LINE = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[(?P<target>.+?)\]\(wiki:(?P<slug>[^)]+)\)\s*$")
 REL_LINE_V2 = re.compile(r"^- (?P<label>.+?)（`(?P<type>[^`]+)`）→ \[\[(?P<slug>[^|\]]+)\|(?P<target>[^\]]+)\]\]\s*$")
 
+# 外部接口绑定串（`bpmn:dataObject*` 四个数据属性）：**只允许 ASCII**
+#   2026-10-25 用户口径：技术绑定用 ASCII（`,` 分接口 / `;` 按序对齐 / `:` 服务名前缀）；
+#   全角标点、空格一律拒收 —— 绑定串只进节点属性、不进 Cypher 注释，所以 `;` 不会截断语句 ✓
+_ASCII_BINDING = re.compile(r"^[A-Za-z0-9_.,;:/~|-]+$")
+
+
 
 def parse_rel_line(line: str):
     """解析「本体关系」小节的一行，兼容新旧两种链接格式。"""
@@ -1004,7 +1010,23 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
         return {"ok": False, "slug": slug, "page_type": page_type, "body_keys": _spa_body,
                 "error": ("正文不是数据属性：%s —— 改正文请走 `save_knowledge(stage=\"report\")`"
                           "（同 slug 覆盖）" % "、".join(_spa_body))}
-    # 2026-10-17（用户口径 ✓）：**属性键必须在类本体的数据属性声明里** ✓ —— 否则拒改 ✗
+    # 2026-10-25（外部接口口径）：`projection` 是**投射**（来源 = MCP `tools/list`），写口一律拒收 ✓
+    _spa_proj = [k for k in (patch or {}) if str(k).split(":")[-1].lower() == "projection"]
+    if _spa_proj:
+        return {"ok": False, "slug": slug, "page_type": page_type,
+                "error": ("`projection` 由 `ext_describe` 生成（来源 = MCP `tools/list`），不能手写："
+                          "调 `ext_describe(kb_id, object=…)` 重新订阅 ✓")}
+    # 2026-10-25（用户口径）：绑定是**技术串**，只允许 ASCII 标点（全角/空格一律拒收 ✓）
+    _spa_bind = {k: v for k, v in (patch or {}).items()
+                 if str(k).split(":")[-1].lower() in
+                 ("dataobjectinterface", "dataobjectaccessmode",
+                  "dataobjectkeyfields", "dataobjectinterfaceref")}
+    _bad_fmt = [k for k, v in _spa_bind.items() if not _ASCII_BINDING.match(str(v or "").strip())]
+    if _bad_fmt:
+        return {"ok": False, "slug": slug, "page_type": page_type,
+                "bad_binding_format": _bad_fmt,
+                "error": ("绑定串只允许 ASCII（字母/数字与 `_ . , ; : / ~ -`）：%s"
+                          % "、".join(_bad_fmt))}
     _spa_allowed = {str(k).split(":")[-1].lower()
                     for k in (ke_ontology.data_properties_for(page_type) or {})
                     if not ke_ontology.is_body_property(k)}
@@ -1434,6 +1456,12 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
             src["locator"] = "session/%s/p%d" % (src["session_no"],
                                                  int(_part_plan.get("part_no") or 1))
     slug = (spec.get("slug") or "").strip() or _derive_slug(page_type, title)
+    # 2026-10-26（用户实测修正）：「首个版本生成」**以 DB 首版时间为准** —— 既有页一律沿用，
+    # 不再取 `page_metadata`/页头（两者都被重置过，会变成"最新版本时间"✗）。
+    if not spec.get("created_at") and slug:
+        _first = first_version_text(kb_id, slug)
+        if _first:
+            spec["created_at"] = _first
     # 2026-10-22（内网问题 4.6 · 1-C）：**apply 前门禁** —— 意图变化（弱信号）未 ack ⇒ 拒写。
     # 判定已在上面提前算好（`_part_plan`）；这里只做 fail-closed 判断，并把结论原样回给调用方。
     if (not dry_run and _part_plan and _part_plan.get("action") == "need_confirm"
@@ -1478,7 +1506,13 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
         if not content:
             raise ValueError("mode=%s 需要 wiki_content（等价别名 article_body）" % mode)
         if mode == "document":
-            content = "\n".join(_contract_head({**spec, "slug": slug})) + "\n" + content.lstrip()
+            # 2026-10-26（用户实测修正）：**幂等拼头** —— 正文里若已带页头（历史重复累积，实测 9 段），
+            # 先剥干净再拼一段；否则每保存一次就多一段 ✗。
+            _h0, _body0 = strip_heads(content)
+            if not spec.get("created_at") and _h0.get("首个版本生成"):
+                spec["created_at"] = _h0["首个版本生成"]
+            content = ("\n".join(_contract_head({**spec, "slug": slug})) + "\n"
+                       + _body0.lstrip())
         if render_attrs:
             content = content.rstrip() + "\n\n" + "\n".join(
                 render_attributes_section(page_type, attrs, skip_keys=[dkey])) + "\n"
@@ -1665,6 +1699,82 @@ def _parse_legacy_head(content: str) -> tuple[dict, str]:
         i += 1
     return head, "\n".join(lines[i:])
 
+
+
+def strip_heads(content: str) -> tuple[dict, str]:
+    """剥掉**所有**页头块（legacy 头 + 契约头可能被重复累积，实测出现过 9 段）✓。
+
+    返回 `(首个 head 字段字典, 去掉全部页头后的正文)`。
+    判据：页头块以 `# 标题` 起、紧跟 `> **本体类型**…`，且**含 `首个版本生成`** 这一行 ——
+    只认这种块，避免把正文自己的 `# 标题` 或引用块误删 ✗。
+    """
+    head_all: dict = {}
+    body = content or ""
+    for _ in range(20):                      # 上限保护（正常 1–2 次即收敛）
+        head, rest = _parse_legacy_head(body)
+        if "首个版本生成" not in head:
+            break
+        for k, v in head.items():
+            head_all.setdefault(k, v)
+        body = rest
+    return head_all, body
+
+
+def first_version_text(kb_id: str, slug: str) -> str:
+    """**「首个版本生成」的权威值** = 该页**首次落库时间**（DB `created_at`，格式化为 +0800）。
+
+    为什么不取页头/`page_metadata`（2026-10-26 用户实测）：
+    - 页头这一行会被重写，历史上被重置成**最新版本时间**；
+    - `page_metadata.ontology.created_at` 也随写路径漂移过。
+    DB 行的 `created_at` 是**首版时间的天花板事实**（同 slug 覆盖不新建行）⇒ 以它为准 ✓。
+    """
+    rows = ke_db.psql_csv(
+        "SELECT to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS t "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL "
+        " ORDER BY created_at LIMIT 1" % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if rows and rows[0].get("t"):
+        return "%s +0800" % rows[0]["t"]
+    return ""
+
+
+def repair_head(kb_id: str, slug: str, created_at: str = "", dry_run: bool = True) -> dict:
+    """**修复页头**（2026-10-26，用户实测问题）：把重复累积的页头收敛成一段 + 校准「首个版本生成」。
+
+    - 收敛：正文里若有多段页头（实测 9 段），只保留一段；
+    - 校准：`created_at` 参数 > **DB 首版时间**（`first_version_text`）> 页头现值
+      （页头现值可能本身就是被重置过的，所以排在 DB 之后 ✓）；
+    - 写回走内核 `write_knowledge(mode="document")`（写序/版本/索引一致 ✓），默认 dry_run。
+    """
+    rows = ke_db.psql_csv(
+        "SELECT title, page_type, content, COALESCE(page_metadata::text,'{}') AS meta "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+    if not rows:
+        return {"ok": False, "error": "page_not_found", "slug": slug, "kb_id": kb_id}
+    row = rows[0]
+    content = row.get("content") or ""
+    heads_before = content.count("**首个版本生成**")
+    head, body = strip_heads(content)
+    target = str(created_at or first_version_text(kb_id, slug)
+                 or head.get("首个版本生成") or "").strip()
+    try:
+        meta = json.loads(row.get("meta") or "{}")
+    except json.JSONDecodeError:
+        meta = {}
+    ont = dict(meta.get("ontology") or {})
+    spec = {"slug": slug, "title": row.get("title") or "",
+            "page_type": row.get("page_type") or "", "mode": "document",
+            "wiki_content": body, "created_at": target,
+            "attributes": dict(ont.get("attributes") or {}),
+            "type_label": ont.get("class_label") or "",
+            "source": {"doc_refs": [], "chunk_refs": []},
+            "metadata_extra": {k: v for k, v in meta.items()
+                               if k not in ("ontology", "projection", "anchor")}}
+    res = write_knowledge(kb_id, spec, dry_run=dry_run, strict_source=False, sync_folders=False)
+    return {"ok": True, "slug": slug, "heads_before": heads_before, "head_found": head,
+            "created_at_used": target, "dry_run": dry_run,
+            "applied": res.get("applied"), "before_version": res.get("before_version"),
+            "content_preview": (res.get("content_preview") or "")[:300]}
 
 
 def spec_from_page(page: dict, element: dict | None = None, *, source: dict | None = None,

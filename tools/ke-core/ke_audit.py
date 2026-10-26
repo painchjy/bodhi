@@ -72,7 +72,7 @@ SEV = {"high": 0, "medium": 1, "low": 2}
 # 企业标准定义「待复核」天数阈值（附录 A：draft 超过它 → G9 low）
 STANDARD_REVIEW_DAYS = 14
 SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling",
-          "similar", "template")
+          "similar", "template", "ext")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
@@ -2109,12 +2109,299 @@ def check_template_sections(ctx: dict, rep: Report) -> None:
 
 
 
+# ---------------------------------------------------------------------------
+# G. 外部接口：报告快照 ↔ 台账（G4）
+#   报告正文里的引用块形如：
+#       ```bodhi-ext
+#       object: <DataObject slug>
+#       review_no: <外层主键值>
+#       basis: <服务名> / <工具名>
+#       rev: <快照时台账 rev>
+#       schema_hash: sha256:…
+#       ```
+#   —— 只认这几个 ASCII 键 + 工具回执；**不出现任何领域名词** ✓
+# ---------------------------------------------------------------------------
+EXT_BLOCK_RE = re.compile(r"(?ms)^```bodhi-ext[ \t]*\r?\n.*?^```[ \t]*$")
+EXT_KV_RE = re.compile(r"(?m)^\s*([A-Za-z_]+)\s*:\s*(.+?)\s*$")
+
+
+def ext_blocks(text: str) -> list:
+    """抽正文里的台账引用块 → `[{键: 值}]`（首个同名键生效；无块 ⇒ 空表）。"""
+    out = []
+    for m in EXT_BLOCK_RE.finditer(text or ""):
+        kv: dict = {}
+        for k in EXT_KV_RE.finditer(m.group(0)):
+            kv.setdefault(k.group(1), k.group(2))
+        if kv:
+            out.append(kv)
+    return out
+
+
+def ext_block_tool(kv: dict) -> str:
+    """引用块 → 工具名：`basis: <服务> / <工具>`（缺 basis 时回空）。"""
+    return str((kv or {}).get("basis") or "").rsplit("/", 1)[-1].strip()
+
+
+def ext_block_lag(kv: dict, ledger_rev) -> dict:
+    """比对快照 rev 与台账 rev → `{comparable, lag, report_rev, ledger_rev}`（纯函数，便于测试）。"""
+    raw = str((kv or {}).get("rev") or "").strip()
+    try:
+        rpt = int(raw)
+    except ValueError:
+        return {"comparable": False, "lag": 0, "report_rev": raw, "ledger_rev": ledger_rev}
+    try:
+        cur = int(ledger_rev)
+    except (TypeError, ValueError):
+        return {"comparable": False, "lag": 0, "report_rev": rpt, "ledger_rev": ledger_rev}
+    return {"comparable": True, "lag": max(0, cur - rpt), "report_rev": rpt, "ledger_rev": cur}
+
+
+def check_ext_reference(ctx: dict, rep: Report) -> None:
+    """G7（low）**参考规范有 URL 但没抓取留痕**（2026-10-26；只读）。
+
+    为什么单独一条：规则页的 `bmm:ruleReference` 若是 URL，报告里**引用该规则的那一列**
+    要求写 `fetched` / `unavailable:<reason>` + 摘要 —— 不抓就没法写「不可得（待澄清）」，只能编 ✗。
+    这里只看**留痕**（`reference_lookup` 抓过会落 `ref_cache.json`），不做网络访问 ✓。
+    """
+    try:
+        import ke_ext_store as _es
+        cache = _es.ref_cache_load()
+    except Exception:  # noqa: BLE001  没装/不可读 ⇒ 不判（避免假告警）
+        return
+    urls: dict = {}
+    for page in ctx.get("pages") or []:
+        meta = _meta_full(page.get("meta"))
+        attrs = ((meta or {}).get("ontology") or {}).get("attributes") or {}
+        for k, v in (attrs or {}).items():
+            ref = str(v or "").strip()
+            if not str(k).lower().endswith("rulereference") or not ref:
+                continue
+            if not ref.lower().startswith(("http://", "https://")):
+                continue
+            urls.setdefault(ref, []).append(page["slug"])
+    missing = [(u, s) for u, s in urls.items() if not (cache or {}).get(u)]
+    ctx["data"]["ext_reference"] = {"urls": len(urls), "cached": len(urls) - len(missing),
+                                    "missing": len(missing)}
+    for url, slugs in missing[:20]:
+        rep.add("G7", "low", slugs[0],
+                "参考规范有 URL 但**没有抓取留痕**（%d 页引用同一 URL；抓过会落 ref_cache）"
+                % len(slugs),
+                "抓一次留痕：`reference_lookup(reference=\"%s\", allow_fetch=true)`；"
+                "抓不到就按 reason 写「不可得（待澄清）」，不要编造" % url)
+
+
+def check_ext_ledger(ctx: dict, rep: Report) -> None:
+    """G4（low）**报告快照落后外部台账**（2026-10-25；只读）。
+
+    - 逐块取 `object` + `review_no` → 按绑定反查台账**当前** `rev`；
+    - 快照 `rev` < 台账 `rev` ⇒ 一条 low（前端面板「同步正文」可一键修）；
+    - **台账/绑定不可读也从实报**（`unreadable`）—— 静默跳过会让巡检的"0 问题"变成假象 ✗；
+    - 同一 `(object, review_no)` 只比一次（多份报告引用同一台账时按页报，台账只读一遍 ✓）。
+    """
+    import ke_ext_issues as I  # noqa: PLC0415  只在用到时加载（不影响无绑定库的巡检）
+    import ke_ext_store as S  # noqa: PLC0415
+
+    data = {"blocks": 0, "ledgers": 0, "stale": 0, "unreadable": 0, "max_lag": 0}
+    ctx.setdefault("data", {})["ext_ledger"] = data
+    cache: dict = {}
+    for page in ctx.get("pages") or []:
+        for kv in ext_blocks(page.get("content") or ""):
+            slug, rno = str(kv.get("object") or "").strip(), str(kv.get("review_no") or "").strip()
+            if not (slug and rno):
+                continue
+            data["blocks"] += 1
+            key = (slug, rno)
+            if key not in cache:
+                try:
+                    rb = S.resolve_binding(ext_block_tool(kv), ctx.get("kb_id") or "", slug)
+                    if not rb.get("ok"):
+                        cache[key] = {"ok": False, "why": rb.get("why") or "no_binding"}
+                    else:
+                        led = I.maintain(kb_id=ctx.get("kb_id") or "", object_slug=slug,
+                                         mode="query", action="list", review_no=rno)
+                        cache[key] = ({"ok": True, "rev": led.get("rev")}
+                                      if led.get("ok") else
+                                      {"ok": False, "why": led.get("error") or "ledger_unreadable"})
+                except Exception as exc:  # noqa: BLE001  单块失败不影响整轮巡检
+                    cache[key] = {"ok": False, "why": str(exc)[:120]}
+            hit = cache[key]
+            if not hit.get("ok"):
+                data["unreadable"] += 1
+                rep.add("G4", "low", page["slug"],
+                        "引用块台账不可读：%s / %s（%s）⇒ 未比对 rev" % (slug, rno, hit.get("why")),
+                        "确认该对象页的 4 个数据属性绑定仍有效；台账恢复后重跑巡检")
+                continue
+            data["ledgers"] += 1
+            lag = ext_block_lag(kv, hit.get("rev"))
+            if not lag["comparable"]:
+                data["unreadable"] += 1
+                rep.add("G4", "low", page["slug"],
+                        "引用块 rev 不是数字（%r）⇒ 无法比对台账 rev %s" % (lag["report_rev"], hit.get("rev")),
+                        "引用块请整段照抄工具回执的 `ref_block`（不要手改 rev）")
+                continue
+            if lag["lag"] > 0:
+                data["stale"] += 1
+                data["max_lag"] = max(data["max_lag"], lag["lag"])
+                rep.add("G4", "low", page["slug"],
+                        "正文台账快照 rev %s 落后台账 rev %s（%s，差 %d 版）"
+                        % (lag["report_rev"], lag["ledger_rev"], rno, lag["lag"]),
+                        "点该报告页面板「同步正文」（= `POST /bodhi/ext/sync-report`）后重跑巡检")
+
+
+def _md_sections(md: str) -> list:
+    """按 `## ` 切节 → `[(纯标题, [行])]`（与 `ke_report._plain` 同口径去编号/装饰）。"""
+    import ke_report  # noqa: PLC0415
+    out, title, buf = [], "", []
+    for ln in (md or "").splitlines():
+        if ln.startswith("## "):
+            if title:
+                out.append((title, buf))
+            title, buf = ke_report._plain(ln[3:]), []      # noqa: SLF001  同仓内部工具
+        elif title:
+            buf.append(ln)
+    if title:
+        out.append((title, buf))
+    return out
+
+
+def _first_table_header(lines: list) -> list:
+    """一节里**第一张表**的表头单元格（无表 ⇒ 空表）。"""
+    for ln in lines or []:
+        s = ln.strip()
+        if s.startswith("|"):
+            return [c.strip() for c in s.strip().strip("|").split("|")]
+    return []
+
+
+def _labels_of(schema: dict, fields: list) -> list:
+    labels = (schema or {}).get("labels") or {}
+    return [labels.get(f, f) for f in (fields or [])]
+
+
+def check_ext_consistency(ctx: dict, rep: Report) -> None:
+    """G5 **依赖外部接口的实例页**内容一致性（2026-10-25；只读）。
+
+    职责边界：**模板 = 报告口径真源**（要哪几列、什么顺序）；**DataObject = 接口定义**
+    （绑定 + 契约投射）⇒ 本检查只证明"三方说的一致"，不判断谁对谁错：
+
+    - **G5 medium**：正文该节**表头** ≠ 模板该节 `fields` 对应的列名（模板是口径真源）；
+    - **G5 medium**：正文表头 ≠ 契约回执 `schema.columns` 对应的列名（列集以回执为准）；
+    - **G5 medium**：引用块 `columns:` 里有契约外的字段（拼错/过期）；
+    - **G5 low**：DataObject 页的 `skos:definition` 又写回**编号列清单**（职责越界 ⇒ 列清单归模板）。
+
+    判定只依赖页面内容与工具回执，**不含任何领域名词** ✓。
+    """
+    import ke_ext_issues as I  # noqa: PLC0415
+    import ke_ext_store as S  # noqa: PLC0415
+    import ke_report  # noqa: PLC0415
+
+    data = {"reports": 0, "template_checked": 0, "ledger_checked": 0, "header_mismatch": 0,
+            "columns_not_in_contract": 0, "definition_overreach": 0}
+    ctx.setdefault("data", {})["ext_consistency"] = data
+    items = _template_items_of((ctx.get("template_kb") or ctx.get("kb_id") or ""))
+    if not items:                                    # 跨库兜底：报告在工作库、模板在领域库 ✓
+        items = _template_items_of("")
+    cache: dict = {}
+
+    for page in ctx.get("pages") or []:
+        blocks = ext_blocks(page.get("content") or "")
+        if not blocks:
+            continue
+        data["reports"] += 1
+        sections = None
+        tpl = ke_report.pick_template(items, (page.get("page_type") or "").strip())
+        if tpl.get("found") and not tpl.get("ambiguous"):
+            sections = tpl.get("sections") or []
+        for kv in blocks:
+            slug = str(kv.get("object") or "").strip()
+            rno = str(kv.get("review_no") or "").strip()
+            if not (slug and rno):
+                continue
+            key = (slug, rno)
+            if key not in cache:
+                try:
+                    rb = S.resolve_binding(ext_block_tool(kv), ctx.get("kb_id") or "", slug)
+                    led = (I.maintain(kb_id=ctx.get("kb_id") or "", object_slug=slug,
+                                      mode="query", action="list", review_no=rno)
+                           if rb.get("ok") else {})
+                    cache[key] = led if led.get("ok") else None
+                except Exception:                        # noqa: BLE001  单块失败不影响整轮
+                    cache[key] = None
+            led = cache[key]
+            if not led:
+                continue                                 # 台账不可读由 G4 报，这里不重复
+            data["ledger_checked"] += 1
+            schema = led.get("schema") or {}
+            order = list(schema.get("order") or [])
+            # 引用块声明的列集（模板配置随块走）—— 读**全量契约**再校验，坏字段才能被看见 ✓
+            raw_cols = [c.strip() for c in re.split(r"[,，]", str(kv.get("columns") or "")) if c.strip()]
+            cols = raw_cols or order
+            bad = [c for c in cols if c not in order]
+            if bad:
+                data["columns_not_in_contract"] += 1
+                rep.add("G5", "medium", page["slug"],
+                        "引用块 `columns:` 含契约外字段：%s（契约可用：%s）"
+                        % ("、".join(bad), "、".join(order[:12])),
+                        "把引用块 `columns:` 改成契约里的字段（或重新订阅契约再看回执）")
+            cols = [c for c in cols if c in order]
+            want_ledger = _labels_of(schema, cols)
+            want_tpl, tpl_title = [], ""
+            for sec in sections or []:
+                if sec.get("fields"):
+                    want_tpl, tpl_title = _labels_of(schema, sec["fields"]), sec.get("title") or ""
+                    break
+            secs = _md_sections(page.get("content") or "")
+            key_label = (schema.get("labels") or {}).get("issue_no") or ""
+            got, got_title = [], ""
+            for title, lines in secs:
+                hd = _first_table_header(lines)
+                if hd and (not key_label or key_label in hd):
+                    got, got_title = hd, title
+                    break
+            if not got:
+                continue
+            if want_ledger and got != want_ledger:
+                data["header_mismatch"] += 1
+                rep.add("G5", "medium", page["slug"],
+                        "第「%s」节表头与接口回执不一致 ⇒ 表头 %s ／ 回执 %s"
+                        % (got_title or "?", " | ".join(got), " | ".join(want_ledger)),
+                        "按回执 `schema.columns` / `labels` 重建该表（面板「同步正文」可一键）")
+            if want_tpl:
+                data["template_checked"] += 1
+                if got != want_tpl:
+                    rep.add("G5", "medium", page["slug"],
+                            "第「%s」节表头与模板「%s」的「数据对象字段」不一致 ⇒ 表头 %s ／ 模板 %s"
+                            % (got_title or "?", tpl_title or "?",
+                               " | ".join(got), " | ".join(want_tpl)),
+                            "报告口径以模板为准：改模板该格并重新同步正文（或改正文补齐）")
+
+    for page in ctx.get("pages") or []:                  # 职责边界：定义里不该再有列清单
+        if "DataObject" not in (page.get("page_type") or ""):
+            continue
+        try:
+            meta = json.loads(page.get("meta") or "{}")
+            dfn = str(((meta.get("ontology") or {}).get("attributes") or {})
+                      .get("skos:definition") or "")
+        except Exception:                                # noqa: BLE001
+            continue
+        # 列清单的形态：「1 编号｜2 **问题描述**｜3 …」—— 数**不同序号**，≥3 即认定又写清单
+        nums = {int(m.group(1)) for m in
+                re.finditer(r"(?<![\d.])(\d{1,2})\s*\*{0,2}\s*[\u4e00-\u9fffA-Za-z_][^｜\n]{0,20}｜", dfn)}
+        if len(nums) >= 3:
+            data["definition_overreach"] += 1
+            rep.add("G5", "low", page["slug"],
+                    "DataObject 的 `skos:definition` 又写了列清单（命中序号 %s）⇒ "
+                    "职责越界：列名/列序归模板，本页只留接口定义"
+                    % "、".join(str(n) for n in sorted(nums)),
+                    "把列清单/表后补充搬进模板页；本页只写绑定、契约来源与读写口径")
+
+
 def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
           page_limit: int = 5000, template_kb_id: str = "") -> dict:
     """只读一致性巡检（**不写任何数据**）。
 
     scope：`all` / `wiki`(A) / `model`(B) / `source`(C) / `dupes`(D) / `governance`(F) /
-    `template`(T1/T2 模板章节完整性)。
+    `template`(T1/T2 模板章节完整性) / `ext`(G4 快照落后台账 + G5 模板/契约/正文三方一致)。
     `template_kb_id`：模板页所在库 —— **模板以领域库为准**（报告在任务库、模板在领域库 ⇒ 指定领域库）；
     空则只看本库（不跨库乱扫 ✗）。多候选不静默（只报 T2、不判章节）。
     返回 `{summary, totals, findings[], data}`：`totals` 是**完整计数**，
@@ -2167,6 +2454,10 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
         check_context_map(ctx, rep)
     if scope in ("all", "coupling"):
         check_coupling(ctx, rep)
+    if scope in ("all", "ext"):
+        check_ext_ledger(ctx, rep)   # G4 报告快照落后外部台账（low；只读）
+        check_ext_consistency(ctx, rep)   # G5 模板/契约/正文三方一致 + DataObject 职责边界
+        check_ext_reference(ctx, rep)     # G7 参考规范有 URL 但没抓取留痕（low；只读）
 
     model = ctx["model"]
     rep.data = ctx["data"]

@@ -97,21 +97,198 @@ def _bmm_rule_class_closure() -> list:
         return []
 
 
+# ---------------------------------------------------------------------------
+# 策略 ↔ 规则 / 影响因素 → 策略：**共用的取数件**（2026-10-25）
+#   实测教训：规则与策略的两条边**方向不同** ——
+#     · T-Box：策略 --`isBasisFor`--> 规则
+#     · 图谱实例里同时还有：规则 --`isDerivedFrom`--> 策略
+#   只沿一个方向找会**漏**：某策略的规则只挂在"策略→规则"上时，只查"规则→策略"会回 0 条
+#   （评测会因此判"少给了规则"，但那其实是取数漏了 ✗）。
+# ---------------------------------------------------------------------------
+RULE_POLICY_RELS = ("bmm:isDerivedFrom", "bmm:isBasisFor")
+
+
+def _influencer_types() -> list:
+    """影响因素类的**后代闭包**（含自身）—— 只用本体声明，不写死实例名 ✓。"""
+    try:
+        import ke_ontology  # noqa: PLC0415
+        out = ke_ontology.descendants("bmm:Influencer") or []
+        return sorted({str(x) for x in out if x}) or ["bmm:Influencer"]
+    except Exception:  # noqa: BLE001  本体不可用 ⇒ 退化为声明过的三个类
+        return ["bmm:Influencer", "bmm:InternalInfluencer", "bmm:ExternalInfluencer"]
+
+
+def _influencers(kb_id: str, arg: str = "") -> list:
+    """影响因素实例清单 `[{slug, name}]`；`arg` 给了就按 slug/名**片段**收窄。"""
+    types = _influencer_types()
+    try:
+        import ke_neo4j as _neo  # noqa: PLC0415
+        rows = _neo.query(
+            "MATCH (i:BodhiInstance {kb_id:$kb}) WHERE i.page_type IN $types "
+            + ("AND (i.slug CONTAINS $q OR coalesce(i.name,'') CONTAINS $q) " if arg else "")
+            + "RETURN i.slug AS slug, coalesce(i.name,'') AS name ORDER BY name LIMIT 30",
+            {"kb": kb_id, "types": types, "q": arg}, timeout=8) or []
+        return [{"slug": str(r.get("slug")), "name": str(r.get("name") or "")}
+                for r in rows if r.get("slug")]
+    except Exception:  # noqa: BLE001  图不可用 ⇒ 回 PG
+        cond = ""
+        if arg:
+            needle = ke_db.sql_str("%" + str(arg) + "%")
+            cond = "AND (slug LIKE %s OR COALESCE(title,'') LIKE %s)" % (needle, needle)
+        try:
+            rows = ke_db.psql_csv(
+                "SELECT slug, COALESCE(title,'') AS name FROM wiki_pages "
+                " WHERE knowledge_base_id = %s AND deleted_at IS NULL AND page_type IN (%s) %s "
+                " ORDER BY title LIMIT 30"
+                % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(t) for t in types), cond))
+        except Exception:  # noqa: BLE001
+            return []
+        return [{"slug": str(r["slug"]), "name": str(r.get("name") or "")} for r in rows]
+
+
+def _policy_closure(kb_id: str, root: str) -> list:
+    """策略闭包（含自身）：`includesBusinessPolicy` 递归 0..4 跳 → `[{slug, name}]`。"""
+    try:
+        import ke_neo4j as _neo  # noqa: PLC0415
+        rows = _neo.query(
+            "MATCH (p:BodhiInstance {kb_id:$kb, slug:$pol}) "
+            "OPTIONAL MATCH (p)-[:`bmm:includesBusinessPolicy`*0..4]->(q:BodhiInstance {kb_id:$kb}) "
+            "RETURN collect(DISTINCT {slug: coalesce(q.slug, p.slug), "
+            "                        name: coalesce(q.name, p.name)}) AS pols",
+            {"kb": kb_id, "pol": root}, timeout=8) or []
+        pols = [x for x in ((rows[0].get("pols") if rows else None) or []) if x and x.get("slug")]
+        return ([{"slug": str(x["slug"]), "name": str(x.get("name") or "")} for x in pols]
+                or [{"slug": root, "name": ""}])
+    except Exception:  # noqa: BLE001  图不可用 ⇒ 逐跳 BFS（慢但可用）
+        seen, have, queue = [], set(), [root]
+        while queue:
+            pol = queue.pop(0)
+            if pol in have:
+                continue
+            have.add(pol)
+            seen.append({"slug": pol, "name": ""})
+            try:
+                import ke_graph as _kg  # noqa: PLC0415
+                rel = _kg.relations_of(kb_id, pol) or {}
+            except Exception:  # noqa: BLE001
+                rel = {}
+            for e in (rel.get("out") or []):
+                if e.get("type") == "bmm:includesBusinessPolicy" and e.get("target_slug"):
+                    queue.append(e["target_slug"])
+        return seen
+
+
+def _rule_slugs_pg(kb_id: str, slug: str) -> list:
+    """单个策略 → 规则 slug（**双向**；图不可用时的兜底）。"""
+    try:
+        import ke_graph as _kg  # noqa: PLC0415
+        rel = _kg.relations_of(kb_id, slug) or {}
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for e in (rel.get("in") or []):          # 规则 --isDerivedFrom--> 策略
+        if e.get("type") in RULE_POLICY_RELS and e.get("source_slug"):
+            out.append(str(e["source_slug"]))
+    for e in (rel.get("out") or []):         # 策略 --isBasisFor--> 规则
+        if e.get("type") in RULE_POLICY_RELS and e.get("target_slug"):
+            out.append(str(e["target_slug"]))
+    return [s for i, s in enumerate(out) if s not in out[:i]]
+
+
+def _rule_slugs_of_policies(kb_id: str, policies: list) -> dict:
+    """策略集 → `{策略slug: [规则slug…]}`（**一次** Cypher，双向取边）。"""
+    want = [str(p) for p in (policies or []) if p]
+    if not want:
+        return {}
+    try:
+        import ke_neo4j as _neo  # noqa: PLC0415
+        rows = _neo.query(
+            "MATCH (x:BodhiInstance {kb_id:$kb}) WHERE x.slug IN $pols "
+            "OPTIONAL MATCH (a:BodhiInstance {kb_id:$kb})-[e1]->(x) WHERE type(e1) IN $rels "
+            "OPTIONAL MATCH (x)-[e2]->(b:BodhiInstance {kb_id:$kb}) WHERE type(e2) IN $rels "
+            "RETURN x.slug AS pol, collect(DISTINCT a.slug) + collect(DISTINCT b.slug) AS rules",
+            {"kb": kb_id, "pols": want, "rels": list(RULE_POLICY_RELS)}, timeout=8) or []
+        return {str(r.get("pol")): [str(s) for s in (r.get("rules") or []) if s]
+                for r in rows if r.get("pol")}
+    except Exception:  # noqa: BLE001  图不可用 ⇒ 调用方逐条走 _rule_slugs_pg
+        return {}
+
+
+def _means_of(kb_id: str, influencer_slug: str) -> list:
+    """影响因素 → 影响手段 `[{slug, name, page_type}]`（**手段不一定是策略** ✓）。"""
+    try:
+        import ke_neo4j as _neo  # noqa: PLC0415
+        rows = _neo.query(
+            "MATCH (i:BodhiInstance {kb_id:$kb, slug:$s})-[e]->(m:BodhiInstance {kb_id:$kb}) "
+            "WHERE type(e) = 'bmm:influencesMeans' "
+            "RETURN m.slug AS slug, coalesce(m.name,'') AS name, "
+            "       coalesce(m.page_type,'') AS pt ORDER BY name LIMIT 20",
+            {"kb": kb_id, "s": influencer_slug}, timeout=8) or []
+        return [{"slug": str(r.get("slug")), "name": str(r.get("name") or ""),
+                 "page_type": str(r.get("pt") or "")} for r in rows if r.get("slug")]
+    except Exception:  # noqa: BLE001  图不可用 ⇒ 逐条兜底
+        try:
+            import ke_graph as _kg  # noqa: PLC0415
+            rel = _kg.relations_of(kb_id, influencer_slug) or {}
+        except Exception:  # noqa: BLE001
+            return []
+        return [{"slug": str(e["target_slug"]), "name": "", "page_type": ""}
+                for e in (rel.get("out") or [])
+                if e.get("type") == "bmm:influencesMeans" and e.get("target_slug")]
+
+
+def _influencer_chain(kb_id: str, arg: str = "") -> list:
+    """**影响因素 → 影响手段 →（策略闭包）→ 规则**（双向取边；链路口径）。
+
+    回：`[{influencer:{slug,name}, means:[{slug,name,page_type}],
+          policies:[{slug,name,rules:[…]}], rules:[…]}]`
+    手段是 `CourseOfAction` 之类（不是策略）时 `policies` 为空、`rules` 为空 —— 照实回，不猜 ✓
+    """
+    out = []
+    for inf in _influencers(kb_id, arg)[:3]:
+        means = _means_of(kb_id, inf["slug"])
+        # ① 先收齐策略闭包（去重）→ ② **一次**取这批策略的规则（否则每策略一次查询 = N+1 ✗）
+        pols, seen = [], set()
+        for m in means:
+            for p in _policy_closure(kb_id, m["slug"]):
+                if p["slug"] not in seen:
+                    seen.add(p["slug"])
+                    pols.append(p)
+        by_pol = _rule_slugs_of_policies(kb_id, [p["slug"] for p in pols])
+        policies, slugs = [], []
+        for p in pols:
+            rs = by_pol.get(p["slug"])
+            if rs is None:                       # 图不可用 / 该策略无行 ⇒ 逐条兜底
+                rs = _rule_slugs_pg(kb_id, p["slug"])
+            rs = [s for s in rs if s]
+            policies.append({"slug": p["slug"], "name": p["name"], "rules": rs})
+            for s in rs:
+                if s not in slugs:
+                    slugs.append(s)
+        out.append({"influencer": {"slug": inf["slug"], "name": inf["name"]},
+                    "means": means, "policies": policies, "rules": slugs})
+    return out
+
+
 def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
     """**按步骤解析规则**（取代"任务→规则"的单一解 ✗）。
 
-    `spec` 五种（**每步自选** ✓）：
-      · `direct:<slug>[,<slug>…]`   直接指定 ✓
-      · `policy:<策略名/slug 片段>`  经策略解析（**递归**：`isDerivedFrom` 入边 + `includesBusinessPolicy` 出边）✓
-      · `ask`                        不回规则，回**可选范围**（策略清单），由用户定 ✓
-      · `task:<任务名/slug>`         兼容旧行为（任务 → `taskExecutesRule`）✓
-      · `path:<json>`                预留（`ontology_paths` 多路径并集）✓
+    `spec`（**每步自选** ✓）：
+      · `direct:<slug>[,<slug>…]`    直接指定 ✓
+      · `policy:<策略名/slug 片段>`   策略闭包（`includesBusinessPolicy` 递归）+ **双向**规则边 ✓
+      · `influencer:<影响因素名/slug>` 影响因素 → 影响手段 → 策略闭包 → 规则（**链路口径** ✓）
+      · `ask`                         不回规则，回**可选范围**（策略清单），由用户定 ✓
+      · `task:<任务名/slug>`          已废弃 ✗（任务边已删除）
+      · `path:<json>`                 预留 ✓
+
+    为什么规则边要**双向**：T-Box 是「策略 --isBasisFor--> 规则」，而图谱实例里同时还有
+    「规则 --isDerivedFrom--> 策略」；只查一个方向会漏（实测：某策略的规则只挂在出边上，
+    只查入边会回 0 条 ⇒ 被误判成"少给了规则"✗）。
 
     回执：`{resolved_by, rules[…与 rules_of_task 逐字段一致…], scope_options[], counts, hash}` ✓
     """
     import hashlib
     import json as _json
-    import ke_graph as _kg
 
     kb, kb_name, _n = ke_db.resolve_kb_id(kb_id)
     sp = (spec or "").strip()
@@ -146,7 +323,7 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
             "   %s ORDER BY title %s"
             % (ke_db.sql_str(kb), cond, "LIMIT 5" if like else ""))
 
-    resolved_by, rules, options = kind, [], []
+    resolved_by, rules, options, chain = kind, [], [], []
     if kind == "direct":
         rules = _rule_contracts(kb, [x.strip() for x in arg.split(",") if x.strip()], kb_name)
     elif kind == "task":
@@ -159,38 +336,34 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
             raise ValueError("找不到策略（含 %r）；现有策略：%s"
                              % (arg, "、".join(x["t"] for x in _pols())))
         root = hits[0]["slug"]
+        pols = _policy_closure(kb, root)                  # 策略闭包（含子策略）
+        by_pol = _rule_slugs_of_policies(kb, [p["slug"] for p in pols])
         slugs = []
-        try:                             # **一次** Cypher：策略闭包（includes 递归）+ 指向它的规则 ✓
-            import ke_neo4j as _neo
-            rr = _neo.query(
-                "MATCH (p:BodhiInstance {kb_id:$kb, slug:$pol}) "
-                "OPTIONAL MATCH (p)-[:`bmm:includesBusinessPolicy`*0..4]->(q:BodhiInstance {kb_id:$kb}) "
-                "WITH collect(DISTINCT coalesce(q.slug, p.slug)) AS pols "
-                "MATCH (r:BodhiInstance {kb_id:$kb})-[e]->(x:BodhiInstance {kb_id:$kb}) "
-                "WHERE x.slug IN pols AND type(e) IN ['bmm:isDerivedFrom','bmm:isBasisFor'] "
-                "RETURN DISTINCT r.slug AS slug",
-                {"kb": kb, "pol": root}, timeout=8)
-            slugs = [str(x.get("slug")) for x in (rr or []) if x.get("slug")]
-        except Exception:                # noqa: BLE001  图不可用 ⇒ 逐条回溯（慢但可用）
-            seen, queue = set(), [root]
-            while queue:
-                pol = queue.pop(0)
-                if pol in seen:
-                    continue
-                seen.add(pol)
-                try:
-                    rel = _kg.relations_of(kb, pol) or {}
-                except Exception:        # noqa: BLE001
-                    rel = {}
-                for e in (rel.get("in") or []):        # 规则 --isDerivedFrom--> 策略
-                    if e.get("type") in ("bmm:isDerivedFrom", "bmm:isBasisFor") and e.get("source_slug"):
-                        if e["source_slug"] not in slugs:
-                            slugs.append(e["source_slug"])
-                for e in (rel.get("out") or []):       # 策略 --includesBusinessPolicy--> 策略
-                    if e.get("type") == "bmm:includesBusinessPolicy" and e.get("target_slug"):
-                        queue.append(e["target_slug"])
+        for p in pols:                                    # **双向**规则边（见 docstring）
+            rs = by_pol.get(p["slug"])
+            if rs is None:                                # 图不可用 / 该策略无行 ⇒ 逐条兜底
+                rs = _rule_slugs_pg(kb, p["slug"])
+            for s in rs:
+                if s and s not in slugs:
+                    slugs.append(s)
         rules = _rule_contracts(kb, slugs, kb_name)
         resolved_by = "policy"
+    elif kind == "influencer":
+        if not arg:                              # 只给前缀 ⇒ 回可选影响因素（与 ask 同口径 ✓）
+            options = [{"kind": "influencer", "slug": x["slug"], "title": x["name"]}
+                       for x in _influencers(kb)]
+            resolved_by = "influencer"
+        else:
+            chain = _influencer_chain(kb, arg)
+            if not chain:
+                known = _influencers(kb)
+                raise ValueError("找不到影响因素（含 %r）；现有影响因素：%s"
+                                 % (arg, "、".join(x["name"] for x in known) or "（无）"))
+            rules = _rule_contracts(kb, [s for c in chain for s in (c.get("rules") or [])], kb_name)
+            resolved_by = "influencer"
+            # 多命中时把候选一并给出（链路口径不变，只是让调用方知道还有哪几个）
+            options = [{"kind": "influencer", "slug": c["influencer"]["slug"],
+                        "title": c["influencer"]["name"]} for c in chain]
     elif kind == "ask":
         options = [{"kind": "policy", "slug": x["slug"], "title": x["t"]} for x in _pols()]
         resolved_by = "ask"
@@ -198,16 +371,19 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
         resolved_by = "path"
         options = [{"note": "path 模式待接入 ontology_paths + walk_path（下一步）"}]
     else:
-        raise ValueError("未知 spec 前缀 %r（direct:/policy:/ask/task:/path:）" % kind)
+        raise ValueError("未知 spec 前缀 %r（direct:/policy:/influencer:/ask/path:）" % kind)
 
     payload = {"resolved_by": resolved_by, "spec": sp, "rules": rules}
-    return {"ok": True, "kb": {"id": kb, "name": kb_name}, "resolved_by": resolved_by, "spec": sp,
-            "rules": rules[:int(limit or 300)],
-            "counts": {"rules": len(rules),
-                       "needs_extract": sum(1 for x in rules if x.get("needs_extract"))},
-            "scope_options": options,
-            "hash": hashlib.sha256(_json.dumps(payload, ensure_ascii=False, sort_keys=True)
-                                   .encode("utf-8")).hexdigest()[:16]}
+    out = {"ok": True, "kb": {"id": kb, "name": kb_name}, "resolved_by": resolved_by, "spec": sp,
+           "rules": rules[:int(limit or 300)],
+           "counts": {"rules": len(rules),
+                      "needs_extract": sum(1 for x in rules if x.get("needs_extract"))},
+           "scope_options": options,
+           "hash": hashlib.sha256(_json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                                  .encode("utf-8")).hexdigest()[:16]}
+    if chain:                                # 链路口径的明细（只在 influencer 时给）
+        out["chain"] = chain
+    return out
 
 
 def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
@@ -233,7 +409,7 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                 "RETURN n.slug AS slug, n.name AS title, n.definition AS dfn, "
                 "       n.ruleImplementation AS impl, n.knowledgeNeed AS need, "
                 "       n.enforcementLevel AS lvl, n.ruleScope AS scope, "
-                "       n.ruleReference AS ref, n.note AS note, "
+                "       n.ruleReference AS ref, n.note AS note, n.ruleHash AS rhash, "
                 "       collect(DISTINCT {t: type(rel), s: m.slug}) AS outs",
                 {"kb": kb_id, "slugs": want}, timeout=6) or []:
             g[str(r.get("slug") or "")] = r
@@ -251,6 +427,7 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleScope','') AS scope, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:enforcementLevel','') AS lvl, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleReference','') AS ref, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleHash','') AS rhash, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
                 " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s) "
@@ -274,8 +451,19 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                 pols = []
             src = "pg:page_metadata"
         pols = [p for i, p in enumerate(pols) if p and p not in pols[:i]]
-        out.append({"slug": slug, "title": str(r.get("title") or ""),
-                    "definition": str(r.get("dfn") or r.get("note") or "")[:400],
+        _title = str(r.get("title") or "")
+        _defn = str(r.get("dfn") or r.get("note") or "")
+        # 2026-10-25：**版本指纹由工具给**（报告那一列直接用，模型不得自算/留空 ✗）
+        #   ① 优先 `bmm:ruleHash`（规则级版本哈希，发布流程写入 —— 本体口径 ✓）；
+        #   ② 没有（这批规则未发布过）⇒ 用 `hash(slug+标题+定义)` 的短哈希**兜底**，并标 `ruleHashSource=computed`；
+        #   规则文本一改指纹就变 ⇒ 报告能看出"这条规则换过版本" ✓
+        _rhash = str(r.get("rhash") or "").strip()
+        _fp = _rhash or ("r-" + hashlib.sha256(
+            ("rule|%s|%s|%s" % (slug, _title, _defn)).encode("utf-8")).hexdigest()[:6])
+        out.append({"slug": slug, "title": _title,
+                    "definition": _defn[:400],
+                    "ruleHash": _rhash, "ruleHashSource": "page" if _rhash else "computed",
+                    "fingerprint": _fp,
                     "implementation": impl, "knowledgeNeed": need, "scope": str(r.get("scope") or ""),
                     "enforcement": str(r.get("lvl") or ""), "reference": str(r.get("ref") or ""),
                     "needs_extract": bool(need) or ("知识提取" in impl),
@@ -708,6 +896,15 @@ def reference_lookup(kb_id: str = "", reference: str = "", allow_fetch: bool = F
                            "**不要编造规范内容**；可改用规范名/文件名查本库文档，"
                            "或请用户离线提供该规范"
                            % (got.get("reason") or "other", str(got.get("detail") or "")[:120]))
+        # 抓取留痕（2026-10-26）：巡检 G6 据此判断"参考规范抓过没"（写失败不影响结论 ✓）
+        try:
+            import ke_ext_store as _es
+            _es.ref_cache_put(ref, {"found": bool(got.get("ok")),
+                                    "reason": got.get("reason") or "",
+                                    "http_status": got.get("http_status"),
+                                    "chars": len(got.get("text") or "")})
+        except Exception:  # noqa: BLE001
+            pass
         return out
     out["note"] = ("知识库里找不到同名规范 → 标「参考规范不可得」，只按规则原文判定，**不要编造**")
     return out

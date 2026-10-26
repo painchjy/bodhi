@@ -1504,6 +1504,13 @@ if __name__ == "__main__":  # 运维自测：python3 ke_admin.py purge <model> |
         out = cascade_purge(args[1])
     elif cmd == "load":
         out = load_model(args[1] if len(args) > 1 else "", purge=True)
+    elif cmd == "fix-head" and len(args) > 2:      # 修复页头：收敛重复 + 校准「首个版本生成」
+        # 用法：fix-head <kb> <slug> [--created-at "2026-10-25 20:49:19 +0800"] [--apply]
+        _ca, _apply = "", "--apply" in args
+        for i, item in enumerate(args[3:]):
+            if item == "--created-at" and i + 4 < len(args) + 1:
+                _ca = args[4 + i] if len(args) > 4 + i else ""
+        out = ke_pages.repair_head(args[1], args[2], created_at=_ca, dry_run=not _apply)
     elif cmd == "repair":                          # 运维修复：编译 → 灌投影 → 重投影 wiki → 体检
         out = repair_all(args[1] if len(args) > 1 else "")
     elif cmd in ("ctx-contexts", "ctx-scan", "ctx-lookup"):   # 跨库上下文映射（一期只读）
