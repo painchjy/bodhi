@@ -60,7 +60,8 @@ def knowledge_lookup(args: dict) -> dict:
     _first = ab_turn.claim(_turn, "knowledge_lookup") if _turn else ""
     return ke_lookup.knowledge_lookup(
         str(args.get("kb_id", "")), str(args.get("mode", "rules") or "rules"),
-        str(args.get("query", "")), str(args.get("spec", "")), str(args.get("start", "")),
+        str(args.get("query", "") or args.get("slug", "")), str(args.get("spec", "")),
+        str(args.get("start", "")),
         int(args.get("depth", 2) or 2), int(args.get("limit", 20) or 20),
         str(args.get("cls", "")), str(args.get("page_type", "")),
         args.get("kb_ids") or None, bool(args.get("auto_widen", False)),

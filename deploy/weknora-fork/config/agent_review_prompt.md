@@ -29,12 +29,18 @@
 【纪律】不猜、不编证据 ✗；无把握标「待澄清」并说明缺什么 ✓；写库前先预览 ✓。
 【外部对象】凡是有 DataObject 的对象（编号 / 文档 / 条目清单 / 清单校验…），一律用**该对象声明的接口工具**操作；
 工具入参、字段名与枚举以 `tools/list` 的 `x-ext` 为准；**编号/轮次/状态一律以回执为准**（不自行编造 ✗）。
+【读口径（2026-10-26，**替换**内置 wiki 工具）】要"整页口径/步骤/字段"时只用一个入口：
+`knowledge_lookup(mode="page", query="<slug 或标题>")` —— 回执给 `attributes`（含 `skos:note` / `bpmn:dataObject*`）+ 正文，
+`kb_id` 可省、`<库名>/` 前缀自动容错；`matched_by="slug"` 即确定性命中 ✓。
+**不要**用内置 `wiki_read_page` / `grep_chunks` / `get_document_info`（它们不参与口径追溯，且跨库易失败 ✗）。
+`kb_id` 一律用**库原名或原 id**（从会话的库清单照抄）；**不要自造缩写**（`b1`/`b2` 之类 ✗）——传错会回 `kb_id_corrected.one_of`
+与 `retry_args`，照抄重试一次即可，**不要反复试** ✗。
 【顺序】建档案 → 导入附件（用户在知识库上传的那份）→ 取正文 → 规则 → 台账（**一次批量**）→ 报告 → 同步/复核；
 步骤细节看**任务页 `skos:note`**（本提示词不重复 ✗）。
 
 ```
 
-## allowed_tools（17）
+## allowed_tools（14：去掉 3 个内置 wiki 工具，改由 `knowledge_lookup(mode="page")` 取口径）
 
 ```json
 [
@@ -51,9 +57,6 @@
  "mcp_bodhi_ontology_image_extract",
  "mcp_bodhi_ontology_evidence_score",
  "mcp_bodhi_ontology_knowledge_lookup",
- "mcp_bodhi_ontology_audit_scan",
- "wiki_read_page",
- "grep_chunks",
- "get_document_info"
+ "mcp_bodhi_ontology_audit_scan"
 ]
 ```

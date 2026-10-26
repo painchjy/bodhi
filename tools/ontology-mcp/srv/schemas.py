@@ -421,9 +421,15 @@ TOOL_SCHEMAS = [
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
                 "mode": {"type": "string",
-                         "description": "rules | keyword | instances | route | path | semantic（默认 rules）"},
+                         "description": ("rules | keyword | **page** | instances | route | path | semantic"
+                                         "（默认 rules）。**page = 按 slug 取整页**（正文 + 属性，"
+                                         "`<库名>/` 前缀自动容错、`kb_id` 可省）⇒ 任务页/DataObject/模板"
+                                         "用它一次取全，**不要**再用内置 wiki 阅读工具")},
                 "query": {"type": "string",
-                          "description": "keyword/instances/route 的查询：`a b`=AND、`a|b`=OR、\"短语\"、-排除"},
+                          "description": ("keyword/instances/route 的查询：`a b`=AND、`a|b`=OR、\"短语\"、-排除；"
+                                          "**page 模式**：slug（可带/不带库名前缀）或标题关键词")},
+                "slug": {"type": "string",
+                         "description": "page 模式的 slug（与 query 二选一；给了优先用 slug）"},
                 "spec": {"type": "string",
                          "description": ("rules 模式的 spec：`direct:<规则slug,…>` | `policy:<策略名/slug 片段>` | "
                                          "`influencer:<影响因素名/slug 片段>`（影响因素→影响手段→策略→规则的链路口径，"
@@ -454,7 +460,7 @@ TOOL_SCHEMAS = [
                                "description": ("自报\"本工具是本轮第一个检索动作\"（true/false）；"
                                                "与门禁判定不一致会计入数据质量 ⚠️")},
                 "limit": {"type": "integer"}},
-                "required": ["kb_id"]},
+                "required": []},
         },
         {
             "name": "lookup_turn_begin",

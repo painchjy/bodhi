@@ -232,3 +232,27 @@ lookup_calls / native_retrieval_calls / agent_ms`。
 | 平均调用次数/问题 | 1.43 | 1.20 | +0.23 |
 
 ⇒ 第一轮"提示让命中率变差"的结论**不成立**，是口径错。提示的代价是 **+0.23 次调用 / +39ms**，收益是 **不靠降级就能命中**。
+
+## 7. 检索类别 `retrieval_kind`：读口径**不计**检索次数（2026-10-26）
+
+**背景**：评审智能体原来靠内置 `wiki_read_page` 拿任务步骤/模板口径，于是"A/B 里的检索次数"
+把**读口径**也算进去，结论被污染；更糟的是模型会为拿步骤反复读页（`kb_id` 自造 + slug 前缀 ⇒ 7 条 ERR）。
+
+**改动**：`knowledge_lookup` 回执的 `telemetry.retrieval_kind` 分三类：
+
+| `mode` | `retrieval_kind` | 计入检索次数？ | 参与首步判定？ |
+|---|---|---|---|
+| `rules` | `policy` | ✓ | ✓ |
+| `page`（新增，按 slug 取整页） | `page` | ✗ **不计**（读口径 ≠ 检索） | ✓（仍是"先查后答"的第一步） |
+| `keyword` / `instances` / `route` / `path` / `semantic` | `knowledge` | ✓ | ✓ |
+
+分析时按 kind 分组（不要混算）：
+
+```bash
+jq -r '[.telemetry.retrieval_kind, (.telemetry.hits // 0)] | @tsv' logs/lookup_ab_2026*.jsonl | sort | uniq -c
+```
+
+**配套**（同日）：`page` 模式支持 `<库名>/` 前缀容错、`kb_id` 可省、多命中回 `page_ambiguous`+candidates；
+`kb_id` 传错（`b1`/`b2`）回 `kb_unresolved` + `kb_id_corrected.one_of` + `retry_args`（照抄重试一次，不再乱试）。
+评审智能体白名单**移除** `wiki_read_page` / `grep_chunks` / `get_document_info`（17 → 14），
+口径统一走 `knowledge_lookup(mode="page")` ⇒ 报告指标变为 **ERR=0 / 每问 lookup ≤1.5 / 原生读页 0 次 / first_step 100%**。

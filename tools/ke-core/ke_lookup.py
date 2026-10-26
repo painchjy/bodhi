@@ -379,6 +379,134 @@ def _rules_guide(base: dict, kb: str, text: str) -> dict:
                      "确需全量策略清单才用 ask")}
 
 
+def _normalize_kb_id(kb_id: str) -> tuple:
+    """`kb_id` 归一化（2026-10-26）：模型爱传 `b1/b2`、`XX库`、带引号 ⇒ 纠正或给可复制的候选。
+
+    返回 `(值, info)`；`info` 非空时回执带 `kb_id_corrected` / `one_of` / `retry_args`。
+    """
+    raw = str(kb_id or "").strip().strip('"').strip("'")
+    if not raw:
+        return raw, {}
+    import ke_db as _db
+
+    try:                                          # resolve 在未知库上会 raise（历史口径 ✓）
+        kb, name, _note = _db.resolve_kb_id(raw)
+    except Exception:                             # noqa: BLE001
+        kb = ""
+    if kb:
+        return raw, {}
+    # 去掉"库"字 / 空白 / 大小写差异后再试一次（b2 → 若唯一近似就纠正）
+    alt = raw.rstrip("库").strip()
+    cands = []
+    try:
+        rows = _db.psql_csv("SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL")
+    except Exception:  # noqa: BLE001
+        rows = []
+    for r in rows:
+        n = str(r.get("name") or "")
+        if alt and (alt.lower() in n.lower() or n.lower() in alt.lower()):
+            cands.append({"kb_id": r.get("id"), "name": n})
+    if len(cands) == 1:
+        return cands[0]["kb_id"], {"from": raw, "to": cands[0]["kb_id"],
+                                   "name": cands[0]["name"], "why": "唯一近似库名 ⇒ 已纠正"}
+    if len(cands) > 1:
+        return raw, {"from": raw, "one_of": [c["name"] for c in cands],
+                     "hint": "这些库名都近似：请用**清单里的原名或 id 原样传**（不要自造缩写 b1/b2）",
+                     "retry_args": {"kb_id": cands[0]["kb_id"]}}
+    names = [str(r.get("name") or "") for r in rows][:12]
+    return raw, {"from": raw, "one_of": names,
+                 "hint": "库不存在：`kb_id` 用**下面清单里的原名或 id 原样传**（不要自造缩写 b1/b2）",
+                 "retry_args": {"kb_id": (rows[0].get("id") if rows else "")}}
+
+
+def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int) -> dict:
+    """`mode="page"`：**按 slug 确定性命中**（`<库名>/` 前缀自动容错）→ 正文 + 属性。
+
+    为什么单独一个模式（2026-10-26 用户口径）：任务页的 `skos:note`、DataObject 的绑定、
+    模板的口径节分别落在**页属性/正文**里；`keyword` 能命中片段但**不保证命中要的那一页**，
+    于是智能体只能去用内置 `wiki_read_page`（污染 A/B、且跨库/前缀一错就失败）。
+    这里给"按 slug 取整页"的确定性入口 ✓（不新增工具，工具数仍 38）。
+    """
+    import ke_db as _db
+
+    q = str(query or "").strip().strip('"').strip("'")
+    if not q:
+        return {**base, "ok": False, "error": "page 需要 query（slug 或标题关键词）",
+                "hint": "例：mode=page, query=\"bpmn/task/<任务页 slug>\"（`kb_id` 可省）", "counts": {"hits": 0}}
+    kbs = [str(k) for k in (kb_ids or []) if str(k).strip()]
+    if kb and kb not in kbs:
+        kbs = [kb] + kbs
+    where = ["deleted_at IS NULL"]
+    if kbs:
+        where.append("knowledge_base_id IN (%s)" % ", ".join(_db.sql_str(k) for k in kbs))
+    # `<库名>/` 前缀容错：q 含 "/" 时，除原文外再按"去掉第一段"查一次 ✓
+    variants = [q]
+    if "/" in q:
+        tail = q.split("/", 1)[1]
+        if tail and tail not in variants:
+            variants.append(tail)
+    like_parts = []
+    for v in variants:
+        like_parts.append(_db.sql_str("%" + v + "%"))
+    rows = _db.psql_csv(
+        "SELECT knowledge_base_id AS kb_id, slug, title, page_type, version, "
+        "       COALESCE(content,'') AS content, "
+        "       COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS attrs "
+        "  FROM wiki_pages WHERE %s AND (slug = %s OR slug ILIKE %s OR title ILIKE %s"
+        "        OR slug IN (%s)) "
+        " ORDER BY (slug = %s) DESC, length(slug) ASC, updated_at DESC LIMIT 30"
+        % (" AND ".join(where), _db.sql_str(q), like_parts[0], like_parts[0],
+           ", ".join(_db.sql_str(v) for v in variants), _db.sql_str(q)))
+    if not rows:
+        return {**base, "ok": False, "error": "page_not_found", "query": q,
+                "hint": "slug 写全（可带/不带 `<库名>/` 前缀）；或先用 mode=keyword 找 slug",
+                "counts": {"hits": 0}}
+
+    def _rank(r: dict) -> tuple:
+        slug = str(r.get("slug") or "")
+        if slug == q:
+            return (0, slug)
+        if slug.split("/", 1)[-1] == q or slug.endswith("/" + q):
+            return (1, slug)
+        if str(r.get("title") or "").strip() == q:
+            return (2, slug)
+        return (3, slug)
+
+    rows.sort(key=_rank)
+    seen, picked = set(), []
+    for r in rows:
+        s = str(r.get("slug") or "")
+        if s in seen:
+            continue
+        seen.add(s)
+        picked.append(r)
+    best_rank = _rank(picked[0])[0]
+    top = [r for r in picked if _rank(r)[0] == best_rank]
+    hits = [{"slug": r.get("slug"), "title": r.get("title"), "page_type": r.get("page_type"),
+             "version": r.get("version"), "kb_id": r.get("kb_id")} for r in picked[:10]]
+    if len(top) > 1 and best_rank >= 2:          # 只有"模糊档"多命中才算歧义（精确/后缀档取第一）
+        return {**base, "ok": False, "error": "page_ambiguous", "query": q,
+                "candidates": hits[:10], "counts": {"hits": len(hits)},
+                "hint": "多条同名/相近页 ⇒ 用**完整 slug** 重试（列表见 candidates），不猜 ✗"}
+    r0 = picked[0]
+    try:
+        attrs = json.loads(r0.get("attrs") or "{}")
+    except Exception:  # noqa: BLE001
+        attrs = {}
+    page = {"slug": r0.get("slug"), "title": r0.get("title"), "page_type": r0.get("page_type"),
+            "version": r0.get("version"), "kb_id": r0.get("kb_id"),
+            "attributes": attrs, "note": attrs.get("skos:note") or "",
+            "content_md": r0.get("content") or "",
+            "content_chars": len(r0.get("content") or "")}
+    return {**base, "ok": True, "mode": "page", "query": q,
+            "matched_by": ("slug" if best_rank == 0 else
+                           "slug_suffix" if best_rank == 1 else
+                           "title" if best_rank == 2 else "fuzzy"),
+            "counts": {"hits": len(hits)}, "hits": hits, "page": page,
+            "next": ("本页内容已给全 ⇒ **不要再调内置 wiki 阅读工具**；"
+                     "缺口径就问用户或看该页的引用（DataObject/模板）")}
+
+
 def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                  spec: str = "", start: str = "", depth: int = 2,
                  limit: int = 20, cls: str = "", page_type: str = "",
@@ -387,9 +515,16 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
     import ke_db as _db
     import ke_review as _rv
 
-    kb, kb_name, note = _db.resolve_kb_id(kb_id)
+    try:                                          # page 模式可省 kb；未知库不要炸（回可读原因 ✓）
+        kb, kb_name, note = _db.resolve_kb_id(kb_id)
+    except Exception:                             # noqa: BLE001
+        kb, kb_name, note = "", "", ""
     m = (mode or "rules").strip().lower()
     base = {"ok": True, "mode": m, "kb": {"id": kb, "name": kb_name}}
+
+    # ── ⓪ page：按 slug 取整页（正文 + 属性；`<库名>/` 前缀容错）────────────
+    if m == "page":
+        return _page_lookup(base, kb, kb_id, query, kb_ids, int(limit) or 20)
 
     # ── ① rules：按步骤解析规则（唯一规则入口 ✓）────────────────────────
     if m == "rules":
@@ -845,6 +980,13 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     `session_no` / `question` / `turn_id` / `first_step` / `turn_first` **只进遥测**，不参与检索。
     """
     t0 = time.time()
+    # 2026-10-26：`kb_id` 归一化（b1/b2、带"库"字、带引号 ⇒ 唯一近似则纠正；否则给候选/retry_args）
+    kb_id, _kb_fix = _normalize_kb_id(kb_id)
+    if _kb_fix and not _kb_fix.get("to") and str(mode or "").lower() != "page":
+        # 库解析不了 ⇒ 直接回**可读纠错回执**（不抛异常，避免智能体反复试错 ✗）
+        return {"ok": False, "error": "kb_unresolved", "kb_id_corrected": _kb_fix,
+                "hint": _kb_fix.get("hint") or "kb_id 用库清单里的原名或 id 原样传",
+                "retry_args": _kb_fix.get("retry_args") or {}}
     # 2026-10-25（P2）：三态开关 —— 显式布尔 > env(on|off|abtest)；abtest 按 50% 分臂并**记进遥测**。
     hint, assignment, ab = _resolve_arm(ontology_hint, question or query or spec, session_no)
     # 2026-10-25（A/B 口径 v2）：**真实 IO 统计** —— 打了库/图几次、几次空手而归。
@@ -861,6 +1003,8 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
         if own_bucket:
             ke_stats.reset()
     variant = "hint" if hint else "plain"
+    if _kb_fix:
+        r["kb_id_corrected"] = _kb_fix
     if not hint:
         for key in _HINT_KEYS:
             r.pop(key, None)
@@ -895,8 +1039,13 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
         "degraded": bool(plan.get("relaxed_by")) or (bool(by_src.get("pg")) and not by_src.get("graph")),
         "ok": bool(hits),                                     # 本次调用是否**拿到结果**
     }
+    # 2026-10-26（用户口径）：**检索类别分列** —— 读口径/读页不计入"检索次数"，
+    # 但仍参与"本轮首个动作"的顺序判定（A/B 报告按 kind 分组 ✓）
+    _kind = {"rules": "policy", "page": "page"}.get(str(r.get("mode") or mode).lower(),
+                                                    "knowledge")
     r["telemetry"] = {
         "variant": variant, "ontology_hint": hint,
+        "retrieval_kind": _kind,
         # 2026-10-24（A/B 四维）：程序版本（语义位 + 代码指纹）／问题种类／轮次判定
         "lookup_version": LOOKUP_VERSION, "code_rev": CODE_REV,
         "q_category": _q_category(r.get("mode") or mode, query, spec),

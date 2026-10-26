@@ -1,0 +1,40 @@
+# 智能体配置真源（发布期唯一入口）
+#
+# 为什么有这个文件（2026-10-26 用户裁定）：
+#   - **不做 `/admin` 后台**：工具面/提示词由**发布程序**写入，写完由 `selfcheck` 校验；
+#   - UI 上能改的项（名字、库绑定、mcp 服务勾选）**以 UI 为准**；改完跑 `apply_config.py --check`
+#     看是否漂移；**工具面与提示词以本文件为准**（UI 改这两个会被下次发布覆盖）。
+#
+# 用法：
+#   python3 tools/delivery/apply_config.py --check        # 只比对（不写），退出码 1=有漂移
+#   python3 tools/delivery/apply_config.py --apply        # 幂等写入（有变化才 UPDATE）
+#   python3 tools/delivery/apply_config.py --apply --only 09e54ee1…   # 只处理某智能体
+#
+# 口径：
+#   - `allowed_tools`：**只列工具名**（WeKnora 原生工具名 + `mcp_<server>_<tool>`）；
+#   - `prompt_file`：相对本目录的 `config/`（`system_prompt` 从 md 的 ```text 代码块取）；
+#   - `mcp_services`：留空表示"不动 UI 上的勾选"；给了就按 id 覆盖（发布包里 id 由 `mcp_services` 表定）。
+version: 2
+agents:
+  - id: 09e54ee1-6d0b-452f-8160-a26990bc71e6
+    name: 技术方案评审智能体
+    prompt_file: agent_review_prompt.md
+    # 读口径只走 knowledge_lookup(mode="page") ⇒ 内置 wiki 三件套已移除（2026-10-26）
+    allowed_tools:
+      - data_schema
+      - data_analysis
+      - mcp_it_platform_ext_catalog_query
+      - mcp_it_platform_ext_issue_list
+      - mcp_it_platform_ext_doc_access
+      - mcp_it_platform_ext_review_flow
+      - mcp_bodhi_ontology_save_knowledge
+      - mcp_bodhi_ontology_rules_resolve
+      - mcp_bodhi_ontology_reference_lookup
+      - mcp_bodhi_ontology_skills
+      - mcp_bodhi_ontology_image_extract
+      - mcp_bodhi_ontology_evidence_score
+      - mcp_bodhi_ontology_knowledge_lookup
+      - mcp_bodhi_ontology_audit_scan
+    mcp_services:
+      - a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001
+      - a7c1f0d2-1b2e-4f3a-9c4d-b0d100000002
