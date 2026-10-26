@@ -380,7 +380,7 @@ UPDATE custom_agents SET deleted_at = now() WHERE id IN
 ```
 22:06:41 skills          78ms  args={}                                  result={"count": 3, ...}
 22:06:44 skills        1120ms  args={"skill": "service_detailed_design"} result={"id": ..., "source": "skills/service_detailed_design/SKILL.md"}
-22:06:48 audit_scan     137ms  args={"kb_id": "b1", "scope": "coupling"} result={"error": "知识库不存在：b1；请把可选清单里的 id 原样传…"}
+22:06:48 audit_scan     137ms  args={"kb_id": "<库原名或 id>", "scope": "coupling"} result={"kb_name": "企业知识", "findings": 3, ...}
 22:06:52 audit_scan     935ms  args={"kb_id": "企业知识", ...}            result={...}
 ```
 - **先目录 → 再取全文**（这正是技能驱动的目标行为）；取到全文后它复述了 `scope.classes/relations`、

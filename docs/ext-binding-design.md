@@ -18,7 +18,8 @@
 
 ## 2 L0 真源：MCP `tools/list` 的 `x-ext`
 
-`it-platform` 每个工具在 `tools/list` 里附带数据面契约（`deploy/mock-ext/it-platform/schema.json` 的 `x_ext` 段）：
+`it-platform` 每个工具在 `tools/list` 里附带数据面契约（**`tools/it-platform-mcp/schema.json`** 的 `x_ext` 段；
+2026-10-26 起该文件随**服务发布**走，`deploy/mock-ext/` 只留文本种子）：
 
 ```jsonc
 "x-ext": {
@@ -262,7 +263,10 @@ TTL 的章节规范也补了：`② 规则清单` 的 `规则指纹` **取 `fing
 | `666555` 报告已补锚点 | 该页原**无**引用块；工具 `auto_ref_block` 补了一块（version 2→3），内容未变 | 无需处理 |
 | 跨库找模板 | 报告在工作库、模板在领域库 ⇒ `resolve_template` **全库唯一命中才用**，回执 `template.scope=global` + `local_reason`（不静默） | 想"只用本库"就显式传 `template=<slug>`，或把模板复制到工作库 |
 | `deploy/bodhi-ops.sudoers` / `wsl-up.sh` 免密 | `wsl-up.sh` 里"重启服务/起容器"等步骤需要免密 sudo；当前用 `wsl -u root` 也可 | 待定：是否安装 sudoers（影响运维脚本能否一键跑） |
-| 工作区未提交 | 本任务新增/改动 40+ 文件（`tools/ke-core/ke_ext_*.py`、`srv/ext_api.py`、`ext-panel.js`、`docs/ext-binding-design.md`、`tests/test_ext_tools.py`、`deploy/mock-ext/`、`tools/it-platform-mcp/` …） | 建议按主题分批提交（`it-platform-mcp` / ext 绑定与面板 / 巡检 G4·G5 / 文档） |
+| 工作区未提交 | **已关闭（2026-10-26）**：按主题分批提交（读口径治理 / 数据边界 / 发布 04+配置矩阵）；`git status` 干净 | — |
+| 读口径靠内置 wiki 工具 | **已关闭（2026-10-26）**：`knowledge_lookup` 增 `mode="page"`（slug 确定性 + 前缀容错 + `kb_id` 可省）；评审智能体白名单移除 `wiki_read_page`/`grep_chunks`/`get_document_info`（17→14），提示词加【读口径】；`apply_config.py --check` 输出 `✓ 无漂移` | 复核：`python3 tools/delivery/apply_config.py --check` |
+| mock-ext 二进制入库 | **已关闭（2026-10-26）**：`docs/ files/ images/` 已 `git rm --cached` + `.gitignore`；契约迁到 `tools/it-platform-mcp/schema.json`（读序 服务目录→`BODHI_EXT_SEED`→容器根）；单测改用 `tests/fixtures/mock-ext/`（合成 docx） | 见 `deploy/mock-ext/README.md` |
+| 配置只有 SQL 片段、易漂移 | **已关闭（2026-10-26）**：`agent_tools.yaml`（真源）+ `apply_config.py`（幂等写 `custom_agents.config`）+ `CONFIG-MATRIX.md`（能改/真源/命令/生效/校验） | `apply_config.py --check` 退出码 0 |
 
 ## 9 评审上下文（`技术方案评审流程`）与附件下载（2026-10-26）
 
@@ -277,7 +281,7 @@ IT 工作平台；我们此前没有对应接口 ⇒ 智能体只能"让用户�
 |---|---|
 | DataObject | `bpmn/dataobject/技术方案评审流程`（领域库）；绑定 `ext_review_flow` / `query,maintain` / `review_no` / `it_platform:tools/ke-core/ke_ext_flow.py` |
 | 工具 | `ext_review_flow`：`get`（状态/轮次/责任人）、`docs`（文档清单 + **url**）、`rounds`、`open`（**建档** + 按文件名绑文档）、`maintain`（`upsert_round`/`close`，默认 `dry_run=true`） |
-| 契约 | `deploy/mock-ext/it-platform/schema.json` 的 `x_ext.ext_review_flow`（8 列 + `flow_status_enum` / `round_status_enum`） |
+| 契约 | `tools/it-platform-mcp/schema.json` 的 `x_ext.ext_review_flow`（8 列 + `flow_status_enum` / `round_status_enum`） |
 
 ### 9.3 编号 / 轮次口径（模拟侧）
 
