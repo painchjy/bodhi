@@ -575,6 +575,35 @@ curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<Data
 **注**：`bodhi-mcp` 是 **systemd 服务**（不是容器）⇒ 改了后端代码必须
 `systemctl restart bodhi-mcp`，否则跑的还是旧字节码（这类"改了没生效"多半是这个）。
 
+## 保存/同步后「正文没变」+ 版本历史多出"无差异"的版本
+
+**症状**（2026-10-26 用户实测）：面板改一条（如 P-03 严重度→严重）→ 保存 + 同步正文 →
+- 报告正文没变（严重度没出现）；
+- 版本历史多出两版，且**版本间无差异**；
+- （更早还有一次）① 范围与依据 的表格被换成条目表：多了一层表头、原内容丢失。
+
+**根因（两个，都在 `/bodhi/ext/sync-report` 的定点替换里）**：
+1. 定位条目表用「任意一行包含锚点标签」⇒ ① 表的数据行「| **评审编号** | YYYYMM-… |」
+   也命中（`编号` 是它的子串）⇒ 把 ① 的数据行换成了条目表；于是 ③ 一直没更新；
+2. 每次同步都写新版本，**没有"内容没变就不写"的判断** ⇒ 空 diff 版本。
+
+**已修（2026-10-26）**：
+- `_replace_section_table` 只认**表头单元格**（精确优先；退化时要求列数 ≥3，2 列小表不参与）；
+- `_dedupe_anchor_tables` 同一锚点只留**第一张**表（清掉历史坏写残留的重复表）；
+- 同步前比对渲染结果：**与库里正文一致 ⇒ 不写库、不加版本**，回执 `changed=false` + `note`。
+
+**自检**（改一行 → 同步 → 看回执/版本）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/bodhi/ext/sync-report -H 'Content-Type: application/json' \
+  -d '{"object":"bpmn/dataobject/问题清单","review_no":"<编号>"}' | python3 -m json.tool
+# 期望：changed=false（已一致）或 changed=true + version+1（有变化）；**不应出现同内容两次写**
+```
+
+**已被覆盖的页怎么恢复**：① 那类被覆盖的段落，从 `logs/args/*-save_knowledge.json`
+里找到事发前的 `report.content_md`，把该段贴回后用 `save_knowledge(stage="report", mode="apply")`
+重写（页头「首个版本生成」保持首版时间 ✓），最后再跑一次 `sync-report` 让条目表归位。
+
 ## 报告 ③ 的「规则指纹」是 `r-xxxxxx`（应为规则页 ruleHash）/ 台账 rev 大得离谱
 
 **症状**（2026-10-26 用户实测）：

@@ -228,22 +228,72 @@ def update_payload(body: dict) -> dict:
 
 
 def _replace_section_table(content: str, table_md: str, label: str) -> tuple:
-    """把"表头含 `label`"的那张表换成 `table_md`（其余不动）。→ `(新正文, 是否替换)`"""
-    if not table_md.strip():
+    """把"**表头单元格**含 `label`"的那张表换成 `table_md`（其余不动）。→ `(新正文, 是否替换)`
+
+    2026-10-26 修（用户实测）：旧实现按「任意一行包含 label」定位 ⇒ ① 里那种"两列小表"的
+    数据行（形如 `| xx编号 | YYYYMM-… |`）也会命中（label 是它的子串）⇒ 把 ① 的数据行换成了
+    条目表（多出一层表头、① 原内容丢失 ✗）。现在只认**表头行**，并优先"表头单元格精确相等"。
+    """
+    if not table_md.strip() or not label:
         return content, False
     lines = content.splitlines()
-    hit = None
-    for i, ln in enumerate(lines):                    # 先定位表头行
-        if ln.lstrip().startswith("|") and label and label in ln:
-            hit = i
+    tables = []                                       # [(header_idx, end_idx, header_cells)]
+    i = 0
+    while i < len(lines):
+        if lines[i].lstrip().startswith("|"):
+            j = i
+            while j < len(lines) and lines[j].lstrip().startswith("|"):
+                j += 1
+            cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+            tables.append((i, j, cells))
+            i = j
+        else:
+            i += 1
+    pick = None
+    for h, e, cells in tables:                        # ① 表头某格 == label（精确）
+        if label in cells:
+            pick = (h, e)
             break
-    if hit is None:
+    if pick is None:                                  # ② 表头含 label 且列数 ≥3（排除 2 列小表）
+        for h, e, cells in tables:
+            if len(cells) >= 3 and any(label in c for c in cells):
+                pick = (h, e)
+                break
+    if pick is None:
         return content, False
-    j = hit
-    while j < len(lines) and lines[j].lstrip().startswith("|"):
-        j += 1
-    new = lines[:hit] + table_md.splitlines() + lines[j:]
+    h, e = pick
+    new = lines[:h] + table_md.splitlines() + lines[e:]
     return "\n".join(new) + ("\n" if content.endswith("\n") else ""), True
+
+
+def _dedupe_anchor_tables(content: str, label: str) -> tuple:
+    """删掉**重复的锚点表**（表头单元格含 `label` 的第 2 张及以后）→ `(新正文, 删了几张)`
+
+    2026-10-26 用户实测：历史上有过"把条目表插进 ① 表位置"的坏写，之后同步只替换了**第一张**
+    锚点表 ⇒ 正文里残留第二张（③ 里出现 P-03/P-04 重复）✗。这里按"锚点相同 ⇒ 只留一张"清理。
+    """
+    if not content or not label:
+        return content, 0
+    lines = content.splitlines()
+    spans, i = [], 0
+    while i < len(lines):
+        if lines[i].lstrip().startswith("|"):
+            j = i
+            while j < len(lines) and lines[j].lstrip().startswith("|"):
+                j += 1
+            cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+            if label in cells:
+                spans.append((i, j))
+            i = j
+        else:
+            i += 1
+    if len(spans) <= 1:
+        return content, 0
+    drop = set()
+    for h, e in spans[1:]:
+        drop.update(range(h, e))
+    kept = [ln for k, ln in enumerate(lines) if k not in drop]
+    return "\n".join(kept) + ("\n" if content.endswith("\n") else ""), len(spans) - 1
 
 
 def _refresh_block(content: str, led: dict, columns=None) -> str:
@@ -334,9 +384,18 @@ def sync_report_payload(body: dict) -> dict:
         label = table_md.splitlines()[0].strip().strip("|").split("|")[0].strip()
     content, replaced = _replace_section_table(page["content"] or "", table_md, label)
     content = _refresh_block(content, led, cols)
+    content, _dups = _dedupe_anchor_tables(content, label)
     if not replaced:
         return {"ok": False, "error": "section_not_found", "label": label,
                 "hint": "报告里找不到表头含「%s」的表格（先粘一次工具回执的 markdown）" % label}
+    # **幂等**（2026-10-26 用户实测：保存+同步后正文没变、版本历史多出"无差异"的两版）：
+    # 渲染结果与库里正文一致 ⇒ 不写库、不加版本 ✓
+    if content.strip() == (page.get("content") or "").strip():
+        return {"ok": True, "changed": False, "slug": page["slug"],
+                "version": page.get("version"), "rows": len(led.get("rows") or []),
+                "rev": led.get("rev"), "columns": cols,
+                "schema_hash": (led.get("projection") or {}).get("schemaHash"),
+                "note": "正文与台账一致 ⇒ 未写新版本（避免空 diff）"}
     # `dry_run`：只回\"将要写成什么\"，**不写库**（自测/预览用，避免体检把人家的正文改小 ✗）
     dry = body.get("dry_run", False)
     if isinstance(dry, str):
@@ -362,7 +421,7 @@ def sync_report_payload(body: dict) -> dict:
         "mode": "apply", "session_no": session_no,
         "report": {"title": page["title"], "page_type": page["page_type"],
                    "slug": page["slug"], "content_md": content}})
-    return {"ok": bool(out.get("applied") or out.get("ok")), "slug": page["slug"],
+    return {"ok": bool(out.get("applied") or out.get("ok")), "changed": True, "slug": page["slug"],
             "version": (out.get("page_versions") or [{}])[0].get("before"),
             "rows": len(led.get("rows") or []), "rev": led.get("rev"),
             "schema_hash": (led.get("projection") or {}).get("schemaHash"),
