@@ -575,6 +575,26 @@ curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<Data
 **注**：`bodhi-mcp` 是 **systemd 服务**（不是容器）⇒ 改了后端代码必须
 `systemctl restart bodhi-mcp`，否则跑的还是旧字节码（这类"改了没生效"多半是这个）。
 
+## 智能体"不会用"新工具 / 新流程（改了工具它却不用）
+
+**症状**（2026-10-26 用户实测）：新加了 `ext_review_flow` / `action="import"`，但评审智能体仍按老路子
+（只按文件名 bind、或说"附件不在库里"），既不建档案也不导入附件。
+
+**按这三处逐项检查（顺序不能反）**：
+
+| # | 检查点 | 怎么看 | 修法 |
+|---|---|---|---|
+| 1 | **工具白名单**（最常见） | `SELECT config->'allowed_tools' FROM custom_agents WHERE id='<agent>'` —— 少了新工具 ⇒ 它**根本看不到** | 把 `mcp_it_platform_ext_review_flow` / `mcp_bodhi_ontology_save_knowledge` / `rules_resolve` 等补进 `allowed_tools`；`mcp_services` 要**同时**含两个服务 id |
+| 2 | **领域任务步骤**（业务口径） | 任务页 `skos:note`（如 `bpmn/task/逐项评审`）—— 老版本写的是"每条 create"、"指纹填 `r-xxxxxx`"，与新口径冲突 | 用 `page_attributes_set(patch={"skos:note": …})` 重写成**一条链路**：建档案 → 导入附件 → 取正文 → 规则 → 台账（`items=[…]` 批量、`rule_fp=ruleHash`）→ 报告 → 同步/复核 |
+| 3 | **提示词**（只放通用纪律） | `config->>'system_prompt'` | 只加 2 条通用纪律：①外部对象一律用**其 DataObject 声明的接口工具**、字段/枚举以 `x-ext` 为准、编号/轮次/状态**以回执为准**；②执行顺序（细节指向任务页 `skos:note`）。**不要**把域名词写进提示词 ✗ |
+
+> 提示词真源留档：`deploy/weknora-fork/config/agent_review_prompt.md`（含 `allowed_tools` 全量 + 应用 SQL）。
+> 任务页与工具口径的关系：**任务步骤 = 业务口径真源**；工具只提供能力，模板提供报告口径，提示词只讲纪律。
+
+**改完怎么验**：让智能体说一遍它要做哪几步（或给一个"编号+文件名"的小任务），
+回执里应出现 `ext_review_flow(action="create")` → `ext_doc_access(action="import")` 的调用痕迹；
+`mcp_bodhi_ontology_audit_scan(scope="ext")` 里 G4/G5/G7 应无新增命中。
+
 ## 智能体要"建档案 + 传附件"，不想用 shell
 
 **口径（2026-10-26）**：附件**不要求**用户手工上传到外部系统，也**不要**写 shell 脚本 —— 用户把附件
