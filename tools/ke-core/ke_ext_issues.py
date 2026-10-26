@@ -158,12 +158,16 @@ def _pack(mode: str, obj: dict, binding: dict, schema: dict, **kw) -> dict:
 
 def maintain(kb_id: str = "", object_slug: str = "", mode: str = "query", action: str = "list",
              review_no: str = "", issue_no: str = "", fields: dict | None = None,
+             items: list | None = None,
              view: str = "rows", if_rev=None, dry_run: bool = True,
              actor: str = "", session_no: str = "", columns=None) -> dict:
     """统一入口（`mode=query` 只读；`mode=maintain` 写，默认 dry_run）。
 
     `columns`：**报告要用哪几列、什么顺序**（模板配置的字段子集，逗号分隔或列表）——
     工具字段可以多于某份报告所需（服务端字段集 ⊋ 报告字段集），这里只做筛选 ✓。
+
+    `items`：**批量写入**（2026-10-26 用户口径）—— 一次 `create` 提交全部条目，`rev` 只 +1。
+    逐条 create 会让"新建档案"的 rev 变成 9（8 条 + 1）✗；批量写入后 rev = **编号级写入版本** ✓。
     """
     rb = S.resolve_binding(TOOL, kb_id, object_slug)
     if not rb.get("ok"):
@@ -216,8 +220,66 @@ def maintain(kb_id: str = "", object_slug: str = "", mode: str = "query", action
     if not actor:
         return {"ok": False, "tool": TOOL, "error": "maintain 需要 actor"}
     payload = dict(fields or {})
-    if action in ("create", "update") and not payload:
-        return {"ok": False, "tool": TOOL, "error": "需要 fields（要写的列）"}
+    if action in ("create", "update") and not payload and not items:
+        return {"ok": False, "tool": TOOL, "error": "需要 fields（要写的列）或 items（批量）"}
+    # ── 批量 create（一次调用 ⇒ rev 只 +1）────────────────────────────────
+    if action == "create" and items:
+        rows, bad = [], []
+        for i, raw in enumerate(items):
+            it = dict(raw or {})
+            no = str(it.pop("issue_no", "") or "").strip()
+            if not no:
+                bad.append({"index": i, "error": "need_issue_no"})
+                continue
+            if schema["verdict_enum"] and it.get("verdict") \
+                    and it["verdict"] not in schema["verdict_enum"]:
+                bad.append({"index": i, "issue_no": no, "error": "bad_verdict"})
+                continue
+            if schema["severity_enum"] and it.get("severity") \
+                    and it["severity"] not in schema["severity_enum"]:
+                bad.append({"index": i, "issue_no": no, "error": "bad_severity"})
+                continue
+            if not istr(it.get("rule_fp")):     # 调用方给了就**原样保留**（模板口径：= 规则页 ruleHash ✓）
+                fp = _fingerprint(it.get("rule"), it.get("doc_loc"),
+                                  it.get("verdict"), it.get("quote"))
+                if fp:
+                    it["rule_fp"] = fp
+            rows.append((no, it))
+        path = _path(rno)
+        if dry_run:
+            return _pack("maintain", obj, binding, schema, dry_run=True, action="create_batch",
+                         rev=int(doc.get("rev") or 0), planned=len(rows), rejected=bad,
+                         next="确认无误后传 dry_run=false 才落盘（一条批量 = rev+1 ✓）")
+        with S.locked(path):
+            fresh = _load(rno)
+            created = updated = 0
+            for no, it in rows:
+                idx2, cur2 = _find(fresh, no)
+                if cur2 is None:
+                    rec = dict({"issue_no": no}, **it)
+                    rec.setdefault("created_at", _now())
+                    rec["updated_at"] = _now()
+                    fresh["items"].append(rec)
+                    created += 1
+                else:
+                    rec = dict(cur2, **it)
+                    rec["updated_at"] = _now()
+                    fresh["items"][idx2] = rec
+                    updated += 1
+            fresh["rev"] = int(fresh.get("rev") or 0) + 1
+            fresh["updated_at"] = _now()
+            S.write_json(path, fresh)
+            S.audit("issues:create_batch",
+                    {"tool": TOOL, "actor": actor, "session_no": session_no,
+                     "key": rno, "dry_run": False,
+                     "created": created, "updated": updated, "rejected": bad})
+        out = _pack("maintain", obj, binding, schema, dry_run=False, action="create_batch",
+                    rev=fresh["rev"], created=created, updated=updated, rejected=bad,
+                    counts={"items": len(fresh["items"])},
+                    rev_note="rev = 该编号台账的写入版本（本次 +1，不等于业务轮次）")
+        if view == "table":
+            out["markdown"] = _md(fresh["items"], schema, sel)
+        return out
     # 2026-10-25：**工具侧**补版本指纹（本体口径：机器生成必须有；人工条目带 human_input 则留空 ✓）
     if not istr(payload.get("rule_fp")):
         _cur_for_fp = _find(doc, issue_no)[1] or {}     # 注意：`cur` 在下面才赋值，这里单独取

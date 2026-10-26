@@ -36,13 +36,24 @@ curl -s http://127.0.0.1:8770/health     # {"ok": true, "server": "it-platform-m
 | 服务内工具名 | 智能体看到的名字 | 用途 |
 |---|---|---|
 | `ext_catalog_query` | `mcp_it_platform_ext_catalog_query` | 白名单/黑名单查询（版本**逐字**；也支持 `versionRange` 允许范围与 `expires_at` 有效期，黑名单优先） |
-| `ext_issue_list` | `mcp_it_platform_ext_issue_list` | 条目清单查询/维护（含 `expert_feedback`；`columns=` 取模板子集） |
+| `ext_issue_list` | `mcp_it_platform_ext_issue_list` | 条目清单查询/维护（含 `expert_feedback`；`columns=` 取模板子集；**`items=[…]` 批量写入 ⇒ `rev` 只 +1**） |
 | `ext_doc_access` | `mcp_it_platform_ext_doc_access` | 文档/附件只读；`action=url` 给**可下载地址**；`image`+`inline_media` 直出 `data_url` |
-| `ext_review_flow` | `mcp_it_platform_ext_review_flow` | **流程上下文**：`get/docs/rounds/open`（编号不存在⇒**直接建档**）+ `maintain`；文档清单带 `url` |
+| `ext_review_flow` | `mcp_it_platform_ext_review_flow` | **流程上下文**：`get/docs/rounds/open/create/attach`（编号不存在⇒**直接建档**）+ `maintain`；文档清单带 `url` |
 
-> 只给「**流程编号 + 文件名称**」即可开工（`ext_review_flow(action=open)` 建档并绑文档）
+> 只给「**流程编号 + 文件名称**」即可开工（`ext_review_flow(action=open)` 建档并按名称绑文档）
 > ⇒ 不必把方案文档上传进知识库 ✓。附件下载走 `GET /files/<doc_id>`（流式 + `Content-Disposition`），
 > 基地址由 `IT_MCP_PUBLIC_BASE`（默认 `http://127.0.0.1:8770`）决定，内网换成域名/IP 即可。
+
+> **内网工作台没接通时怎么"上传文档"**（2026-10-26）：
+> ① `POST /files/<doc_id>?review_no=<编号>&name=<文件名>&title=<标题>&round=1`，body = 文件二进制
+> （docx 会用标准库切节）→ 回 `doc_id/size/sections/url`；
+> ② `ext_review_flow(action="attach", review_no=<编号>, doc_id=<doc_id>)` 把文档绑到该编号；
+> ③ 一条命令搞定：`bash deploy/mock-ext/upload_doc.sh <编号> <本地文件> [标题]`。
+> 新建流程：`ext_review_flow(action="create", review_no=<新编号>, title=…)`。
+
+> **台账指纹与版本口径**（2026-10-26）：`rule_fp` 由**调用方显式给**（= 规则页 `bmm:ruleHash`，16 hex）；
+> 工具只在缺省时才自算 `r-xxxxxx` 短哈希（`human_input=true` 的人工条目留空）。
+> `rev` = **该编号台账的写入版本**（一次批量写 +1，不是业务轮次）。
 
 > **版本指纹**：`create/update` 时工具按 `hash(规则 + 文档位置 + 判定 + 原文摘录)` 自动生成 `r-xxxxxx`
 > （人工提交的条目带 `human_input=true` 才留空）—— 调用方**不要自己拼**，也不要写"未取得（待澄清）"。

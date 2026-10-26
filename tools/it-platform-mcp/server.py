@@ -73,7 +73,8 @@ def call_tool(name: str, args: dict) -> dict:
             kb_id=str(a.get("kb_id", "")), object_slug=str(a.get("object", "")),
             mode=str(a.get("mode", "query")), action=str(a.get("action", "list")),
             review_no=str(a.get("review_no", "")), issue_no=str(a.get("issue_no", "")),
-            fields=a.get("fields") or None, view=str(a.get("view", "rows")),
+            fields=a.get("fields") or None, items=a.get("items") or None,
+            view=str(a.get("view", "rows")),
             columns=a.get("columns"), if_rev=a.get("if_rev"), dry_run=_bool(a.get("dry_run"), True),
             actor=str(a.get("actor", "")), session_no=str(a.get("session_no", "")))
     if name == "ext_review_flow":
@@ -82,6 +83,7 @@ def call_tool(name: str, args: dict) -> dict:
             mode=str(a.get("mode", "query")), action=str(a.get("action", "get")),
             review_no=str(a.get("review_no", "")), round=int(a.get("round", 0) or 0),
             filenames=a.get("filenames") or [], status=str(a.get("status", "")),
+            title=str(a.get("title", "")), doc_id=str(a.get("doc_id", "")),
             dry_run=_bool(a.get("dry_run"), True), actor=str(a.get("actor", "")),
             session_no=str(a.get("session_no", "")))
     if name == "ext_doc_access":
@@ -181,6 +183,34 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(405, b'{"ok":false,"error":"use POST /mcp"}')
 
+    def _upload_file(self, n: int) -> None:
+        """`POST /files/<doc_id>[?review_no=&name=&title=&round=]` → 存盘 + 切节 + 挂索引 ✓。"""
+        import urllib.parse
+
+        path = self.path.split("?")[0].rstrip("/")
+        doc_id = urllib.parse.unquote(path[len("/files/"):])
+        q = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+
+        def _q(k: str, default: str = "") -> str:
+            return (q.get(k) or [default])[0]
+
+        raw = self.rfile.read(int(n)) if n else b""
+        if not raw:
+            self._send(400, json.dumps({"ok": False, "error": "empty_body"},
+                                       ensure_ascii=False).encode())
+            return
+        try:
+            out = DOCS.save_document(
+                doc_id=doc_id or "doc-%s" % time.strftime("%Y%m%d%H%M%S"),
+                review_no=_q("review_no"), filename=_q("name") or (doc_id + ".bin"),
+                raw=raw, title=_q("title"), round=int(_q("round", "1") or 1),
+                actor=_q("actor"), session_no=_q("session_no"))
+        except Exception as exc:  # noqa: BLE001
+            self._send(500, json.dumps({"ok": False, "error": repr(exc)[:300]},
+                                       ensure_ascii=False).encode())
+            return
+        self._send(200, json.dumps(out, ensure_ascii=False).encode())
+
     def _send_file(self, doc_id: str) -> None:
         """`GET /files/<doc_id>[?name=<附件名>]` → 附件二进制（带 Content-Disposition ✓）。"""
         import urllib.parse
@@ -223,6 +253,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
+        # 2026-10-26：**上传文档**（内网工作台未接通前的补位）
+        #   POST /files/<doc_id>?review_no=…&name=…&title=…&round=1   （body = 文件二进制）
+        if self.path.split("?")[0].rstrip("/").startswith("/files/"):
+            self._upload_file(n)
+            return
         raw = self.rfile.read(n) if n else b"{}"
         try:
             req = json.loads(raw.decode("utf-8") or "{}")

@@ -575,6 +575,47 @@ curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<Data
 **注**：`bodhi-mcp` 是 **systemd 服务**（不是容器）⇒ 改了后端代码必须
 `systemctl restart bodhi-mcp`，否则跑的还是旧字节码（这类"改了没生效"多半是这个）。
 
+## 报告 ③ 的「规则指纹」是 `r-xxxxxx`（应为规则页 ruleHash）/ 台账 rev 大得离谱
+
+**症状**（2026-10-26 用户实测）：
+- ② 规则清单的指纹是 16 位 hex（`bmm:ruleHash` ✓），③ 问题清单却是 `r-f2f4a9` 这种短哈希；
+- 新建的评审编号，台账却是 `rev 9`。
+
+**口径（已固化，模板 v12 + 工具兜底）**：
+- ③ 的「规则指纹」列 = **规则页 `bmm:ruleHash`（16 hex）**，与 ② 同源同值；
+- 写台账时**显式**提交 `rule_fp=<ruleHash>` —— 工具只在**缺省**时才自算 `r-xxxxxx`
+  （人工条目 `human_input=true` 留空，用来区分来源）；
+- 台账写入**一次批量**：`items=[{issue_no, rule_fp, …}]` ⇒ `rev` 只 +1；
+  `rev` = 该编号台账的**写入版本**，**不是评审轮次**。
+
+**修一个编号的历史数据**（走接口，不直改文件）：
+
+```bash
+# 1) 读出条目（拿到 rule / 现状）
+curl -s -X POST http://127.0.0.1:8770/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ext_issue_list",
+       "arguments":{"action":"list","review_no":"YYYYMM-2222222"}}}'
+
+# 2) 批量 upsert：把每条 rule_fp 换成规则页的 ruleHash（rev 只 +1）
+#    items=[{"issue_no":"P-01","rule_fp":"16c4fde43637ed6c", ...}, …]  dry_run 先预览
+```
+
+**报告正文同步**：③ 表的指纹列按同法替换后，用 `save_knowledge(stage="report", mode="apply")`
+重写正文（页头「首个版本生成」保持**首版时间**、只一段 ✓）。
+
+**自查 SQL**（看哪条台账还是 `r-` 开头）：
+
+```sql
+-- 台账在容器里：state/ext/it-platform/issues/<编号>.json
+python3 - <<'PY'
+import json,glob
+for p in glob.glob("state/ext/it-platform/issues/*.json"):
+    d=json.load(open(p,encoding="utf-8"))
+    bad=[i["issue_no"] for i in d.get("items",[]) if str(i.get("rule_fp","")).startswith("r-")]
+    print(p, "rev", d.get("rev"), "短哈希条目", bad)
+PY
+```
+
 ## 「首个版本生成」不对 / 页头重复了好几段
 
 **症状**（2026-10-26 用户实测）：

@@ -51,7 +51,12 @@ TOOLS = [
             "issue_no": {"type": "string", "description": "内层主键"},
             "fields": {"type": "object",
                        "description": ("desc/rule/doc_loc/quote/verdict/severity/fix/"
-                                       "confidence/rule_fp/expert_feedback")},
+                                       "confidence/rule_fp/expert_feedback；"
+                                       "**rule_fp 请显式给**（= 规则页 bmm:ruleHash），给了就不覆盖")},
+            "items": {"type": "array", "items": {"type": "object"},
+                      "description": ("**批量 create**：一次提交全部条目（每条含 issue_no + 上面 fields），"
+                                      "整批只让 `rev` +1（避免\"一条一个版本\"）；"
+                                      "回执给 created/updated/rejected")},
             "view": {"type": "string", "description": "rows | table"},
             "columns": {"type": "string",
                         "description": ("**报告要用哪几列**（逗号分隔，顺序即展示顺序；省略=全部）。"
@@ -76,8 +81,12 @@ TOOLS = [
             "object": {"type": "string", "description": "业务对象页 slug（建议给）"},
             "mode": {"type": "string", "description": "query | maintain（默认 query）"},
             "action": {"type": "string",
-                       "description": "get | docs | rounds | open | upsert_round | close"},
+                       "description": ("get | docs | rounds | open | create | attach | "
+                                       "upsert_round | close")},
             "review_no": {"type": "string", "description": "流程编号（外层主键）"},
+            "title": {"type": "string", "description": "create 时的流程名称（可省）"},
+            "doc_id": {"type": "string",
+                       "description": "attach 时绑定已上传的文档（先 `POST /files/<doc_id>`）"},
             "round": {"type": "integer", "description": "轮次（open/maintain 用；省略=档案当前轮次）"},
             "filenames": {"type": "array", "items": {"type": "string"},
                           "description": "open 时按**文件名**绑定文档（模糊匹配标题）"},

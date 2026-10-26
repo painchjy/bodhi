@@ -137,6 +137,7 @@ def _save(a: dict, actor: str = "", session_no: str = "", action: str = "") -> d
 
 def call(kb_id: str = "", object_slug: str = "", mode: str = "query", action: str = "get",
          review_no: str = "", round: int = 0, filenames=None, status: str = "",
+         title: str = "", doc_id: str = "",
          dry_run: bool = True, actor: str = "", session_no: str = "") -> dict:
     """统一入口（与其余 `ext_*` 同口径：绑定解析 → 动作 → 可读回执 ✓）。"""
     rb = S.resolve_binding(TOOL, kb_id, object_slug)
@@ -203,6 +204,43 @@ def call(kb_id: str = "", object_slug: str = "", mode: str = "query", action: st
         return {**base, "round": cur,
                 "rounds": [dict(x, is_current=(int(x.get("round") or 0) == cur)) for x in rnds],
                 "counts": {"rounds": len(rnds)}}
+
+    # ── 新建流程 / 绑定已上传文档（2026-10-26：内网工作台未接通前的补位 ✓）──
+    if mode == "query" and action in ("create", "attach"):
+        if action == "create":
+            arch = _new_archive(rno, int(round or 1), docs)
+            if str(title or "").strip():
+                arch["name"] = str(title).strip()
+            if str(status or "").strip():
+                arch["status"] = str(status).strip()
+            _save(arch, actor=actor, session_no=session_no, action="create")
+            return {**base, "created": True, "name": arch.get("name"),
+                    "status": arch.get("status"), "stage": arch.get("stage"),
+                    "round": arch.get("round"), "rev": arch.get("rev"),
+                    "docs": [_doc_brief(d) for d in (arch.get("docs") or [])],
+                    "next": ("上传文档：`POST /files/<doc_id>`（?name=&title=&review_no=<编号>）"
+                             "或直接用 scripts/upload_doc.sh；再 `action=attach&doc_id=…` 绑定")}
+        bind = str(doc_id or "").strip()
+        if not bind:
+            return {"ok": False, "tool": TOOL, "error": "need_doc_id",
+                    "hint": "先上传文档拿到 doc_id，再 action=attach 绑定到该编号"}
+        if not arch:
+            arch = _new_archive(rno, int(round or 1), docs)
+        live = _doc_rows(rno, 0)
+        picked = [d for d in live if d.get("doc_id") == bind]
+        if not picked:
+            one = _doc(bind)
+            if not one:
+                return {"ok": False, "tool": TOOL, "error": "doc_not_found", "doc_id": bind,
+                        "hint": "先 `POST /files/<doc_id>` 上传，或核对 doc_id"}
+            one.setdefault("doc_id", bind)
+            picked = [_doc_brief(one)]
+        arch["docs"] = picked
+        _save(arch, actor=actor, session_no=session_no, action="attach")
+        return {**base, "attached": bind, "rev": arch.get("rev"),
+                "round": arch.get("round"), "status": arch.get("status"),
+                "docs": [_doc_brief(d) for d in (arch.get("docs") or [])],
+                "next": "ext_doc_access(action=outline, doc_id=…) 取章节树 ⇒ section 逐节取正文"}
 
     # ── 开工：open（建档 + 绑文档；只写"档案"，不动业务数据） ────────────
     if mode == "query" and action == "open":

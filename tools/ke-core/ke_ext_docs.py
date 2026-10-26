@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
 import time
 
 import ke_ext_store as S
@@ -102,6 +103,112 @@ def doc_file(doc_id: str, name: str = "") -> dict:
         return {"ok": False, "error": "file_not_found", "path": pick.get("path")}
     return {"ok": True, "path": p, "name": pick.get("name") or os.path.basename(p),
             "mime": pick.get("mime") or d.get("mime") or "application/octet-stream"}
+
+
+def _docx_sections(path: str) -> list:
+    """docx → `[{path,title,text}]`（标准库解析；标题 = `2.1 xxx` 这类行首编号，样式仅辅助）。"""
+    import re as _re
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    try:
+        with zipfile.ZipFile(path) as z:
+            root = ET.fromstring(z.read("word/document.xml"))
+    except Exception:  # noqa: BLE001  读不了就当"全文无正文"（不阻断上传 ✓）
+        return [{"path": "全文", "title": "全文", "text": ""}]
+
+    def _lvl(style: str, text: str) -> int:
+        m = _re.match(r"^(\d+(?:\.\d+){0,3})\s+\S", text or "")
+        if m and len(text) <= 40:
+            return m.group(1).count(".") + 1
+        m2 = _re.match(r"(?i)^heading\s*(\d)$", style or "")
+        styled = bool(m2) or ((style or "").isdigit() and 2 <= int(style or 0) <= 3)
+        if styled and len(text or "") <= 30 and not text.endswith(("。", "，", "；")):
+            return 1
+        return 0
+
+    paras = []
+    for p in root.iter(W + "p"):
+        style = ""
+        for s in p.iter(W + "pStyle"):
+            style = s.get(W + "val") or ""
+            break
+        text = "".join(t.text or "" for t in p.iter(W + "t")).strip()
+        if text:
+            paras.append((style, text))
+    heads = [(i, _lvl(st, tx)) for i, (st, tx) in enumerate(paras) if _lvl(st, tx)]
+    if not heads:
+        return [{"path": "全文", "title": "全文", "text": "\n".join(tx for _s, tx in paras)}]
+    out = []
+    for k, (idx, lvl) in enumerate(heads):
+        end = heads[k + 1][0] if k + 1 < len(heads) else len(paras)
+        title = paras[idx][1]
+        body = "\n".join(tx for _s, tx in paras[idx + 1:end])
+        m = _re.match(r"^(\d+(?:\.\d+){0,3})\s+(.*)$", title)
+        pid = (m.group(1) + " " + m.group(2)[:36]) if m else ("H%d %s" % (lvl, title[:36]))
+        out.append({"path": pid, "title": title[:80], "text": body})
+    return out
+
+
+def save_document(doc_id: str, review_no: str, filename: str, raw: bytes, title: str = "",
+                  round: int = 1, actor: str = "", session_no: str = "") -> dict:
+    """**上传一份文档**（2026-10-26 用户口径：内网工作台未接通前，文档自己上传给模拟服务 ✓）。
+
+    - 文件落 `<root>/it-platform/files/<doc_id>.<ext>`；docx 用标准库切节（正文可按 section 取 ✓）；
+    - 元数据落 `docs/<doc_id>.json`，并把 doc_id 挂到 `docs/index.json` 的该编号下；
+    - 返回 `doc_id / title / size / sections / url`，随后 `ext_review_flow(action=attach)` 绑到流程。
+    """
+    import hashlib
+
+    doc_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(doc_id or "").strip()).strip("-") \
+        or ("doc-" + time.strftime("%Y%m%d%H%M%S"))
+    name = os.path.basename(str(filename or "") or (doc_id + ".bin"))
+    ext = os.path.splitext(name)[1].lower()
+    sub = os.path.join(S.system_dir(), "files")
+    os.makedirs(sub, exist_ok=True)
+    fname = doc_id + (ext or ".bin")
+    fpath = os.path.join(sub, fname)
+    with open(fpath, "wb") as fh:
+        fh.write(raw)
+    mime = {".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".pdf": "application/pdf", ".md": "text/markdown", ".txt": "text/plain",
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}.get(
+        ext, "application/octet-stream")
+    sha = hashlib.sha256(raw).hexdigest()[:16]
+    sections = _docx_sections(fpath) if ext == ".docx" else [
+        {"path": "全文", "title": name, "text": ""}]
+    doc = {"doc_id": doc_id, "title": str(title or os.path.splitext(name)[0]),
+           "mime": mime, "size": len(raw), "round": int(round or 1),
+           "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "sha256": sha,
+           "files": [{"name": name, "path": "files/" + fname, "mime": mime, "size": len(raw),
+                      "sha256": sha}],
+           "attachments": [{"name": name, "path": "files/" + fname, "mime": mime,
+                            "size": len(raw)}],
+           "sections": sections, "images": []}
+    ddir = os.path.join(S.system_dir(), "docs")
+    os.makedirs(ddir, exist_ok=True)
+    dp = os.path.join(ddir, doc_id + ".json")
+    with S.locked(dp):
+        S.write_json(dp, doc)
+        ip = os.path.join(ddir, "index.json")
+        idx = S.read_json(ip, {}) or {}
+        ids = [str(x) for x in (idx.get(str(review_no or "")) or [])]
+        if doc_id not in ids:
+            ids.append(doc_id)
+        idx[str(review_no or "_default")] = ids
+        defs = [str(x) for x in (idx.get("_default") or [])]
+        if doc_id not in defs:
+            defs.append(doc_id)
+        idx["_default"] = defs
+        S.write_json(ip, idx)
+    S.audit("docs:upload", {"tool": TOOL, "actor": actor, "session_no": session_no,
+                            "key": "%s/%s" % (review_no, doc_id),
+                            "size": len(raw), "sections": len(sections)})
+    return {"ok": True, "doc_id": doc_id, "title": doc["title"], "mime": mime,
+            "size": len(raw), "sha256": sha, "sections": len(sections),
+            "round": doc["round"], "path": "files/" + fname,
+            "url": "%s/files/%s" % (S.public_base(), doc_id)}
 
 
 def access(kb_id: str = "", object_slug: str = "", action: str = "list",

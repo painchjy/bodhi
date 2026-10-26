@@ -302,6 +302,68 @@ def test_gate_reference_missing_cache(ext):
     assert ctx2["data"]["ext_reference"]["cached"] == 1
 
 
+# ── 批量写入 / rule_fp 透传 / 文档上传（2026-10-26） ─────────────────────
+def test_issue_bulk_create_single_rev(ext):
+    """一次 `items=[…]` 建 3 条 ⇒ **rev 只 +1**（新建档案首写 = 1），不再是"一条一个版本" ✓。"""
+    items = [{"issue_no": "P-%02d" % i, "desc": "d%d" % i, "rule": "规则A",
+              "verdict": "不符合", "rule_fp": "16c4fde43637ed6c"} for i in (1, 2, 3)]
+    dry = I.maintain(kb_id="kb", mode="maintain", action="create", review_no="R-BULK",
+                     items=items, actor="t", dry_run=True)
+    assert dry["dry_run"] is True and dry["planned"] == 3 and dry["rev"] == 0, dry
+    res = I.maintain(kb_id="kb", mode="maintain", action="create", review_no="R-BULK",
+                     items=items, actor="t", dry_run=False)
+    assert res["created"] == 3 and res["rev"] == 1, res
+    assert res["rev_note"].startswith("rev ="), res
+    again = I.maintain(kb_id="kb", mode="maintain", action="create", review_no="R-BULK",
+                       items=items[:1], actor="t", dry_run=False)
+    assert again["updated"] == 1 and again["rev"] == 2, again
+
+
+def test_issue_rule_fp_from_caller_kept(ext):
+    """调用方给的 `rule_fp`（= 规则页 ruleHash）**原样保留**，不再自算 `r-xxxxxx` ✓。"""
+    r = I.maintain(kb_id="kb", mode="maintain", action="create", review_no="R-FP",
+                   issue_no="P-01", actor="t", dry_run=False,
+                   fields={"rule": "规则A", "doc_loc": "2.1", "verdict": "不符合",
+                           "quote": "原文", "rule_fp": "22e44ac2f97e874c"})
+    assert r["diff"]["after"]["rule_fp"] == "22e44ac2f97e874c", r
+    gen = I.maintain(kb_id="kb", mode="maintain", action="create", review_no="R-FP",
+                     issue_no="P-02", actor="t", dry_run=False,
+                     fields={"rule": "规则A", "doc_loc": "2.2", "verdict": "不符合",
+                             "quote": "原文2"})
+    assert str(gen["diff"]["after"]["rule_fp"]).startswith("r-"), "缺省时才自算短哈希"
+
+
+def _mk_docx(path, paras):
+    """最小 docx（只含 word/document.xml），用来验证上传切节 ✓。"""
+    import zipfile
+    body = "".join("<w:p><w:r><w:t>%s</w:t></w:r></w:p>" % t for t in paras)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.'
+           'openxmlformats.org/wordprocessingml/2006/main"><w:body>%s</w:body></w:document>'
+           % body)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/document.xml", xml)
+
+
+def test_document_upload_then_sections(ext):
+    """上传 docx ⇒ 落文件 + 切节 + 挂索引；随后 outline/section 可读（内网未接通时的补位）✓。"""
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    src = os.path.join(tmp, "方案.docx")
+    _mk_docx(src, ["1 概述", "现状说明。", "2.1 应用架构", "涉及系统：A、B。"])
+    raw = open(src, "rb").read()
+    up = D.save_document(doc_id="doc-up-1", review_no="R-UP", filename="方案.docx",
+                         raw=raw, title="方案（上传）", actor="t")
+    assert up["ok"] and up["doc_id"] == "doc-up-1", up
+    assert up["sections"] >= 2, up                      # 「1 概述」「2.1 应用架构」
+    assert up["url"].endswith("/files/doc-up-1"), up
+    out = D.access(kb_id="kb", action="outline", doc_id="doc-up-1", review_no="R-UP")
+    assert out["ok"] and out["counts"]["sections"] >= 2, out
+    sec = D.access(kb_id="kb", action="section", doc_id="doc-up-1", section_path="2.1")
+    assert sec["ok"] and "涉及系统" in (sec.get("text") or ""), sec
+    dl = D.doc_file("doc-up-1")
+    assert dl["ok"] and dl["path"].endswith("doc-up-1.docx"), dl
+
+
 def test_gate_skips_doc_without_ext_ref(ext):
     """与接口无关的页（模板/说明页）⇒ 门禁直接跳过，不报 `ext_no_ref_block` ✗。"""
     import ke_ext_gate as G

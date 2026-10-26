@@ -304,3 +304,20 @@ IT 工作平台；我们此前没有对应接口 ⇒ 智能体只能"让用户�
 - **抓取留痕**（`<root>/ref_cache.json`）：`reference_lookup` 每抓一次就落一条（同 URL 覆盖，
   只留最近 300 条）；巡检 **G7（low）** 读这份留痕 —— 规则页写了 URL 但从没抓过 ⇒ 提示抓一次。
   这样既不联网做巡检（避免假告警/慢），又能逼出"跳过抓取直接写不可得"的情况 ✓。
+
+### 9.6 文档上传与新建流程（2026-10-26）
+
+内网工作台没接通时，文档可直接交给模拟服务（**不需要**先进知识库）：
+
+| 动作 | 调用 | 说明 |
+|---|---|---|
+| 新建流程 | `ext_review_flow(action="create", review_no=…, title=…)` | 状态取 schema `defaults`，轮次 1 |
+| 上传文档 | `POST /files/<doc_id>?review_no=&name=&title=&round=` | body=文件二进制；docx 用标准库**切节** |
+| 绑定文档 | `ext_review_flow(action="attach", review_no=…, doc_id=…)` | 档案的 `docs` 指向该文档 |
+| 一条命令 | `bash deploy/mock-ext/upload_doc.sh <编号> <文件> [标题]` | 上传 + attach |
+
+### 9.7 台账指纹与 rev（2026-10-26）
+
+- `rule_fp` = **规则页 `bmm:ruleHash`**（16 hex），调用方**显式**提交；工具只在缺省时自算 `r-xxxxxx`；
+- 台账写入用 **`items=[…]` 批量**（一次调用 ⇒ `rev` 只 +1）；`rev` = 该编号的**写入版本**，不是评审轮次；
+- 报告 ③ 的指纹列必须 ⊆ ② 的指纹集合（表后自查），历史 `r-` 值按 `TROUBLESHOOTING` 的批量法重写。
