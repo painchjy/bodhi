@@ -116,6 +116,12 @@ TOOLS = [
                                           "同名多份 ⇒ `doc_ambiguous` + candidates，不猜）")},
             "knowledge_id": {"type": "string",
                              "description": "import 用：直接指定知识库文档 id（比 doc_title 更确定）"},
+            "source": {"type": "string",
+                       "description": ("import 用：`auto`(默认：先知识库，找不到再用**会话附件**) | "
+                                       "`chat`(**直接用用户在本会话上传的附件**，不必先入知识库) | "
+                                       "`kb`(只从知识库找)")},
+            "session_no": {"type": "string",
+                           "description": "import(source=chat) 用：会话编号（省略=全库最近一条带附件的消息）"},
             "round": {"type": "integer", "description": "import 用：轮次（默认 1）"},
             "actor": {"type": "string"},
             "section_path": {"type": "string"},

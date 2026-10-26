@@ -97,7 +97,7 @@ def call_tool(name: str, args: dict) -> dict:
             max_bytes=int(a.get("max_bytes", 1500000) or 1500000),
             doc_title=str(a.get("doc_title", "")), knowledge_id=str(a.get("knowledge_id", "")),
             round=int(a.get("round", 1) or 1), actor=str(a.get("actor", "")),
-            session_no=str(a.get("session_no", "")))
+            session_no=str(a.get("session_no", "")), source=str(a.get("source", "auto")))
     raise ValueError("tool not found: %s（可用：%s）"
                      % (name, ", ".join(t["name"] for t in S.TOOLS)))
 

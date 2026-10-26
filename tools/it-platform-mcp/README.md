@@ -48,9 +48,12 @@ curl -s http://127.0.0.1:8770/health     # {"ok": true, "server": "it-platform-m
 > 用户只给「编号 + 文件名」，智能体依次调：
 > ① `ext_review_flow(action="create", review_no=<编号>, title=<可选>)`（已存在会复用）
 > ② `ext_doc_access(action="import", review_no=<编号>, doc_title=<文件名>)`
->   —— 工具按文件名在 `knowledges` 里定位（也可传 `knowledge_id`），从 WeKnora 容器读出原文、
->   切节、落 `docs/`+`files/`+索引，并**自动绑定**到该编号档案；回执给 `doc_id/size/sha256/sections/url`；
->   同名多份 ⇒ `doc_ambiguous` + `candidates`（不猜 ✗）；读不到 ⇒ `file_not_found` + `diag`。
+>   —— 默认 `source="auto"`：**先查知识库，查不到就用「本会话上传的附件」**（`messages.attachments`
+>   + 容器 `/data/files/<tenant>/exports/chat_attachment_*`），**不必先入知识库** ✓；
+>   PDF 借 docreader 的 pypdf 抽**逐页文本 + 内嵌图**（`images>0` ⇒ 图证据可用），
+>   docx 走本模块解析并取 `word/media` 图；回执给 `doc_id/size/sha256/sections/images/url`
+>   + `quality`/`warnings`（`tables_text_only` / `images_unavailable`）；
+>   `doc_ambiguous` / `chat_attachment_not_found` ⇒ 让用户指一份或重新上传（不猜 ✗）。
 > ③ `ext_review_flow(action="docs")` 复核绑定；正文用 `ext_doc_access(action="outline"|"section")`。
 >
 > 后备（**仅排障**，不是正常链路）：`POST /files/<doc_id>`（二进制直传）、

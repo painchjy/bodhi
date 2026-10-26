@@ -312,7 +312,7 @@ IT 工作平台；我们此前没有对应接口 ⇒ 智能体只能"让用户�
 | 动作 | 调用 | 说明 |
 |---|---|---|
 | 新建流程 | `ext_review_flow(action="create", review_no=…, title=…)` | 状态取 schema `defaults`，轮次 1 |
-| **导入附件（推荐）** | `ext_doc_access(action="import", review_no=…, doc_title=<文件名>)` | 用户上传的附件 ⇒ 自动建档 + 绑定；回 `doc_id/sections/url`；歧义回 `doc_ambiguous` |
+| **导入附件（推荐）** | `ext_doc_access(action="import", review_no=…, doc_title=<文件名>)` | 默认 `source="auto"`：知识库 → **会话附件**（`exports/chat_attachment_*`），不必先入知识库 ✓；PDF 抽逐页文本+内嵌图 |
 | 绑定已有文档 | `ext_review_flow(action="attach", review_no=…, doc_id=…)` | 档案的 `docs` 指向该文档 |
 | 后备（排障） | `POST /files/<doc_id>` / `bash deploy/mock-ext/upload_doc.sh` | 二进制直传；**正常链路不用** |
 

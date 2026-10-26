@@ -613,9 +613,15 @@ curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<Data
 
 | 回执 | 含义 | 处置 |
 |---|---|---|
-| `knowledge_not_found` | 知识库里没有该文件名 | 让用户确认文件名（含扩展名），或先上传 |
+| `knowledge_not_found` | 知识库里没有该文件名 | **`source=auto` 会自动改用会话附件**；仍失败再确认文件名（含扩展名） |
 | `doc_ambiguous` + `candidates` | 同名多份 | 让用户指一份（给 `knowledge_id`），**不猜** |
-| `file_not_found` + `diag` | 容器里读不到原文 | 看 `diag.path/rc/entries`；确认容器名与 tenant |
+| `file_not_found` + `diag` | 知识库文档读不到原文 | 看 `diag.path/rc/entries`；确认容器名与 tenant |
+| `chat_attachment_not_found` | 会话里**没有带附件的消息** | 让用户重新上传（附件要随消息发）；或给 `knowledge_id` |
+| `chat_file_not_found` + `glob/seen` | 容器里没有 `exports/chat_attachment_*` 原件 | 看 `glob` 与实际租户目录（`/data/files/<tenant>/exports/`） |
+
+**质量字段（PDF 尤其要看）**：`quality.text_source`（`pdf_pypdf` / `docx_raw` / `chat_parsed`）、
+`quality.images_available`、`quality.tables_text_only`；对应 `warnings`（`images_unavailable` / `tables_text_only`）。
+⇒ `images_unavailable` 时图相关规则写「无法判定」；`tables_text_only` 表示表格是**行文本**，别硬当"逐格逐字"证据。
 
 > `POST /files/<doc_id>`、`deploy/mock-ext/upload_doc.sh` 只在**排障**时用，正常链路不需要。
 

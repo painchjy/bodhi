@@ -405,6 +405,54 @@ def test_import_knowledge_file_unreadable(ext, monkeypatch):
     assert r["ok"] is False and r["error"] == "file_not_found" and r["diag"], r
 
 
+def test_import_from_chat_uses_session_attachment(ext, monkeypatch):
+    """**直接用会话里上传的附件**（`messages.attachments` + exports 原件）⇒ 建档+图+节 ✓。"""
+    monkeypatch.setattr(D, "_latest_chat_attachment", lambda s="": {
+        "message_id": "m-1", "session_id": "s-1", "at": "2026-10-26 05:26:25",
+        "epoch": 1792992386, "items": [{"id": "a-1", "content": "1 概述\n正文"}]})
+    monkeypatch.setattr(D, "_pick_chat_file", lambda ep, g: {
+        "path": "/data/files/10000/exports/chat_attachment_x_1.pdf", "size": 10,
+        "mtime": ep, "gap": 1, "candidates": 1})
+    monkeypatch.setattr(D, "_container_bytes", lambda p: b"%PDF-1.4 fake")
+    monkeypatch.setattr(D, "_pdf_sections_and_images", lambda raw, did, title: (
+        [{"path": "1 概述", "title": "1 概述", "text": "正文"}],
+        [{"name": "图片1.png", "path": "files/x_img1.png"}],
+        {"text_source": "pdf_pypdf", "pages": 1, "images_available": True,
+         "tables_text_only": True}))
+    r = D.import_knowledge(review_no="R-CHAT", doc_title="方案.pdf", source="chat", actor="t")
+    assert r["ok"] and r["source"] == "chat" and r["images"] == 1, r
+    assert r["quality"]["tables_text_only"] is True
+    assert "tables_text_only" in (r["warnings"] or []), r
+    assert r["flow"]["ok"] and r["flow"]["created"] is True, r
+    doc = json.load(open(os.path.join(_sys(ext, "docs/%s.json" % r["doc_id"])), encoding="utf-8"))
+    assert doc["source"] == "chat" and doc["origin_path"].endswith(".pdf"), doc
+
+
+def test_import_auto_falls_back_to_chat(ext, monkeypatch):
+    """`source=auto`：知识库没有 ⇒ **自动改用会话附件**，回执 `tried=[kb, chat]` ✓。"""
+    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [])
+    monkeypatch.setattr(D, "_latest_chat_attachment", lambda s="": {
+        "message_id": "m-2", "session_id": "s-2", "at": "2026-10-26 05:26:25",
+        "epoch": 1792992386, "items": [{"id": "a-2", "content": "1 概述"}]})
+    monkeypatch.setattr(D, "_pick_chat_file", lambda ep, g: {
+        "path": "/data/files/10000/exports/chat_attachment_y_2.pdf", "size": 9,
+        "mtime": ep, "gap": 2, "candidates": 3})
+    monkeypatch.setattr(D, "_container_bytes", lambda p: b"%PDF-1.4 fake")
+    monkeypatch.setattr(D, "_pdf_sections_and_images", lambda raw, did, title: (
+        [{"path": "全文", "title": "全文", "text": "1 概述"}], [],
+        {"text_source": "pdf_pypdf", "pages": 1, "images_available": False}))
+    r = D.import_knowledge(review_no="R-AUTO", doc_title="方案.pdf", actor="t")
+    assert r["ok"] and r["source"] == "chat" and r["tried"] == ["kb", "chat"], r
+    assert "images_unavailable" in (r["warnings"] or []), r
+
+
+def test_import_chat_without_attachment(ext, monkeypatch):
+    """会话里没有带附件的消息 ⇒ `chat_attachment_not_found`（不猜 ✗）。"""
+    monkeypatch.setattr(D, "_latest_chat_attachment", lambda s="": {})
+    r = D.import_knowledge(review_no="R-CHAT2", source="chat")
+    assert r["ok"] is False and r["error"] == "chat_attachment_not_found", r
+
+
 def test_gate_skips_doc_without_ext_ref(ext):
     """与接口无关的页（模板/说明页）⇒ 门禁直接跳过，不报 `ext_no_ref_block` ✗。"""
     import ke_ext_gate as G
