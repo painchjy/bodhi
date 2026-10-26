@@ -1,9 +1,9 @@
 ---
 name: rule_judge
 id: rule_judge
-when: 需要把规则逐条判成 passed/failed/insufficient 并留字段级依据时（成批判定、入库前复核、出报告前）
-tools: [knowledge_lookup, wiki_read_page, grep_chunks, save_knowledge]
-description: 规则判定——读「规则契约」+「知识计划(ke_plan) 的 derived/items」，对每条规则给出 passed/failed/insufficient 与依据（字段级），固定输出「结论集合」供报告引用。判定只看规则声明与已提取事实，不做自由发挥。
+when: 需要把规则逐条判成 符合/不符合/无法判定/不适用 并留字段级依据时（成批判定、入库前复核、出报告前）
+tools: [knowledge_lookup, evidence_score, ext_issue_list, save_knowledge]
+description: 规则判定——先判**适用性**（规则页 `knowledgeSpec.applies_when`），再读「规则契约」+「知识计划(ke_plan) 的 derived/items」，对每条规则给出 符合/不符合/无法判定/不适用 与依据（字段级），固定输出「结论集合」供报告引用。判定只看规则声明与已提取事实，不做自由发挥。
 ---
 
 # rule_judge（规则判定）
@@ -15,40 +15,48 @@ description: 规则判定——读「规则契约」+「知识计划(ke_plan) �
 
 ## 输入（三样，缺一不可）
 1. **规则契约**：`rules_resolve(kb_id, spec)` 的 `rules[]`
-   - 关键字段：`required_fields` / `needs_extract` / `enforcement` / `source` / `hash`；
+   - 关键字段：`applies_when` / `evidence_required` / `required_fields` / `needs_extract` / `enforcement` / `ruleHash`;
+   - **枚举以回执为准**：`verdict_enum`（符合/不符合/不适用/无法判定）、`severity_enum`（严重/一般/建议）——**不要自己换词** ✗
 2. **事实**：`ke_plan`（`knowledge_plan`）的 `items[]`（`required` / `found` / `value` / `quote` / `locator`）
    与 `derived`（**已由规则 spec 推导好的结论**，如 `verdict` / `missing_deploy_fig` / `city_remote` / `dr_ok`）；
-3. **判定口径**：规则自身的 `knowledgeSpec`（`check` / `pass_when` / `fail_when`）——**优先读它，不读散文** ✓。
+3. **判定口径**：规则契约里的 `knowledge_spec`（`applies_when` / `check` / `pass_when` / `fail_when`）——
+   **优先读它，不读散文** ✓（读不到 `knowledge_spec` ⇒ 该规则没有条件，按 `applies_when=always` 处理）
 
-## 判定顺序（先机械、后推理）
+## 判定顺序（先适用、再机械、后推理）
 ```
+⓪  applies_when 是否成立？（拿文档标题 + 方案目标与表达式比对）
+      不成立 ⇒ 结论 = 「不适用」，**不进 ③ 表**，只在 ⑤ 说明里写一句"本方案不含 X ⇒ 规则不适用" ✓
+      成立 / always ⇒ 继续
 ①  required 字段是否齐全？
-      缺 且 needs_extract=true ⇒ insufficient（缺证据，不是 failed ✗）
-      缺 且 needs_extract=false ⇒ insufficient（规则自带口径，说明提取阶段漏了）
+      缺 且 needs_extract=true ⇒ 无法判定（缺证据，不是不符合 ✗）
+      缺 且 needs_extract=false ⇒ 无法判定（规则自带口径，说明提取阶段漏了）
 ②  规则若有 derived 结论（spec 里 check 可机算）⇒ **直接采用**，并注明 "derived: <key>" ✓
 ③  否则按 pass_when / fail_when 逐条比对，给出 field → (期望, 实际) ✓
 ④  强制级别：
-      enforcement=严格执行 且 failed ⇒ 结论=不通过（一票否决，触发整改）
-      enforcement=建议/授权覆盖 且 failed ⇒ 结论=整改项（不否决）
+      enforcement=严格执行 且 不符合 ⇒ 结论=不通过（触发整改；是否**一票否决**看 severity）
+      enforcement=建议/授权覆盖 且 不符合 ⇒ 结论=整改项（不否决）
 ```
-> ⚠️ **禁止**在证据不足时给 `failed` ✗ —— 证据不足只能 `insufficient`（否则就是"假断言" ✗）。
+> ⚠️ **禁止**在证据不足时给 `不符合` ✗ —— 证据不足只能 `无法判定`（否则就是"假断言" ✗）。
 
 ## 输出（固定结构，供报告直接引用 ✓）
 ```json
-{"rule": {"slug": "...", "title": "...", "enforcement": "严格执行", "source": "policy:…", "hash": "…"},
- "verdict": "passed|failed|insufficient",
+{"rule": {"slug": "...", "title": "...", "enforcement": "严格执行", "source": "policy:…", "ruleHash": "…"},
+ "applies_when": "always|标题或目标含搬迁/迁移",
+ "verdict": "符合|不符合|无法判定|不适用",
  "basis": [{"field": "部署图", "expect": "存在", "actual": "缺失", "quote": "", "locator": ""}],
  "derived_used": ["missing_deploy_fig"],
  "note": ""}
 ```
-回执汇总：`{n} 条 ｜ passed=a failed=b insufficient=c ｜ 否决项(=严格执行&failed)=k`，并**逐条**列出 `failed` 与 `insufficient` 的字段级依据 ✓。
+回执汇总：`{n} 条 ｜ 符合=a 不符合=b 无法判定=c 不适用=d ｜ 否决项(=严格执行∧不符合∧severity∈{严重})=k`，
+并**逐条**列出 `不符合` 与 `无法判定` 的字段级依据 ✓。
 
 ## 反假断言（自检）
-- [ ] 每条 `failed` 都有 `basis` 且 `actual` 可回访 ✓；
-- [ ] 每条 `insufficient` 都注明**缺哪个字段**（不许写"信息不足"了事 ✗）；
-- [ ] `passed` 的规则其 `required` 全部 `found=true` ✓；
+- [ ] 每条 `不符合` 都有 `basis` 且 `actual` 可回访 ✓；
+- [ ] 每条 `无法判定` 都注明**缺哪个字段**（不许写"信息不足"了事 ✗）；
+- [ ] 每条 `不适用` 都写出**哪一条不满足 `applies_when`**（拿标题/目标原文指认 ✓）；
+- [ ] `符合` 的规则其 `required` 全部 `found=true` ✓；
 - [ ] 用了 `derived` 的规则写清 key ✓；
-- [ ] `a+b+c == n` ✓，且"否决项"数 = `严格执行` 中 `failed` 的条数 ✓。
+- [ ] `a+b+c+d == n` ✓，且"否决项"数 = `严格执行` 中 `不符合` 且 severity=严重 的条数 ✓。
 
 ## 清单类产物：一律走对象声明的接口（2026-10-25 用户口径 ✓）
 
@@ -86,15 +94,15 @@ description: 规则判定——读「规则契约」+「知识计划(ke_plan) �
 
 ## 判定口径修正（回归样例乙发现 ✓）
 
-1. **否决 ≠ 严格执行 + failed** ✗
-   - 正确口径：**否决 = 严格执行 ∧ failed ∧ severity ∈ {高, 严重}** ✓
+1. **否决 ≠ 严格执行 + 不符合** ✗
+   - 正确口径：**否决 = 严格执行 ∧ 不符合 ∧ severity ∈ {严重}** ✓
    - 依据：回归样例乙里有 2 条"严格执行且不符合"，但专家严重度=**一般** ⇒ 整改项（**不否决** ✓），
      反馈单结论是"符合 5 / 不符合 3 / 无严重项" ✓；
    - 所以 `严格执行` 只决定**是否必须整改** ✓，**是否一票否决看 severity** ✓。
-2. **"缺文档要素" 是 failed，不是 insufficient** ✗→✓
-   - 回归样例乙 F3-02：文档**未给技术栈勾选表** ⇒ 属**文档缺陷** ⇒ `failed` ✓（不是"证据不足" ✗）；
-   - 只有"**外部**清单/系统不可得"（如外部数据源拿不到 ✓）才判 `insufficient` ✓；
-   - 判据一句话：**缺的是"受评文档里该有的东西" ⇒ failed ✓；缺的是"受评文档之外的数据源" ⇒ insufficient ✓**。
+2. **"缺文档要素" 是不符合，不是无法判定** ✗→✓
+   - 回归样例乙 F3-02：文档**未给技术栈勾选表** ⇒ 属**文档缺陷** ⇒ `不符合` ✓（不是"证据不足" ✗）；
+   - 只有"**外部**清单/系统不可得"（如外部数据源拿不到 ✓）才判 `无法判定` ✓；
+   - 判据一句话：**缺的是"受评文档里该有的东西" ⇒ 不符合 ✓；缺的是"受评文档之外的数据源" ⇒ 无法判定 ✓**。
 
 ## ke_score 必经（2026-10-17 用户口径 ✓）：结论必须带"可信度"
 
@@ -112,12 +120,14 @@ description: 规则判定——读「规则契约」+「知识计划(ke_plan) �
 
 ### 判定流程（固定顺序 ✓）
 ```python
-sc = ke_score.score_rule(facts=<该规则 required 的事实>, checks=<fact_check 结果>, threshold=0.60)
+sc = ke_score.score_rule(facts=<该规则 required 的事实>, checks=<fact_check 结果>)  # 阈值见下
 if sc["gate"] == "insufficient":
-    verdict = "无法判定"      # ✓ 不得写 failed ✗
+    verdict = "无法判定"      # ✓ 不得写 不符合 ✗
 else:
     verdict = "符合" if 满足 pass_when else "不符合"
 ```
+- **阈值/等级从哪来（2026-10-27）**：`agent/metric/规则评测指标` 页（`threshold=0.60`、`level 高≥0.80 / 中≥0.60 / 低<0.60`）；
+  工具 `evidence_score` 已按该页取值 ⇒ **技能里不写死数字** ✗（读不到页面时才回退 0.60）；
 - `gate` 的两条来源 ✓：**必需事实 `unavailable` ⇒ 硬闸门** ✓；`score < threshold` ⇒ 阈值闸门 ✓；
 - `level`：≥0.80 高 ｜ 0.60–0.80 中 ｜ <0.60 低 ✓；
 - `reasons` 必须逐条可回访 ✓（缺哪条事实 / 哪个外部源不可得 / 哪条事实缺 quote 或 locator ✓）。
@@ -144,7 +154,9 @@ else:
 ## 判定输出（硬 ✓）
 - **全量输出**：每条规则**至少一个**结论（`符合｜不符合｜无法判定｜不适用`）✓；只报不符合 ✗；
 - **一规则可多结论**：同一规则在不同文档位置/模块结论不同时，**按位置各出一条** ✓（例：同一规则在不同模块/位置的结论不同 ✓）；结论必须带各自的定位与原文证据 ✓。
-- **取规则/策略正文**：在**领域库**，用 `knowledge_lookup(mode="rules")` 或 `wiki_read_page(领域库, slug)` ✓；
+- **取规则/策略正文**：在**领域库**，用 `knowledge_lookup(mode="rules")` 取契约，或用
+  `knowledge_lookup(mode="page", query="<规则页 slug 或标题>")` 取整页（正文 + 属性）；
+  **不用**内置 `wiki_read_page` / `grep_chunks`（已从评审智能体白名单移除，且读页无口径追溯 ✗）
 - **不要用 `context_page`** ✗ —— 它是「跨库同名概念视图」，不是取正文的入口；误用会报「本库没有这一页」（库名/副本不含该页 ✓）。
 - **取页面属性**：`knowledge_lookup(mode="keyword")` 的 **`definition` / `attributes`** ✓；`summary` 仅展示 ✗（截断）
 

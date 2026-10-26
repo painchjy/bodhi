@@ -2629,9 +2629,6 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 def check_ontology_page_drift(ctx: dict, rep: Report) -> None:
     """**W11 本体库与 TTL 编译漂移**（2026-10-18）✓
 
@@ -2682,3 +2679,10 @@ def check_ontology_page_drift(ctx: dict, rep: Report) -> None:
                 "重新上传本体（改 TTL → 加载编译），不要直接改本体库页 ✗")
     else:
         rep.add("W11", "low", kb, "本体库类页与编译结果一致（已比对 %d 页 ✓）" % len(slugs[:800]), "")
+
+
+# 2026-10-27 修（用户实测）：原来这段在模块中部（在 `check_ontology_page_drift` 定义**之前**）⇒
+# `python3 ke_audit.py scan <kb>` 走到 audit() 调它时**尚未定义** ⇒ NameError（MCP 工具不受影响，
+# 因为 import 完成后再调才正常）。CLI 是闭环验收路径，必须在**文件末尾**才安全 ✓。
+if __name__ == "__main__":
+    sys.exit(main())

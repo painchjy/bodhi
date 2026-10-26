@@ -386,6 +386,74 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
     return out
 
 
+def parse_knowledge_spec(note: str) -> dict:
+    """从规则页 `skos:note` 里的 ````knowledgeSpec```` 块解析**判定口径**（2026-10-27）。
+
+    为什么放 note（用户口径：`knowledgeSpec.applies_when`，**不改 TTL**）：
+      - `knowledgeSpec` 不是本体声明的属性，`page_attributes_set` 有本体守卫 ⇒ 写不进属性；
+      - 规则页正文是只读渲染 ⇒ 也写不进正文；
+      - 规则页的 `skos:note` 本来就是**结构化块的既有载体**（现在就有 `已发布…｜rules_hash …｜体检 ✓`）。
+    逻辑键仍是 `knowledgeSpec.applies_when` ✓，物理位置是 note 里的围栏块。
+
+    块语法（YAML 或 JSON 均可；建议 YAML，可读）：
+        ```knowledgeSpec
+        version: 1
+        applies_when: 'title_or_objective CONTAINS_ANY ["搬迁","迁移"]'
+        evidence_required: [搬迁前置条件, 回退方案措施]
+        pass_when: [...]
+        fail_when: [...]
+        ```
+    返回 `{}` 表示"没写 spec"（⇒ 视为 always 适用，保持向后兼容 ✓）。
+    """
+    import json as _json
+    import re as _re
+
+    if not note:
+        return {}
+    m = _re.search(r"(?ms)^```knowledgeSpec[^\n]*\n(.*?)^```", str(note))
+    if not m:
+        return {}
+    body = m.group(1).strip()
+    try:
+        doc = _json.loads(body)
+        return doc if isinstance(doc, dict) else {}
+    except Exception:  # noqa: BLE001  退 YAML（本机通常有 PyYAML；没有就按空处理）
+        pass
+    try:
+        import yaml  # noqa: PLC0415
+        doc = yaml.safe_load(body)
+        return doc if isinstance(doc, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _ledger_enums() -> dict:
+    """判定/严重度枚举的**唯一真源** = it-platform 契约 `schema.json`（2026-10-27，P2）。
+
+    为什么要它：规则契约以前硬编码 `合规｜违规｜待澄清` + `高｜中｜低`，而台账/报告用
+    `符合｜不符合｜无法判定｜不适用` + `严重｜一般｜建议` ⇒ 模型每轮都要心算映射。
+    现在两处同源（契约缺失时退回台账口径的常量，保证可跑 ✓）。
+    """
+    import json as _json
+    import os as _os
+
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    cands = [_os.path.join(here, "..", "it-platform-mcp", "schema.json"),
+             _os.environ.get("BODHI_IT_PLATFORM_SCHEMA", "")]
+    for p in cands:
+        if p and _os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    d = _json.load(fh)
+            except Exception:  # noqa: BLE001
+                continue
+            if d.get("verdict_enum"):
+                return {"verdict": list(d["verdict_enum"]),
+                        "severity": list(d.get("severity_enum") or [])}
+    return {"verdict": ["符合", "不符合", "不适用", "无法判定"],
+            "severity": ["严重", "一般", "建议"]}
+
+
 def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
     """规则页 → 统一契约（与 `rules_of_task` 的字段一致 ✓）。
 
@@ -452,7 +520,15 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
             src = "pg:page_metadata"
         pols = [p for i, p in enumerate(pols) if p and p not in pols[:i]]
         _title = str(r.get("title") or "")
-        _defn = str(r.get("dfn") or r.get("note") or "")
+        _note = str(r.get("note") or "")
+        # `note` 现在是「结构化块载体」（knowledgeSpec / 发布/体检/评测留痕）⇒ 只在**没有 definition**
+        # 时才拿它当定义，且去掉围栏块（否则定义里会混进 spec 文本 ✗）
+        _defn = str(r.get("dfn") or "")
+        if not _defn and _note:
+            import re as _re
+            _defn = _re.sub(r"(?ms)^```knowledgeSpec.*?^```\s*", "", _note).strip()
+        _spec = parse_knowledge_spec(_note)
+        _enums = _ledger_enums()
         # 2026-10-25：**版本指纹由工具给**（报告那一列直接用，模型不得自算/留空 ✗）
         #   ① 优先 `bmm:ruleHash`（规则级版本哈希，发布流程写入 —— 本体口径 ✓）；
         #   ② 没有（这批规则未发布过）⇒ 用 `hash(slug+标题+定义)` 的短哈希**兜底**，并标 `ruleHashSource=computed`；
@@ -460,6 +536,7 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
         _rhash = str(r.get("rhash") or "").strip()
         _fp = _rhash or ("r-" + hashlib.sha256(
             ("rule|%s|%s|%s" % (slug, _title, _defn)).encode("utf-8")).hexdigest()[:6])
+        _vf = _spec.get("required_fields") if isinstance(_spec.get("required_fields"), dict) else {}
         out.append({"slug": slug, "title": _title,
                     "definition": _defn[:400],
                     "ruleHash": _rhash, "ruleHashSource": "page" if _rhash else "computed",
@@ -468,10 +545,18 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                     "enforcement": str(r.get("lvl") or ""), "reference": str(r.get("ref") or ""),
                     "needs_extract": bool(need) or ("知识提取" in impl),
                     "strategies": pols,
-                    "required_fields": {"conclusion": "合规｜违规｜不适用｜待澄清（逐字枚举）",
-                                        "evidence": "原文证据（逐字摘录，可回溯）",
-                                        "severity": "高｜中｜低（违规时必填）",
-                                        "rule_ref": "本规则的 slug（出处）"},
+                    # 2026-10-27（P1/P2）：判定口径**从规则页 knowledgeSpec 读**（缺省=全适用，向后兼容 ✓）；
+                    #   枚举与台账同源（`_ledger_enums`），不再各写一套 ✗
+                    "knowledge_spec": _spec,
+                    "applies_when": str(_spec.get("applies_when") or "always"),
+                    "evidence_required": list(_spec.get("evidence_required") or []),
+                    "verdict_enum": _enums["verdict"],
+                    "severity_enum": _enums["severity"],
+                    "required_fields": {
+                        "conclusion": "｜".join(_enums["verdict"]) + "（逐字枚举）",
+                        "evidence": _vf.get("evidence") or "原文证据（逐字摘录，可回溯）",
+                        "severity": "｜".join(_enums["severity"]) + "（不符合时必填）",
+                        "rule_ref": "本规则的 slug（出处）"},
                     "source": src})
     return out
 
