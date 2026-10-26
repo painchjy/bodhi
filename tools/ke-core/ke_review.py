@@ -463,6 +463,7 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
     所以**一次 Cypher** 取全；仅当图不可用、或该 slug 在图上一条属性都没有时，才降级 PG ✓。
     """
     import ke_graph as _kg
+    import hashlib          # 2026-10-27 修：无 ruleHash 时的兜底指纹在本函数里算 ⇒ 必须在本地导入
 
     want = [str(s).strip() for s in (slugs or []) if str(s).strip()]
     if not want:

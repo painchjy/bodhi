@@ -654,7 +654,41 @@ curl -s -X POST http://127.0.0.1:8765/bodhi/ext/sync-report -H 'Content-Type: ap
 里找到事发前的 `report.content_md`，把该段贴回后用 `save_knowledge(stage="report", mode="apply")`
 重写（页头「首个版本生成」保持首版时间 ✓），最后再跑一次 `sync-report` 让条目表归位。
 
-## 报告 ③ 表格"错位"（列数忽多忽少、点保存/刷新正文后更明显）
+## 改了 `tools/ke-core/*` 但服务行为没变（drvfs 上的 `__pycache__` 坑）
+
+**现象**：`systemctl restart bodhi-mcp` 后，`knowledge_lookup` 回执仍是旧字段（例如没有
+`applies_when` / `retrieval_kind`），但直接用 `python3 tools/ke-core/xxx.py` 跑却是新行为。
+
+**根因**：仓库在 `/mnt/c`（drvfs），Python 判断 `.pyc` 是否过期依赖 mtime，drvfs 的 mtime
+精度/时区不可靠 ⇒ **加载旧字节码**。
+
+**处置（改完 ke-core / srv 后固定三步）**：
+
+```bash
+rm -rf tools/ke-core/__pycache__ tools/ontology-mcp/srv/__pycache__
+systemctl restart bodhi-mcp
+# 复验：knowledge_lookup(mode="page") 的 telemetry.retrieval_kind 应为 "page"
+```
+
+## `save_knowledge` 回执 `applied=true`，但库里没有那页（文档类必须走 `stage="report"`）
+
+**现象**：写 `agent:RuleEvaluation` / 报告 / 模板这类页，回执里 `created` 有、`applied: true`，
+但 `wiki_pages` 查不到；或者回执里出现 `skipped_document_nodes`。
+
+**根因**：这些类是**文档类**（本体 `render_mode=document`，`schema:CreativeWork` 谱系）。
+`stage="graph"` **只写实体类**，文档类会被跳过（回执 `skipped_document_note` 已说明）。
+
+**处置**：
+
+```jsonc
+{"kb_id": "…", "stage": "report", "mode": "apply", "session_no": "…",
+ "report": {"slug": "agent/ruleevaluation/<规则名>", "page_type": "agent:RuleEvaluation",
+            "title": "规则评测 · <规则名>", "content_md": "<整篇正文>",
+            "attributes": {"skos:definition": "…", "skos:note": "…"}}}
+```
+
+> 另注：文档类页**没有图节点** ⇒ 关系（如 `agent:evaluationOfRule`）写不上（`edge_errors`
+> 会报"不适用于（未知类）"）。溯源改用页面正文里的 `rule_slug` + `ruleHash`。
 
 **现象**：修改「专家反馈」→ 保存 → 面板「刷新正文」后，问题清单表某几行只有 5 列（其余 11 列），
 表体看起来错位；手工删掉这几行再刷新，坏行**又回来**。
