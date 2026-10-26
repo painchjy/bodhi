@@ -50,7 +50,26 @@ description: 规则判定——读「规则契约」+「知识计划(ke_plan) �
 - [ ] 用了 `derived` 的规则写清 key ✓；
 - [ ] `a+b+c == n` ✓，且"否决项"数 = `严格执行` 中 `failed` 的条数 ✓。
 
+## 清单类产物：一律走对象声明的接口（2026-10-25 用户口径 ✓）
+
+判定结论常常要落成一张**清单**（多行多列）。这类产物若对应某个 `bpmn:DataObject`，且该页声明了
+`bpmn:dataObjectInterface`，**数据只能经它声明的工具读写** ✓ —— 本技能**不存数据、不自编号、不改列** ✗：
+
+| 步骤 | 怎么做 | 依据 |
+|---|---|---|
+| ① 取表头 | `mode=query, action=list, <主键>=…, view=table`；**回执的 `schema.order` / `schema.labels` 就是列名与顺序**（台账 0 条时同法当模板 ✓） | 该对象页的列规范 + `bpmn:dataObjectKeyFields` |
+| ② 写条目 | `mode=maintain, action=create`；主键取 `bpmn:dataObjectKeyFields`；**必带 `actor`（执行者）+ `session_no`（会话编号，审计用）**；**编号由台账分配，禁止自编号** ✗ | 同上 |
+| ③ 先预览 | 写前 `dry_run=true` 把 `diff` 给用户看；确认后才 `dry_run=false`（`bpmn:dataObjectAccessMode` 含 `maintain` 才可写） | 写库纪律 |
+| ④ 回写反馈 | `action=update` + `fields={…}` + `if_rev=<台账 rev>`（台账级）+ `actor`/`session_no`；回执 `conflict` ⇒ 重新 `list` 再改（**不静默覆盖** ✗） | 乐观并发 |
+| ⑤ 报告呈现 | 报告里那张表**逐字嵌入** `view=table` 回执的 `markdown`（不改列名、不加列、不重排 ✓） | 列口径真源 = 回执 + 对象页 |
+| ⑥ 不可用 | 工具不可用 ⇒ 相关判定记「无法判定」并注明「台账不可用（待澄清）」；**不得自造清单** ✗ | 反假断言 |
+
+> 工具名 / 模式 / 主键**一律从对象页读**（`bpmn:dataObjectInterface` / `bpmn:dataObjectAccessMode` /
+> `bpmn:dataObjectKeyFields` / `bpmn:dataObjectInterfaceRef`），技能里**不写死** ✓；
+> 回执 `schema` 与对象页列规范不一致 ⇒ **以回执为准**并把差异报给用户 ✓。
+
 ## 与其它技能的关系
+
 - 上游：`rules_resolve`（规则）✓ + `knowledge_plan`/`knowledge_extract`（事实）✓；
 - 下游：`report_compose`（报告「判定结论」与清单类小节都只引这里 ✓）；
 - 不做：文章改写 ✗、入库决策 ✗（那是入库任务的 `ask` 环节 ✓）。
@@ -58,8 +77,8 @@ description: 规则判定——读「规则契约」+「知识计划(ke_plan) �
 ## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）
 
 - **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
-  - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
-  - 旧「按任务取规则」入口（已退役）≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+  - `spec`：`direct:<slug[,slug]>` / `policy:<策略>` / `influencer:<影响因素>`（链路口径）/ `ask`（**只回策略清单、不含规则**）/ `path:`（预留）；`task:` 已废弃
+  - **影响类问题用 `influencer:`**（影响因素→影响手段→策略→规则）；**确需全量策略清单才用 `ask`**
 - **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
   每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
 - **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓

@@ -92,8 +92,8 @@ guard: 只读；不猜类（歧义进 questions）；同链才整合（不同链
 ## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）
 
 - **取规则**：`knowledge_lookup(kb_id, mode="rules", spec=…)`
-  - `spec` 五种：`direct:<slug[,slug]>` / `policy:<策略>` / `ask` / `task:<任务>` / `path:`（预留）
-  - 旧「按任务取规则」入口（已退役）≡ `spec="task:<任务>"` ✓（行为保留，**新写一律用本入口**）
+  - `spec`：`direct:<slug[,slug]>` / `policy:<策略>` / `influencer:<影响因素>`（链路口径）/ `ask`（**只回策略清单、不含规则**）/ `path:`（预留）；`task:` 已废弃
+  - **影响类问题用 `influencer:`**（影响因素→影响手段→策略→规则）；**确需全量策略清单才用 `ask`**
 - **找知识**：`knowledge_lookup(kb_id, mode="keyword", query=…)` —— 图优先 → PG 收窄融合 ✓
   每条命中带 `source`（`graph` / `graph+pg` / `pg`）；`pg` 占比高 ⇒ 图缺数据 ✗
 - **多跳**：`knowledge_lookup(kb_id, mode="path", start=<slug>, depth=2)` ✓

@@ -105,11 +105,16 @@ def test_template_swap_changes_sections(mcp, test_kb, session_no):
 
 
 def test_missing_template_falls_back_with_reason(mcp, test_kb, session_no):
-    """没有模板 ⇒ 回落内置结构，并给 `template_fallback_reason`（可追溯 ✓）。"""
+    """本库没模板 ⇒ **全库唯一命中才用**（回执标 `scope=global` + `local_reason`，不静默 ✓）；
+    全库也没有 ⇒ 回落内置结构并给 `template_fallback_reason`（可追溯 ✓）。"""
     r = _write_report(mcp, test_kb, session_no, "review/_tpl-none", REPORT_OK)
     assert r.get("applied") is True, json.dumps(r, ensure_ascii=False)[:400]
-    assert (r.get("template") or {}).get("found") is False, r.get("template")
-    assert r.get("template_fallback_reason"), "回落没给原因 ✗"
+    tpl = r.get("template") or {}
+    if tpl.get("found"):
+        assert tpl.get("scope") == "global", "跨库用了模板却没标 scope ✗：%s" % tpl
+        assert tpl.get("local_reason"), "跨库用了模板却没说明本库为什么没有 ✗：%s" % tpl
+    else:
+        assert r.get("template_fallback_reason"), "回落没给原因 ✗"
 
 
 def test_audit_flags_missing_template_sections(mcp, test_kb, session_no):

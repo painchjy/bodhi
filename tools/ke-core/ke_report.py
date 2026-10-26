@@ -22,7 +22,7 @@ def _plain(text: str) -> str:
 
 
 def parse_template_sections(body: str) -> list:
-    """从**模板正文**解析章节表 → `[{title, required, requirement}]`。
+    """从**模板正文**解析章节表 → `[{title, required, requirement, fields}]`。
 
     约定（模板页正文）：形如
     ```
@@ -33,6 +33,10 @@ def parse_template_sections(body: str) -> list:
     ```
     找不到表时**回退**为「取 `##` 标题」（排除模板自身的元小节），且全部标 `required=False`
     （不猜必填，宁缺勿错）。
+
+    **可选第 5 列「数据对象字段」**（2026-10-25 用户口径）：该小节要展示/编辑哪几列，
+    逗号分隔、**顺序即展示顺序** —— 工具字段可以多于某份报告所需，取哪些由模板定 ✓；
+    没这一列 ⇒ `fields=[]`（= 用工具全量契约，不猜 ✗）。
     """
     lines = (body or "").splitlines()
     tbl: list = []
@@ -50,6 +54,7 @@ def parse_template_sections(body: str) -> list:
         idx_title = next((i for i, c in enumerate(head) if "章节" in c), 1)
         idx_req = next((i for i, c in enumerate(head) if "必填" in c), -1)
         idx_req2 = next((i for i, c in enumerate(head) if "要求" in c or "说明" in c), -1)
+        idx_fields = next((i for i, c in enumerate(head) if "字段" in c), -1)
         out = []
         for row in tbl[1:]:
             if set(row.replace("|", "").strip()) <= set("-: "):
@@ -63,14 +68,27 @@ def parse_template_sections(body: str) -> list:
             req = bool(idx_req >= 0 and len(cells) > idx_req
                        and cells[idx_req] in ("是", "必填", "Y", "y", "true"))
             req_txt = cells[idx_req2] if 0 <= idx_req2 < len(cells) else ""
-            out.append({"title": title, "required": req, "requirement": req_txt})
+            raw_fields = cells[idx_fields] if 0 <= idx_fields < len(cells) else ""
+            fields = [f.strip() for f in re.split(r"[,，]", raw_fields) if f.strip()
+                      and f.strip() not in ("—", "-", "无")]
+            out.append({"title": title, "required": req, "requirement": req_txt,
+                        "fields": fields})
         if out:
             return out
     # 回退：按 `##` 标题（排除模板元小节）；不猜必填 ✓
     skip = ("章节结构", "使用约束", "模板信息", "属性")
-    return [{"title": ln[3:].strip(), "required": False, "requirement": ""}
+    return [{"title": ln[3:].strip(), "required": False, "requirement": "", "fields": []}
             for ln in lines
             if ln.startswith("## ") and not any(k in ln[3:] for k in skip)]
+
+
+def section_fields(sections: list, title: str) -> list:
+    """按章节名（忽略编号/装饰）取该节的字段子集（找不到 ⇒ 空表，不猜 ✗）。"""
+    want = _plain(title)
+    for sec in sections or []:
+        if _plain(sec.get("title") or "") == want:
+            return list(sec.get("fields") or [])
+    return []
 
 
 def check_report_md(md: str, sections: list | None = None) -> list:
@@ -165,26 +183,40 @@ def template_items_from_pages(pages: list) -> list:
     return out
 
 
-def resolve_template(kb_id: str, report_type: str = "", template_slug: str = "") -> dict:
-    """按**本体属性**找模板页（不猜 ✗）：`schema:DocumentTemplate` + `applicableReportType`。
-
-    - 给了 `template_slug` ⇒ 直接取（校验存在且属本库）；
-    - 否则按 `applicableReportType`（值=报告类名，支持多值）匹配；
-    - 多条候选且仅一条带 `templateSelector` ⇒ 取它；仍多 ⇒ `ambiguous=true` + `candidates`
-      （**不静默选**，交由调用方/用户定夺）；
-    - 找不到 ⇒ `found=false` + `reason`（调用方据此回落内置结构并回传原因）。
-
-    返回 `{found, slug, title, version, selector, sections[], candidates[], ambiguous, reason}`。
-    """
+def _template_rows(kb_id: str = "") -> list:
+    """读模板页（`kb_id` 空 ⇒ **全库**）。"""
     import ke_db  # noqa: PLC0415
 
-    rows = ke_db.psql_csv(
+    where = ("knowledge_base_id = %s AND " % ke_db.sql_str(kb_id)) if kb_id else ""
+    return ke_db.psql_csv(
         "SELECT slug, COALESCE(title,'') AS title, COALESCE(version,1) AS version, "
         "       COALESCE(content,'') AS content, COALESCE(page_metadata::text,'{}') AS meta, "
         "       COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS attrs, "
         "       'schema:DocumentTemplate' AS page_type "
-        "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
-        "   AND page_type = 'schema:DocumentTemplate'" % ke_db.sql_str(kb_id))
-    return pick_template(template_items_from_pages(rows), report_type, template_slug)
+        "  FROM wiki_pages WHERE %sdeleted_at IS NULL "
+        "   AND page_type = 'schema:DocumentTemplate'" % where)
+
+
+def resolve_template(kb_id: str, report_type: str = "", template_slug: str = "") -> dict:
+    """按**本体属性**找模板页（不猜 ✗）：`schema:DocumentTemplate` + `applicableReportType`。
+
+    - 给了 `template_slug` ⇒ 直接取（校验存在）；
+    - 否则按 `applicableReportType`（值=报告类名，支持多值）匹配；
+    - **本库找不到 ⇒ 跨库兜底**（2026-10-25 用户口径：报告在**工作库**、模板在**领域库**，
+      不跨库会"静默跳过校验"✗）；跨库命中回执带 `template_scope=global` + `local_reason`（透明 ✓）；
+    - 本库自带多候选 ⇒ **不跨库**、也不静默选 ⇒ `ambiguous=true` + `candidates`；
+    - 都找不到 ⇒ `found=false` + `reason`（调用方据此回传原因）。
+    """
+    got = pick_template(template_items_from_pages(_template_rows(kb_id)), report_type, template_slug)
+    if got.get("found") or template_slug:
+        return got
+    local_reason = got.get("reason") or ""
+    got2 = pick_template(template_items_from_pages(_template_rows()), report_type, "")
+    if got2.get("found"):
+        got2["template_scope"] = "global"
+        got2["local_reason"] = local_reason
+    else:
+        got2["reason"] = local_reason or got2.get("reason") or ""
+    return got2
 
 
