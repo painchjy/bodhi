@@ -1,0 +1,7 @@
+{
+  "system": "it-platform",
+  "note": "单测用最小种子：只声明允许/拒绝的扩展名与映射键；真实演示数据见 deploy/mock-ext/（不进包）",
+  "allow_ext": [".pdf", ".docx"],
+  "deny_glob": ["*.exe", "*.bat", "*~"],
+  "docs": {}
+}

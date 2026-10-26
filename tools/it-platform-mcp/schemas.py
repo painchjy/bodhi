@@ -146,13 +146,27 @@ TOOLS = [
 # 因为容器根里的副本是"首次使用时的初始化数据"、`bootstrap()` **只补缺失不覆盖**，
 # 可能落后于本次发布；契约跟着服务版本走才对 ✓。
 def _contract() -> dict:
-    """容器数据契约（含 `x_ext`）：seed 优先 → 容器根兜底。"""
+    """容器数据契约（含 `x_ext`）：**服务目录 → 种子目录 → 容器根** 依次找。
+
+    读序（2026-10-26 用户裁定）：
+      ① `tools/it-platform-mcp/schema.json` —— 契约**跟着服务版本走**（发布包里一定有 ✓）；
+      ② `BODHI_EXT_SEED` / `deploy/mock-ext/it-platform/schema.json` —— 现场自定义（可选覆盖）；
+      ③ 容器根 `state/it-platform/schema.json` —— 首次 bootstrap 的旧副本（兜底）。
+    """
     try:
         import ke_ext_store as S
     except Exception:                     # noqa: BLE001  独立导入（如单测）时按无契约处理
         return {}
-    for path in (os.path.join(S.SEED_DIR, S.DEFAULT_SYSTEM, "schema.json"),
-                 os.path.join(S.system_dir(), "schema.json")):
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands = [os.path.join(here, "schema.json")]
+    seed = os.environ.get("BODHI_EXT_SEED", "") or getattr(S, "SEED_DIR", "")
+    if seed:
+        cands.append(os.path.join(seed, S.DEFAULT_SYSTEM, "schema.json"))
+    try:
+        cands.append(os.path.join(S.system_dir(), "schema.json"))
+    except Exception:                     # noqa: BLE001
+        pass
+    for path in cands:
         doc = S.read_json(path, None)
         if isinstance(doc, dict) and doc.get("x_ext"):
             return doc

@@ -1,0 +1,6 @@
+{
+  "system": "it-platform",
+  "note": "单测用最小索引：编号 → doc_id 映射；真实数据由 ext_doc_access(action=\"import\") 写入",
+  "version": 1,
+  "docs": {}
+}

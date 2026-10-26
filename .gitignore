@@ -63,5 +63,13 @@ docs/cases/技术方案评审/*.xls
 # 结论：只在本机留档，不入版本库、不进交付包（见 tools/delivery/pack_release.py）。
 # 注意：目录本身在本地保留；如需入库，请先沟通——不要直接 `git add -f`。
 # ------------------------------------------------------------
-tools/diag/
+# ------------------------------------------------------------
+# mock-ext 数据边界（2026-10-26 用户裁定）
+#   进 git / 进发布包：allowlist.json / denylist.json / issues/ / flows/（文本种子）
+#   不进：docs/ files/ images/（二进制与抓取产物；由 upload_doc.sh 或客户现场生成）
+# ------------------------------------------------------------
+deploy/mock-ext/it-platform/docs/
+deploy/mock-ext/it-platform/files/
+deploy/mock-ext/it-platform/images/
+deploy/mock-ext/it-platform/state/
 

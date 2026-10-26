@@ -1,0 +1,84 @@
+{
+  "note": "外部接口（模拟）的字段口径。业务取值只在这里与 DataObject 页，代码里不写 ✓",
+  "status_enum": ["已认证", "未认证", "待定"],
+  "labels": {"software": "软件名称", "version": "软件版本", "vendor": "厂商",
+             "license": "许可协议", "status": "状态"},
+  "verdict_enum": ["符合", "不符合", "不适用", "无法判定"],
+  "severity_enum": ["严重", "一般", "建议"],
+  "issue_order": ["issue_no", "desc", "rule", "doc_loc", "quote", "verdict",
+                  "severity", "fix", "confidence", "rule_fp", "expert_feedback"],
+  "issue_labels": {"issue_no": "编号", "desc": "问题描述", "rule": "触发规则",
+                   "doc_loc": "文档位置", "quote": "原文摘录", "verdict": "判定",
+                   "severity": "严重度", "fix": "修改建议", "confidence": "可信度",
+                   "rule_fp": "规则指纹", "expert_feedback": "专家反馈"},
+  "x_ext": {
+    "note": "工具面下发给订阅方（tools/list 的 x-ext）；列/主键/模式/枚举的**唯一**真源，页面不另写一份",
+    "ext_catalog_query": {
+      "objectKind": "catalog",
+      "keyFields": ["software", "version"],
+      "modes": ["query", "maintain"],
+      "revScope": "document",
+      "views": ["rows", "table"],
+      "columns": [
+        {"field": "software", "label": "软件名称", "key": true},
+        {"field": "version", "label": "软件版本", "key": true},
+        {"field": "vendor", "label": "厂商"},
+        {"field": "license", "label": "许可协议"},
+        {"field": "status", "label": "状态", "enumRef": "status_enum"}
+      ]
+    },
+    "ext_issue_list": {
+      "objectKind": "issue_list",
+      "keyFields": ["review_no", "issue_no"],
+      "modes": ["query", "maintain"],
+      "revScope": "document",
+      "views": ["rows", "table"],
+      "columns": [
+        {"field": "issue_no", "label": "编号", "key": true, "generated": true},
+        {"field": "desc", "label": "问题描述"},
+        {"field": "rule", "label": "触发规则"},
+        {"field": "doc_loc", "label": "文档位置"},
+        {"field": "quote", "label": "原文摘录"},
+        {"field": "verdict", "label": "判定", "enumRef": "verdict_enum"},
+        {"field": "severity", "label": "严重度", "enumRef": "severity_enum"},
+        {"field": "fix", "label": "修改建议"},
+        {"field": "confidence", "label": "可信度"},
+        {"field": "rule_fp", "label": "规则指纹"},
+        {"field": "expert_feedback", "label": "专家反馈", "editableBy": "expert"}
+      ]
+    },
+    "ext_doc_access": {
+      "objectKind": "document",
+      "keyFields": ["review_no", "doc_id"],
+      "modes": ["query"],
+      "revScope": "none",
+      "views": ["outline", "section", "url"],
+      "columns": [
+        {"field": "doc_id", "label": "文档编号", "key": true},
+        {"field": "section_path", "label": "章节"},
+        {"field": "cursor", "label": "游标"}
+      ]
+    },
+    "ext_review_flow": {
+      "note": "流程上下文（2026-10-26）：编号/轮次/状态/文档清单；编号不存在 ⇒ 直接建档",
+      "defaults": {"status": "评审中", "stage": "评审执行"},
+      "objectKind": "review_flow",
+      "keyFields": ["review_no"],
+      "modes": ["query", "maintain"],
+      "revScope": "document",
+      "views": ["get", "docs", "rounds"],
+      "columns": [
+        {"field": "review_no", "label": "评审编号", "key": true},
+        {"field": "flow_no", "label": "流程编号"},
+        {"field": "name", "label": "流程名称"},
+        {"field": "stage", "label": "阶段"},
+        {"field": "status", "label": "状态", "enumRef": "flow_status_enum"},
+        {"field": "round", "label": "轮次"},
+        {"field": "doc_title", "label": "评审文档"},
+        {"field": "doc_url", "label": "文档下载"}
+      ]
+    }
+  },
+  "flow_status_enum": ["待评审", "评审中", "已完成", "已归档"],
+  "round_status_enum": ["进行中", "已结束"]
+}

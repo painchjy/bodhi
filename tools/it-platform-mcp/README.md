@@ -80,7 +80,8 @@ bpmn:dataObjectInterfaceRef   it_platform:tools/ke-core/ke_ext_catalog.py
 
 ## 3.1 契约下发：`tools/list` 的 `x-ext`（2026-10-25）
 
-列的**名称/顺序/枚举/主键/模式/版本策略**只在这里定义一次（`deploy/mock-ext/it-platform/schema.json` 的 `x_ext` 段），
+列的**名称/顺序/枚举/主键/模式/版本策略**只在这里定义一次（`tools/it-platform-mcp/schema.json` 的 `x_ext` 段；
+2026-10-26 迁入服务目录 ⇒ **契约跟服务版本走**，`deploy/mock-ext/` 不再随包携带副本）：
 由 `tools/list` 随工具一起下发；**页面只做投射**（`page_metadata.ontology.projection`，带 `fetched_at` + `schemaHash`），
 不再手写列规范 ⇒ 单一真源、可判漂移。
 
