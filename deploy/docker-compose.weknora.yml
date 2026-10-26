@@ -79,6 +79,8 @@ services:
     image: weknora-ui:bodhi2
     volumes:
       - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/weknora-fork/frontend/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # 外部接口面板（P4）：报告里的 ```bodhi-ext 块渲染成可编辑表格（不改 Vue、不重建镜像 ✓）
+      - ${BODHI_DEPLOY_DIR:?请先设置 BODHI_DEPLOY_DIR=<本仓库>/deploy}/weknora-fork/frontend/ext-panel.js:/usr/share/nginx/html/ext-panel.js:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

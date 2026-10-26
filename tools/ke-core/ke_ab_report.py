@@ -114,6 +114,14 @@ def load_telemetry(pattern: str = "") -> list:
                          "degraded": bool(retr.get("degraded")),
                          "io_ms": int(retr.get("io_ms") or io.get("ms") or 0),
                          "has_io": bool(io or retr),
+                         # 2026-10-25（P2/P3）：分臂来源 + 规则取数路径（报告按路径分组判正确率）
+                         "assignment": tel.get("assignment") or "",
+                         "arm": (tel.get("ab") or {}).get("arm") or "",
+                         "route": tel.get("route") or "",
+                         "resolved_by": tel.get("resolved_by") or "",
+                         "rules_n": int(tel.get("rules_n") or 0),
+                         # 2026-10-25（P3-b）：本轮取到的规则 slug（判"检索口径"用）
+                         "rule_slugs": [str(x) for x in (tel.get("rule_slugs") or []) if x],
                          # 2026-10-25：自检样本隔离（`session_no` 以 selftest 开头 ⇒ 默认不进统计 ✓）
                          "selftest": str(tel.get("session_no") or "").startswith("selftest"),
                          "source": os.path.basename(f)})
@@ -182,8 +190,8 @@ def group_rows(rows: list, threshold: float = 0.62) -> list:
     """**问题归组**（2026-10-25 用户口径）：不同编号/不同措辞也可能是同一个问题。
 
     规则（确定性、可复算）：
-      ① 有业务编号（`qid`，如 `评审编号 YYYYMM-889999`）且该编号已归组 ⇒ **必进同组**
-         （这正是"同一编号评审两次 = 两轮，不是两个问题" ✓）；
+      ① 有业务编号（`qid`，如 `业务编号 YYYYMM-889999`）且该编号已归组 ⇒ **必进同组**
+         （这正是"同一编号跑两次 = 两轮，不是两个问题" ✓）；
       ② 否则与各组**代表问题**算字符 bigram 相似度，取最高且 ≥ `threshold` 者；
       ③ 都不满足 ⇒ 新开一组（代表 = 本行问题，组名 `G1` / `G2`…）。
     组内**不**按形态（词数/层次）再拆：形态差异保留在 `q_shape` 维度里单独看 ✓。
@@ -296,6 +304,13 @@ def link_trace(trace: list, rows: list, threshold: float = 0.62) -> list:
         t["queries"] = sum(int(c.get("queries") or 0) for c in cands)
         t["empty_queries"] = sum(int(c.get("empty_queries") or 0) for c in cands)
         t["degraded"] = any(c.get("degraded") for c in cands)
+        # 2026-10-25（P3-b）：本轮**取到的规则 slug 并集**（多轮调用合并；判"检索口径"用）
+        slugs: list = []
+        for c in cands:
+            for s in (c.get("rule_slugs") or []):
+                if s not in slugs:
+                    slugs.append(s)
+        t["rule_slugs"] = slugs
         t["question_group"] = hit.get("question_group") or ""
         t["linked"] = bool(cands)
         out.append(t)
@@ -807,7 +822,7 @@ def render_md(rep: dict, rows: list, expects: dict, title: str) -> str:
     if missing:
         lines.append("- ℹ️ 未在**固定问题集**里的 %d 个（只统计命中率、不判解决）：%s"
                      % (len(missing), "、".join(missing[:4])))
-        lines.append("  —— 实际跑法常是「选文件 + 给编号 + 要求评审」而非按题库逐题 ⇒ 这类**自建问题**"
+        lines.append("  —— 实际跑法常是「选文件 + 给编号 + 要求判定」而非按题库逐题 ⇒ 这类**自建问题**"
                      "按第 5 节的 `question_group` 归组比较 ✓")
 
     # ---- 7. 口径说明 ----
@@ -862,6 +877,9 @@ def main() -> int:
     ap.add_argument("--no-trace", action="store_true", help="忽略 C2 真值（只看服务端遥测）")
     ap.add_argument("--group-threshold", type=float, default=0.62,
                     help="问题归组相似度阈值（同 qid 必同组；默认 0.62）")
+    # 2026-10-25（P3）：真值判分（**测试资产**；缺省 tests/cases/lookup_truth.json）
+    ap.add_argument("--truth", default="",
+                    help="真值集路径（默认 tests/cases/lookup_truth.json；不存在则跳过 §7）")
     args = ap.parse_args()
 
     expects = load_questions(args.questions)
@@ -929,6 +947,25 @@ def main() -> int:
                    "来源=%s ｜ 窗口 %s~%s ｜ 真实调用 %d 条 / 纳入 %d 条 / 问题组 %d 个"
                    % ({"real": "真实调用", "sim": "确定性模拟", "all": "真实+模拟"}[args.source],
                       since or "-", until or "-", len(real), len(rows), len(rep["groups"])))
+    # 2026-10-25（P3）：**真值判分附录** —— 逐题清单 + 打分 + 影响指标（读者据此决定是否采信）
+    route_stats: dict = {}
+    for r in rows:
+        if (r.get("mode") or "") != "rules" and not r.get("resolved_by"):
+            continue
+        k = (r.get("resolved_by") or r.get("route")
+             or ("(旧遥测·未记路径)" if (r.get("mode") or "") == "rules" else ""))
+        d = route_stats.setdefault(k, {"n": 0, "hit": 0, "empty": 0, "rules_n": 0})
+        d["n"] += 1
+        rn = int(r.get("rules_n") or 0)
+        d["rules_n"] += rn
+        d["hit"] += 1 if rn else 0
+        d["empty"] += 0 if rn else 1
+    try:
+        import ke_ab_truth as _truth  # noqa: PLC0415
+        tj = _truth.judge_trace(trace, truth_path=args.truth)
+        md += _truth.render_md(tj, route_stats)
+    except Exception as exc:  # noqa: BLE001  判分失败不影响主报告
+        md += "\n\n## 7. 真值判分\n\n> 跳过：%r\n" % (str(exc)[:200],)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(md)

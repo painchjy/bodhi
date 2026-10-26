@@ -60,6 +60,13 @@
       "why": "rules 模式向后兼容（spec=ask 回策略清单 scope_options）",
       "args": {"mode": "rules", "spec": "ask"},
       "expect": {"present": ["scope_options"]}
+    },
+    {
+      "id": "C10",
+      "why": "链路口径：影响因素 → 影响手段 → 策略 → 规则（规则边双向），恰好 6 条且带 chain 明细",
+      "args": {"mode": "rules", "spec": "influencer:信创与异地机房搬迁"},
+      "expect": {"equals": {"resolved_by": "influencer", "counts.rules": 6},
+                 "min_len": {"rules": 6, "chain": 1}}
     }
   ]
 }

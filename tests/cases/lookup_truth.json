@@ -1,0 +1,88 @@
+{
+  "version": "1",
+  "note": "检索 A/B 的**真值集**（测试资产；服务端不读它）。匹配口径：① 同编号 qid ⇒ 同题；② anchors 命中 + intent 词（主判据）；③ 整句 bigram 相似度兜底（sim_threshold，实测真改写 0.35~0.38、异题 0.11~0.15）；④ 配了 BODHI_EMBED_* 才走真向量（embed_threshold）。未匹配的问题**不进正确率的分子分母**，只影响 coverage。",
+  "kb": "技术方案评审领域模型",
+  "match": {
+    "metric": "bigram-jaccard",
+    "sim_threshold": 0.35,
+    "embed_threshold": 0.8
+  },
+  "questions": [
+    {
+      "id": "T01",
+      "question": "列出\"信创与异地机房搬迁\"类技术方案需要的评审规则",
+      "aliases": [
+        "列出影响\"信创与异地机房搬迁\"的评审规则"
+      ],
+      "anchors": ["信创与异地机房搬迁", "信创"],
+      "intent": ["规则"],
+      "qids": [],
+      "expect": {
+        "rules": [
+          "bmm/operativebusinessrule/应用架构系统边界原则",
+          "bmm/operativebusinessrule/技术方案文档结构规范",
+          "bmm/operativebusinessrule/技术方案章节裁剪规则",
+          "bmm/operativebusinessrule/技术架构开源软件适用规则",
+          "bmm/operativebusinessrule/技术架构系统隔离原则",
+          "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+        ],
+        "forbid": [
+          "bmm/operativebusinessrule/合理性行动方案合理性"
+        ],
+        "rules_any_of": []
+      },
+      "note": "链路口径（影响因素 → 影响手段 → 策略闭包 → 规则，规则边双向）；链路外策略所辖规则一律不算（forbid 就是这个判据）"
+    },
+    {
+      "id": "T02",
+      "question": "技术方案逐项评审策略包含哪些规则？",
+      "aliases": [
+        "逐项评审的策略里有哪些规则"
+      ],
+      "anchors": ["技术方案逐项评审策略", "逐项评审"],
+      "intent": ["规则"],
+      "qids": [],
+      "expect": {
+        "rules": [
+          "bmm/operativebusinessrule/应用架构系统边界原则",
+          "bmm/operativebusinessrule/技术方案文档结构规范",
+          "bmm/operativebusinessrule/技术方案章节裁剪规则",
+          "bmm/operativebusinessrule/技术架构开源软件适用规则",
+          "bmm/operativebusinessrule/技术架构系统隔离原则",
+          "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+        ],
+        "forbid": [
+          "bmm/operativebusinessrule/合理性行动方案合理性"
+        ],
+        "rules_any_of": []
+      },
+      "note": "按策略取（含子策略闭包 + 双向规则边）；与 T01 的规则集合相同，但入口不同 ⇒ 可用来比「哪条路更准」"
+    },
+    {
+      "id": "T03",
+      "question": "对技术方案文档按评审策略逐条评审（选文件、给编号、开始评审）",
+      "aliases": [
+        "评审编号 XXX；评审文档 XXX；第一轮，开始评审",
+        "我是评审组长，按技术方案评审要求逐条核"
+      ],
+      "anchors": ["开始评审", "评审文档", "评审编号"],
+      "intent": [],
+      "qids": [],
+      "expect": {
+        "rules": [
+          "bmm/operativebusinessrule/应用架构系统边界原则",
+          "bmm/operativebusinessrule/技术方案文档结构规范",
+          "bmm/operativebusinessrule/技术方案章节裁剪规则",
+          "bmm/operativebusinessrule/技术架构开源软件适用规则",
+          "bmm/operativebusinessrule/技术架构系统隔离原则",
+          "bmm/operativebusinessrule/部署架构最低部署和灾备要求"
+        ],
+        "forbid": [
+          "bmm/operativebusinessrule/合理性行动方案合理性"
+        ],
+        "rules_any_of": []
+      },
+      "note": "工作流型问题（选文件 + 编号 + 开始评审）共用同一套 6 条真值；判分看**答案提到/检索取到**的规则集合（不看报告排版）"
+    }
+  ]
+}

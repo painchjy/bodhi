@@ -42,6 +42,36 @@
     rdfs:comment "活动/任务读写的**业务对象**（BPMN DataObject）：技术方案、系统、设备申请、技术栈、认证清单…。**各领域模型里的「业务对象」类建议继承本类**（`rdfs:subClassOf bpmn:DataObject`），使「数据从哪来、到哪去」可查。"@zh ;
     rdfs:subClassOf owl:Thing .
 
+# ============ 3b. 业务对象 ↔ 外部系统接口（数据属性；2026-10-25）============
+# 口径：业务对象的"正本从哪个接口取"用**数据属性**声明。
+# **不借用** `bmm:sourceLocator` —— 那个是落库内核的"来源定位"，语义不同 ✗。
+# 绑定**直接指向 MCP 工具**（`ext_*` 是给内网存量系统接口打样的**参考实现**：
+# 内网照这套代码把"读写容器文件"换成"读写自己的库表"即可复用同一套属性与回执口径）。
+:dataObjectInterface rdf:type owl:DatatypeProperty ;
+    rdfs:label "接口工具"@zh ;
+    rdfs:domain :DataObject ;
+    rdfs:range xsd:string ;
+    rdfs:comment "提供该业务对象的外部系统接口（**MCP 工具名**，如 ext_catalog_query）；**多个接口用英文逗号分隔**。空 = 无外部接口。"@zh .
+
+:dataObjectAccessMode rdf:type owl:DatatypeProperty ;
+    rdfs:label "访问模式"@zh ;
+    rdfs:domain :DataObject ;
+    rdfs:range xsd:string ;
+    rdfs:comment "每个接口允许的模式：query（只读）/ maintain（维护）；**与接口顺序对齐**，接口之间用分号分隔（如 `query,maintain｜query`）。"@zh .
+
+:dataObjectKeyFields rdf:type owl:DatatypeProperty ;
+    rdfs:label "主键字段"@zh ;
+    rdfs:domain :DataObject ;
+    rdfs:range xsd:string ;
+    rdfs:comment "每个接口的幂等/更新主键（字段名，逗号分隔）；接口之间用分号分隔，与接口顺序对齐。"@zh .
+
+:dataObjectInterfaceRef rdf:type owl:DatatypeProperty ;
+    rdfs:label "接口实现参考"@zh ;
+    rdfs:domain :DataObject ;
+    rdfs:range xsd:string ;
+    rdfs:comment "该接口的**参考实现**（MCP 工具代码路径，如 `tools/ke-core/ke_ext_issues.py`）；内网按此代码把存储层换成自己的库表即可。接口之间用分号分隔，与接口顺序对齐。"@zh .
+
+
 # ============ 4.（业务属性 Property：**2026-10-11 用户口径先去除**）============
 # 需要时再回来：BPMN Property 表达"流程范围内的属性"；当前用 OWL 数据属性承载即可。
 

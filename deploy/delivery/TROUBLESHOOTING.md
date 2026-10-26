@@ -492,6 +492,153 @@ DOCKER_BUILDKIT=0 docker build --no-cache -f Dockerfile -t weknora-ui:bodhi2 .
 - **两次上传回执数字一样**：`compiled.totals_*` 是**全量总数**（所有模块合计），模块集合没变时它当然相同；
   判断本次影响请看 **`compiled.per_module`**（按模块的类/关系/属性）与 `compiled.modules_added`。
 
+## 11i. 【2026-10-25】WeKnora「MCP 服务」页点「重新拉取」报 `404 page not found`
+
+**现象**：设置 → MCP 服务 → 选 `it_platform`（或 `bodhi_ontology`）→ 点「重新拉取 / 刷新」→ 页面红字 `404 page not found`。
+
+**判定**（先看 app 日志，两条就够）：
+
+```bash
+docker logs WeKnora-app 2>&1 | grep -E 'mcp-services/.*/metadata'
+# GET  /api/v1/mcp-services/<id>/metadata          404
+# POST /api/v1/mcp-services/<id>/metadata/refresh  404
+```
+
+同一时刻 `GET /api/v1/mcp-services` 与 `PUT /api/v1/mcp-services/<id>` 都是 **200** ⇒ **配置本身是好的**，
+只是前端点的那两条路由在 app 里不存在。
+
+**根因 = 前端镜像比 app 镜像新**（版本错配，与 MCP 服务无关）：
+
+| 证据 | 结果 |
+|---|---|
+| `docker exec WeKnora-app sh -c 'grep -ac mcp-endpoints /app/WeKnora'` | **0**（旧 app 只有 `mcp-services`） |
+| 前端 bundle `Settings-*.js` | 用 `/api/v1/mcp-endpoints`、`/mcp-endpoints/{id}/rotate-token`（新 API） |
+| 服务访问日志 `/var/log/bodhi-it-mcp.log` | 点按钮期间**一条请求都没有**（请求根本没到 MCP 服务） |
+| 容器内手工 `initialize` | 正常回 SSE ⇒ 服务与网络都通 |
+
+**影响面**：仅「工具描述」在页面上显示不出来。**智能体运行时仍会自己向 MCP 服务 `tools/list`** ——
+历史日志里 `mcp_bodhi_ontology_*` 工具名出现 5235 次，从未经过 `metadata` 接口。
+
+**处理**：
+
+1. **推荐：不修页面** —— 服务注册直接写库（`mcp_services`）+ 重启 app 即生效，见 `docs/weknora-fork.md`；
+2. 一定要这个按钮可用 ⇒ **对齐版本**（升 app 镜像到与前端同版，或把前端回退到与 app 同版）；
+   注意 app 升级会触发数据库迁移，离线环境还要先解决镜像来源，别顺手 `docker pull latest`。
+
+**自检**：
+
+```bash
+tail -f /var/log/bodhi-it-mcp.log     # 智能体真调用时应看到 POST /mcp -> 200 accept='...event-stream'
+tail -f /var/log/bodhi-mcp.log        # 同上（:8765）
+```
+
+## 报告页**没有**外部接口面板 / 面板数据不对（2026-10-25 实测）
+
+**症状**：报告页 ③ 节表格有内容，但表格下面**没有可编辑面板**；或面板出现了但编号是别的评审。
+
+**根因（三类）**：
+
+1. **正文没有 `bodhi-ext` 引用块** ⇒ 面板没有锚点（`position('bodhi-ext' in content) = 0`）；
+2. 引用块**缺 `review_no`**（智能体只写了 `object:`，或照抄了示例编号）；
+3. 引用块写了编号，但那是**示例编号**（如 `YYYYMM-11111111`），与本次报告 ① 表里的编号不一致。
+
+**修法**（从可靠到兜底）：
+
+```bash
+# ① 让工具把锚点补上（编号从正文里的台账编号认，不靠模型手写）
+#    走 MCP save_knowledge(stage="report", mode="apply") 重写同一份正文即可；
+#    回执里 ext_ref_block 会告诉你补了什么：
+#    {"object": "...", "review_no": "...", "rev": 11, "review_no_source": "report_context", "columns": [...]}
+```
+
+- 巡检也能看出来：`audit_scan(scope="ext")` 的 `G4`/`G5`；
+- 面板侧已容错：`isRefBlock` 只认 `object:`；编号缺省时由后端按页面标题解析
+  （`GET /bodhi/ext/list?object=…&title=<页面标题>`，回执带 `review_no` + `review_no_source`），
+  解析成功时面板标签会显示「编号取自报告上下文」；
+- `object` 多候选（多个 DataObject 的表头都能对上）时工具**不猜** ⇒ 回 `object_ambiguous` + `candidates`，
+  需人工在正文里补一次块或先在 DataObject 页 `ext_describe` 订阅契约。
+
+**排障命令**
+
+```bash
+# 页面里有没有块 / 块里写的编号是什么
+docker exec WeKnora-postgres psql -U postgres -d WeKnora -t -A -c \
+  "SELECT position('bodhi-ext' in content), substring(content from position('review_no:' in content) for 40) \
+   FROM wiki_pages WHERE slug='<报告 slug>';"
+# 面板能否拿到数据（不给编号，只给标题）
+curl -sG 'http://127.0.0.1:8765/bodhi/ext/list' \
+  --data-urlencode 'object=<DataObject slug>' --data-urlencode 'title=<报告标题>' | head -c 300
+# 契约标签（编号那一列叫什么）
+curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<DataObject slug>'
+```
+
+**注**：`bodhi-mcp` 是 **systemd 服务**（不是容器）⇒ 改了后端代码必须
+`systemctl restart bodhi-mcp`，否则跑的还是旧字节码（这类"改了没生效"多半是这个）。
+
+## 「首个版本生成」不对 / 页头重复了好几段
+
+**症状**（2026-10-26 用户实测）：
+- 页头「首个版本生成」显示的是**最新版本时间**（不是首版）；
+- 同一页正文开头出现**多段页头**（实测 9 段，每次保存多一段）。
+
+**口径（已固化在代码里）**：
+- 「首个版本生成」= **DB 行 `created_at`**（`wiki_pages`，同 slug 覆盖不新建行）⇒ 首版时间的天花板事实；
+  页头/`page_metadata.ontology.created_at` 只作兜底（它们被重置过 ✗）；
+- 页头写入**幂等**：`ke_pages.strip_heads()` 先把正文里所有页头块剥掉，再拼**一段**。
+
+**修一页**（默认 dry_run，先看回执再 `--apply`）：
+
+```bash
+python3 tools/ke-core/ke_admin.py fix-head <kb_id> "<slug>"                 # 预览
+python3 tools/ke-core/ke_admin.py fix-head <kb_id> "<slug>" --apply         # 落库（走内核写路径）
+python3 tools/ke-core/ke_admin.py fix-head <kb_id> "<slug>" \
+        --created-at "2026-10-25 20:49:19 +0800" --apply                     # 指定首版时间
+```
+
+**批量自查**（看哪页 head 段数 >1 或 head≠DB 首版）：
+
+```sql
+SELECT slug, version,
+       (length(content)-length(replace(content,'**首个版本生成**','')))/length('**首个版本生成**') AS heads,
+       substring(content from '首个版本生成\*\*：([0-9: \-+]+)') AS head_time,
+       to_char(created_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI:SS') AS db_created
+  FROM wiki_pages WHERE deleted_at IS NULL AND content LIKE '%首个版本生成%'
+ ORDER BY heads DESC, updated_at DESC;
+```
+
+> 修复只动页头那几行；正文（章节表、引用块、条目行）原样保留 ✓。
+
+## 规则参考规范抓不到（`reference_lookup` 抓 URL）
+
+**症状**：报告 ② 表「参考规范」列写不出内容，或工具回 `found=false` + `reason`。
+
+**按 reason 对照处理**（`ke_review.reference_lookup` 的结构化回执）：
+
+| reason | 含义 | 处理 |
+|---|---|---|
+| `dns` | 域名解析不了 | 配 DNS 或 hosts（见下）；WSL 重启会重生成 `/etc/hosts` |
+| `conn_refused` / `timeout` | 不通/太慢 | 用 IP 试；或 `BODHI_REF_TIMEOUT` 调大 |
+| `tls` | 证书问题 | 内网自签证书 ⇒ 换 http 或走信任链 |
+| `blocked` | 主机不在白名单 | `.env` 的 `BODHI_REF_HOSTS` 加上该域名（支持子域后缀） |
+| `http_4xx/5xx` | 页面不存在/服务异常 | 修 URL；4xx 不重试 |
+| `fetch_disabled` | 没开抓取 | 调用时带 `allow_fetch=true` |
+
+**hosts 幂等维护**（不要把映射手写一次就算完）：
+
+```bash
+# 在 .env 里（可选）：BODHI_REF_HOST=techdoc.sdc.bocomm.com
+#                    BODHI_REF_HOST_IP=<内网IP>      # 留空表示走 DNS
+bash deploy/wsl-up.sh up        # 启动时会自动补 /etc/hosts（已存在则不动 ✓）
+getent hosts techdoc.sdc.bocomm.com     # 应能解析
+curl -sI "http://techdoc.sdc.bocomm.com/<path>"   # 应 200
+```
+
+> 本项目**不需要代理**：`reference_lookup` 直连；`BODHI_HTTP_PROXY` 仅在必须经代理出网时才设。
+
+**巡检判据**：`audit_scan(scope="ext")` 的 **G7（low）** 会列出「规则页写了参考规范 URL 但
+`ref_cache.json` 里没有抓取留痕」的条目 —— 说明有人跳过了抓取直接写"不可得"。
+修法：按提示 `reference_lookup(reference=<url>, allow_fetch=true)` 抓一次（成功失败都算留痕 ✓）。
+
 ## 附录：沙箱相关（本交付**不需要**，仅备查）
 
 WeKnora 原生技能是"沙箱安装型"（装进快照镜像）。要用需同时满足：`WEKNORA_SANDBOX_DOCKER_ENABLED=true`、

@@ -29,6 +29,23 @@
  "audit_scan": {
   "_unparsed": "{\n                \"type\": \"object\",\n                \"properties\": {\n                    \"kb_id\": {\"type\": \"string\", \"description\": \"知识库 UUID（单库巡检）\"},\n                    \"kb_ids\": {\"type\": \"array\", \"i"
  },
+ "clean_alias_noise": {
+  "properties": {
+   "dry_run": {
+    "description": "默认 true：只统计，不写",
+    "type": "boolean"
+   },
+   "kb_id": {
+    "description": "空 = 全库（建议先单库 dry-run）",
+    "type": "string"
+   },
+   "limit": {
+    "description": "最多扫描多少页（默认 2000）",
+    "type": "integer"
+   }
+  },
+  "type": "object"
+ },
  "context_authority": {
   "properties": {
    "master": {
@@ -46,7 +63,50 @@
   "type": "object"
  },
  "context_authority_apply": {
-  "properties": {},
+  "properties": {
+   "acknowledge_risks": {
+    "description": "必须与预览回的 required_risks 完全一致",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "action": {
+    "enum": [
+     "decide",
+     "pull",
+     "detach"
+    ],
+    "type": "string"
+   },
+   "actor": {
+    "type": "string"
+   },
+   "apply": {
+    "description": "detach 专用：false=只预览（默认 true 表示执行）",
+    "type": "boolean"
+   },
+   "kb": {
+    "description": "pull/detach：副本库（id/名）",
+    "type": "string"
+   },
+   "master": {
+    "description": "decide：权威库（id/名）",
+    "type": "string"
+   },
+   "slug": {
+    "description": "同名组的 slug（概念库里的企业标准页）",
+    "type": "string"
+   },
+   "ticket": {
+    "description": "来自预览的影响面指纹",
+    "type": "string"
+   }
+  },
+  "required": [
+   "action",
+   "slug"
+  ],
   "type": "object"
  },
  "context_concept_apply": {
@@ -105,6 +165,10 @@
    },
    "slug": {
     "description": "精确 slug（如 ea/businessentity/客户信息）",
+    "type": "string"
+   },
+   "turn_id": {
+    "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）",
     "type": "string"
    }
   },
@@ -170,6 +234,10 @@
     "description": "文档 id 或标题（本篇要建模的文档）",
     "type": "string"
    },
+   "turn_id": {
+    "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）",
+    "type": "string"
+   },
    "with_text": {
     "description": "是否返回本批正文（默认 true）",
     "type": "boolean"
@@ -201,6 +269,39 @@
   ],
   "type": "object"
  },
+ "ext_describe": {
+  "properties": {
+   "kb_id": {
+    "description": "业务对象所在库（必填）",
+    "type": "string"
+   },
+   "object": {
+    "description": "业务对象页 slug（必填）",
+    "type": "string"
+   },
+   "tool": {
+    "description": "指定接口名（省略 ⇒ 用该页第一个绑定）",
+    "type": "string"
+   },
+   "url": {
+    "description": "直接给服务地址（省略 ⇒ 查注册表）",
+    "type": "string"
+   },
+   "write_anchor": {
+    "description": "默认 false：是否把契约卡锚点块（```bodhi-ext-contract）幂等写进页面正文",
+    "type": "boolean"
+   },
+   "write_projection": {
+    "description": "默认 true：把契约投射到页面元数据",
+    "type": "boolean"
+   }
+  },
+  "required": [
+   "kb_id",
+   "object"
+  ],
+  "type": "object"
+ },
  "extract_candidates": {
   "properties": {
    "domain_kb": {
@@ -212,7 +313,7 @@
     "type": "string"
    },
    "knowledge_id": {
-    "description": "文档 UUID / 标题 / 文件名（如 样例1-…docx）",
+    "description": "文档 UUID / 标题 / 文件名（如 <标题>.docx）",
     "type": "string"
    },
    "limit_items": {
@@ -223,7 +324,11 @@
     "type": "array"
    },
    "task": {
-    "description": "任务（默认 逐项评审）",
+    "description": "任务（可空）",
+    "type": "string"
+   },
+   "turn_id": {
+    "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）",
     "type": "string"
    }
   },
@@ -449,36 +554,130 @@
  },
  "knowledge_lookup": {
   "properties": {
+   "auto_widen": {
+    "description": "保留位（默认 false：父类扩大只在 suggestions 里给 args）",
+    "type": "boolean"
+   },
+   "cls": {
+    "description": "显式本体类（instances 必填；keyword 可给多个用逗号分隔）",
+    "type": "string"
+   },
    "depth": {
     "description": "path 模式深度（1-4，默认 2）",
     "type": "integer"
    },
+   "first_step": {
+    "description": "自报\"本工具是本轮第一个检索动作\"（true/false）；与门禁判定不一致会计入数据质量 ⚠️",
+    "type": "boolean"
+   },
    "kb_id": {
     "type": "string"
+   },
+   "kb_ids": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
    },
    "limit": {
     "type": "integer"
    },
    "mode": {
-    "description": "rules | keyword | path（默认 rules）",
+    "description": "rules | keyword | instances | route | path | semantic（默认 rules）",
+    "type": "string"
+   },
+   "ontology_hint": {
+    "description": "是否**提示用本体规划查询**（默认取 env `BODHI_ONTOLOGY_HINT`=on）：true ⇒ 回 `plan/strategy/suggestions/next`；false ⇒ 只回 `hits/counts`（对照组基线，**不猜**）",
+    "type": "boolean"
+   },
+   "page_type": {
+    "description": "只查某页类型（可与 cls 并用）",
     "type": "string"
    },
    "query": {
-    "description": "keyword 模式的关键词",
+    "description": "keyword/instances/route 的查询：`a b`=AND、`a|b`=OR、\"短语\"、-排除",
+    "type": "string"
+   },
+   "question": {
+    "description": "用户**原始问题**（只进遥测日志/同类问题聚类；检索仍用 `query`）",
+    "type": "string"
+   },
+   "session_no": {
+    "description": "会话编号（**只进遥测日志**，不参与检索；用于按会话统计成败）",
     "type": "string"
    },
    "spec": {
-    "description": "rules 模式的 spec（direct:/policy:/ask/task:）",
+    "description": "rules 模式的 spec：`direct:<规则slug,…>` | `policy:<策略名/slug 片段>` | `influencer:<影响因素名/slug 片段>`（影响因素→影响手段→策略→规则的链路口径，**影响类问题优先用它**）| `ask`（**只回策略清单、不含规则**，仅确需全量清单时用）| `path:…`（预留）",
     "type": "string"
    },
    "start": {
     "description": "path 模式的起始 slug",
+    "type": "string"
+   },
+   "turn_id": {
+    "description": "本轮编号（先调 `lookup_turn_begin` 拿）：用于判\"本轮首个检索动作是否就是本工具\"，**只进遥测** ✓",
     "type": "string"
    }
   },
   "required": [
    "kb_id"
   ],
+  "type": "object"
+ },
+ "lookup_turn_begin": {
+  "properties": {
+   "kb_ids": {
+    "description": "本问打算检索的库（可选，仅记录）",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "question": {
+    "description": "用户原始问题（必填：同类问题聚簇）",
+    "type": "string"
+   },
+   "session_no": {
+    "description": "WeKnora 会话编号（必填：按会话统计成败）",
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_no",
+   "question"
+  ],
+  "type": "object"
+ },
+ "metric_compute": {
+  "properties": {
+   "kb_id": {
+    "type": "string"
+   },
+   "spec": {
+    "description": "规则集标识（仅 with_rules=true 时用）",
+    "type": "string"
+   },
+   "with_rules": {
+    "description": "是否附带规则数指标（默认 false）",
+    "type": "boolean"
+   }
+  },
+  "required": [
+   "kb_id"
+  ],
+  "type": "object"
+ },
+ "migrate_article_body": {
+  "properties": {
+   "dry_run": {
+    "description": "默认 true：只统计，不写",
+    "type": "boolean"
+   },
+   "kb_id": {
+    "description": "空 = 全库",
+    "type": "string"
+   }
+  },
   "type": "object"
  },
  "ontology_types": {
@@ -543,9 +742,39 @@
   ],
   "type": "object"
  },
+ "page_copy": {
+  "properties": {
+   "copy_relations": {
+    "description": "是否复制关系边（默认 true）",
+    "type": "boolean"
+   },
+   "kb_id": {
+    "description": "目标知识库（写库解析口径同 save_knowledge）",
+    "type": "string"
+   },
+   "new_slug": {
+    "description": "副本 slug（缺省 <src>-copy）",
+    "type": "string"
+   },
+   "new_title": {
+    "description": "副本标题（缺省 <原标题>（副本））",
+    "type": "string"
+   },
+   "src_slug": {
+    "description": "源页 slug",
+    "type": "string"
+   }
+  },
+  "required": [
+   "kb_id",
+   "src_slug"
+  ],
+  "type": "object"
+ },
  "reference_lookup": {
   "properties": {
    "allow_fetch": {
+    "description": "允许抓取 http(s) URL（默认 false）",
     "type": "boolean"
    },
    "kb_id": {
@@ -556,6 +785,14 @@
    },
    "reference": {
     "description": "规则里的参考规范（URL / 规范名 / 文件名）",
+    "type": "string"
+   },
+   "timeout": {
+    "description": "单次抓取超时秒（默认 8；也可用 BODHI_REF_TIMEOUT）",
+    "type": "number"
+   },
+   "turn_id": {
+    "description": "A/B 轮次编号（可选，仅用于判\"本轮首个检索动作\"）",
     "type": "string"
    }
   },
@@ -663,6 +900,26 @@
   ],
   "type": "object"
  },
+ "rule_publish": {
+  "properties": {
+   "apply": {
+    "description": "true 才真正写库（默认 false=dry_run）",
+    "type": "boolean"
+   },
+   "kb_id": {
+    "type": "string"
+   },
+   "spec": {
+    "description": "规则集标识（如 policy:<策略名> 或 spec 片段）",
+    "type": "string"
+   }
+  },
+  "required": [
+   "kb_id",
+   "spec"
+  ],
+  "type": "object"
+ },
  "rules_resolve": {
   "properties": {
    "kb_id": {
@@ -673,7 +930,7 @@
     "type": "integer"
    },
    "spec": {
-    "description": "direct:<slug,…> | policy:<策略> | ask | task:<任务> | path:…",
+    "description": "direct:<slug,…> | policy:<策略> | influencer:<影响因素> | ask | task:<任务> | path:…",
     "type": "string"
    }
   },

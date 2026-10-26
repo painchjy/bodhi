@@ -170,6 +170,19 @@ server {
         proxy_buffering off;
     }
 
+    # ---------------------------------------------------------------------
+    # bodhi2 外部接口面板（P4，2026-10-25）：注入脚本 + 提供静态文件
+    #   - 报告正文里的 ```bodhi-ext 块由 ext-panel.js 在浏览器渲染成可编辑表格；
+    #   - 只有 index.html（text/html）会被注入，接口 JSON 不受影响 ✓。
+    # ---------------------------------------------------------------------
+    sub_filter '</body>' '<script src="/ext-panel.js" defer></script></body>';
+    sub_filter_once on;
+
+    location = /ext-panel.js {
+        root /usr/share/nginx/html;
+        add_header Cache-Control "no-store";
+    }
+
     location = /50x.html {
         root /usr/share/nginx/html;
     }

@@ -64,6 +64,9 @@ def _check(expect: dict, resp: dict) -> list:
 def test_lookup_strategy_cases(mcp, kbs, case):
     args = dict(case["args"])
     args.setdefault("kb_id", kbs["domain"])
+    # 2026-10-25（P2）：`.env` 生产口径已切 `abtest`（随机分臂）⇒ 本用例断言的是**提示面内容**，
+    # 必须显式要提示，否则会随分臂间歇性红（不是回归 ✗）。
+    args.setdefault("ontology_hint", True)
     resp = mcp.call("knowledge_lookup", args)
     problems = _check(case["expect"], resp)
     assert not problems, ("%s %s ✗ %s\n回执=%s"

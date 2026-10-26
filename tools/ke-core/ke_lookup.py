@@ -291,10 +291,99 @@ def _cross_kb(types: list, kb: str) -> dict:
             "why": "本库没有这些类型的实例；它们在本会话的其它库里有（换 kb_id 再查 ✓）"}
 
 
+def _lcs_len(a: str, b: str) -> int:
+    """最长公共子串长度（两行 DP；两侧各截 240 字，短问句足够）。"""
+    a, b = (a or "")[:240], (b or "")[:240]
+    if not a or not b:
+        return 0
+    best, prev = 0, [0] * (len(b) + 1)
+    for i in range(1, len(a) + 1):
+        cur, ai = [0] * (len(b) + 1), a[i - 1]
+        for j in range(1, len(b) + 1):
+            if ai == b[j - 1]:
+                cur[j] = prev[j - 1] + 1
+                if cur[j] > best:
+                    best = cur[j]
+        prev = cur
+    return best
+
+
+def _name_hits(text: str, items: list, key: str = "name", top: int = 2) -> list:
+    """「文本里提到了哪个名字」—— **只比名字，不写死任何业务名** ✓
+
+    判定：归一化后最长公共子串 ≥3 字；或名字**头 2 字**命中（短问句常见，如只提两个字）。
+    返回按匹配长度降序的前 `top` 项（元素原样透传）。
+    """
+    core = _norm(text)
+    if not core:
+        return []
+    scored = []
+    for it in (items or []):
+        name = str((it or {}).get(key) or "")
+        k = _norm(name)
+        if len(k) < 2:
+            continue
+        n = _lcs_len(core, k)
+        if n >= 3 or (n == 2 and k.startswith(core[:2])):
+            scored.append((n, len(k), it))
+    scored.sort(key=lambda x: (-x[0], -x[1]))
+    return [it for _n, _l, it in scored[:max(1, int(top))]]
+
+
+# rules 模式的合法前缀 / 各路线的一句话口径（提示面用，纯类型与关系，无业务名词 ✓）
+_SPEC_KINDS = ("direct", "policy", "influencer", "ask", "path", "task")
+_ROUTE_WHY = {
+    "direct": "按给定规则 slug 直接取（不展开策略）",
+    "policy": "策略闭包（含子策略）+ 双向规则边（规则↔策略）",
+    "influencer": "影响因素 → 影响手段 → 策略闭包 → 规则（双向边）",
+    "ask": "只回策略清单（不取规则）",
+    "path": "预留（多路径并集）",
+    "task": "已废弃（任务边已删除）",
+}
+
+
+def _rules_guide(base: dict, kb: str, text: str) -> dict:
+    """rules 模式**没给 spec**（或给的不是 spec）⇒ 回可执行路线，**不抛错** ✓
+
+    历史踩坑（2026-10-23 实测）：把问题当 spec 传进来会抛「未知 spec 前缀」，
+    智能体只能换着试 ⇒ 一次问答烧 20 步。这里改成"给下一步的精确参数"。
+    """
+    import ke_review as _rv  # noqa: PLC0415
+    q = (text or "").strip()
+    sug = []
+    for x in _name_hits(q, _rv._influencers(kb), "name", top=1):
+        sug.append({"tool": "knowledge_lookup",
+                    "args": {"kb_id": kb, "mode": "rules",
+                             "spec": "influencer:" + str(x.get("name") or "")},
+                    "why": "问题提到「%s」（影响因素）⇒ 走影响因素链路取规则" % x.get("name")})
+    if not sug and q:                       # 策略页命中 ⇒ 直接按策略取
+        parsed = _parse_query(q)
+        terms = (parsed["phrases"] + parsed["words"])[:3]
+        for r in _graph_search(kb, terms or [q], ["bmm:BusinessPolicy"], 1):
+            sug.append({"tool": "knowledge_lookup",
+                        "args": {"kb_id": kb, "mode": "rules",
+                                 "spec": "policy:" + str(r.get("slug") or "")},
+                        "why": "命中策略页「%s」⇒ 按该策略取规则" % (r.get("name") or "")})
+    if not sug:
+        sug.append({"tool": "knowledge_lookup",
+                    "args": {"kb_id": kb, "mode": "keyword", "query": q},
+                    "why": "先按关键词定位策略/规则页，再用 policy:/direct: 取规则"})
+    return {**base, "spec": "", "resolved_by": "", "rules": [],
+            "counts": {"rules": 0, "needs_extract": 0}, "scope_options": [],
+            "plan": {"mode": "rules", "route": "", "args": {"mode": "rules", "spec": ""},
+                     "expect": {"rules": 0}},
+            "strategy": {"used": [], "scope_by": "none",
+                         "why": "rules 模式要 spec：direct:/policy:/influencer:/ask"},
+            "suggestions": sug,
+            "next": ("请给 spec（direct:<规则slug> | policy:<策略> | influencer:<影响因素>）；"
+                     "确需全量策略清单才用 ask")}
+
+
 def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                  spec: str = "", start: str = "", depth: int = 2,
                  limit: int = 20, cls: str = "", page_type: str = "",
-                 kb_ids: list | None = None, auto_widen: bool = False) -> dict:
+                 kb_ids: list | None = None, auto_widen: bool = False,
+                 question: str = "") -> dict:
     import ke_db as _db
     import ke_review as _rv
 
@@ -304,11 +393,49 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
 
     # ── ① rules：按步骤解析规则（唯一规则入口 ✓）────────────────────────
     if m == "rules":
-        r = _rv.rules_resolve(kb, spec or query, int(limit) or 300)
-        return {**base, "resolved_by": r.get("resolved_by"), "spec": r.get("spec"),
-                "rules": r.get("rules"), "counts": r.get("counts"),
-                "scope_options": r.get("scope_options"), "hash": r.get("hash"),
-                "source": "graph:BodhiInstance"}
+        sp = (spec or query or "").strip()
+        kind = (sp.partition(":")[0].strip().lower() if sp else "")
+        if not sp or kind not in _SPEC_KINDS:
+            # 没给 spec / 把**问题**当 spec（历史踩坑：抛"未知 spec 前缀"⇒ 智能体反复试错 ✗）
+            return _rules_guide(base, kb, sp or (question or ""))
+        r = _rv.rules_resolve(kb, sp, int(limit) or 300)
+        out = {**base, **r}                       # **全字段透传**（含 chain；不再白名单挑字段 ✓）
+        out.setdefault("source", "graph:BodhiInstance")
+        n_rules = int((out.get("counts") or {}).get("rules") or 0)
+        text = (question or query or "").strip()
+        sug, nxt = [], ""
+        if kind == "ask":
+            # ask 只回策略清单 ⇒ **必须**给下一步的精确参数（否则等于把宽口径甩给智能体 ✗）
+            for x in _name_hits(text, _rv._influencers(kb), "name", top=1):
+                sug.append({"tool": "knowledge_lookup",
+                            "args": {"kb_id": kb_id or kb, "mode": "rules",
+                                     "spec": "influencer:" + str(x.get("name") or "")},
+                            "why": "问题提到「%s」（影响因素）⇒ 用 influencer: 取规则，"
+                                   "不必枚举全部策略" % x.get("name")})
+            for x in _name_hits(text, out.get("scope_options") or [], "title", top=1):
+                sug.append({"tool": "knowledge_lookup",
+                            "args": {"kb_id": kb_id or kb, "mode": "rules",
+                                     "spec": "policy:" + str(x.get("slug") or x.get("title") or "")},
+                            "why": "问题提到「%s」⇒ 直接按该策略取规则" % (x.get("title") or "")})
+            nxt = (sug[0]["why"] if sug else
+                   "`ask` 只回策略清单、不含规则：请从清单里选一条用 policy:/influencer: 再取")
+        elif kind == "influencer":
+            nxt = (("已按影响因素链路取规则 %d 条（仅链路内的策略，不含链路外策略）" % n_rules)
+                   if n_rules else
+                   "该影响因素的影响手段不是策略（多为手段类页），未派生规则；"
+                   "可先 ask 看策略清单，或用 direct: 指定规则")
+        elif kind == "policy":
+            nxt = "已按策略闭包（含子策略）+ 双向规则边取规则 %d 条" % n_rules
+        else:
+            nxt = "已按 direct 取规则 %d 条" % n_rules
+        out["plan"] = {"mode": "rules", "route": kind,
+                       "args": {"mode": "rules", "spec": out.get("spec") or sp},
+                       "expect": {"rules": n_rules}}
+        out["strategy"] = {"used": ["graph"], "scope_by": "explicit",
+                           "why": _ROUTE_WHY.get(kind, "")}
+        out["suggestions"] = sug
+        out["next"] = nxt
+        return out
 
     # ── ② keyword：**类范围 + 多词**，图优先（`articleBody` 全文）→ PG 补字段 ─────
     if m == "keyword":
@@ -421,9 +548,12 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                                     "args": {"kb_id": kb0["kb_id"], "mode": "keyword", "query": q},
                                     "why": "该类型在 %s 有 %s 页"
                                            % (kb0.get("kb_name") or kb0["kb_id"], kb0.get("pages"))})
-            suggestions.append({"tool": "knowledge_lookup",
-                                "args": {"kb_id": kb_arg, "mode": "rules", "spec": "ask"},
-                                "why": "若查的是策略/规则：先列全部策略（spec=ask），再按策略名取规则"})
+            for x in _name_hits(q, _rv._influencers(kb), "name", top=1):
+                suggestions.append({"tool": "knowledge_lookup",
+                                    "args": {"kb_id": kb_arg, "mode": "rules",
+                                             "spec": "influencer:" + str(x.get("name") or "")},
+                                    "why": "问题提到「%s」（影响因素）⇒ 走影响因素链路取规则"
+                                           "（不要枚举全部策略）" % x.get("name")})
             if not scope and len(text_terms) == 1:
                 short = text_terms[0][:2]
                 if short and short != text_terms[0]:
@@ -561,12 +691,61 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
 _HINT_KEYS = ("plan", "strategy", "suggestions", "next", "cross_kb_hint")
 
 
+def _hint_mode() -> str:
+    """env 三态：`on` | `off` | `abtest`（未知值 ⇒ 按 abtest 处理并落到遥测，不再**静默**当 on）。
+
+    为什么要三态：手工切 `.env` 跑 A/B 太麻烦，且会污染真实流量；
+    `abtest` 让服务端按 50% 分臂、把"哪一臂"记进遥测，分析侧再判对错（服务端不读真值 ✗）。
+    """
+    raw = (os.environ.get("BODHI_ONTOLOGY_HINT") or "on").strip().lower()
+    if raw in ("0", "false", "off", "no", "n"):
+        return "off"
+    if raw in ("1", "true", "on", "yes", "y"):
+        return "on"
+    return "abtest"                       # `abtest` / 未知值 ⇒ 自动分臂（遥测里带 mode，可回溯）
+
+
+def _ab_arm(key: str) -> tuple:
+    """50% 分臂 → `(arm, rotation)`。
+
+    `hash`（默认）用 `blake2b(问题键|会话号)` 的奇偶 ⇒ **随机分布但可复算**
+    （同一会话同一问稳定、跨会话约 50/50，便于复核）；`random` 才是真随机（不可复算）。
+    """
+    rot = (os.environ.get("BODHI_AB_ROTATION") or "hash").strip().lower()
+    if rot == "random":
+        import random  # noqa: PLC0415
+        return ("hint" if random.getrandbits(1) else "plain"), "random"
+    try:
+        import hashlib  # noqa: PLC0415
+        h = hashlib.blake2b((key or "").encode("utf-8"), digest_size=8).digest()
+        return ("hint" if (h[0] & 1) else "plain"), "hash"
+    except Exception:  # noqa: BLE001  分臂失败也要能用
+        return "hint", "hash"
+
+
+def _resolve_arm(ontology_hint, text: str = "", session_no: str = "") -> tuple:
+    """→ `(hint: bool, assignment: str, ab: dict)`；优先级：显式布尔 > env 三态。"""
+    if isinstance(ontology_hint, bool):
+        return (ontology_hint, "forced",
+                {"mode": "forced", "arm": "hint" if ontology_hint else "plain"})
+    mode = _hint_mode()
+    if mode == "on":
+        return True, "manual", {"mode": "on", "arm": "hint"}
+    if mode == "off":
+        return False, "manual", {"mode": "off", "arm": "plain"}
+    arm, rotation = _ab_arm(_question_key(text) + "|" + str(session_no or ""))
+    return arm == "hint", "abtest", {"mode": "abtest", "arm": arm, "rotation": rotation}
+
+
 def _hint_enabled(ontology_hint=None) -> bool:
-    """开关解析：显式布尔 > env `BODHI_ONTOLOGY_HINT`（默认 on）。"""
+    """开关解析（**兼容旧口径**）：显式布尔 > env。
+
+    `abtest` 在这里回 True（=提示面**可能**在场）；真正的分臂要靠问题/会话上下文，
+    走 `_resolve_arm` ✓（没有上下文的老调用方保持旧行为，不回退成 off）。
+    """
     if isinstance(ontology_hint, bool):
         return ontology_hint
-    raw = (os.environ.get("BODHI_ONTOLOGY_HINT") or "on").strip().lower()
-    return raw not in ("0", "false", "off", "no", "n")
+    return _hint_mode() != "off"
 
 
 _QKEY_PUNCT = re.compile(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/？?！!…\"'“”‘’]+")
@@ -580,22 +759,22 @@ def _question_key(text: str) -> str:
 # ---------------------------------------------------------------------------
 # **问题归组 / 形态分类**（2026-10-25，用户口径）
 # ---------------------------------------------------------------------------
-# 场景（用户实测）：不是在跑"问题集"，而是「选一个文件 → 给评审编号 → 要求评审」。
-#   · 同一个**编号**评审两次 ⇒ 是**同一个问题的两轮**（不能算两个问题 ✗）；
+# 场景（用户实测）：不是在跑"问题集"，而是「选一个文件 → 给业务编号 → 要求判定」。
+#   · 同一个**编号**跑两次 ⇒ 是**同一个问题的两轮**（不能算两个问题 ✗）；
 #   · 编号不同但语义相似 ⇒ **可以当同一个问题**对比（报告侧用相似度归组）；
 #   · 关键字**数量**不同、**层次**不同（类 vs 实例组合）⇒ **算不同类问题**（`q_shape`）。
 # 服务端只落**可复算的原始特征**（编号 / 词数 / 层次），归组与阈值放报告侧
 # （`ke_ab_report.group_rows`）—— 口径可调、不用重启发服务 ✓
 # ---------------------------------------------------------------------------
 _QID_PAT = (
-    re.compile(r"(?:评审|流程|任务|单据|报告)?编号\s*[：:#]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{3,})"),
+    re.compile(r"编号\s*[：:#]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{3,})"),
     re.compile(r"\b(?:no|no\.|id)\s*[：:#]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{3,})", re.I),
 )
 _POLITE = re.compile(r"(请问|帮我|麻烦|谢谢|一下|能否|请)")
 
 
 def _extract_qid(question: str) -> str:
-    """问题里的**业务编号**（如 `评审编号 YYYYMM-889999`）——同编号 ⇒ 同问题（多轮）。
+    """问题里的**业务编号**（如 `业务编号 YYYYMM-889999`）——同编号 ⇒ 同问题（多轮）。
 
     取不到就回空串（报告侧退化为"语义相似度归组"✓）。
     """
@@ -641,13 +820,13 @@ def _q_shape(mode: str = "", query: str = "", cls: str = "", plan: dict | None =
 def _question_core(text: str) -> str:
     """问题**语义核**：去编号/版本/文件名/礼貌语/标点（报告侧相似度归组的输入）。
 
-    例：`评审编号 YYYYMM-889999；评审文档 样例1-统一结算平台技术方案.docx；第一轮，开始评审`
-        ⇒ `评审编号评审文档样例统一结算平台技术方案开始评审`
+    例：`业务编号 YYYYMM-889999；受评文档 设计说明-v3.docx；第一轮，开始判定`
+        ⇒ `业务编号受评文档设计说明开始判定`
     """
     t = (text or "").lower()
     t = re.sub(r"https?://\S+", " ", t)
     t = re.sub(r"\.(docx?|pdf|xlsx?|pptx?|wps|md|txt|csv)\b", " ", t)      # 文件后缀
-    t = re.sub(r"[A-Za-z]{0,4}\d[\dA-Za-z\-_./]*", " ", t)          # 编号/版本/样例1
+    t = re.sub(r"[A-Za-z]{0,4}\d[\dA-Za-z\-_./]*", " ", t)          # 编号/版本/示例
     t = re.sub(r"第\s*[0-9一二三四五六七八九十百]+\s*[轮版次阶段步章节]", " ", t)
     t = _POLITE.sub(" ", t)
     return _question_key(t)
@@ -666,7 +845,8 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     `session_no` / `question` / `turn_id` / `first_step` / `turn_first` **只进遥测**，不参与检索。
     """
     t0 = time.time()
-    hint = _hint_enabled(ontology_hint)
+    # 2026-10-25（P2）：三态开关 —— 显式布尔 > env(on|off|abtest)；abtest 按 50% 分臂并**记进遥测**。
+    hint, assignment, ab = _resolve_arm(ontology_hint, question or query or spec, session_no)
     # 2026-10-25（A/B 口径 v2）：**真实 IO 统计** —— 打了库/图几次、几次空手而归。
     #   · 走 MCP 时 `srv/http.py` 已经 `begin()`，这里只读快照（**不重复计数** ✓）；
     #   · CLI / 测试直接调用时自己开一个桶，结束后 `reset()`（**不影响外层** ✓）。
@@ -675,7 +855,7 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
         ke_stats.begin()
     try:
         r = _lookup_impl(kb_id, mode, query, spec, start, depth, limit, cls, page_type,
-                         kb_ids, auto_widen)
+                         kb_ids, auto_widen, question=question)
     finally:
         snap = ke_stats.snapshot() or {}
         if own_bucket:
@@ -735,8 +915,15 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
         "hits": int(hits or 0), "top_slug": top,
         "relaxed_by": str(plan.get("relaxed_by") or ""),
         "ambiguity": bool(plan.get("ambiguity")), "scope_by": str(plan.get("scope_by") or ""),
+        # 2026-10-25（P2/P3）：分臂来源 + 规则取数路径（报告按路径分组判正确率）
+        "assignment": assignment, "ab": ab,
+        "route": str(plan.get("route") or r.get("resolved_by") or ""),
+        "resolved_by": str(r.get("resolved_by") or ""),
+        "rules_n": int((r.get("counts") or {}).get("rules") or 0),
+        # 2026-10-25（P3-b）：**本轮实际取到的规则 slug**（≤20 个）—— 判"检索口径"用，
+        # 不必等最终答案就能判对错（样本量因此大幅增加 ✓）
+        "rule_slugs": [str(x.get("slug")) for x in (r.get("rules") or []) if x.get("slug")][:20],
         "ms": int((time.time() - t0) * 1000),
-        "assignment": "manual",
     }
     return r
 

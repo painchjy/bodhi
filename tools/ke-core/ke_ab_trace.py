@@ -52,6 +52,7 @@ select m.id                         as message_id,
        (m.created_at at time zone 'Asia/Shanghai')::text as ts,
        coalesce(m.agent_duration_ms, 0) as agent_ms,
        m.agent_steps::text          as steps,
+       left(coalesce(m.content, ''), 8000) as answer,
        (select u.content
           from messages u
          where u.session_id = m.session_id and u.role = 'user'
@@ -123,6 +124,9 @@ def build_row(rec: dict) -> dict:
         "native_retrieval_calls": sum(1 for n in seq if n in NATIVE_RETRIEVAL),
         "tool_calls": len(seq),
         "agent_ms": int(rec.get("agent_ms") or 0),
+        # 2026-10-25（P3）：**答案正文**（判对错要读；截断防爆日志）✓
+        "answer": (rec.get("answer") or "")[:4000],
+        "answer_len": len(rec.get("answer") or ""),
     }
 
 
