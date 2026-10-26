@@ -44,12 +44,17 @@ curl -s http://127.0.0.1:8770/health     # {"ok": true, "server": "it-platform-m
 > ⇒ 不必把方案文档上传进知识库 ✓。附件下载走 `GET /files/<doc_id>`（流式 + `Content-Disposition`），
 > 基地址由 `IT_MCP_PUBLIC_BASE`（默认 `http://127.0.0.1:8770`）决定，内网换成域名/IP 即可。
 
-> **内网工作台没接通时怎么"上传文档"**（2026-10-26）：
-> ① `POST /files/<doc_id>?review_no=<编号>&name=<文件名>&title=<标题>&round=1`，body = 文件二进制
-> （docx 会用标准库切节）→ 回 `doc_id/size/sections/url`；
-> ② `ext_review_flow(action="attach", review_no=<编号>, doc_id=<doc_id>)` 把文档绑到该编号；
-> ③ 一条命令搞定：`bash deploy/mock-ext/upload_doc.sh <编号> <本地文件> [标题]`。
-> 新建流程：`ext_review_flow(action="create", review_no=<新编号>, title=…)`。
+> **内网工作台没接通时，"建档案 + 上传附件"由智能体调工具完成（不需要 shell ✓）**（2026-10-26）：
+> 用户只给「编号 + 文件名」，智能体依次调：
+> ① `ext_review_flow(action="create", review_no=<编号>, title=<可选>)`（已存在会复用）
+> ② `ext_doc_access(action="import", review_no=<编号>, doc_title=<文件名>)`
+>   —— 工具按文件名在 `knowledges` 里定位（也可传 `knowledge_id`），从 WeKnora 容器读出原文、
+>   切节、落 `docs/`+`files/`+索引，并**自动绑定**到该编号档案；回执给 `doc_id/size/sha256/sections/url`；
+>   同名多份 ⇒ `doc_ambiguous` + `candidates`（不猜 ✗）；读不到 ⇒ `file_not_found` + `diag`。
+> ③ `ext_review_flow(action="docs")` 复核绑定；正文用 `ext_doc_access(action="outline"|"section")`。
+>
+> 后备（**仅排障**，不是正常链路）：`POST /files/<doc_id>`（二进制直传）、
+> `bash deploy/mock-ext/upload_doc.sh <编号> <本地文件>`。
 
 > **台账指纹与版本口径**（2026-10-26）：`rule_fp` 由**调用方显式给**（= 规则页 `bmm:ruleHash`，16 hex）；
 > 工具只在缺省时才自算 `r-xxxxxx` 短哈希（`human_input=true` 的人工条目留空）。

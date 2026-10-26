@@ -364,6 +364,47 @@ def test_document_upload_then_sections(ext):
     assert dl["ok"] and dl["path"].endswith("doc-up-1.docx"), dl
 
 
+def test_import_knowledge_creates_doc_and_flow(ext, monkeypatch):
+    """**智能体用工具导入附件**（用户上传的那份）⇒ 建档 + 绑文档 + 可读正文（不走 shell）✓。"""
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    src = os.path.join(tmp, "方案.docx")
+    _mk_docx(src, ["1 概述", "正文", "2.1 设计", "细节"])
+    raw = open(src, "rb").read()
+    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [
+        {"id": "kid-1", "tenant_id": 10000, "knowledge_base_id": "kb-x",
+         "title": "方案.docx", "file_name": "方案.docx"}])
+    monkeypatch.setattr(D, "_read_knowledge_bytes", lambda t, k, f="": (raw, {"path": "/x"}))
+    r = D.import_knowledge(review_no="R-IMP", doc_title="方案.docx", actor="t")
+    assert r["ok"] and r["doc_id"] == "doc-kid-1", r
+    assert r["sections"] >= 2, r
+    assert r["flow"]["ok"] and r["flow"]["created"] is True, r
+    idx = json.load(open(os.path.join(_sys(ext, "docs/index.json")), encoding="utf-8"))
+    assert "doc-kid-1" in (idx.get("R-IMP") or []), idx
+    o = D.access(kb_id="kb", action="outline", doc_id="doc-kid-1", review_no="R-IMP")
+    assert o["ok"] and o["counts"]["sections"] >= 2, o
+
+
+def test_import_knowledge_ambiguous_does_not_guess(ext, monkeypatch):
+    """同名附件多份 ⇒ `doc_ambiguous` + candidates（**不猜** ✗）。"""
+    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [
+        {"id": "k1", "title": "a.docx", "file_name": "a.docx", "knowledge_base_id": "kb1"},
+        {"id": "k2", "title": "a.docx", "file_name": "a.docx", "knowledge_base_id": "kb2"}])
+    r = D.import_knowledge(review_no="R-IMP2", doc_title="a.docx")
+    assert r["ok"] is False and r["error"] == "doc_ambiguous", r
+    assert len(r["candidates"]) == 2
+
+
+def test_import_knowledge_file_unreadable(ext, monkeypatch):
+    """容器里读不到附件 ⇒ `file_not_found` + diag（排障要能看到路径/rc）✓。"""
+    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [
+        {"id": "k3", "tenant_id": 1, "title": "b.docx", "file_name": "b.docx",
+         "knowledge_base_id": "kb"}])
+    monkeypatch.setattr(D, "_read_knowledge_bytes", lambda t, k, f="": (b"", {"rc": 1, "path": "/x"}))
+    r = D.import_knowledge(review_no="R-IMP3", doc_title="b.docx")
+    assert r["ok"] is False and r["error"] == "file_not_found" and r["diag"], r
+
+
 def test_gate_skips_doc_without_ext_ref(ext):
     """与接口无关的页（模板/说明页）⇒ 门禁直接跳过，不报 `ext_no_ref_block` ✗。"""
     import ke_ext_gate as G

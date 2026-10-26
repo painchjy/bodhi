@@ -211,18 +211,138 @@ def save_document(doc_id: str, review_no: str, filename: str, raw: bytes, title:
             "url": "%s/files/%s" % (S.public_base(), doc_id)}
 
 
+def _knowledge_rows(doc_title: str = "", knowledge_id: str = "", kb_id: str = "") -> list:
+    """查 WeKnora 的 `knowledges`（附件已在库里 ⇒ 别让用户再走 shell ✗）。"""
+    import ke_db  # noqa: PLC0415
+
+    where = ["deleted_at IS NULL"]
+    if knowledge_id:
+        where.append("id = %s" % ke_db.sql_str(knowledge_id))
+    elif doc_title:
+        like = ke_db.sql_str("%" + doc_title.strip() + "%")
+        where.append("(title ILIKE %s OR file_name ILIKE %s)" % (like, like))
+    else:
+        return []
+    if kb_id:
+        where.append("knowledge_base_id = %s" % ke_db.sql_str(kb_id))
+    return ke_db.psql_csv(
+        "SELECT id, tenant_id, knowledge_base_id, title, COALESCE(file_name,'') AS file_name, "
+        "       COALESCE(file_type,'') AS file_type, COALESCE(file_size,0) AS file_size "
+        "  FROM knowledges WHERE %s ORDER BY created_at DESC LIMIT 5" % " AND ".join(where))
+
+
+def _read_knowledge_bytes(tenant_id, knowledge_id: str, file_name: str = "") -> tuple:
+    """从 WeKnora 容器读附件原文 → `(bytes, diag)` ✓。
+
+    布局（实测 2026-10-26）：`/data/files/<tenant>/<knowledge_id>/<原文件名>`（**是目录**）；
+    兼容"直接是文件"的旧布局。优先取与 `file_name` 同名的那个文件。
+    """
+    import subprocess  # noqa: PLC0415
+
+    cname = os.environ.get("WEKNORA_APP_CONTAINER") or "WeKnora-app"
+    base = "/data/files/%s/%s" % (tenant_id, knowledge_id)
+    diag = {"container": cname, "path": base}
+    r = subprocess.run(["docker", "exec", cname, "cat", base], capture_output=True)
+    if r.returncode == 0 and r.stdout:
+        return r.stdout, dict(diag, layout="file")
+    ls = subprocess.run(["docker", "exec", cname, "ls", "-1", base], capture_output=True)
+    names = [x.strip() for x in (ls.stdout or b"").decode("utf-8", "replace").splitlines()
+             if x.strip()]
+    diag["entries"] = names[:5]
+    pick = file_name if file_name in names else (names[0] if names else "")
+    if pick:
+        p2 = base + "/" + pick
+        r2 = subprocess.run(["docker", "exec", cname, "cat", p2], capture_output=True)
+        diag.update(path=p2, rc=r2.returncode)
+        if r2.returncode == 0 and r2.stdout:
+            return r2.stdout, dict(diag, layout="dir")
+    diag["stderr"] = (ls.stderr or b"").decode("utf-8", "replace")[:160]
+    return b"", diag
+
+
+def import_knowledge(review_no: str, doc_title: str = "", knowledge_id: str = "",
+                     kb_id: str = "", doc_id: str = "", round: int = 1,
+                     actor: str = "", session_no: str = "") -> dict:
+    """**把用户上传到知识库的附件**导入模拟 it-platform，并挂到该编号档案（2026-10-26）。
+
+    智能体用法（**不需要 shell** ✓）：用户说"编号 <编号>，附件《<文件名>》" ⇒
+        `action=import, review_no=<编号>, doc_title=<文件名>`
+    ⇒ 本函数按文件名（或 `knowledge_id`）在 `knowledges` 里定位、从容器读出原文、
+      切节后落 `docs/`+`files/`+索引，并**自动建档/绑定**（档案不存在就建 ✓）。
+
+    歧义（同名多份）⇒ 回 `doc_ambiguous` + `candidates`，**不猜** ✗。
+    """
+    rno = str(review_no or "").strip()
+    if not rno:
+        return {"ok": False, "tool": TOOL, "error": "need_review_no",
+                "hint": "外层主键 = 编号（用户消息里给的那个）"}
+    rows = _knowledge_rows(doc_title=doc_title, knowledge_id=knowledge_id, kb_id=kb_id)
+    if not rows:
+        return {"ok": False, "tool": TOOL, "error": "knowledge_not_found",
+                "doc_title": doc_title, "knowledge_id": knowledge_id,
+                "hint": "先在知识库上传附件，或把 doc_title 写全（含扩展名）；"
+                        "也可直接用 knowledge_id"}
+    if len(rows) > 1 and not knowledge_id:
+        uniq = {(r.get("id"), r.get("title")) for r in rows}
+        if len(uniq) > 1:
+            return {"ok": False, "tool": TOOL, "error": "doc_ambiguous", "doc_title": doc_title,
+                    "candidates": [{"knowledge_id": r.get("id"), "title": r.get("title"),
+                                    "kb_id": r.get("knowledge_base_id")} for r in rows],
+                    "hint": "同名附件有多份 ⇒ 指定 `knowledge_id` 或换更精确的 doc_title"}
+    row = rows[0]
+    kid = str(row.get("id") or "")
+    fname = str(row.get("file_name") or row.get("title") or (kid + ".bin"))
+    raw, diag = _read_knowledge_bytes(row.get("tenant_id"), kid, fname)
+    if not raw:
+        return {"ok": False, "tool": TOOL, "error": "file_not_found", "knowledge_id": kid,
+                "diag": diag,
+                "hint": "容器里读不到附件（默认 WeKnora-app:/data/files/<tenant>/<kid>/<原文件名>）；"
+                        "可用 env WEKNORA_APP_CONTAINER 指定容器名"}
+    title = str(row.get("title") or os.path.splitext(fname)[0])
+    did = doc_id or ("doc-" + kid[:8])
+    saved = save_document(doc_id=did, review_no=rno, filename=fname, raw=raw, title=title,
+                          round=int(round or 1), actor=actor or "import",
+                          session_no=session_no)
+    flow = {}
+    try:                                          # 自动建档 + 绑定（与 attach 同一实现 ✓）
+        import ke_ext_flow as F  # noqa: PLC0415
+        flow = F.attach_doc(rno, {k: saved.get(k) for k in
+                                  ("doc_id", "title", "mime", "size", "sha256", "round",
+                                   "sections", "attachments", "images", "url")},
+                            actor=actor or "import", session_no=session_no)
+    except Exception as exc:  # noqa: BLE001  绑定失败不影响导入（文档已在索引里 ✓）
+        flow = {"ok": False, "error": repr(exc)[:200]}
+    return {"ok": True, "tool": TOOL, "review_no": rno, "doc_id": saved["doc_id"],
+            "title": saved["title"], "size": saved["size"], "sha256": saved["sha256"],
+            "sections": saved["sections"], "url": saved["url"],
+            "knowledge": {"knowledge_id": kid, "kb_id": row.get("knowledge_base_id"),
+                          "file_name": fname},
+            "flow": flow,
+            "next": "ext_doc_access(action=outline, doc_id=…) ⇒ section 逐节取正文；"
+                    "报告 ① 的文档信息用 `get` 回执"}
+
+
 def access(kb_id: str = "", object_slug: str = "", action: str = "list",
            review_no: str = "", doc_id: str = "", section_path: str = "",
            cursor: int = 0, limit_chars: int = 6000, inline_media: bool = False,
-           max_bytes: int = MAX_IMG_BYTES) -> dict:
-    """统一入口（**只读**；外部文档/附件/图都从这里取）。"""
+           max_bytes: int = MAX_IMG_BYTES, doc_title: str = "", knowledge_id: str = "",
+           round: int = 1, actor: str = "", session_no: str = "") -> dict:
+    """统一入口（**只读**；外部文档/附件/图都从这里取）。
+
+    `action="import"` 是**写**：把用户上传到知识库的附件导入模拟 it-platform 并绑定档案
+    （智能体用它，不需要 shell ✓）—— 所以它**不要求** DataObject 绑定（先做文档，再谈契约）。
+    """
+    action = (action or "list").strip().lower()
+    if action == "import":
+        return import_knowledge(review_no=review_no, doc_title=doc_title,
+                                knowledge_id=knowledge_id, kb_id=kb_id, doc_id=doc_id,
+                                round=int(round or 1), actor=actor, session_no=session_no)
     rb = S.resolve_binding(TOOL, kb_id, object_slug)
     if not rb.get("ok"):
         return {"ok": False, "tool": TOOL,
                 **{k: rb.get(k) for k in ("why", "hint", "candidates", "object", "binding")
                    if rb.get(k) is not None}}
     binding, obj = rb["binding"], rb["object"]
-    action = (action or "list").strip().lower()
     base = {"ok": True, "tool": TOOL, "object": obj.get("slug"), "action": action,
             "binding": {"tool": binding.get("tool"), "modes": binding.get("modes"),
                         "impl": binding.get("impl")}, "fetched_at": _now()}

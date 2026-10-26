@@ -48,13 +48,19 @@ def flow(tmp_path, monkeypatch):
 
 
 def test_number_unknown_creates_archive(flow):
-    """编号不存在 ⇒ **建档**（平台已存在口径）；状态/阶段取契约 `defaults`（代码不写业务取值 ✓）。"""
+    """编号不存在 ⇒ **建档**（平台已存在口径）；状态/阶段取契约 `defaults`（代码不写业务取值 ✓）。
+
+    文档清单**只认该编号**：新编号没有文档 ⇒ `docs=0` + `docs_missing`（不再回落到演示清单 ✗）。
+    """
     r = F.call(kb_id="kb", review_no="NEW-001")
     assert r["ok"] and r["status"] == "处理中" and r["stage"] == "执行", r
     assert r["round"] == 1 and r["authority"] == "agent_requested", r
-    assert (r["counts"] or {}).get("docs") == 1, r
-    assert r["docs"][0]["url"].endswith("/files/doc-a"), r["docs"][0]
+    assert (r["counts"] or {}).get("docs") == 0, r
     assert (flow / "it-platform" / "flows" / "NEW-001.json").is_file(), "档案必须落盘 ✓"
+    # 索引里有的编号 ⇒ 正常带出文档 + 可下载 url
+    r2 = F.call(kb_id="kb", review_no="R-1")
+    assert (r2["counts"] or {}).get("docs") == 1, r2
+    assert r2["docs"][0]["url"].endswith("/files/doc-a"), r2["docs"][0]
 
 
 def test_open_binds_docs_by_filename(flow):

@@ -94,7 +94,10 @@ def call_tool(name: str, args: dict) -> dict:
             cursor=int(a.get("cursor", 0) or 0),
             limit_chars=int(a.get("limit_chars", 6000) or 6000),
             inline_media=_bool(a.get("inline_media"), False),
-            max_bytes=int(a.get("max_bytes", 1500000) or 1500000))
+            max_bytes=int(a.get("max_bytes", 1500000) or 1500000),
+            doc_title=str(a.get("doc_title", "")), knowledge_id=str(a.get("knowledge_id", "")),
+            round=int(a.get("round", 1) or 1), actor=str(a.get("actor", "")),
+            session_no=str(a.get("session_no", "")))
     raise ValueError("tool not found: %s（可用：%s）"
                      % (name, ", ".join(t["name"] for t in S.TOOLS)))
 

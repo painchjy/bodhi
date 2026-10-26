@@ -575,6 +575,30 @@ curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<Data
 **注**：`bodhi-mcp` 是 **systemd 服务**（不是容器）⇒ 改了后端代码必须
 `systemctl restart bodhi-mcp`，否则跑的还是旧字节码（这类"改了没生效"多半是这个）。
 
+## 智能体要"建档案 + 传附件"，不想用 shell
+
+**口径（2026-10-26）**：附件**不要求**用户手工上传到外部系统，也**不要**写 shell 脚本 —— 用户把附件
+上传到知识库后，智能体按「评审编号 + 文件名」调工具即可：
+
+```
+① ext_review_flow(action="create", review_no="<编号>", title="<可选>")      # 档案（已存在则复用）
+② ext_doc_access(action="import", review_no="<编号>", doc_title="<文件名>")   # 导入并自动绑定
+   → 回 {doc_id, size, sha256, sections, url, flow:{docs:[…]}}
+③ ext_doc_access(action="outline"/"section", doc_id="…")                    # 取正文
+```
+
+**工作原理**（排障用）：`import` 在 `knowledges` 里按 `title/file_name` 模糊匹配（也可直接给
+`knowledge_id`），再从 `WeKnora-app:/data/files/<tenant>/<knowledge_id>/<原文件名>` 读原文
+（容器名可用 `WEKNORA_APP_CONTAINER` 覆盖），然后切节 + 落 `docs/`、`files/`、索引并绑定档案。
+
+| 回执 | 含义 | 处置 |
+|---|---|---|
+| `knowledge_not_found` | 知识库里没有该文件名 | 让用户确认文件名（含扩展名），或先上传 |
+| `doc_ambiguous` + `candidates` | 同名多份 | 让用户指一份（给 `knowledge_id`），**不猜** |
+| `file_not_found` + `diag` | 容器里读不到原文 | 看 `diag.path/rc/entries`；确认容器名与 tenant |
+
+> `POST /files/<doc_id>`、`deploy/mock-ext/upload_doc.sh` 只在**排障**时用，正常链路不需要。
+
 ## 保存/同步后「正文没变」+ 版本历史多出"无差异"的版本
 
 **症状**（2026-10-26 用户实测）：面板改一条（如 P-03 严重度→严重）→ 保存 + 同步正文 →

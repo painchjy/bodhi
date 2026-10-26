@@ -87,11 +87,9 @@ def _doc_rows(review_no: str, rnd: int = 0) -> list:
     """该编号下的文档清单（含**可下载 URL** ✓）。`rnd`=0 ⇒ 不过滤轮次。"""
     idx = _docs_index()
     ids = [str(x) for x in (idx.get(str(review_no or "")) or [])]
-    if not ids:                                  # 无该编号 ⇒ `_default`（再退：所有清单里的 doc_id 去重）
+    if not ids and not str(review_no or "").strip():
+        # 只有**没给编号**时才用 `_default`（演示清单）；给了编号就必须"该编号下真的没有"✓
         ids = [str(x) for x in (idx.get("_default") or [])]
-    if not ids:
-        flat = [str(x) for v in idx.values() if isinstance(v, list) for x in v]
-        ids = list(dict.fromkeys(flat))
     out = []
     for did in ids:
         d = _doc(did)
@@ -133,6 +131,30 @@ def _save(a: dict, actor: str = "", session_no: str = "", action: str = "") -> d
                  "key": a["review_no"], "after": {"round": a.get("round"),
                                                   "status": a.get("status")}})
     return {"written": True, "path": path, "rev": a["rev"]}
+
+
+def attach_doc(review_no: str, doc: dict, actor: str = "", session_no: str = "") -> dict:
+    """把一份**已在索引里**的文档挂到该编号档案（无绑定依赖；供 import/attach 复用 ✓）。
+
+    档案不存在 ⇒ 直接建档；回执给 `{review_no, docs[], rev, round, created}`。
+    """
+    rno = str(review_no or "").strip()
+    if not rno:
+        return {"ok": False, "error": "need_review_no"}
+    one = dict(doc or {})
+    did = str(one.get("doc_id") or "").strip()
+    if not did:
+        return {"ok": False, "error": "need_doc_id"}
+    arch = _load(rno)
+    created = not bool(arch)
+    if created:
+        arch = _new_archive(rno, 1, [])
+    one.setdefault("round", int(arch.get("round") or 1))
+    arch["docs"] = [one]
+    _save(arch, actor=actor or "import", session_no=session_no, action="attach")
+    return {"ok": True, "review_no": rno, "created": created, "rev": arch.get("rev"),
+            "round": arch.get("round"), "status": arch.get("status"),
+            "docs": [_doc_brief(one)]}
 
 
 def call(kb_id: str = "", object_slug: str = "", mode: str = "query", action: str = "get",
@@ -224,8 +246,6 @@ def call(kb_id: str = "", object_slug: str = "", mode: str = "query", action: st
         if not bind:
             return {"ok": False, "tool": TOOL, "error": "need_doc_id",
                     "hint": "先上传文档拿到 doc_id，再 action=attach 绑定到该编号"}
-        if not arch:
-            arch = _new_archive(rno, int(round or 1), docs)
         live = _doc_rows(rno, 0)
         picked = [d for d in live if d.get("doc_id") == bind]
         if not picked:
@@ -235,11 +255,11 @@ def call(kb_id: str = "", object_slug: str = "", mode: str = "query", action: st
                         "hint": "先 `POST /files/<doc_id>` 上传，或核对 doc_id"}
             one.setdefault("doc_id", bind)
             picked = [_doc_brief(one)]
-        arch["docs"] = picked
-        _save(arch, actor=actor, session_no=session_no, action="attach")
-        return {**base, "attached": bind, "rev": arch.get("rev"),
-                "round": arch.get("round"), "status": arch.get("status"),
-                "docs": [_doc_brief(d) for d in (arch.get("docs") or [])],
+        res = attach_doc(rno, picked[0], actor=actor, session_no=session_no)
+        return {**base, "attached": bind, "rev": res.get("rev"),
+                "round": res.get("round"), "status": res.get("status"),
+                "created": res.get("created"),
+                "docs": res.get("docs") or [],
                 "next": "ext_doc_access(action=outline, doc_id=…) 取章节树 ⇒ section 逐节取正文"}
 
     # ── 开工：open（建档 + 绑文档；只写"档案"，不动业务数据） ────────────

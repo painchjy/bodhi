@@ -312,9 +312,9 @@ IT 工作平台；我们此前没有对应接口 ⇒ 智能体只能"让用户�
 | 动作 | 调用 | 说明 |
 |---|---|---|
 | 新建流程 | `ext_review_flow(action="create", review_no=…, title=…)` | 状态取 schema `defaults`，轮次 1 |
-| 上传文档 | `POST /files/<doc_id>?review_no=&name=&title=&round=` | body=文件二进制；docx 用标准库**切节** |
-| 绑定文档 | `ext_review_flow(action="attach", review_no=…, doc_id=…)` | 档案的 `docs` 指向该文档 |
-| 一条命令 | `bash deploy/mock-ext/upload_doc.sh <编号> <文件> [标题]` | 上传 + attach |
+| **导入附件（推荐）** | `ext_doc_access(action="import", review_no=…, doc_title=<文件名>)` | 用户上传的附件 ⇒ 自动建档 + 绑定；回 `doc_id/sections/url`；歧义回 `doc_ambiguous` |
+| 绑定已有文档 | `ext_review_flow(action="attach", review_no=…, doc_id=…)` | 档案的 `docs` 指向该文档 |
+| 后备（排障） | `POST /files/<doc_id>` / `bash deploy/mock-ext/upload_doc.sh` | 二进制直传；**正常链路不用** |
 
 ### 9.7 台账指纹与 rev（2026-10-26）
 

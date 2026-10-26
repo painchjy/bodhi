@@ -106,9 +106,18 @@ TOOLS = [
             "kb_id": {"type": "string", "description": "业务对象所在库（可省：自动跨库解析绑定）"},
             "object": {"type": "string", "description": "业务对象页 slug（建议给）"},
             "action": {"type": "string",
-                       "description": "list | meta | url | outline | section | attachment | image"},
-            "review_no": {"type": "string"},
+                       "description": ("list | meta | url | outline | section | attachment | image | "
+                                       "**import**（把知识库里已上传的附件导入并绑定编号，"
+                                       "不需要 shell ✓）")},
+            "review_no": {"type": "string", "description": "外层主键（import 必填：编号）"},
             "doc_id": {"type": "string"},
+            "doc_title": {"type": "string",
+                          "description": ("import 用：**用户给的文件名**（含扩展名，按 title/file_name 模糊匹配；"
+                                          "同名多份 ⇒ `doc_ambiguous` + candidates，不猜）")},
+            "knowledge_id": {"type": "string",
+                             "description": "import 用：直接指定知识库文档 id（比 doc_title 更确定）"},
+            "round": {"type": "integer", "description": "import 用：轮次（默认 1）"},
+            "actor": {"type": "string"},
             "section_path": {"type": "string"},
             "cursor": {"type": "integer"},
             "limit_chars": {"type": "integer"},
