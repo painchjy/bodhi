@@ -102,6 +102,10 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
    **SQL 在 `03-manual/AGENTS-SQL.md`**（可回滚）；
 5. `knowledge_bases.wiki_config`：抽取指令按你们领域改（`KB-CONFIG.md` §3）；
 6. 前端 nginx 模板挂载 + `image: weknora-ui:bodhi2`（`FRONTEND.md`）。
+7. **ext 侧（04 包，独立服务 8766）**：`sudo bash 04-it-platform-mcp/install.sh` → `python3 04-it-platform-mcp/selfcheck.py`；
+   智能体工具面/提示词**不手改 SQL**，用 `tools/delivery/apply_config.py --check|--apply`（真源
+   `deploy/weknora-fork/config/agent_tools.yaml` + `agent_review_prompt.md`）。
+   **哪些能改、改哪、怎么生效、怎么校验 ⇒ 一律看 `CONFIG-MATRIX.md`** ✓
 
 ## 4. 验收清单（交付意义的"通过标准"）
 
