@@ -12,9 +12,10 @@
 
 约定
 ----
-- 真源：`deploy/weknora-fork/config/agent_tools.yaml`（工具面 + 提示词文件 + mcp_services）；
+- 真源：`deploy/weknora-fork/config/agent_tools.yaml`（内置工具 `builtin_tools` + 提示词文件 + `mcp_services`）；
+- **MCP 工具不在这里配**（由 `mcp_services` 挂载决定，工具清单不落库）⇒ 别往 `allowed_tools` 写 `mcp_*`（写了也不生效）；
 - `system_prompt` 从 md 里**第一个 ```text 代码块**取（md 顶部说明不算提示词）；
-- 只写三键：`allowed_tools` / `system_prompt` / `mcp_services`（其它键原样保留 ✓）；
+- 只写三键：`allowed_tools`（值来自 `builtin_tools`）/ `system_prompt` / `mcp_services`（其它键原样保留 ✓）；
 - 每次写前打印 `before → after`（数量 + 增删项），写完**立刻回读复核**。
 """
 import argparse

@@ -145,6 +145,15 @@ TOOLS = [
 # 读哪里：**优先读服务发布内的 seed 文件**（`deploy/mock-ext/<system>/schema.json`），
 # 因为容器根里的副本是"首次使用时的初始化数据"、`bootstrap()` **只补缺失不覆盖**，
 # 可能落后于本次发布；契约跟着服务版本走才对 ✓。
+def _read_json(path: str):
+    """读 JSON（失败 ⇒ None）。**不依赖 ke-core**：04 包是独立服务，可能没有 `ke_ext_store`。"""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _contract() -> dict:
     """容器数据契约（含 `x_ext`）：**服务目录 → 种子目录 → 容器根** 依次找。
 
@@ -152,22 +161,33 @@ def _contract() -> dict:
       ① `tools/it-platform-mcp/schema.json` —— 契约**跟着服务版本走**（发布包里一定有 ✓）；
       ② `BODHI_EXT_SEED` / `deploy/mock-ext/it-platform/schema.json` —— 现场自定义（可选覆盖）；
       ③ 容器根 `state/it-platform/schema.json` —— 首次 bootstrap 的旧副本（兜底）。
+
+    2026-10-27 修正：`ke_ext_store` 改为**可选**——04 包**不含 ke-core**，旧写法 import 失败就
+    `return {}`，导致 `selfcheck.py` 在客户现场必红（`x-ext 下发 schemaHash = None`）、
+    `tools/list` 也不带 `x-ext`。现在缺它时按**路径**兜底读（①②③ 顺序不变）。
     """
-    try:
-        import ke_ext_store as S
-    except Exception:                     # noqa: BLE001  独立导入（如单测）时按无契约处理
-        return {}
     here = os.path.dirname(os.path.abspath(__file__))
     cands = [os.path.join(here, "schema.json")]
-    seed = os.environ.get("BODHI_EXT_SEED", "") or getattr(S, "SEED_DIR", "")
-    if seed:
-        cands.append(os.path.join(seed, S.DEFAULT_SYSTEM, "schema.json"))
     try:
-        cands.append(os.path.join(S.system_dir(), "schema.json"))
-    except Exception:                     # noqa: BLE001
-        pass
+        import ke_ext_store as S  # noqa: PLC0415
+    except Exception:             # noqa: BLE001  独立部署（04 包）⇒ 走路径兜底
+        S = None
+    if S is not None:
+        seed = os.environ.get("BODHI_EXT_SEED", "") or getattr(S, "SEED_DIR", "")
+        if seed:
+            cands.append(os.path.join(seed, S.DEFAULT_SYSTEM, "schema.json"))
+        try:
+            cands.append(os.path.join(S.system_dir(), "schema.json"))
+        except Exception:         # noqa: BLE001
+            pass
+    else:
+        seed = os.environ.get("BODHI_EXT_SEED", "")
+        if seed:                                     # 现场自定义（默认种子目录）
+            cands.append(os.path.join(seed, "it-platform", "schema.json"))
+        # 发布包布局：`<包根>/tools/it-platform-mcp/schema.json` + `<包根>/deploy/mock-ext/it-platform/schema.json`
+        cands.append(os.path.join(here, "..", "..", "deploy", "mock-ext", "it-platform", "schema.json"))
     for path in cands:
-        doc = S.read_json(path, None)
+        doc = S.read_json(path, None) if S is not None else _read_json(path)
         if isinstance(doc, dict) and doc.get("x_ext"):
             return doc
     return {}

@@ -370,6 +370,11 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
     # 2026-10-26 用户裁定：**知识库里的知识不出包**（本体模型库页面手工导出/导入内网），
     # 所以不再复制 `seed/`（页面种子）。登记 SQL（sql/）仍要带：它是部署配置，不是知识内容。
     copy_tree(REPO / "tools" / "delivery", d / "tools" / "delivery")
+    # 2026-10-27：`tools/delivery/apply_config.py` 的**真源**（内置工具面 + 提示词）必须同包 ——
+    #   否则客户拿到 03 包跑 `apply_config.py --apply` 会找不到 `agent_tools.yaml`
+    #   （旧包四个包里都没有这两个文件，实测确认）。包内层级与 `apply_config.py` 的
+    #   `REPO/deploy/weknora-fork/config` 对齐：`<03-manual>/deploy/weknora-fork/config/`。
+    copy_tree(REPO / "deploy" / "weknora-fork" / "config", d / "deploy" / "weknora-fork" / "config")
     shutil.copy2(REPO / "deploy" / "weknora-fork" / "refresh_ontology_kb.sh",
                  d / "refresh_ontology_kb.sh")
     write(d / "README.txt",
@@ -383,6 +388,10 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
           "- `docs/` —— 设计与运维文档（`agent-design-flow.md` 是建模流程真源）\n"
           "- `ontology/` —— 本体真源：`*完整版.ttl`、`extensions/`、`shapes/`、`lexicon/`、`queries/`\n"
           "- `sql/` —— 智能体/MCP 登记 SQL（部署配置，不是知识内容 ✓）\n"
+          "- `deploy/weknora-fork/config/` —— **智能体配置真源**（`agent_tools.yaml` 的 `builtin_tools`\n"
+          "  = 内置工具；MCP 工具由 `mcp_services` 挂载决定，**不写在这里**；`agent_review_prompt.md` = 提示词真源）\n"
+          "  ⇒ 跑 `python3 tools/delivery/apply_config.py --check|--apply`（**需与 02 包解到同一父目录**：\n"
+          "  它 import `tools/ke-core/ke_db.py`）\n"
           "- **知识库页面（`seed/`）不在本包**（2026-10-26 用户裁定：页面由用户手工导出/导入内网）\n"
           "- `tools/delivery/` —— 维护工具（外链体检 `offline_harden.py`、密钥审计 `scan_secrets.py`、\n"
           "  打包 `pack_release.py`、导出种子 `export_db.py`、版本徽标 `patch_version_badge.py`）\n"
