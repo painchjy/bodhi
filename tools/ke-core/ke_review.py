@@ -373,12 +373,48 @@ def rules_resolve(kb_id: str = "", spec: str = "", limit: int = 300) -> dict:
     else:
         raise ValueError("未知 spec 前缀 %r（direct:/policy:/influencer:/ask/path:）" % kind)
 
+    # 2026-10-27（用户口径）：**规则集歧义的确定性暴露** —— 同一意图用「总策略」还是「某个子策略」，
+    #   取到的规则集可能不同（内网踩过）。这里逐子策略与本次结果比对，**只在集合不同时**回
+    #   `alternatives`，让智能体据此判 `rule_set_ambiguous` 并请用户确认走哪条路径 ✓；
+    #   集合相同则不回（不制造噪声 ✗）；算不出也不阻断主流程。
+    alternates = []
+    if kind == "policy" and rules:
+        try:
+            base = sorted({str(x.get("slug")) for x in rules if x.get("slug")})
+            for pol in pols:
+                if str(pol.get("slug")) == str(root):
+                    continue
+                # 子策略的**自身闭包**（子策略里还可能 includes 更小的子策略）⇒ 按它重算一次规则集
+                sub_slugs = []
+                for sub_pol in (_policy_closure(kb, pol["slug"]) or [{"slug": pol["slug"], "name": ""}]):
+                    rs = by_pol.get(sub_pol["slug"])
+                    if rs is None:
+                        rs = _rule_slugs_pg(kb, sub_pol["slug"])
+                    for s in (rs or []):
+                        if s and s not in sub_slugs:
+                            sub_slugs.append(s)
+                sub = sorted(sub_slugs)
+                extra = [s for s in sub if s not in base]
+                missing = [s for s in base if s not in sub]
+                if not extra and not missing:
+                    continue
+                alternates.append({
+                    "via": "policy:%s" % (pol.get("name") or pol["slug"]),
+                    "rules": len(sub),
+                    "hash": hashlib.sha256(_json.dumps(sub, ensure_ascii=False)
+                                           .encode("utf-8")).hexdigest()[:16],
+                    "extra": extra[:10], "missing": missing[:10]})
+            alternates = alternates[:6]
+        except Exception:  # noqa: BLE001
+            alternates = []
+
     payload = {"resolved_by": resolved_by, "spec": sp, "rules": rules}
     out = {"ok": True, "kb": {"id": kb, "name": kb_name}, "resolved_by": resolved_by, "spec": sp,
            "rules": rules[:int(limit or 300)],
            "counts": {"rules": len(rules),
                       "needs_extract": sum(1 for x in rules if x.get("needs_extract"))},
            "scope_options": options,
+           "alternatives": alternates,
            "hash": hashlib.sha256(_json.dumps(payload, ensure_ascii=False, sort_keys=True)
                                   .encode("utf-8")).hexdigest()[:16]}
     if chain:                                # 链路口径的明细（只在 influencer 时给）

@@ -19,22 +19,13 @@ agents:
   - id: 09e54ee1-6d0b-452f-8160-a26990bc71e6
     name: 技术方案评审智能体
     prompt_file: agent_review_prompt.md
-    # 读口径只走 knowledge_lookup(mode="page") ⇒ 内置 wiki 三件套已移除（2026-10-26）
-    allowed_tools:
+    # 2026-10-27（用户实证 + 库表核对，见 CONFIG-MATRIX.md §1）：
+    #   `allowed_tools` **只作用于 WeKnora 内置工具**；往里写 `mcp_*` 是**无效配置** ✗
+    #   （MCP 工具由 `config.mcp_services` 挂载决定，且工具清单不落库、会话时实时 tools/list）。
+    #   因此这里只保留真·内置工具；**内网 UI 自建智能体留空（= 平台默认集）等价，不必改**。
+    builtin_tools:
       - data_schema
       - data_analysis
-      - mcp_it_platform_ext_catalog_query
-      - mcp_it_platform_ext_issue_list
-      - mcp_it_platform_ext_doc_access
-      - mcp_it_platform_ext_review_flow
-      - mcp_bodhi_ontology_save_knowledge
-      - mcp_bodhi_ontology_rules_resolve
-      - mcp_bodhi_ontology_reference_lookup
-      - mcp_bodhi_ontology_skills
-      - mcp_bodhi_ontology_image_extract
-      - mcp_bodhi_ontology_evidence_score
-      - mcp_bodhi_ontology_knowledge_lookup
-      - mcp_bodhi_ontology_audit_scan
     mcp_services:
       - a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001
       - a7c1f0d2-1b2e-4f3a-9c4d-b0d100000002

@@ -71,23 +71,41 @@ def _current(agent_id: str) -> dict:
     return r
 
 
+def _want_tools(agent: dict):
+    """**内置工具**清单（`allowed_tools` 的语义，2026-10-27 修正）。
+
+    - 优先 `builtin_tools`（新口径）；兼容旧 `allowed_tools`（自动剔除 `mcp_*`）；
+    - **两者都没有 ⇒ 返回 None = 不写该键**（UI 留空 = 平台默认集，不要覆盖）；
+    - MCP 工具**不在**这里：由 `config.mcp_services` 挂载决定（见 CONFIG-MATRIX.md §1）。
+    """
+    if "builtin_tools" in (agent or {}):
+        return list(agent.get("builtin_tools") or [])
+    if "allowed_tools" in (agent or {}):
+        return [t for t in (agent.get("allowed_tools") or []) if not str(t).startswith("mcp_")]
+    return None
+
+
 def _diff(agent: dict, cur: dict) -> dict:
-    want_tools = list(agent.get("allowed_tools") or [])
+    want_list = _want_tools(agent)
     have_tools = list(cur.get("tools") or [])
+    want_tools = want_list if want_list is not None else have_tools
+    stale = sorted(t for t in have_tools if str(t).startswith("mcp_"))
     want_prompt = _prompt_text(os.path.join(CONF, agent.get("prompt_file") or ""))
     have_prompt = (cur.get("prompt") or "").strip()
     want_svcs = list(agent.get("mcp_services") or [])
-    have_svcs = list(cur.get("svcs") or [])
+    svcs = list(cur.get("svcs") or [])
     return {
         "tools": {"add": sorted(set(want_tools) - set(have_tools)),
                   "del": sorted(set(have_tools) - set(want_tools)),
-                  "changed": sorted(want_tools) != sorted(have_tools),
+                  "changed": bool(stale) or (want_list is not None
+                                             and sorted(want_tools) != sorted(have_tools)),
+                  "stale_mcp": stale, "managed": want_list is not None,
                   "n_from": len(have_tools), "n_to": len(want_tools)},
         "prompt": {"changed": want_prompt != have_prompt,
                    "chars_from": len(have_prompt), "chars_to": len(want_prompt)},
-        "svcs": {"changed": bool(want_svcs) and sorted(want_svcs) != sorted(have_svcs),
-                 "n_from": len(have_svcs), "n_to": len(want_svcs or have_svcs)},
-        "_want": {"tools": want_tools, "prompt": want_prompt, "svcs": want_svcs},
+        "svcs": {"changed": bool(want_svcs) and sorted(want_svcs) != sorted(svcs),
+                 "n_from": len(svcs), "n_to": len(want_svcs or svcs)},
+        "_want": {"tools": want_list, "prompt": want_prompt, "svcs": want_svcs},
     }
 
 
@@ -99,10 +117,14 @@ def _apply(agent_id: str, want: dict) -> str:
 
 
 def _nest(want: dict) -> str:
-    """`jsonb_set` 逐键嵌套（只覆盖三键，其它键保留）。"""
+    """`jsonb_set` 逐键嵌套（只覆盖需要写的键，其它键保留）。
+
+    `tools is None` ⇒ **不写** `allowed_tools`（yaml 没声明就别动 UI 的设置 ✓）。
+    """
     expr = "config"
-    expr = ("jsonb_set(%s, '{allowed_tools}', %s::jsonb, true)"
-            % (expr, ke_db.sql_str(json.dumps(want["tools"], ensure_ascii=False))))
+    if want.get("tools") is not None:
+        expr = ("jsonb_set(%s, '{allowed_tools}', %s::jsonb, true)"
+                % (expr, ke_db.sql_str(json.dumps(want["tools"], ensure_ascii=False))))
     expr = ("jsonb_set(%s, '{system_prompt}', to_jsonb(%s::text), true)"
             % (expr, ke_db.sql_str(want["prompt"])))
     if want.get("svcs"):
@@ -137,9 +159,13 @@ def main() -> int:
             continue
         d = _diff(a, cur)
         print("== %s（%s）" % (aid, a.get("name") or ""))
-        print("   工具面：%d → %d  增=%s 删=%s"
+        print("   内置工具：%d → %d  增=%s 删=%s%s"
               % (d["tools"]["n_from"], d["tools"]["n_to"],
-                 d["tools"]["add"] or "—", d["tools"]["del"] or "—"))
+                 d["tools"]["add"] or "—", d["tools"]["del"] or "—",
+                 ("   ⚠ 库里还有 %d 个 mcp_* 无效项（MCP 工具不在此配置）"
+                  % len(d["tools"]["stale_mcp"])) if d["tools"]["stale_mcp"] else ""))
+        if not d["tools"]["managed"]:
+            print("   （yaml 未声明 builtin_tools ⇒ **不写** allowed_tools；UI 留空=平台默认集）")
         print("   提示词：%d → %d 字  %s"
               % (d["prompt"]["chars_from"], d["prompt"]["chars_to"],
                  "有变化" if d["prompt"]["changed"] else "一致"))
@@ -156,8 +182,10 @@ def main() -> int:
             continue
         _apply(aid, d["_want"])
         cur2 = _current(aid)
-        ok = (sorted(cur2.get("tools") or []) == sorted(d["_want"]["tools"])
-              and (cur2.get("prompt") or "").strip() == d["_want"]["prompt"])
+        tools_ok = ((d["_want"]["tools"] is None and not d["tools"]["stale_mcp"])
+                    or (d["_want"]["tools"] is not None
+                        and sorted(cur2.get("tools") or []) == sorted(d["_want"]["tools"])))
+        ok = tools_ok and (cur2.get("prompt") or "").strip() == d["_want"]["prompt"]
         print("   %s 已写入并复核（工具 %d 个 / 提示词 %d 字）"
               % ("✓" if ok else "✗", len(cur2.get("tools") or []),
                  len((cur2.get("prompt") or "").strip())))

@@ -2,7 +2,7 @@
 
 与既有的 `ke_rule_eval.py` 分工（两者互补，别混）：
   - `ke_rule_eval.py` = **发布前回放门禁**：拿 fixtures 重放 → 一致性/假断言/覆盖度 → 写 bmm:Report；
-  - 本模块 = **运行期回写**：每次真实评审后，把台账里该规则的结论统计**追加**到
+  - 本模块 = **运行期回写**：每次真实执行后，把台账里该规则的结论统计**追加**到
     `agent:RuleEvaluation`（一规则一页）⇒ 才能回答"这条规则历次表现如何、可否被任务步骤引用"。
 
 写库只走 MCP `save_knowledge(stage="graph")`（闸门生效 ✓）；枚举/阈值读真源（台账契约 + 指标页）。
@@ -189,12 +189,12 @@ def build_node(rule_title: str, stat: dict, prev: str = "") -> dict:
                "evidence_traceable_rate": round(trace, 3),
                "veto_count": sum(h.get("veto_count") or 0 for h in keep),
                "triggered_reviews": sum(1 for h in keep if (h.get("items") or 0) > 0)}
-    note = ("【规则评测】一规则一页；每次评审把台账结论**追加**进 `evaluations[]`（只留最近 %d 次）\n"
+    note = ("【规则评测】一规则一页；每次执行把台账结论**追加**进 `evaluations[]`（只留最近 %d 次）\n"
             "```ruleEval\n%s\n```\n最近一次：%s（%s，%s 条，gate=%s）"
             % (KEEP_EVALS, json.dumps({"summary": summary, "evaluations": keep},
                                       ensure_ascii=False, indent=1),
                keep[-1]["at"], keep[-1]["review_no"], keep[-1]["items"], keep[-1]["gate"]))
-    defn = ("规则「%s」的运行期评测台账：累计 %d 次评审 / %d 条结论（不符合 %d、否决 %d），"
+    defn = ("规则「%s」的运行期评测台账：累计 %d 次执行 / %d 条结论（不符合 %d、否决 %d），"
             "证据可回溯率 %.2f ⇒ 判断该规则是否可信、可否被任务步骤引用 ✓"
             % (rule_title, summary["reviews"], n, bad, summary["veto_count"],
                summary["evidence_traceable_rate"]))
@@ -214,7 +214,7 @@ def _render_md(rule_title: str, stat: dict, node: dict) -> str:
              "> 规则：`%s`（ruleHash `%s`）｜执行级别：%s｜适用条件：`%s`"
              % (stat.get("rule_slug") or "-", stat.get("rule_hash") or "-",
                 stat.get("enforcement") or "-", stat.get("applies_when") or "always"),
-             "> 门槛：%.2f（来源：%s）｜本次评审：%s｜gate=`%s`"
+             "> 门槛：%.2f（来源：%s）｜本次执行：%s｜gate=`%s`"
              % (float(stat.get("threshold") or 0.6), stat.get("threshold_source") or "-",
                 stat.get("review_no") or "-", stat.get("gate") or "-"), "",
              "## 本次结论分布", "",
@@ -226,7 +226,7 @@ def _render_md(rule_title: str, stat: dict, node: dict) -> str:
               "| 证据可回溯率 | %.2f |" % float(stat.get("evidence_traceable_rate") or 0),
               "| 否决数（不符合∧严重） | %d |" % int(stat.get("veto_count") or 0), "",
               "## 历次评测（最近 %d 次）" % KEEP_EVALS, "",
-              "| 时间 | 评审编号 | 条目 | 不符合 | 可回溯率 | gate |",
+              "| 时间 | 执行编号 | 条目 | 不符合 | 可回溯率 | gate |",
               "|---|---|---|---|---|---|"]
     for e in evals:
         lines.append("| %s | %s | %d | %d | %.2f | %s |"
@@ -269,7 +269,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="规则运行期评测回写（台账 → agent:RuleEvaluation）")
     ap.add_argument("--kb", required=True, help="领域库（规则所在库）")
     ap.add_argument("--rule", required=True, help="规则标题（= 台账 rule 列的值）")
-    ap.add_argument("--review-no", required=True, help="评审编号（台账分片键）")
+    ap.add_argument("--review-no", required=True, help="执行批次编号（台账分片键）")
     ap.add_argument("--session-no", default="", help="会话编号（审计用；缺省取规则页溯源会话）")
     ap.add_argument("--threshold", type=float, default=0.0,
                     help="可信度阈值（缺省：指标页 > 规则 knowledgeSpec.threshold > 0.60）")

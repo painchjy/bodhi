@@ -970,6 +970,61 @@ def _registered_module_keys() -> list[str]:
     return list(_registered_modules().keys())
 
 
+UPLOAD_AUDIT_DIR = REPO / "logs" / "uploads"
+
+
+def _audit_upload(out: dict, t0: float, module_key: str, target) -> dict:
+    """把上传回执**落盘**（2026-10-27，内网排查用；只写文件，不动任何数据）。
+
+    为什么：`/bodhi/ontology/upload` 走 HTTP，**不进** `logs/mcp_calls_*.log`；回执只在响应体里，
+    刷新即失；而"解析出 0 类"这类情况**不抛异常 ⇒ 没有任何日志**（内网实测：上传 BMM 回
+    `本模块类：0`，图没长、PG 照旧重投影，无从查证）。这里把回执原样留档 + 做 0 类告警。
+
+    产物：`logs/uploads/<YYYYMMDD-HHMMSS>-<module>.json`（含 TTL 的 sha256/字节数、preflight、
+    类/属性/语句数、compiled.per_module、import/apply、耗时、ok/error/warn）；
+    回执里同时回 `audit_file`（相对仓库根），内网出问题直接把该文件发出来即可 ✓。
+    """
+    import hashlib as _hl
+    import json as _js
+    import time as _t
+
+    try:
+        mc = out.get("module_classes")
+        if mc is not None and int(mc or 0) == 0:
+            out.setdefault("warn", (
+                "本模块解析出 **0 个类**：多半是 TTL 的 ontology IRI 末段与模块名不一致"
+                "（于是落成 sources/<别的 key>.ttl），或 sources/ 下缺该模块文件；"
+                "本次**不会向图库写入任何节点**（wiki 重投影仍会跑，用的是旧产物）"))
+        UPLOAD_AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        p_target = pathlib.Path(str(target))
+        raw = p_target.read_bytes() if p_target.is_file() else b""
+        doc = {"at": _t.strftime("%Y-%m-%d %H:%M:%S"),
+               "module_key": module_key or "",
+               "upload_saved": out.get("upload_saved", ""),
+               "file": {"name": p_target.name, "bytes": len(raw),
+                        "sha256": _hl.sha256(raw).hexdigest()},
+               "preflight": out.get("preflight"),
+               "source": out.get("source"),
+               "module_classes": out.get("module_classes"),
+               "module_properties": out.get("module_properties"),
+               "cypher_statements": out.get("cypher_statements"),
+               "statements_skipped": out.get("statements_skipped"),
+               "compiled": {k: (out.get("compiled") or {}).get(k)
+                            for k in ("modules", "modules_added", "per_module", "delta")},
+               "import": out.get("import"), "apply": out.get("apply"),
+               "wiki": {k: (out.get("wiki") or {}).get(k) for k in ("pages", "build", "project")},
+               "ok": out.get("ok"), "error": out.get("error"),
+               "note": out.get("note"), "warn": out.get("warn"),
+               "ms": int((_t.time() - t0) * 1000)}
+        p = UPLOAD_AUDIT_DIR / ("%s-%s.json" % (_t.strftime("%Y%m%d-%H%M%S"),
+                                                module_key or p_target.stem or "upload"))
+        p.write_text(_js.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        out["audit_file"] = str(p.relative_to(REPO))
+    except Exception as exc:  # noqa: BLE001  留档失败**不影响**上传结果
+        out.setdefault("warn", "回执留档失败：%s" % str(exc)[:200])
+    return out
+
+
 def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki: bool = True,
                kb_id: str = "", write_source: bool = True, compile_after: bool = True,
                apply_after: bool = False) -> dict:
@@ -1003,6 +1058,7 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     # 因此无论调用方传什么，上传路径一律重投影。
     project_wiki = True
 
+    t0 = time.time()
     content = content or ""
     if not content.strip():
         raise ValueError("上传内容为空")
@@ -1018,8 +1074,10 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     try:
         meta = inspect_ttl(target)
     except Exception as exc:  # noqa: BLE001
-        return {**out, "ok": False, "error": "ttl_unparsable",
-                "note": "TTL 无法解析（**没有改动真源、没有删除任何数据**）：%s" % str(exc)[:300]}
+        return _audit_upload({**out, "ok": False, "error": "ttl_unparsable",
+                              "note": "TTL 无法解析（**没有改动真源、没有删除任何数据**）：%s"
+                                      % str(exc)[:300]},
+                             t0, (module or pathlib.Path(safe).stem), target)
     module_key = (module or str(meta.get("key") or "") or "").strip().lower()
     if not module_key:
         module_key = re.sub(r"[^a-z0-9-]+", "-", pathlib.Path(safe).stem.lower()).strip("-") or "upload"
@@ -1027,17 +1085,18 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
     out["preflight"] = pre
     out["module_key"] = module_key
     if not pre["ok"]:
-        return {**out, "ok": False, "error": "preflight_failed",
-                "note": ("预检未通过：**没有删除任何 wiki 页/图谱节点，也没有改真源**。"
-                         "按 hints 补齐文件后重试即可。"),
-                "missing": pre["missing"], "hints": pre["hints"]}
+        return _audit_upload({**out, "ok": False, "error": "preflight_failed",
+                              "note": ("预检未通过：**没有删除任何 wiki 页/图谱节点，也没有改真源**。"
+                                       "按 hints 补齐文件后重试即可。"),
+                              "missing": pre["missing"], "hints": pre["hints"]},
+                             t0, module_key, target)
 
     if not write_source:
         out["import"] = import_ttl(target, module=module, project_wiki=project_wiki, kb_id=kb_id)
         out["note"] = ("只更新了图库（write_source=false）：类型校验 / 前端类型下拉 / 投影回放仍以"
                        "**编译产物**为准，新类会被判「本体里没有这个类」；要完整生效请打开该开关"
                        "（或把 TTL 放进 ontology/extensions/ 后跑 `ke_admin.py repair`）")
-        return out
+        return _audit_upload(out, t0, module_key, target)
 
     # ③ 落真源：内置模块**就地覆盖**清单文件；新模块落 `extensions/` 并登记
     known = _registered_modules().get(module_key)
@@ -1073,7 +1132,7 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
         if not compile_after:
             out["note"] = ("已落真源%s；本次未编译（compile_after=false）—— 需要时跑 `ke_admin.py repair`"
                            "（编译+灌投影+重投影+体检）" % ("（就地覆盖）" if is_builtin else "并登记"))
-            return out
+            return _audit_upload(out, t0, module_key, target)
 
         # ④ **级联删除**（本模块 + 下游依赖）：图库/wiki + 真源文件 + 注册信息
         #    **2026-10-05 用户口径回退 + 加固**：
@@ -1185,7 +1244,7 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
         out["error"] = "upload_failed"
         out["note"] = ("上传失败：**已从备份恢复 sources/ 并重新编译**（硬删的内容随重编译重建）：%s"
                        % str(exc)[:300])
-        return out
+        return _audit_upload(out, t0, module_key, target)
 
     if apply_after and "apply" not in out:
         out["apply"] = apply_projection()
@@ -1212,7 +1271,7 @@ def upload_ttl(filename: str, content: str = "", module: str = "", project_wiki:
                        "label_from_ttl": meta.get("label") or None,
                        "short_from_ttl": short_label or None}
     out.update(_module_import_stats(module_key, str(meta.get("namespace") or ""), ontology_iri))
-    return out
+    return _audit_upload(out, t0, module_key, target)
 
 
 def _module_namespace(module_key: str) -> str:

@@ -402,7 +402,7 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
 
 
 def pkg_ext(stage: pathlib.Path) -> dict:
-    """04 ext 服务包：**it-platform MCP 独立服务**（台账/文档/评审流程）+ 文本种子 + 安装/自检 + 配置矩阵。
+    """04 ext 服务包：**it-platform MCP 独立服务**（台账/文档/流程类接口）+ 文本种子 + 安装/自检 + 配置矩阵。
 
     口径（2026-10-26 用户裁定）：
       - `tools/it-platform-mcp/**` 只在本包（02 已排除）；
@@ -526,7 +526,7 @@ def main() -> int:
           "| `bodhi2-01-frontend.tar.gz` | UI 镜像 + nginx 模板 + overlay + 部署/补丁脚本 | FRONTEND.md |\n"
           "| `bodhi2-02-mcp-server.tar.gz` | 本体 MCP 服务「仓库根形状」整包（tools/ artifacts/ skills/）+ Dockerfile/compose/systemd/自检 | MCP-SERVER.md |\n"
           "| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源 TTL** + 登记 SQL + 维护工具 + 其余 4 份手册 | MANUAL.md / ONTOLOGY-KB.md / KB-CONFIG.md / TROUBLESHOOTING.md / AGENTS-SQL.md |\n"
-          "| `bodhi2-04-it-platform-mcp.tar.gz` | **ext MCP 独立服务**（台账/文档/评审流程）+ 文本种子 + 安装/自检 + `CONFIG-MATRIX.md` | 包内 `README.md`（04 目录）|\n\n"
+          "| `bodhi2-04-it-platform-mcp.tar.gz` | **ext MCP 独立服务**（台账/文档/流程类接口）+ 文本种子 + 安装/自检 + `CONFIG-MATRIX.md` | 包内 `README.md`（04 目录）|\n\n"
           "**知识库页面不在任何包里**（2026-10-26 用户裁定）：本体模型库的页面由用户手工导出、再导入内网知识库；\n"
           "包内只带登记 SQL（`sql/`）与本体真源 TTL。\n\n"
           "## 手册在哪\n\n"

@@ -11,7 +11,9 @@
 | 名称/描述 | ✓ 可以 | UI | —（人工） | 立即 | UI 里看一眼 |
 | 知识库绑定 `knowledge_bases` | ✓ 可以 | UI（选库） | —（人工） | 立即 | `SELECT config->'knowledge_bases' …` |
 | MCP 服务勾选 `mcp_services` | ✓ 可以 | UI；发布包内可用 `agent_tools.yaml` 覆盖 | `apply_config.py --apply` | 新会话 | `apply_config.py --check` |
-| **工具面 `allowed_tools`** | ✗ **不要**（会被覆盖） | `deploy/weknora-fork/config/agent_tools.yaml` | `apply_config.py --apply` | 新会话（已开会话仍用旧面） | `apply_config.py --check`（应"无漂移"） |
+| **内置工具 `allowed_tools`** | ✗ **不要**（会被覆盖） | `deploy/weknora-fork/config/agent_tools.yaml` 的 **`builtin_tools`** | `apply_config.py --apply` | 新会话（已开会话仍用旧面） | `apply_config.py --check`（应"无漂移"） |
+| **MCP 工具**（`mcp_*`） | ✗ **无处可配** —— 写上 `allowed_tools` 也**不生效** | `mcp_services` 挂载的服务，会话时实时 `tools/list`；**工具清单不落库**（`\dt mcp*` 只有 4 张表） | —（不需要配） | 新会话拉到即可用 | 会话里 `tools/list` 看得到 = 可用 |
+| 工具级审批 `mcp_tool_approvals` | ✗（默认不拦） | 表 `mcp_tool_approvals(service_id, tool_name, require_approval)` | 运维 SQL 按需 insert | 立即 | 有行且 `require_approval=true` 才弹确认；**新工具默认 false，不必补记录** |
 | **提示词 `system_prompt`** | ✗ **不要**（会被覆盖） | `deploy/weknora-fork/config/agent_review_prompt.md`（首个 ```text 块） | 同上 | 新会话 | 同上 + `selfcheck.py` 输出提示词字数 |
 | `temperature` / `max_iterations` | ✓ 可以 | UI | —（人工） | 新会话 | 跑一轮看行为 |
 
@@ -50,7 +52,7 @@
 # ① 配置（幂等）
 python3 tools/delivery/apply_config.py --check     # 先看漂移
 python3 tools/delivery/apply_config.py --apply     # 再写
-# ② 工具面自检（数量/名字/必需工具齐不齐）
+# ② 工具面自检（内置工具清单 + MCP 服务挂载；MCP 工具本身不落库，靠会话 tools/list）
 python3 <包>/04-it-platform-mcp/selfcheck.py
 # ③ 口径可读性（page 模式确定性）
 python3 tools/ke-core/ke_lookup.py --page "bpmn/task/逐项评审"
@@ -62,7 +64,8 @@ python3 tests/run_all.py --fast
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| 智能体看不到新工具 | `allowed_tools` 少了它（最常被忘） | `apply_config.py --check` → `--apply` → **新开会话** |
+| 智能体看不到新工具 | ① 服务没挂（`mcp_services` 少了它）② **以为**要写 `allowed_tools`（写了也不生效）③ 老会话没刷新 | ① `apply_config.py --check` → `--apply` ② **新开会话** ③ 服务侧 `tools/list` 确认工具真注册了 |
+| `allowed_tools` 里有一堆 `mcp_*` | 旧口径（2026-10-27 前）留下的**无效配置** | `apply_config.py --apply` 会自动清掉（只剩内置工具）；`--check` 会把这种残留判为漂移 |
 | 提示词改了没生效 | 改的是仓库 md，没写入 DB | 同上（md 是真源，DB 是投影） |
 | 报告列对不上模板 | 模板「数据对象字段」列与回执 `schema.order` 不符 | 改模板该格（**不改契约**），巡检 G2 会复报 |
 | `knowledge_lookup` 回 `kb_unresolved` | `kb_id` 自造缩写（`b1`/`b2`） | 照抄回执 `one_of`/`retry_args` 重试一次 |

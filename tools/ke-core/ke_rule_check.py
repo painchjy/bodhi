@@ -155,7 +155,7 @@ def main() -> None:
         return
     if not str(a.spec or "").strip():
         print("请给 `--spec policy:<策略页名>`（单策略）或 `--all`（本库全部策略）")
-        print("  例：python3 tools/ke-core/ke_rule_check.py --kb <领域库> --spec policy:部署架构设计原则")
+        print("  例：python3 tools/ke-core/ke_rule_check.py --kb <领域库> --spec policy:<策略名>")
         raise SystemExit(2)
 
     res = check_rules(kb, a.spec)

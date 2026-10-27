@@ -17,6 +17,8 @@ description: 规则判定——先判**适用性**（规则页 `knowledgeSpec.ap
 1. **规则契约**：`rules_resolve(kb_id, spec)` 的 `rules[]`
    - 关键字段：`applies_when` / `evidence_required` / `required_fields` / `needs_extract` / `enforcement` / `ruleHash`;
    - **枚举以回执为准**：`verdict_enum`（符合/不符合/不适用/无法判定）、`severity_enum`（严重/一般/建议）——**不要自己换词** ✗
+   - **`alternatives` 非空 ⇒ 规则集歧义**（2026-10-27）：同一意图用「总策略」还是某个「子策略」会取到不同规则集 ⇒
+     **先问用户走哪条** ✗别自己挑；已按当前 `spec` 判了就在结论里写「按 X 判，若按 Y 结论会不同」✓（`rule_set_ambiguous`）
 2. **事实**：`ke_plan`（`knowledge_plan`）的 `items[]`（`required` / `found` / `value` / `quote` / `locator`）
    与 `derived`（**已由规则 spec 推导好的结论**，如 `verdict` / `missing_deploy_fig` / `city_remote` / `dr_ok`）；
 3. **判定口径**：规则契约里的 `knowledge_spec`（`applies_when` / `check` / `pass_when` / `fail_when`）——
@@ -155,10 +157,36 @@ else:
 - **全量输出**：每条规则**至少一个**结论（`符合｜不符合｜无法判定｜不适用`）✓；只报不符合 ✗；
 - **一规则可多结论**：同一规则在不同文档位置/模块结论不同时，**按位置各出一条** ✓（例：同一规则在不同模块/位置的结论不同 ✓）；结论必须带各自的定位与原文证据 ✓。
 - **取规则/策略正文**：在**领域库**，用 `knowledge_lookup(mode="rules")` 取契约，或用
-  `knowledge_lookup(mode="page", query="<规则页 slug 或标题>")` 取整页（正文 + 属性）；
-  **不用**内置 `wiki_read_page` / `grep_chunks`（已从评审智能体白名单移除，且读页无口径追溯 ✗）
+  `knowledge_lookup(mode="page", query="<规则页 slug 或标题>")` 取整页（正文 + 属性）——**优先这两条** ✓；
+  内置 `wiki_read_page` / `grep_chunks` **不是首选**（读页无口径追溯）：确有必要可以用，但**必须说明理由**并自报
+  `tool_deviation` ✓，且**不作为判定依据** ✗
 - **不要用 `context_page`** ✗ —— 它是「跨库同名概念视图」，不是取正文的入口；误用会报「本库没有这一页」（库名/副本不含该页 ✓）。
 - **取页面属性**：`knowledge_lookup(mode="keyword")` 的 **`definition` / `attributes`** ✓；`summary` 仅展示 ✗（截断）
+
+## 裁决顺序与越界自报（2026-10-27 用户口径 ✓）
+
+冲突时的优先级（**上压下列**）：
+任务页 `skos:note` 步骤 > 本技能 > 本体（类定义 / `bpmn:DataObject` 及其 `dataObjectInterface` 的 `x-ext` 回执）> 提示词 > 常识。
+上面没写的**不补** ✗；下面与上面冲突**以上面为准** ✓ 并在结论 `note` 里点一句冲突点。
+
+工具面：可用工具 = 内置工具 + 已挂载 MCP 服务的全部工具（会话 `tools/list` 能看到的就是全部，**不需额外配置** ✓）；
+以**步骤写明的工具**为准，步骤没写就选最贴合产物类型的那个 ✓。
+**偏离步骤工具 / 用内置工具顶替 MCP 工具 / 用了清单外工具 ⇒ 必须自报** ✓，并按本节 4 类写进结论的 `uncertainty`。
+
+| type | 什么时候写 | 怎么写 |
+|---|---|---|
+| `tool_deviation` | 工具与步骤不一致、用了清单外工具 | 「步骤要 X，实际用 Y，因为 Z」+ 对结论的影响 |
+| `rule_set_ambiguous` | `rules_resolve.alternatives` 非空（总策略 vs 子策略…） | 列出候选 `via`/`hash`/`missing`，**先问用户**；已判则写「按 X 判，按 Y 会不同」 |
+| `doc_unreadable` | 正文/图片/表格取不到（格式、加密、配额、跨库失败） | 哪一段读不到 + 影响哪些规则的哪条 required 事实 |
+| `external_unavailable` | 外部系统/接口不可得（超时、无权限、未部署） | 记「无法判定」（**不是**不符合 ✗）+ 需要谁提供什么 |
+
+```json
+{"uncertainty": [{"type": "external_unavailable",
+                  "detail": "ext_issue_list 超时 3 次（8770 未启动）",
+                  "impact": "R-07 的 issue_id 无法核实 ⇒ 该条判「无法判定」",
+                  "next": "由运维确认 it-platform 服务后重跑 ① ③ 步"}]}
+```
+自报不等于免责：能取的证据仍要取全 ✓。
 
 ## 检索（类型优先，2026-10-22）
 

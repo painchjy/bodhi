@@ -21,6 +21,9 @@ deploy/.env
 
 # ��ȡ������־����������ʾ���� LLM ԭʼ���أ�ֻ�ڱ�������
 logs/
+# 本体上传回执留档（ke_admin.upload_ttl → logs/uploads/<ts>-<module>.json，2026-10-27）
+# 已在上面 logs/ 覆盖；此处显式声明，便于将来调整 logs/ 口径时不误入库
+logs/uploads/
 
 # 交付包产物（tar.gz 体积大，不进 git；用 tools/delivery/pack_release.py 重新生成）
 /dist-delivery/

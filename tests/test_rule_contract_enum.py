@@ -8,6 +8,7 @@
 import json
 import os
 import sys
+import traceback
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "tools", "ke-core"))
@@ -55,3 +56,23 @@ def test_required_fields_follow_ledger_enum():
         assert v in concl
     for old in ("合规", "违规", "待澄清"):
         assert old not in concl, "旧枚举必须彻底退场：%s" % old
+
+
+def main() -> int:
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    bad = 0
+    for name, fn in tests:
+        try:
+            fn()
+            print("  ✓ %s" % name)
+        except Exception as exc:  # noqa: BLE001
+            bad += 1
+            print("  ✗ %s：%s" % (name, exc))
+            traceback.print_exc()
+    print("规则契约枚举用例：%d 个 ｜ 通过 %d ｜ 失败 %d" % (len(tests), len(tests) - bad, bad))
+    return 0 if not bad else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
