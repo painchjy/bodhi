@@ -164,16 +164,33 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, code: int, body: bytes, sid: str = "", ctype="application/json"):
         self._log(code)
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        if sid:
-            self.send_header("Mcp-Session-Id", sid)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            if sid:
+                self.send_header("Mcp-Session-Id", sid)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # 客户端已断开（前端/代理超时）：**不是服务端错误**，记一行就走，别抛栈
+            print("[%s] client_gone %s %s" % (time.strftime("%H:%M:%S"), self.command, self.path),
+                  flush=True)
 
     def do_GET(self):
+        try:
+            self._do_get()
+        except (BrokenPipeError, ConnectionResetError):
+            print("[%s] client_gone GET %s" % (time.strftime("%H:%M:%S"), self.path), flush=True)
+        except Exception as exc:  # noqa: BLE001  任何异常都**不许**冒到 socketserver
+            print("[%s] ERROR GET %s: %r" % (time.strftime("%H:%M:%S"), self.path, exc), flush=True)
+            try:
+                self._send(500, json.dumps({"ok": False, "error": repr(exc)[:300]}).encode())
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _do_get(self):
         path = self.path.split("?")[0].rstrip("/")
         if path in ("/health", ""):
             self._send(200, json.dumps({"ok": True, "server": SERVER_NAME,
@@ -197,7 +214,22 @@ class Handler(BaseHTTPRequestHandler):
         def _q(k: str, default: str = "") -> str:
             return (q.get(k) or [default])[0]
 
-        raw = self.rfile.read(int(n)) if n else b""
+        MAX_UP = 64 * 1024 * 1024      # 单文件上限 64MB（内网方案文档远小于此）
+        if n and int(n) > MAX_UP:
+            self._send(413, json.dumps({"ok": False, "error": "payload_too_large",
+                                        "limit_mb": 64, "got": int(n)},
+                                       ensure_ascii=False).encode())
+            return
+        raw = b""
+        if n:
+            left, chunks = int(n), []
+            while left > 0:                      # 分块读，避免一次性吃满内存
+                blk = self.rfile.read(min(1 << 20, left))
+                if not blk:
+                    break
+                chunks.append(blk)
+                left -= len(blk)
+            raw = b"".join(chunks)
         if not raw:
             self._send(400, json.dumps({"ok": False, "error": "empty_body"},
                                        ensure_ascii=False).encode())
@@ -212,7 +244,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, json.dumps({"ok": False, "error": repr(exc)[:300]},
                                        ensure_ascii=False).encode())
             return
+        # 带 review_no ⇒ **顺手绑定档案**（it_platform 侧一次完成，调用方只需一次 HTTP ✓）
+        if _q("review_no") and out.get("ok"):
+            try:
+                out["flow"] = DOCS.access(action="import", review_no=_q("review_no"),
+                                          doc_id=out.get("doc_id"), actor=_q("actor"),
+                                          session_no=_q("session_no"))
+            except Exception as exc:  # noqa: BLE001
+                out["flow"] = {"ok": False, "error": repr(exc)[:200]}
         self._send(200, json.dumps(out, ensure_ascii=False).encode())
+
 
     def _send_file(self, doc_id: str) -> None:
         """`GET /files/<doc_id>[?name=<附件名>]` → 附件二进制（带 Content-Disposition ✓）。"""
@@ -229,22 +270,31 @@ class Handler(BaseHTTPRequestHandler):
                                         "doc_id": doc_id},
                                        ensure_ascii=False).encode())
             return
-        try:
-            with open(info["path"], "rb") as fh:
-                raw = fh.read()
-        except Exception as exc:  # noqa: BLE001
-            self._send(500, json.dumps({"ok": False, "error": repr(exc)[:200]}).encode())
-            return
         name = info.get("name") or "attachment"
+        try:
+            size = os.path.getsize(info["path"])
+        except OSError:
+            self._send(500, b'{"ok":false,"error":"stat_failed"}')
+            return
         self._log(200)
         self.send_response(200)
         self.send_header("Content-Type", info.get("mime") or "application/octet-stream")
-        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Content-Length", str(size))
         self.send_header("Content-Disposition",
                          "attachment; filename*=UTF-8''%s" % urllib.parse.quote(name))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(raw)
+        try:
+            with open(info["path"], "rb") as fh:        # 分块写，大附件不占满内存
+                while True:
+                    blk = fh.read(1 << 20)
+                    if not blk:
+                        break
+                    self.wfile.write(blk)
+        except (BrokenPipeError, ConnectionResetError):
+            print("[%s] client_gone GET /files/%s（客户端已断开）"
+                  % (time.strftime("%H:%M:%S"), doc_id), flush=True)
+
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -255,6 +305,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        try:
+            self._do_post()
+        except (BrokenPipeError, ConnectionResetError):
+            print("[%s] client_gone POST %s" % (time.strftime("%H:%M:%S"), self.path), flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print("[%s] ERROR POST %s: %r" % (time.strftime("%H:%M:%S"), self.path, exc), flush=True)
+            try:
+                self._send(500, json.dumps({"ok": False, "error": repr(exc)[:300]}).encode())
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _do_post(self):
         n = int(self.headers.get("Content-Length") or 0)
         # 2026-10-26：**上传文档**（内网工作台未接通前的补位）
         #   POST /files/<doc_id>?review_no=…&name=…&title=…&round=1   （body = 文件二进制）
@@ -290,8 +352,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="内网 IT 工作台 MCP 服务（参考实现）")
     ap.add_argument("--host", default=os.environ.get("IT_MCP_HOST", "127.0.0.1"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("IT_MCP_PORT", "8770")))
+    # `--http`：历史 systemd 单元里写的是 `server.py --http`（本服务本来就只跑 HTTP）——
+    # 为了不让旧 unit 文件把服务卡在 argparse，这里接受并忽略它 ✓
+    ap.add_argument("--http", action="store_true", help="（兼容旧 unit；无实际作用）")
     args = ap.parse_args()
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    srv.daemon_threads = True
+    srv.timeout = 60
+
     print("[%s] listening on http://%s:%d/mcp（tools=%d）"
           % (SERVER_NAME, args.host, args.port, len(S.TOOLS)), flush=True)
     srv.serve_forever()

@@ -411,17 +411,28 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
 
 
 def pkg_ext(stage: pathlib.Path) -> dict:
-    """04 ext 服务包：**it-platform MCP 独立服务**（台账/文档/流程类接口）+ 文本种子 + 安装/自检 + 配置矩阵。
+    """04 ext 服务包：**it-platform MCP 独立服务**（文件存取 + 流程 + 台账）+ 自带运行库 + 安装/自检。
 
-    口径（2026-10-26 用户裁定）：
+    口径（2026-10-28 用户裁定：**完全独立**）：
       - `tools/it-platform-mcp/**` 只在本包（02 已排除）；
+      - **自带 ext 运行库**：`ke_ext_{store,docs,flow,issues,catalog}.py` 随包走
+        ⇒ 不依赖 02 的 `tools/ke-core`，也不依赖 WeKnora/PG/docker；
+      - 文档正文**不解析**（PDF/DOCX 由 bodhi-mcp 的 `ext_doc_parse` 拉原件再解析）；
       - 种子只带文本（allowlist/denylist/issues/flows），**二进制目录不带**；
-      - `ke-core` 不复制（与 02 共用）——`install.sh` 会软链到 02 的 `tools/ke-core`；
-      - 智能体工具面/提示词**不由本包写**（走 `tools/delivery/apply_config.py`，真源在 `agent_tools.yaml`）。
+      - 智能体工具面/提示词**不由本包写**（走 `tools/delivery/apply_config.py`）。
     """
     d = stage / "04-it-platform-mcp"
     d.mkdir(parents=True, exist_ok=True)
     copy_tree(REPO / "tools" / EXT_TOOL_DIR, d / "tools" / EXT_TOOL_DIR)
+    # 自带运行库（只这 5 个文件，不带 ke-core 其余）
+    ext_lib = d / "tools" / "ke-core"
+    ext_lib.mkdir(parents=True, exist_ok=True)
+    for name in ("ke_ext_store.py", "ke_ext_docs.py", "ke_ext_flow.py",
+                 "ke_ext_issues.py", "ke_ext_catalog.py"):
+        src = REPO / "tools" / "ke-core" / name
+        if not src.is_file():
+            raise SystemExit("!! 04 包缺少运行库文件：tools/ke-core/%s" % name)
+        shutil.copy2(src, ext_lib / name)
     copy_tree(REPO / "deploy" / "mock-ext" / "it-platform",
               d / "deploy" / "mock-ext" / "it-platform", skip_names=EXT_SEED_SKIP)
     for name in ("upload_doc.sh", "README.md"):
@@ -432,18 +443,22 @@ def pkg_ext(stage: pathlib.Path) -> dict:
     if (DELIVERY / "CONFIG-MATRIX.md").is_file():
         shutil.copy2(DELIVERY / "CONFIG-MATRIX.md", d / "CONFIG-MATRIX.md")
     write(d / "README.txt",
-          "bodhi2 ext 服务包（04）：it-platform MCP\n"
-          "=======================================\n\n"
-          "先读 **deploy/delivery/04-it-platform-mcp/README.md**（与 02 的分工、安装、自检），\n"
-          "配置口径见 **CONFIG-MATRIX.md**（哪些能改 / 真源 / 命令 / 生效 / 校验）。\n\n"
+          "bodhi2 ext 服务包（04）：it-platform MCP（**完全独立**）\n"
+          "=================================================\n\n"
+          "先读 **deploy/delivery/04-it-platform-mcp/README.md**（能力边界、安装、自检），\n"
+          "配置口径见 **CONFIG-MATRIX.md**。\n\n"
           "  tools/it-platform-mcp/       服务代码 + schema.json（**契约真源**，随服务版本走）\n"
+          "  tools/ke-core/               自带 ext 运行库（store/docs/flow/issues/catalog，5 个文件）\n"
           "  deploy/mock-ext/it-platform/ 文本种子（allowlist / denylist / issues / flows）\n"
           "  deploy/delivery/04-it-platform-mcp/  install.sh / selfcheck.py / .env.sample / systemd unit\n\n"
           "安装：sudo bash deploy/delivery/04-it-platform-mcp/install.sh --prefix /opt/bodhi-ext\n"
           "自检：python3 deploy/delivery/04-it-platform-mcp/selfcheck.py --base /opt/bodhi-ext\n\n"
-          "依赖：`tools/ke-core` **不在本包**（与 02 共用运行库），install.sh 会自动软链\n"
-          "      `/opt/bodhi2/tools/ke-core`（或用 `--kecore <路径>` 指定）。\n"
-          "本包**不含**：知识库页面/种子（用户手工导出导入）、二进制附件（docs/files/images 现场生成）。\n")
+          "依赖：**零第三方 Python 依赖、零数据库、零 docker**（只用标准库 + 本包内的 5 个运行库文件）。\n"
+          "      不需要 02 包、不需要 WeKnora；文档正文由 bodhi-mcp 侧的 `ext_doc_parse` 解析。\n"
+          "本包**不含**：知识库页面/种子、二进制附件（docs/files/images 现场生成）。\n")
+    return {"files": sum(1 for p in d.rglob("*") if p.is_file()),
+            "layout": sorted(p.name for p in d.iterdir())}
+
     return {"files": sum(1 for p in d.rglob("*") if p.is_file()),
             "layout": sorted(p.name for p in d.iterdir())}
 

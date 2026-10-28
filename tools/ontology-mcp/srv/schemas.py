@@ -744,4 +744,42 @@ TOOL_SCHEMAS = [
             "description": "计算知识库基础指标（页数/类型分布/版本/来源覆盖[/规则数]）：同输入同结果 + 同 hash（可复算），每个指标自带 formula 口径。",
             "inputSchema": {"type": "object", "properties": {"kb_id": {"type": "string"}, "spec": {"type": "string", "description": "规则集标识（仅 with_rules=true 时用）"}, "with_rules": {"type": "boolean", "description": "是否附带规则数指标（默认 false）"}}, "required": ["kb_id"]},
         },
+        {
+            "name": "ext_attach_probe",
+            "description": ("**只读探测会话附件（排障/普查）**：列 `/data/files/<tenant>/exports/chat_attachment_*`，"
+                            "回目录、最新一份（名/大小/mtime）、可读性；给 `session_no` 时另查会话记录的 "
+                            "`messages.attachments`。**不写任何数据**；it_platform 侧不参与（零 PG/零 docker）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "session_no": {"type": "string", "description": "WeKnora 会话编号（可选）"},
+                "doc_title": {"type": "string", "description": "文件名关键字（可选）"},
+                "limit": {"type": "integer", "description": "最多列几份（默认 10）"}}},
+        },
+        {
+            "name": "ext_doc_push",
+            "description": ("**把会话附件推给 it_platform 并绑定流程档案**：读容器里的附件 → "
+                            "`POST {IT_MCP_PUBLIC_BASE}/files/<doc_id>`（it_platform 侧自动 attach 到该编号）→ "
+                            "回 `{doc_id,size,sha256,url,flow}`。文件存在外部系统里，正文再用 `ext_doc_parse` 取；"
+                            "附件不在容器里 ⇒ `attachment_not_found`（让用户重传，不猜 ✗）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "review_no": {"type": "string", "description": "流程编号（外层主键，必填）"},
+                "doc_title": {"type": "string", "description": "文件名（同名多份时必须给；不传取最新）"},
+                "session_no": {"type": "string", "description": "会话编号（配合 messages.attachments 探测）"},
+                "doc_id": {"type": "string", "description": "自定义 doc_id（缺省按内容 hash 生成）"},
+                "actor": {"type": "string"}, "title": {"type": "string"}},
+                "required": ["review_no"]},
+        },
+        {
+            "name": "ext_doc_parse",
+            "description": ("**解析外部文档正文（本地解析，不共享磁盘）**：`GET /files/<doc_id>` 取原件 → "
+                            "PDF 走 docreader（bytes 从 stdin 进容器）/ DOCX 标准库 / 文本直读 → "
+                            "`action=outline|section|image|full`。正文**逐字**返回（不改写 ✗）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "doc_id": {"type": "string", "description": "it_platform 的 doc_id（ext_doc_push 回执里给）"},
+                "action": {"type": "string", "enum": ["outline", "section", "image", "full"]},
+                "section_path": {"type": "string"}, "cursor": {"type": "integer"},
+                "limit_chars": {"type": "integer"}, "inline_media": {"type": "boolean"},
+                "doc_title": {"type": "string"}},
+                "required": ["doc_id"]},
+        },
+
     ]

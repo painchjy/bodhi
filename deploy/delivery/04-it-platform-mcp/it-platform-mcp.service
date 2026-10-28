@@ -1,17 +1,17 @@
 [Unit]
-Description=Bodhi it-platform MCP (ext ledger / documents / review flow)
-After=network-online.target docker.service
-Wants=docker.service
+Description=Bodhi it-platform MCP (documents / review flow / issue ledger) — 独立服务，零 PG/零 docker
+After=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/bodhi-ext
 EnvironmentFile=/opt/bodhi-ext/.env
-ExecStart=/usr/bin/python3 /opt/bodhi-ext/tools/it-platform-mcp/server.py --http
+ExecStart=/usr/bin/python3 /opt/bodhi-ext/tools/it-platform-mcp/server.py
 Restart=always
 RestartSec=5
 # 业务数据落在 BODHI_EXT_ROOT（见 .env），包目录只读即可
 ReadWritePaths=/var/lib/bodhi-ext
+
 
 [Install]
 WantedBy=multi-user.target

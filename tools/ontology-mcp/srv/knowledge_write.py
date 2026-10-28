@@ -96,10 +96,21 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
     confirmed = {str(x).strip() for x in (confirmed_new_applications or []) if str(x).strip()}
 
     doc_meta = {"id": "", "title": (report or {}).get("source_document_title") or "（无来源文档）",
-                "context": ctx["id"]}
+                "context": ctx["id"], "note": "", "external_ref": ""}
     if (report or {}).get("source_document_id"):
-        doc_meta["id"] = resolve_knowledge_id(kb_id, str(report["source_document_id"]))[0]
+        # 2026-10-28：**来源文档解析失败不再阻断报告落库**（内网 20261027-101010 实测：
+        # 智能体传的是外部台账的 doc_id（`chat-*`），工作库里没有对应 knowledges 记录）。
+        # 解析不到 ⇒ 记成外部溯源（`bmm:sourceLocator = ext-doc://<doc_id>`），正文/回执如实说明。
+        _raw_doc = str(report["source_document_id"])
+        try:
+            doc_meta["id"], doc_meta["note"] = resolve_knowledge_id(kb_id, _raw_doc, allow_empty=True)
+        except Exception as exc:  # noqa: BLE001
+            doc_meta["id"] = ""
+            doc_meta["note"] = "来源文档解析失败：%s" % str(exc)[:120]
+        if not doc_meta["id"]:
+            doc_meta["external_ref"] = _raw_doc
     elif (report or {}).get("source_document_title"):
+
         # 只给了标题也要解析出 id：否则正文写着「来源：《<需求文档>》」而 `source_refs` 为空，
         # 巡检会判 C3（2026-09-21 实测：报告页 v5 命中；设计页的 source_refs 还靠它继承）。
         try:
@@ -215,6 +226,10 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                     body, _tpl.get("sections") if _tpl.get("found") else None)
         except Exception:  # noqa: BLE001
             _report_warns = []
+        _attrs = dict((report or {}).get("attributes") or {})
+        if doc_meta.get("external_ref"):
+            # 外部台账来源（it_platform 的 doc_id）落到 `bmm:sourceLocator`：**可追溯**，且不伪装成 WeKnora 文档
+            _attrs.setdefault("bmm:sourceLocator", "ext-doc://%s" % doc_meta["external_ref"])
         spec = {
             "slug": slug,                    # 复用既有报告页时由上面的幂等查询给出；空则由内核派生
             "title": title, "page_type": _ptype, "type_label": _type_label_of(_ptype, ctx["report_label"]),
@@ -222,18 +237,21 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             "wiki_content": body,
             # 2026-10-23（用户口径）：`stage="report"` 可**直接写任意 document 类页**（报告/模板同属
             # `schema:CreativeWork`），模板页因此**不需要再 retag**；属性随本调用一起写。
-            "attributes": dict((report or {}).get("attributes") or {}),
+            "attributes": _attrs,
             "summary": (report or {}).get("summary") or "",
             "source": {
                 "doc_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
                 "doc_title": doc_meta.get("title", ""),
                 "source_text": ctx["report_source"],
                 "derived_from": _upstream,
+                # 外部台账来源（2026-10-28）：it_platform 的 doc_id，不是 WeKnora 的 knowledge UUID
+                "external_ref": doc_meta.get("external_ref") or "",
                 # 2026-10-22（4.6）：分页判定三件套（文档变化是**强信号**、意图变化是**弱信号**）
                 "doc_id": str(doc_id or doc_meta.get("id") or ""),
                 "intent": str(intent or ""),
                 "acknowledge_intent_change": bool(acknowledge_intent_change),
             },
+
             "metadata_extra": {"design": {"upstream": _upstream, "context": ctx["id"]}},
             "aliases": (report or {}).get("aliases") or [],
         }
@@ -242,8 +260,10 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             spec["source"]["agent_name"] = ident.get("agent_name", "")
         res = ke_pages.write_knowledge(
             kb_id, spec, dry_run=(mode != "apply"),
-            strict_source=bool(doc_meta.get("id") or ident.get("ok")),
+            # 有 WeKnora 文档 / 有会话身份 / 有外部台账来源 ⇒ 都算"有溯源"
+            strict_source=bool(doc_meta.get("id") or ident.get("ok") or doc_meta.get("external_ref")),
             sync_folders=not defer_maintenance)
+
         if mode == "apply" and res.get("applied") is False:
             # 2026-10-22（4.6）：内核**拒写**（如会话分页需确认）⇒ 不要把拒写伪装成成功 ✗
             return {"ok": False, "applied": False, "stage": "report", "kb_id": kb_id,
@@ -258,6 +278,16 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         summary = {
             "model": model_obj["key"], "kb_id": kb_id, "knowledge_id": doc_meta["id"],
             "resolved_note": (kb_note or "").strip(), "doc_title": doc_meta.get("title", ""),
+            # 2026-10-28：来源文档三态（requested 请求的 / resolved 绑到的 / note 说明）
+            "source_document": {
+                "requested": str((report or {}).get("source_document_id") or ""),
+                "resolved": doc_meta.get("id") or "",
+                "external_ref": doc_meta.get("external_ref") or "",
+                "note": doc_meta.get("note") or "",
+                "status": ("kb_document" if doc_meta.get("id")
+                           else ("external" if doc_meta.get("external_ref") else "none")),
+            },
+
             "elements": 1, "relationships": 0,
             "created": [{"name": title, "type": _ptype, "slug": res.get("slug")}] if _created else [],
             "merged": ([] if _created else

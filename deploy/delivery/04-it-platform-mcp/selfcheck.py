@@ -49,6 +49,37 @@ def main() -> int:
     ok("契约可读：%s" % p1, bool(doc.get("x_ext")))
     ok("契约含 x_ext（%d 个工具）" % len(doc.get("x_ext") or {}), bool(doc.get("x_ext")))
 
+    # ⓪ **独立性**（2026-10-28 用户口径：04 不依赖 02 / WeKnora / PG）
+    lib = os.path.join(base, "tools", "ke-core")
+    need = ["ke_ext_store.py", "ke_ext_docs.py", "ke_ext_flow.py",
+            "ke_ext_issues.py", "ke_ext_catalog.py"]
+    missing = [n for n in need if not os.path.isfile(os.path.join(lib, n))]
+    ok("自带 ext 运行库齐（%d 个 ke_ext_*.py）" % len(need), not missing,
+       ("缺：" + "、".join(missing)) if missing else lib)
+    src = ""
+    try:
+        with open(os.path.join(svc, "server.py"), encoding="utf-8") as fh:
+            src = fh.read()
+    except OSError as exc:
+        ok("server.py 可读", False, str(exc))
+    ok("服务不引用 ke_db（零 PG）", "ke_db" not in src)
+    import re as _re
+    ok("运行库**顶层**不 import ke_db（函数内延迟 import 允许）",
+       not any(_re.search(r"^(?:import ke_db|from ke_db import)", open(os.path.join(lib, n), encoding="utf-8").read(), _re.M)
+               for n in need if os.path.isfile(os.path.join(lib, n))))
+    ok("运行库**顶层**不 import subprocess（零容器/零 CLI）",
+       not any(_re.search(r"^(?:import subprocess|from subprocess import)", open(os.path.join(lib, n), encoding="utf-8").read(), _re.M)
+               for n in need if os.path.isfile(os.path.join(lib, n))))
+    # 只有本包也能 import（不碰 02 目录）
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "import sys;sys.path[:0]=[%r,%r];import ke_ext_docs,ke_ext_flow,ke_ext_issues;"
+         "print('ok', 'ke_db' in sys.modules)" % (svc, lib)],
+        capture_output=True, text=True)
+    ok("仅凭本包可 import 运行库", (probe.returncode == 0 and "ok" in (probe.stdout or "")),
+       (probe.stdout or probe.stderr or "")[:160])
+    ok("import 后仍未加载 ke_db", "False" in (probe.stdout or ""), (probe.stdout or "").strip())
+
     # ② 两份一致
     p2 = os.path.join(seed, "schema.json")
     if os.path.exists(p2):

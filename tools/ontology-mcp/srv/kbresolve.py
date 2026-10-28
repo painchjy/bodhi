@@ -89,12 +89,21 @@ def resolve_write_kb(kb_id: str = "", kb_ids: list | None = None,
     return uid, note, None
 
 
-def resolve_knowledge_id(kb_id: str, raw: str) -> tuple[str, str]:
-    """把 knowledge_id 解析成真实 UUID：支持 UUID / id 前缀 / 标题包含；
-    占位符或无法解析时退回该知识库**最新一篇**文档（并在返回里说明）。"""
+def resolve_knowledge_id(kb_id: str, raw: str, allow_empty: bool = False) -> tuple[str, str]:
+    """把 knowledge_id 解析成真实 UUID：支持 UUID / id 前缀 / 标题包含。
+
+    2026-10-28 修正（内网实测：`20261027-101010` 报告写不进去）：
+      - `allow_empty=True` ⇒ **库内没有文档也不再抛异常**（报告来源可以是外部台账的 doc_id，
+        WeKnora 库里本来就没有文档）；返回 `("", 原因)`；
+      - **解析不到就回空**（不再静默回退"该知识库最新文档"）—— 旧行为会把报告 `source_refs`
+        绑到用户随手传的无关文档上（溯源张冠李戴）；
+      - 只有 `raw` 为空时才回"该库最新文档"（这是原语义，保留）。
+    """
     rows = psql_csv("SELECT id, title FROM knowledges WHERE knowledge_base_id = %s AND deleted_at IS NULL "
                     "ORDER BY created_at DESC" % sql_str(kb_id))
     if not rows:
+        if allow_empty:
+            return "", "该知识库暂无文档（报告来源可为外部台账 doc_id，不阻断落库）"
         raise RuntimeError("该知识库还没有文档：请先上传文档并等切片完成")
     raw = (raw or "").strip()
     if raw:
@@ -106,8 +115,11 @@ def resolve_knowledge_id(kb_id: str, raw: str) -> tuple[str, str]:
                 return r["id"], "（knowledge_id「%s」按 id 前缀匹配）" % raw
             if raw.lower() in (r["title"] or "").lower():
                 return r["id"], "（knowledge_id「%s」按标题匹配：%s）" % (raw, r["title"])
-    return rows[0]["id"], ("（knowledge_id「%s」无法解析，已改用该库最新文档：%s）"
-                           % (raw or "(空)", rows[0]["title"]))
+        # 解析不到 ⇒ **不猜**（旧行为会绑到最新文档，导致溯源错误）
+        return "", ("knowledge_id「%s」在本库解析不到（现有 %d 份文档，不做自动绑定）"
+                    % (raw, len(rows)))
+    return rows[0]["id"], ("（未给 knowledge_id，按该库最新文档：%s）" % rows[0]["title"])
+
 
 
 def get_kb_tenant(kb_id: str) -> int:
