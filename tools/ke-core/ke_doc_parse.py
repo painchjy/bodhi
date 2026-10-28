@@ -75,6 +75,24 @@ def doc_root() -> str:
     return root
 
 
+# 解析结果**进程内缓存**（2026-10-28）：同一 doc_id 顺序读多节时不必每次重跑 docreader。
+#   - 键 = doc_id；值 = {sig: (len, sha256[:16]), secs, images, quality}
+#   - 文件变了（长度或 sha 变）自动失效；`BODHI_DOC_CACHE=0` 可关；最多留 8 份。
+_DOC_CACHE: dict = {}
+_CACHE_MAX = 8
+
+
+def _cache_on() -> bool:
+    return str(os.environ.get("BODHI_DOC_CACHE", "1")).strip().lower() \
+        not in ("0", "false", "no", "off")
+
+
+def _sig(raw: bytes) -> tuple:
+    import hashlib
+    return (len(raw), hashlib.sha256(raw).hexdigest()[:16])
+
+
+
 def _docreader_container() -> str:
     return os.environ.get("WEKNORA_DOCREADER_CONTAINER") or "WeKnora-docreader"
 
@@ -196,11 +214,24 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                 "duration_ms": {"fetch": t_fetch, "parse": 0, "total": t_fetch}, **meta}
     did = str(doc_id or "").strip()
     title = str(doc_title or "").strip() or did
-    t1 = time.time()
-    secs, images, quality = _sections_and_images(raw, did, title,
-                                                 str(meta.get("content_type") or ""))
-    t_parse = int((time.time() - t1) * 1000)
-    timing = {"fetch": t_fetch, "parse": t_parse, "total": int((time.time() - t0) * 1000)}
+    sig = _sig(raw)
+    hit = _DOC_CACHE.get(did) if _cache_on() else None
+    cache_hit = bool(hit and hit.get("sig") == sig)
+    if cache_hit:
+        secs, images, quality = hit["secs"], hit["images"], hit["quality"]
+        t_parse = 0
+    else:
+        t1 = time.time()
+        secs, images, quality = _sections_and_images(raw, did, title,
+                                                     str(meta.get("content_type") or ""))
+        t_parse = int((time.time() - t1) * 1000)
+        if _cache_on() and not quality.get("error"):
+            if len(_DOC_CACHE) >= _CACHE_MAX:
+                _DOC_CACHE.pop(next(iter(_DOC_CACHE)), None)
+            _DOC_CACHE[did] = {"sig": sig, "secs": secs, "images": images, "quality": quality}
+    timing = {"fetch": t_fetch, "parse": t_parse, "total": int((time.time() - t0) * 1000),
+              "cache_hit": cache_hit}
+
     if quality.get("error"):
         return {"ok": False, "tool": "ext_doc_parse", "doc_id": did, "error": quality["error"],
                 "detail": quality.get("detail"), "bytes": len(raw), "duration_ms": timing,
