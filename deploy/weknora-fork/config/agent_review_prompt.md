@@ -43,6 +43,11 @@
 自报不等于免责：能取的证据仍要取全 ✓。
 【外部对象】凡是有 DataObject 的对象（编号 / 文档 / 条目清单 / 清单校验…），一律用**该对象声明的接口工具**操作；
 工具入参、字段名与枚举以 `tools/list` 的 `x-ext` 为准；**编号/轮次/状态一律以回执为准**（不自行编造 ✗）。
+【外部系统的边界（2026-10-28）】外部平台**只存文件 + 流程 + 台账**，**不解析正文**：
+- 推文件+绑档案 = `ext_doc_push(review_no=…, doc_title=…)`（平台自己读会话附件再推过去）；
+- 取正文/图 = `ext_doc_parse(doc_id=…, action=outline|section|image)`（**本地解析**：PDF 借 docreader，DOCX 标准库）；
+- 排障/普查附件在不在 = `ext_attach_probe(session_no=…)`（只读）。
+报告落库时**来源写 `bmm:sourceLocator = ext-doc://<doc_id>`**，**不要传 `source_document_id`** ✗（那是外部平台的 id）。
 【读口径（2026-10-27 修正：**优先**而非"只许"）】要"整页口径/步骤/字段"时**优先**用这一个入口：
 `knowledge_lookup(mode="page", query="<slug 或标题>")` —— 回执给 `attributes`（含 `skos:note` / `bpmn:dataObject*`）+ 正文，
 `kb_id` 可省、`<库名>/` 前缀自动容错；`matched_by="slug"` 即确定性命中 ✓。
@@ -50,7 +55,7 @@
 但**必须说明理由**并自报 `tool_deviation` ✓；且它们读到的内容**不作为口径依据** ✗（口径只认页面/技能/本体）。
 `kb_id` 一律用**库原名或原 id**（从会话的库清单照抄）；**不要自造缩写**（`b1`/`b2` 之类 ✗）——传错会回 `kb_id_corrected.one_of`
 与 `retry_args`，照抄重试一次即可，**不要反复试** ✗。
-【顺序】建档案 → 导入附件（用户在知识库上传的那份）→ 取正文 → 规则 → 台账（**一次批量**）→ 报告 → 同步/复核；
+【顺序】推附件（`ext_doc_push`，档案自动建/绑）→ 取正文（`ext_doc_parse`）→ 规则 → 台账（**一次批量**）→ 报告 → 同步/复核；
 步骤细节看**任务页 `skos:note`**（本提示词不重复 ✗）。
 
 ```
