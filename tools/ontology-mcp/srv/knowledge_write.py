@@ -92,6 +92,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         session_warn = ident.get("reason")
     else:
         session_warn = ""
+    import time as _time
+    _T0 = _time.time()          # 2026-10-28：分段耗时（超时排查用；不改任何语义）
     tenant_id = get_kb_tenant(kb_id)
     confirmed = {str(x).strip() for x in (confirmed_new_applications or []) if str(x).strip()}
 
@@ -258,11 +260,15 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         if ident.get("ok"):
             spec["source"]["session_no"] = ident["session_no"]
             spec["source"]["agent_name"] = ident.get("agent_name", "")
+        _t_prep = int((_time.time() - _T0) * 1000)   # 准备：来源解析 + 模板校验 + spec 组装
+        _t1 = _time.time()
         res = ke_pages.write_knowledge(
             kb_id, spec, dry_run=(mode != "apply"),
             # 有 WeKnora 文档 / 有会话身份 / 有外部台账来源 ⇒ 都算"有溯源"
             strict_source=bool(doc_meta.get("id") or ident.get("ok") or doc_meta.get("external_ref")),
             sync_folders=not defer_maintenance)
+        _t_kernel = int((_time.time() - _t1) * 1000)  # 内核：PG 写页 + 版本快照 + 图 + 正文渲染
+
 
         if mode == "apply" and res.get("applied") is False:
             # 2026-10-22（4.6）：内核**拒写**（如会话分页需确认）⇒ 不要把拒写伪装成成功 ✗
@@ -287,6 +293,10 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 "status": ("kb_document" if doc_meta.get("id")
                            else ("external" if doc_meta.get("external_ref") else "none")),
             },
+            # 2026-10-28：超时排查（不改语义）—— 内容多大 / 准备多久 / 内核写库多久
+            "content_bytes": len(body.encode("utf-8")),
+            "timing": {"prepare_ms": _t_prep, "kernel_ms": _t_kernel,
+                       "total_ms": int((_time.time() - _T0) * 1000)},
 
             "elements": 1, "relationships": 0,
             "created": [{"name": title, "type": _ptype, "slug": res.get("slug")}] if _created else [],

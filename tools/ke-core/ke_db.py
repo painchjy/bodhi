@@ -432,12 +432,15 @@ def caller_tenant(default: int | None = None) -> int | None:
 def assert_can_write(kb_id: str, tenant: int | None = None) -> dict:
     """判断调用者能否**写**这个知识库；返回 `{allowed, mode, kb, caller_tenant, why}`（不抛异常）。
 
-    规则（依据 `knowledge_bases.tenant_id` + `kb_shares` + `organization_tenant_members`）：
-      1. 该库属调用者租户 → `owner`，允许；
-      2. 该库通过组织共享给调用者租户且权限在 `WRITE_PERMISSIONS` 内 → `share:<perm>`，允许；
-      3. 其它（含 viewer 共享、身份缺失）→ **拒**（fail-closed；只读接口另行放行）。
+    2026-10-28 用户口径（内网）：**权限控制暂不启用** —— 不识别租户，一律放行（`mode="open"`）。
+    仍回 `kb`（属主/库名）便于回执与审计；**删除类操作照旧先 `dry_run` 出范围预览**（另一层护栏）。
+
+    要恢复严格判定：设 `BODHI_OPEN_WRITE_ACL=0`（下面的 else 分支保留原规则：
+    属主 → owner；组织共享 editor/writer/admin → share；其它 → 拒）。
     """
     kb_id = (kb_id or "").strip()
+    open_acl = str(env_value("BODHI_OPEN_WRITE_ACL", "1")).strip().lower() \
+        not in ("0", "false", "no", "off")
     out = {"allowed": False, "mode": "none", "kb": {"id": kb_id}, "caller_tenant": tenant, "why": ""}
     if not kb_id:
         out["why"] = "kb_id 为空"
@@ -451,7 +454,13 @@ def assert_can_write(kb_id: str, tenant: int | None = None) -> dict:
     kb = rows[0]
     out["kb"] = {"id": kb["id"], "name": kb["name"], "tenant_id": int(kb["tenant_id"] or 0),
                  "creator_id": kb["creator_id"]}
+    if open_acl:
+        out.update({"allowed": True, "mode": "open",
+                    "why": ("权限控制已停用（2026-10-28 内网口径：不识别租户）⇒ 放行；"
+                            "库属租户 %d" % int(kb["tenant_id"] or 0))})
+        return out
     if tenant is None:
+
         out["why"] = ("无法确定调用者租户（身份缺失 → 拒写，只读放行）：请给 MCP 服务配 "
                       "`X-Bodhi-Tenant` 头或设 env `BODHI_TENANT_ID`")
         return out

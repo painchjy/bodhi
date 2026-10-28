@@ -825,3 +825,41 @@ curl -sI "http://techdoc.sdc.bocomm.com/<path>"   # 应 200
 WeKnora 原生技能是"沙箱安装型"（装进快照镜像）。要用需同时满足：`WEKNORA_SANDBOX_DOCKER_ENABLED=true`、
 app 挂载 `docker.sock`（≈宿主机 root）、沙箱基础镜像可用、以及上面的 §1 SSRF 白名单。
 我们已验证可行，但**方案上以 MCP 承载技能为主**（不需要沙箱）；若你们要开，照 `docs/agent-design-flow.md` §11.7。
+
+## 15. `ext_*` 工具全报 `no_binding`（2026-10-28 内网实测）
+
+**症状**：`ext_describe` / `ext_issue_list` / `ext_review_flow` / `ext_catalog_query` 同时回
+`{"ok":false,"error":"no_binding","object":{"slug":"bpmn/dataobject/问题清单"}}`（有的显示"工具不可达"）。
+
+**根因**：绑定写在 **PG** 的 `wiki_pages.page_metadata.ontology.attributes`（4 个 `bpmn:dataObject*`），
+`ke_ext_store._attrs_of()` **只查 PG**（这是设计：外部系统不存绑定）。两种情形会一起挂：
+
+1. 该页 4 个属性**没落库**（前端只点了「预览」没点「确认写入」）；
+2. 目标库的页面**只在 Neo4j、没有 PG 行**（只做了"加载编译"、没做"投影 wiki"）。
+
+**自查（三条）**
+
+```sql
+SELECT slug, version,
+       page_metadata->'ontology'->'attributes'->>'bpmn:dataObjectInterface' AS iface,
+       page_metadata->'ontology'->'attributes'->>'bpmn:dataObjectAccessMode' AS modes,
+       page_metadata->'ontology'->'attributes'->>'bpmn:dataObjectKeyFields'  AS keys
+  FROM wiki_pages WHERE slug='bpmn/dataobject/问题清单';
+
+SELECT count(*) FROM wiki_pages WHERE knowledge_base_id='<本体库uuid>' AND deleted_at IS NULL;   -- 期望 180+
+
+SELECT name, url, enabled FROM mcp_services WHERE deleted_at IS NULL ORDER BY name;              -- 应有 it_platform
+```
+
+**修法**
+
+| 现象 | 修法 |
+|---|---|
+| `iface` 为空 | 在该页「数据属性」面板写 4 个属性并**确认写入**（或 `page_attributes_set`）；本模板口径见 `docs/ext-binding-design.md` §5 |
+| 本体库页数为 0 | 恢复投影（**从 Neo4j 实况生成 PG 页**，幂等）：<br>`python3 -c "import sys;sys.path.insert(0,'tools/ke-core');import ke_admin;print(ke_admin.regen_wiki(''))"`<br>或 `python3 tools/ontology-extract/ontology_wiki.py project --kb-id <uuid>` + `python3 tools/ontology-mcp/sync_folders.py --kb-id <uuid>` |
+| 没有 `it_platform` 行 | 补 `mcp_services` 登记（url=`http://127.0.0.1:8770/mcp`），或设 `BODHI_EXT_SERVICE_URLS={"it_platform":"http://127.0.0.1:8770/mcp"}` |
+| 写属性被拒（`unknown_keys`） | 该模块 TTL 没声明 `dataObjectInterface` 等 4 个属性 ⇒ 换用**含声明**的 `BPMN完整版.ttl`（1020 那版没有），重新编译 |
+
+> 补充：`assert_can_write` 自 2026-10-28 起**默认放行**（`BODHI_OPEN_WRITE_ACL=1`，权限控制停用），
+> 所以"身份缺失 → 拒写"只会在显式设 `=0` 时出现；删除类操作仍先 `dry_run` 出范围预览。
+

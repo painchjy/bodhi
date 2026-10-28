@@ -127,7 +127,9 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 | `BODHI_ONTOLOGY_KB_NAME` | `企业本体模型` | 同上（库名匹配用）|
 | `BODHI_CONCEPT_KB_ID` | 空 | **企业共享概念模型**知识库 id（跨库上下文映射的落点，见 `KB-CONFIG.md`）|
 | `BODHI_CONCEPT_KB_NAME` | `企业共享概念模型` | 同上（库名匹配用）|
-| `BODHI_TENANT_ID` | 空 | **写权限判定**用的调用者租户；不配且没带请求头 `X-Bodhi-Tenant` → 写路径 fail-closed 拒（读不受影响）|
+| `BODHI_TENANT_ID` | 空 | **可选**（2026-10-28 起权限控制已停用：`assert_can_write` 一律放行、`mode="open"`）；保留它只用于回执/审计里的"调用者租户"记录，不再阻断写 |
+| `BODHI_OPEN_WRITE_ACL` | `1` | **写权限总开关**：`1`=停用权限判定（内网口径，默认）；`0`=恢复严格判定（属主 / 组织共享 editor·writer·admin，身份缺失 fail-closed）|
+| `BODHI_EXT_SERVICE_URLS` | 空 | 外部 MCP 服务的地址覆盖（`ext_describe` 取契约用）：`{"it_platform":"http://127.0.0.1:8770/mcp"}`；不配则读 PG `mcp_services`（`name='it_platform'`）|
 | ~~`BODHI_SIMILARITY_MERGE`~~ | — | **已删除**（2026-10-10 相似度合并永久取消）：一律按 `(kb,slug)` 幂等 upsert（`merged` = "同 slug 覆盖"）；相似知识治理走巡检 `audit_scan`（S1/S2）。**落库只走契约内核一条路**（`BODHI_SAVE_ENGINE` 已删除）|
 | `BODHI_VALIDATE_FROM_GRAPH` | `1` | 关系 domain/range 校验的**类型读**：`1`=图优先（1 次 Neo4j 替掉每条边 2 次 psql，图里没有才回落 PG）；`0`=只用 PG |
 | `BODHI_DEFER_MAINTENANCE` | `1` | 重型维护（全库目录树重建 / CRUD 矩阵）延迟到前端按需刷新（`/bodhi/folders/refresh`）；`0`=落库时同步做 |

@@ -181,21 +181,34 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str) -> tupl
 
 def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: int = 0,
           limit_chars: int = 6000, inline_media: bool = True, doc_title: str = "") -> dict:
-    """取原件 + 解析 → `outline` / `section` / `image` / `full`（逐字，不改写 ✓）。"""
+    """取原件 + 解析 → `outline` / `section` / `image` / `full`（逐字，不改写 ✓）。
+
+    回执带 `duration_ms{fetch,parse,total}` 与 `bytes`（2026-10-28：超时排查用，只量不改语义）。
+    """
+    import time
+
     action = (action or "outline").strip().lower()
+    t0 = time.time()
     raw, meta = fetch(doc_id)
+    t_fetch = int((time.time() - t0) * 1000)
     if not raw:
-        return {"ok": False, "tool": "ext_doc_parse", "doc_id": doc_id, **meta}
+        return {"ok": False, "tool": "ext_doc_parse", "doc_id": doc_id,
+                "duration_ms": {"fetch": t_fetch, "parse": 0, "total": t_fetch}, **meta}
     did = str(doc_id or "").strip()
     title = str(doc_title or "").strip() or did
+    t1 = time.time()
     secs, images, quality = _sections_and_images(raw, did, title,
                                                  str(meta.get("content_type") or ""))
+    t_parse = int((time.time() - t1) * 1000)
+    timing = {"fetch": t_fetch, "parse": t_parse, "total": int((time.time() - t0) * 1000)}
     if quality.get("error"):
         return {"ok": False, "tool": "ext_doc_parse", "doc_id": did, "error": quality["error"],
-                "detail": quality.get("detail"),
+                "detail": quality.get("detail"), "bytes": len(raw), "duration_ms": timing,
                 "hint": "docreader 不可达或 PDF 损坏 ⇒ 该文档按「无法判定」处置", "source": meta}
     base = {"ok": True, "tool": "ext_doc_parse", "doc_id": did, "source": meta,
-            "quality": quality, "counts": {"sections": len(secs), "images": len(images)}}
+            "quality": quality, "bytes": len(raw), "duration_ms": timing,
+            "counts": {"sections": len(secs), "images": len(images)}}
+
     if action == "outline":
         return {**base, "outline": [{"path": s.get("path") or "", "title": s.get("title") or "",
                                      "chars": len(s.get("text") or "")} for s in secs],
