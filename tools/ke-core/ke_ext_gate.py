@@ -193,11 +193,49 @@ def _tables(md: str) -> list:
 
 
 def _service_of(binding: dict) -> str:
+    """服务名：优先取**工具节点的 MCP 服务关系**（`toolProvidedByMcp`），再回退 `impl` 前缀。"""
     impl = str((binding or {}).get("impl") or "")
-    return impl.split(":", 1)[0].strip() if ":" in impl else ""
+    if ":" in impl:
+        return impl.split(":", 1)[0].strip()
+    tool = str((binding or {}).get("tool") or "").strip()
+    if not tool:
+        return ""
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (t:BodhiInstance)-[]->(s:BodhiInstance) "
+            "WHERE t.slug STARTS WITH 'agent/tool/' "
+            "  AND coalesce(t.name, last(split(t.slug,'/'))) = $tool "
+            "  AND s.slug STARTS WITH 'agent/mcpservice/' "
+            "RETURN coalesce(s.name, last(split(s.slug,'/'))) AS svc LIMIT 1",
+            {"tool": tool}, timeout=6) or []
+        return str(rows[0].get("svc") or "") if rows else ""
+    except Exception:                                  # noqa: BLE001
+        return ""
 
 
 def _schema_hash(kb_id: str, slug: str) -> str:
+    """契约哈希：**工具节点**（`toolSchemaHash`）优先 → 页面 projection 回退。
+
+    2026-10-29 起契约真源在工具节点（`agent:toolSchemaHash`），页面 projection 只作历史兼容；
+    报告块里的 `schema_hash` 用于面板判断"契约是否已变"（drift）。
+    """
+    try:
+        import ke_ext_store as _S  # noqa: PLC0415
+        binds = _S.parse_binding(_S._attrs_of(kb_id or "", slug))   # noqa: SLF001
+        tool = (binds[0].get("tool") if binds else "") or ""
+        if tool:
+            import ke_neo4j  # noqa: PLC0415
+            rows = ke_neo4j.query(
+                "MATCH (t:BodhiInstance) WHERE t.slug STARTS WITH 'agent/tool/' "
+                "  AND coalesce(t.name, last(split(t.slug,'/'))) = $tool "
+                "RETURN coalesce(t.toolSchemaHash,'') AS h LIMIT 1",
+                {"tool": tool}, timeout=6) or []
+            h = str(rows[0].get("h") or "") if rows else ""
+            if h:
+                return h
+    except Exception:                                  # noqa: BLE001
+        pass
     try:
         import json  # noqa: PLC0415
 
@@ -210,6 +248,7 @@ def _schema_hash(kb_id: str, slug: str) -> str:
                     .get("schemaHash")) or "")
     except Exception:                                  # noqa: BLE001
         return ""
+
 
 
 def auto_ref_block(md: str, kb_id: str = "") -> dict:
