@@ -513,6 +513,20 @@ def resolve_binding(tool: str, kb_id: str = "", object_slug: str = "") -> dict:
         cands_kb = _kbs_with_slug(slug)
         if len(cands_kb) == 1:
             kb_id = cands_kb[0]
+        elif cands_kb:
+            # 多库同 slug（领域库 + 概念副本/测试库）⇒ 选**真正有绑定关系**的那个 ✓
+            for _k in cands_kb:
+                try:
+                    if parse_binding(_attrs_of(_k, slug)):
+                        kb_id = _k
+                        break
+                except Exception:                  # noqa: BLE001
+                    continue
+            if not kb_id:
+                return {"ok": False, "why": "need_kb", "object": {"slug": slug},
+                        "candidates": [{"kb_id": k} for k in cands_kb[:10]],
+                        "hint": ("同 slug 出现在 %d 个库、且都没有绑定关系 ⇒ 请用 kb_id 指定"
+                                 % len(cands_kb))}
     if not slug:
         cands = _objects_by_tool(kb_id, tool)
         if len(cands) == 1:

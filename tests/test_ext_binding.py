@@ -204,3 +204,39 @@ def test_refresh_rejects_unmodeled_tool(graph, kb_id, store):
     assert out["ok"] is False and out["error"] == "tool_not_modeled"
 
 
+def test_resolve_binding_without_kb_picks_bound_kb(graph, kb_id, store):
+    """**不传 kb_id**、且同 slug 在多个库 ⇒ 选**有绑定关系**的那个（2026-10-30 修）。
+
+    场景：报告在工作库、绑定在领域库、测试库也有同名对象页。
+    旧实现只在"恰好 1 个库"时才自动定位 ⇒ 多库情形直接 `need_kb`（面板 400）。
+    """
+    import ke_db
+    _mk_object(graph, kb_id)                     # 本测试库：有对象、**无绑定**
+    dom = ke_db.resolve_kb_id("技术方案评审领域模型")[0]
+    if not dom:
+        pytest.skip("找不到技术方案评审领域模型库")
+    if not store.list_bindings(dom, OBJ):
+        pytest.skip("领域库里该对象当前没有绑定（先跑一次绑定）")
+
+    got = store.resolve_binding(TOOL, "", OBJ)   # 不给 kb_id、不给 object 之外的线索
+    assert got["ok"], got
+    assert got.get("binding_kb") == dom, got
+    assert got["binding_kb"] != kb_id
+
+
+def test_list_payload_remote_failure_is_not_success(graph, monkeypatch):
+    """04 回 `ok=false`（如 `need_kb`）⇒ **不得**当成功：必须回落本地并暴露 `remote_error`。
+
+    旧实现把"带 `ok=false` 的回执"直接当数据源，面板显示 `0 行`、`data_source` 却是
+    `it_platform_mcp`（看起来像"台账真的为空"），排查成本极高。
+    """
+    import ke_ext_client as C
+    from srv import ext_api
+    monkeypatch.setattr(C, "call", lambda *a, **k: {"ok": False, "why": "need_kb"})
+    out = ext_api.list_payload({"object": OBJ, "review_no": "no-such-ledger-xyz"})
+    assert out.get("data_source") == "local_store", out
+    assert out.get("remote_error") == "need_kb", out
+
+
+
+

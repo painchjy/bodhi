@@ -196,12 +196,16 @@ def list_payload(params: dict) -> dict:
         q["columns"] = params["columns"]
     if slug:
         q["object"] = slug
-    out, src_kind = {}, "local_store"
+    if kb:
+        q["kb_id"] = kb                      # 04 也要能定位库（它不判断绑定，但会用它取契约）
+    out, src_kind, remote_err = {}, "local_store", ""
     try:
         import ke_ext_client as _C  # noqa: PLC0415
         got = _C.call("ext_issue_list", q)
-        if got.get("ok") or got.get("error") not in ("unreachable", "no_service_url", "empty_result"):
+        if got.get("ok"):
             out, src_kind = got, "it_platform_mcp"
+        else:                                 # `ok=false` **不能当成功**（2026-10-30 修）
+            remote_err = str(got.get("why") or got.get("error") or "remote_not_ok")
     except Exception:  # noqa: BLE001
         out = {}
     if not out:
@@ -209,6 +213,8 @@ def list_payload(params: dict) -> dict:
                              review_no=review_no, view=str(params.get("view") or "rows"),
                              columns=params.get("columns"))
         src_kind = "local_store"
+        if remote_err:
+            out["remote_error"] = remote_err
     out["data_source"] = src_kind
     if out.get("ok"):
         out["projection"] = _projection(kb, slug) if kb else {}
