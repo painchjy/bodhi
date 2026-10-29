@@ -29,8 +29,26 @@ def _ledger_dir() -> str:
         return os.path.dirname(_LEDGER_GLOB)
 
 
-def _ledgers() -> dict:
-    """`{review_no: {"items": [...], "rev": n}}`（读容器根的所有分片）。"""
+def _review_no_hint(md: str) -> str:
+    """从正文里取「评审编号」值（① 表的首列含"编号"那一行）——不写死表头措辞。"""
+    for ln in (md or "").splitlines():
+        if not ln.strip().startswith("|"):
+            continue
+        cells = _cells(ln)
+        if len(cells) >= 2 and cells[0].strip().endswith("编号"):
+            val = cells[1].strip()
+            if val and val not in ("—", "-", "无"):
+                return val
+    return ""
+
+
+def _ledgers(md: str = "") -> dict:
+    """`{review_no: {"items": [...], "rev": n}}`。
+
+    2026-10-29（用户口径）：02 与 04 **不共享磁盘** ⇒ 本地没有台账分片时，
+    **按正文里的评审编号调 04 的 `ext_issue_list`** 取该编号的台账（rev/items）；
+    两者都没有 ⇒ 空（= 没有台账，报告不必补块）。
+    """
     out = {}
     for path in glob.glob(os.path.join(_ledger_dir(), "*.json")):
         try:
@@ -40,7 +58,22 @@ def _ledgers() -> dict:
             continue
         if isinstance(doc, dict) and isinstance(doc.get("items"), list):
             out[str(doc.get("review_no") or os.path.basename(path)[:-5])] = doc
-    return out
+    if out or not md:
+        return out
+    rno = _review_no_hint(md)
+    if not rno:
+        return {}
+    try:
+        import ke_ext_client as _C  # noqa: PLC0415
+        got = _C.call("ext_issue_list", {"mode": "query", "action": "list",
+                                         "review_no": rno, "view": "rows"})
+        if got.get("ok") and isinstance(got.get("rows"), list):
+            return {rno: {"review_no": rno, "rev": int(got.get("rev") or 0),
+                          "items": got["rows"]}}
+    except Exception:                                  # noqa: BLE001  04 不可达 ⇒ 当作没有台账
+        pass
+    return {}
+
 
 
 def _cells(line: str) -> list:
@@ -127,7 +160,19 @@ def _contract_of(obj: dict) -> dict:
             return {"labels": labels, "order": order, "source": "projection"}
     except Exception:                                  # noqa: BLE001
         pass
+    # 2026-10-29（用户口径）：**没有 projection 也能补块** —— 回落工具契约文件
+    # （04 的 `schema.json`，随包同版本；`source="contract_file"` 让回执可追溯）。
+    try:
+        import ke_ext_issues as _I  # noqa: PLC0415
+        sc = _I._schema()           # noqa: SLF001
+        labels = dict(sc.get("labels") or {})
+        order = list(sc.get("order") or [])
+        if labels and order:
+            return {"labels": labels, "order": order, "source": "contract_file"}
+    except Exception:                                  # noqa: BLE001
+        pass
     return {"labels": {}, "order": [], "source": "none"}
+
 
 
 def _tables(md: str) -> list:
@@ -181,7 +226,7 @@ def auto_ref_block(md: str, kb_id: str = "") -> dict:
         return {"changed": False, "md": md, "reason": "has_block"}
     if not kb_id:
         return {"changed": False, "md": md, "reason": "need_kb"}
-    ledgers = _ledgers()
+    ledgers = _ledgers(md)
     if not ledgers:
         return {"changed": False, "md": md, "reason": "no_ledger"}
     items = _report_items(md)
@@ -212,8 +257,9 @@ def auto_ref_block(md: str, kb_id: str = "") -> dict:
     for obj in _kb_objects(kb_id):
         con = _contract_of(obj)
         labels, order = con["labels"], con["order"]
-        if con["source"] != "projection" or not order:
-            continue                                 # 没有投射契约 ⇒ 不猜（先 ext_describe 订阅）
+        if not order:
+            continue                                 # 契约拿不到（projection/契约文件都没有）⇒ 不猜 ✗
+
         anchor = labels.get(order[0]) or ""
         if not anchor:
             continue

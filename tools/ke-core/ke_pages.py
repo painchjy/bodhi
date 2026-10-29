@@ -1014,8 +1014,9 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
     _spa_proj = [k for k in (patch or {}) if str(k).split(":")[-1].lower() == "projection"]
     if _spa_proj:
         return {"ok": False, "slug": slug, "page_type": page_type,
-                "error": ("`projection` 由 `ext_describe` 生成（来源 = MCP `tools/list`），不能手写："
-                          "调 `ext_describe(kb_id, object=…)` 重新订阅 ✓")}
+                "error": ("`projection` 由「**刷新契约**」生成（来源 = MCP `tools/list`），不能手写："
+                          "调面板「刷新契约」（`POST /bodhi/ext/describe`）重新订阅 ✓")}
+
     # 2026-10-25（用户口径）：绑定是**技术串**，只允许 ASCII 标点（全角/空格一律拒收 ✓）
     _spa_bind = {k: v for k, v in (patch or {}).items()
                  if str(k).split(":")[-1].lower() in

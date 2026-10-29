@@ -384,3 +384,65 @@
     rdfs:domain :Agent ;
     rdfs:range bpmn:Activity ; 
     rdfs:comment "智能体**协助**完成活动（活动下的任务由人或智能体执行，取决于任务的**实现手段**）。"@zh .
+
+# ============================================================
+# 十、数据对象 ↔ 工具绑定（**图本绑定**，2026-10-29 用户口径）
+#   口径：
+#     · 绑定 = **关系实例**（有边即绑定 ✓）；一个数据对象默认**一个**工具，
+#       确需多工具用边属性 `role` 区分（read / write）；
+#     · 工具契约（模式 / 主键 / 输入输出 / 列清单 / hash）**一律定义在工具侧**，
+#       数据对象不再记录工具的全部输入输出（`bpmn:dataObject*` 四个数据属性随之下线）；
+#     · 没有绑定的数据对象 = **软定义表格**：靠 `skos:definition` / `skos:note` 说明业务定义与结构，
+#       智能体按语义处理，**不调外部服务**；用户看到"该有表格却没面板"时去查绑定关系（预期排查路径 ✓）。
+#   工具实例的落地：由「MCP 服务页」刷新契约时，**只同步模型中已存在的工具**
+#   （`tools/list` → 更新这些工具节点的 toolSchemaHash / toolColumns …），不自动新建实例。
+# ============================================================
+
+bpmn:dataObjectBindingTool rdf:type owl:ObjectProperty ;
+    rdfs:label "绑定接口工具"@zh ;
+    rdfs:domain bpmn:DataObject ;
+    rdfs:range :Tool ;
+    rdfs:comment "数据对象通过哪个 MCP 工具读写；**有这条边即视为已绑定**。边属性可带 role（read/write）/ note。绑定决定『本系统如何操作外部工具』，不记录工具的全部输入输出。"@zh .
+
+:toolModes rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具模式"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "工具允许的调用模式：query（只读）/ maintain（维护），逗号分隔。"@zh .
+
+:toolKeyFields rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具主键字段"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "该工具的幂等/更新主键（字段名，逗号分隔）——**在工具侧统一定义**，避免不同数据对象调同一工具各写一套主键。"@zh .
+
+:toolColumns rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具列清单"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "契约的列清单（JSON：{order:[...],labels:{field:label}}），供报告补锚点与面板渲染；来源 = 服务端 tools/list。"@zh .
+
+:toolInputs rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具入参"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "工具入参契约（JSON：字段/类型/必填/枚举）。"@zh .
+
+:toolOutputs rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具出参"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "工具出参契约（JSON：字段/类型/含义）。"@zh .
+
+:toolSchemaHash rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具契约哈希"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "契约版本（`sha256:…`）——**刷新契约只更新它**（连同 toolContractAt / toolColumns），不再往页面元数据写副本。"@zh .
+
+:toolContractAt rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具契约同步时间"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "最近一次从服务端 tools/list 同步契约的时间。"@zh .
+

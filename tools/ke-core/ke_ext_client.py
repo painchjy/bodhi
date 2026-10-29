@@ -97,7 +97,43 @@ def find_tool(url: str, tool: str, timeout: float = 8.0) -> tuple:
     return None, names
 
 
-def describe(service: str, tool: str, url: str = "", timeout: float = 8.0) -> dict:
+def call(tool: str, args: dict | None = None, service: str = "it_platform",
+         url: str = "", timeout: float = 30.0) -> dict:
+    """调外部 MCP 的 `tools/call`，并把回执里的 JSON 文本解析成 dict（**不抛**）。
+
+    用途（2026-10-29）：02 的面板/报告补锚点需要**外部系统的实时数据**（台账行、rev、列集），
+    但 02 与 04 **不共享磁盘**（04 独立部署）⇒ 一律走这个调用，不再读本地文件。
+    """
+    cands = [url] if url else service_urls(service)
+    if not cands:
+        return {"ok": False, "error": "no_service_url", "service": service,
+                "hint": ("没找到服务地址：在 WeKnora `mcp_services` 建 `%s` 行，"
+                         "或设 env `BODHI_EXT_SERVICE_URLS`" % service)}
+    errs = []
+    for u in cands:
+        try:
+            out = rpc(u, "tools/call", {"name": tool, "arguments": args or {}}, timeout=timeout)
+        except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+            errs.append("%s: %r" % (u, exc))
+            continue
+        res = out.get("result") or {}
+        txt = ""
+        for c in (res.get("content") or []):
+            if isinstance(c, dict) and c.get("type") == "text":
+                txt = c.get("text") or ""
+                break
+        data = {}
+        try:
+            data = json.loads(txt) if (txt or "").strip().startswith("{") else {}
+        except Exception:  # noqa: BLE001
+            data = {"ok": False, "error": "bad_json", "raw": txt[:300]}
+        if not data:
+            data = {"ok": False, "error": "empty_result", "raw": (txt or "")[:200]}
+        data["_service_url"] = u
+        return data
+    return {"ok": False, "error": "unreachable", "service": service,
+            "tried": cands, "detail": errs[:3]}
+
     """连服务取 `x-ext` 契约 → `{ok, url, tool, contract, tools, error?}`（**不抛**）。"""
     cands = [url] if url else service_urls(service)
     if not cands:

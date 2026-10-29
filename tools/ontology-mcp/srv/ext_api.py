@@ -188,26 +188,48 @@ def list_payload(params: dict) -> dict:
                 "hint": ("面板要知道是哪一份台账：引用块缺 `review_no` 时，"
                          "请带上页面 `slug`（后端会从正文表格的「%s」行解析）"
                          % (schema_payload({"object": slug, "kb_id": kb}).get("key_label") or "主键"))}
-    out = ISSUE.maintain(kb_id=kb, object_slug=slug, mode="query", action="list",
-                         review_no=review_no, view=str(params.get("view") or "rows"),
-                         columns=params.get("columns"))
+    # 数据来源（2026-10-29）：**优先调 04**（it_platform MCP），不再读本地文件——
+    # 02 与 04 独立部署、不共享磁盘；本地文件只在 04 不可达时作兜底（同机/离线）。
+    q = {"mode": "query", "action": "list", "review_no": review_no,
+         "view": str(params.get("view") or "rows")}
+    if params.get("columns"):
+        q["columns"] = params["columns"]
+    if slug:
+        q["object"] = slug
+    out, src_kind = {}, "local_store"
+    try:
+        import ke_ext_client as _C  # noqa: PLC0415
+        got = _C.call("ext_issue_list", q)
+        if got.get("ok") or got.get("error") not in ("unreachable", "no_service_url", "empty_result"):
+            out, src_kind = got, "it_platform_mcp"
+    except Exception:  # noqa: BLE001
+        out = {}
+    if not out:
+        out = ISSUE.maintain(kb_id=kb, object_slug=slug, mode="query", action="list",
+                             review_no=review_no, view=str(params.get("view") or "rows"),
+                             columns=params.get("columns"))
+        src_kind = "local_store"
+    out["data_source"] = src_kind
     if out.get("ok"):
         out["projection"] = _projection(kb, slug) if kb else {}
         out["kb_id"] = kb
         out["review_no"] = review_no
         out["review_no_source"] = src
-        # 报告/页面可直接引用的引用块（前端渲染、后端校验都用它）
+        # 引用块：basis/tool 用回执里的 binding（04 回 `unbound` 时也照实写），不再读本地绑定
+        _b = out.get("binding") or {}
         out["ref_block"] = ("```bodhi-ext\nobject: %s\nreview_no: %s\nbasis: %s / %s\nrev: %s\n"
                             "schema_hash: %s\n%s```"
                             % (slug, review_no,
-                               ((STORE.parse_binding(STORE._attrs_of(kb, slug)) or [{}])[0]
-                                .get("impl") or "").split(":")[0] or "ext",
-                               (out.get("binding") or {}).get("tool") or "",
+                               str(_b.get("impl") or "").split(":")[0]
+                               or ((STORE.parse_binding(STORE._attrs_of(kb, slug)) or [{}])[0]
+                                   .get("impl") or "").split(":")[0] or "ext",
+                               _b.get("tool") or "",
                                out.get("rev"), (out.get("schema") or {}).get("schemaHash")
                                or ((out.get("projection") or {}).get("schemaHash") or ""),
                                ("columns: %s\n" % params.get("columns"))
                                if params.get("columns") else ""))
     return out
+
 
 
 def update_payload(body: dict) -> dict:

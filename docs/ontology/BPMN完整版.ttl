@@ -51,25 +51,30 @@
     rdfs:label "接口工具"@zh ;
     rdfs:domain :DataObject ;
     rdfs:range xsd:string ;
-    rdfs:comment "提供该业务对象的外部系统接口（**MCP 工具名**，如 ext_catalog_query）；**多个接口用英文逗号分隔**。空 = 无外部接口。"@zh .
+    bodhi:hiddenFromEditor true ;
+    rdfs:comment "提供该业务对象的外部系统接口（**MCP 工具名**，如 ext_catalog_query）；**多个接口用英文逗号分隔**。空 = 无外部接口。**2026-10-29 起：绑定改由关系 `bpmn:dataObjectBindingTool` 表达（图本），本属性只作兼容兜底、面板不再显示**。"@zh .
 
 :dataObjectAccessMode rdf:type owl:DatatypeProperty ;
     rdfs:label "访问模式"@zh ;
     rdfs:domain :DataObject ;
     rdfs:range xsd:string ;
-    rdfs:comment "每个接口允许的模式：query（只读）/ maintain（维护）；**与接口顺序对齐**，接口之间用分号分隔（如 `query,maintain｜query`）。"@zh .
+    bodhi:hiddenFromEditor true ;
+    rdfs:comment "每个接口允许的模式：query（只读）/ maintain（维护）；**与接口顺序对齐**，接口之间用分号分隔（如 `query,maintain｜query`）。**2026-10-29 起归工具侧（`agent:toolModes`）**。"@zh .
 
 :dataObjectKeyFields rdf:type owl:DatatypeProperty ;
     rdfs:label "主键字段"@zh ;
     rdfs:domain :DataObject ;
     rdfs:range xsd:string ;
-    rdfs:comment "每个接口的幂等/更新主键（字段名，逗号分隔）；接口之间用分号分隔，与接口顺序对齐。"@zh .
+    bodhi:hiddenFromEditor true ;
+    rdfs:comment "每个接口的幂等/更新主键（字段名，逗号分隔）；接口之间用分号分隔，与接口顺序对齐。**2026-10-29 起归工具侧（`agent:toolKeyFields`）**——避免不同对象调同一工具各写一套主键。"@zh .
 
 :dataObjectInterfaceRef rdf:type owl:DatatypeProperty ;
     rdfs:label "接口实现参考"@zh ;
     rdfs:domain :DataObject ;
     rdfs:range xsd:string ;
-    rdfs:comment "该接口的**参考实现**（MCP 工具代码路径，如 `tools/ke-core/ke_ext_issues.py`）；内网按此代码把存储层换成自己的库表即可。接口之间用分号分隔，与接口顺序对齐。"@zh .
+    bodhi:hiddenFromEditor true ;
+    rdfs:comment "该接口的**参考实现**（MCP 工具代码路径，如 `tools/ke-core/ke_ext_issues.py`）；内网按此代码把存储层换成自己的库表即可。接口之间用分号分隔，与接口顺序对齐。**2026-10-29 起归工具侧（`agent:toolImpl` 语义，实现不由业务对象声明）**。"@zh .
+
 
 
 # ============ 4.（业务属性 Property：**2026-10-11 用户口径先去除**）============

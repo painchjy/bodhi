@@ -334,30 +334,8 @@ TOOL_SCHEMAS = [
                 "required": ["kb_id"]},
         },
         {
-            "name": "ext_describe",
-            "description": ("**外部接口契约投射（写元数据，不写知识）**：读业务对象页的 4 个绑定属性"
-                            "（`bpmn:dataObjectInterface` / `AccessMode` / `KeyFields` / `InterfaceRef`），"
-                            "连该接口所在 MCP 服务取 `tools/list` 的 `x-ext`（列/标签/枚举/主键/模式 + `schemaHash`），"
-                            "把结果**投射**到 `page_metadata.ontology.projection`（带 `fetched_at`/`schemaHash`）"
-                            "并回 `drift`（与上次投影比是否变化）。"
-                            " ⇒ 页面/报告/前端面板都读投影，**不要再把列规范写进 `skos:note/definition`** ✓。"
-                            "服务地址来自 WeKnora `mcp_services`（可用 env `BODHI_EXT_SERVICE_URLS` 覆盖）。"
-                            "`write_projection=false` 只回契约不落库。"),
-            "inputSchema": {"type": "object", "properties": {
-                "kb_id": {"type": "string", "description": "业务对象所在库（必填）"},
-                "object": {"type": "string", "description": "业务对象页 slug（必填）"},
-                "tool": {"type": "string",
-                         "description": "指定接口名（省略 ⇒ 用该页第一个绑定）"},
-                "url": {"type": "string", "description": "直接给服务地址（省略 ⇒ 查注册表）"},
-                "write_projection": {"type": "boolean",
-                                     "description": "默认 true：把契约投射到页面元数据"},
-                "write_anchor": {"type": "boolean",
-                                 "description": ("默认 false：是否把契约卡锚点块"
-                                                 "（```bodhi-ext-contract）幂等写进页面正文")}},
-                "required": ["kb_id", "object"]},
-        },
-        {
             "name": "rules_resolve",
+
             "description": ("**按步骤解析规则（只读；= `knowledge_lookup(mode=\"rules\")` 的实现）**："
                             "`direct:<slug>[,<slug>…]` 直接指定；`policy:<策略名/slug片段>` 经策略**递归解析**"
                             "（`includesBusinessPolicy` 出边，支持策略包含策略；规则边**双向**取："

@@ -261,7 +261,17 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
     did = str(doc_id or "").strip()
     title = str(doc_title or "").strip() or did
     need_images = action == "image"
+    # C（2026-10-29）：**小 PDF 在 outline 时顺手取图**（一次解析、成本低）；
+    # 大文件仍延后到 action="image"，避免把"读正文"拖慢。
+    if not need_images and action == "outline" and raw[:5] == b"%PDF-":
+        try:
+            mb = float(os.environ.get("BODHI_PDF_AUTO_IMAGES_MB", "2") or 2)
+        except ValueError:
+            mb = 2.0
+        if mb > 0 and len(raw) <= mb * 1024 * 1024:
+            need_images = True
     sig = _sig(raw)
+
     ckey = (did, need_images)
     hit = _DOC_CACHE.get(ckey) if _cache_on() else None
     cache_hit = bool(hit and hit.get("sig") == sig)
@@ -290,6 +300,11 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
     base = {"ok": True, "tool": "ext_doc_parse", "doc_id": did, "source": meta,
             "quality": quality, "bytes": len(raw), "duration_ms": timing,
             "counts": {"sections": len(secs), "images": len(images)}}
+    if quality.get("images_skipped"):
+        base["next"] = ("本页只抽了文本（未取图）。**需要图证据请调 "
+                        "`ext_doc_parse(doc_id=…, action=\"image\")`**"
+                        "（首次解析较慢，之后命中缓存；涉及图的规则必须用图判定）")
+
 
     if action == "outline":
         return {**base, "outline": [{"path": s.get("path") or "", "title": s.get("title") or "",
