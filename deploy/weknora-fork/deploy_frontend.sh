@@ -47,13 +47,27 @@ do_switch() {
     docker restart WeKnora-frontend >/dev/null && sleep 5
   fi
   # ② 注入规则：`GET /ext-panel.js` 200 只说明**文件在**，页面要不要加载它还看 nginx 有没有
-  #    `sub_filter + location = /ext-panel.js`。老部署没挂载 `/etc/nginx/templates/` 时，上面 cp 到宿主机无效 ⇒
-  #    这里直接把模板放进**容器内** templates，再重启（entrypoint 会 envsubst 生成 default.conf）。
+  #    `sub_filter + location = /ext-panel.js`。两层兜底（2026-10-29 内网实测）：
+  #      a. 模板是 **bind-mount**（单文件）⇒ `docker cp` 会 `device or resource busy`
+  #         ⇒ 必须找到**宿主机挂载源**，用 `cat > 源文件` **原地覆盖**（不换 inode），再重启；
+  #      b. 没挂载 ⇒ 才 `docker cp` 进容器 templates。
   if [ "$(docker exec WeKnora-frontend grep -c ext-panel /etc/nginx/conf.d/default.conf 2>/dev/null || echo 0)" = "0" ]; then
-    if docker exec WeKnora-frontend test -d /etc/nginx/templates 2>/dev/null; then
+    TPL_SRC=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/nginx/templates/default.conf.template"}}{{.Source}}{{end}}{{end}}' WeKnora-frontend 2>/dev/null)
+    TPL_DIR=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/nginx/templates"}}{{.Source}}{{end}}{{end}}' WeKnora-frontend 2>/dev/null)
+    if [ -n "$TPL_SRC" ]; then
+      cp -f "$TPL_SRC" "$TPL_SRC.bak.$(date +%H%M)" 2>/dev/null
+      cat "$HERE/frontend/default.conf.template" > "$TPL_SRC" \
+        && echo "  !! nginx 未注入 → 已**原地覆盖**挂载源 $TPL_SRC（备份 .bak.*）"
+      docker restart WeKnora-frontend >/dev/null && sleep 6
+    elif [ -n "$TPL_DIR" ]; then
+      cp -f "$TPL_DIR/default.conf.template" "$TPL_DIR/default.conf.template.bak.$(date +%H%M)" 2>/dev/null
+      cat "$HERE/frontend/default.conf.template" > "$TPL_DIR/default.conf.template" \
+        && echo "  !! nginx 未注入 → 已原地覆盖目录挂载源 $TPL_DIR/default.conf.template"
+      docker restart WeKnora-frontend >/dev/null && sleep 6
+    elif docker exec WeKnora-frontend test -d /etc/nginx/templates 2>/dev/null; then
       docker cp "$HERE/frontend/default.conf.template" \
         WeKnora-frontend:/etc/nginx/templates/default.conf.template 2>/dev/null \
-        && echo "  !! nginx 未注入 → 已 docker cp 模板进容器 templates（重启后生效）"
+        && echo "  !! nginx 未注入 → 已 docker cp 模板进容器 templates（无挂载时才可行）"
       docker restart WeKnora-frontend >/dev/null && sleep 6
     else
       echo "  !! 容器没有 /etc/nginx/templates（非官方 entrypoint）⇒ 需手工在 server{} 里加："
