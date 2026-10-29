@@ -31,7 +31,25 @@ do_switch() {
   cd "$WK" || exit 1
   docker compose -f docker-compose.yml -f "$OVL" --profile neo4j up -d --no-build frontend 2>&1 | tail -6
   docker restart WeKnora-frontend >/dev/null && sleep 6 && echo "  frontend restarted（避免 nginx 缓存旧 app IP）"
+
+  # 2.5 外部接口面板脚本（2026-10-28 补）：报告里的 ```bodhi-ext 块靠它渲染成可编辑表格；
+  #     缺了前端 F12 会报 `bodhiExtPanel is not defined`、台账面板一个都不挂载。
+  #     两个条件缺一不可：① /ext-panel.js 可访问 ② nginx 在首页注入 <script src="/ext-panel.js">
+  step "2.5 外部接口面板（ext-panel.js）"
+  cp -f "$HERE/frontend/ext-panel.js" "$BODHI_DEPLOY_DIR/weknora-fork/frontend/ext-panel.js" 2>/dev/null \
+    && echo "  已同步脚本到 $BODHI_DEPLOY_DIR/weknora-fork/frontend/ext-panel.js"
+  cp -f "$HERE/frontend/default.conf.template" "$BODHI_DEPLOY_DIR/weknora-fork/frontend/default.conf.template" 2>/dev/null \
+    && echo "  已同步 nginx 模板（含 sub_filter 注入 + location = /ext-panel.js）"
+  # overlay 挂载若没生效（老部署先用 docker cp 兜底；容器重建后需重新挂载）
+  if [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' http://localhost/ext-panel.js)" != "200" ]; then
+    docker cp "$HERE/frontend/ext-panel.js" WeKnora-frontend:/usr/share/nginx/html/ext-panel.js 2>/dev/null \
+      && echo "  !! overlay 未挂载 → 已 docker cp 兜底（长期请用 docker-compose.weknora.yml 的 frontend.volumes）"
+    docker restart WeKnora-frontend >/dev/null && sleep 5
+  fi
+  echo "  GET /ext-panel.js      -> $(curl -s -o /dev/null -m 10 -w '%{http_code} %{size_download}B' http://localhost/ext-panel.js)"
+  echo "  index 注入 <script>    -> $(curl -s -m 10 http://localhost/ | grep -c 'ext-panel.js') 处（应 ≥1）"
 }
+
 
 do_check() {
   step "A. 容器里的 nginx 配置"

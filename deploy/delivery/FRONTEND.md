@@ -199,3 +199,41 @@ curl -s 'http://127.0.0.1:8765/bodhi/ontology/kb?kb_id=<kb>' | python3 -m json.t
 > 前置条件同其它 Bodhi 面板：nginx 要把 `/bodhi/` 反代到 MCP（本交付的 nginx 模板已含，见 §2/§4）。
 > 若这条反代没挂，`/bodhi/ontology/kb` 拿不到结果 → 前端退回**构建期常量**判定（客户环境会显示不出来），
 > 此时要么补上反代，要么在构建前端时注入 `ONTOLOGY_KB_ID=<你们的本体库 uuid>`（见 §3）。
+
+## 外部接口面板脚本（`ext-panel.js`，2026-10-28 补充交付说明）
+
+报告正文里的 ```` ```bodhi-ext ```` 引用块，由一个 **DOM 级脚本** 在浏览器里替换成可编辑表格
+（**不改 Vue、不重建镜像**）。它**不在 UI 镜像里**，靠两处生效，缺一不可：
+
+| # | 位置 | 作用 |
+|---|---|---|
+| ① | `docker-compose.weknora.yml` 的 `frontend.volumes`：<br>`.../weknora-fork/frontend/ext-panel.js:/usr/share/nginx/html/ext-panel.js:ro` | 让 `GET /ext-panel.js` 返回 200 |
+| ② | `default.conf.template`：<br>`sub_filter '</body>' '<script src="/ext-panel.js" defer></script></body>';`<br>`location = /ext-panel.js { ... }` | 让每个页面**自动加载**该脚本 |
+
+`deploy_frontend.sh` 的 **2.5 步**会自动同步这两份文件、overlay 未挂载时用 `docker cp` 兜底，
+并打印验收数字。**手工部署**等价命令：
+
+```bash
+# ① 脚本（持久：写进 compose 挂载；临时：docker cp）
+docker cp frontend/ext-panel.js WeKnora-frontend:/usr/share/nginx/html/ext-panel.js
+# ② 模板（bind-mount 才生效；改完必须重启前端，entrypoint 会重新 envsubst）
+cp frontend/default.conf.template $BODHI_DEPLOY_DIR/weknora-fork/frontend/
+docker restart WeKnora-frontend && sleep 6
+
+# ③ 验收（三条都要对）
+curl -s -o /dev/null -w '%{http_code} %{size_download}B\n' http://localhost/ext-panel.js   # 200 ≈24000B
+curl -s http://localhost/ | grep -c 'ext-panel.js'                                        # ≥1
+docker exec WeKnora-frontend grep -c ext-panel /etc/nginx/conf.d/default.conf             # ≥1
+```
+
+**排障对照**
+
+| 现象 | 结论 | 处置 |
+|---|---|---|
+| F12 `bodhiExtPanel is not defined` | 脚本没加载（①②任一不满足） | 按上表 ①/② 修 + 重启前端 |
+| F12 有 `[bodhi-ext] v… loaded ｜ 已挂载 0 个引用块` | 脚本在跑，但页面上没有含 `object:` 的 `<pre>` | 在该页跑 `bodhiExtPanel.diagnose()`：`preCodeBlocks=0` ⇒ 正文没渲染；`>0` 而 `refBlocks=0` ⇒ 块被渲染器改写 |
+| 报告里有 ```` ```bodhi-ext ```` 块但面板不出现 | 同上（先看 diagnose） | 把 `sample` 发研发 |
+
+> `ext-panel.js` 与 `default.conf.template` **都在 01 包的 `frontend/` 目录里**；两者内容必须同版本
+> （脚本 v4.x 与模板的 `location = /ext-panel.js` 配套）。
+
