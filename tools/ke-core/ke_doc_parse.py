@@ -24,8 +24,18 @@ import ke_ext_store as S
 
 _PDF_HELPER = r'''
 import sys, json, io, base64
+
+with_images = "--with-images" in sys.argv
+max_img_pages = 0
+for a in sys.argv:
+    if a.startswith("--max-img-pages="):
+        try:
+            max_img_pages = int(a.split("=", 1)[1] or 0)
+        except Exception:
+            max_img_pages = 0
+
 data = sys.stdin.buffer.read()
-out = {"pages": [], "images": [], "engine": "pypdf"}
+out = {"pages": [], "images": [], "engine": "pypdf", "with_images": with_images}
 try:
     from pypdf import PdfReader
 except Exception as e:
@@ -34,14 +44,18 @@ try:
     rd = PdfReader(io.BytesIO(data))
 except Exception as e:
     print(json.dumps({"error": "pdf_open_failed", "detail": repr(e)})); sys.exit(0)
+
+n = 0
 for i, pg in enumerate(rd.pages, 1):
     try:
         t = pg.extract_text() or ""
     except Exception:
         t = ""
     out["pages"].append({"no": i, "text": t})
-n = 0
-for i, pg in enumerate(rd.pages, 1):
+    if not with_images:
+        continue
+    if max_img_pages and i > max_img_pages:
+        continue
     try:
         imgs = list(getattr(pg, "images", []) or [])
     except Exception:
@@ -65,6 +79,10 @@ for i, pg in enumerate(rd.pages, 1):
 print(json.dumps(out))
 '''
 
+_HELPER_SHA = __import__("hashlib").sha256(_PDF_HELPER.encode()).hexdigest()[:12]
+_HELPER_READY: dict = {}
+
+
 
 def doc_root() -> str:
     """解析产物的落地根（bodhi-mcp 自己的目录；与 04 的 `BODHI_EXT_ROOT` **无关**）。"""
@@ -79,7 +97,7 @@ def doc_root() -> str:
 #   - 键 = doc_id；值 = {sig: (len, sha256[:16]), secs, images, quality}
 #   - 文件变了（长度或 sha 变）自动失效；`BODHI_DOC_CACHE=0` 可关；最多留 8 份。
 _DOC_CACHE: dict = {}
-_CACHE_MAX = 8
+_CACHE_MAX = 64          # 一次评审可能顺序读几十份/多节（原来 8 份会被挤掉）
 
 
 def _cache_on() -> bool:
@@ -97,20 +115,39 @@ def _docreader_container() -> str:
     return os.environ.get("WEKNORA_DOCREADER_CONTAINER") or "WeKnora-docreader"
 
 
-def _pdf_extract(raw: bytes) -> dict:
-    """借 docreader 的 pypdf 解析 PDF（脚本 + 二进制都走 stdin，**不共享磁盘** ✓）。"""
-    cname = _docreader_container()
+def _ensure_helper(cname: str) -> str:
+    """把解析脚本写进 docreader 容器（**按 sha 只写一次**；容器重启后会自动重写）。"""
     helper = "/tmp/bodhi_pdf_extract.py"
-    try:
-        subprocess.run(["docker", "exec", "-i", cname, "sh", "-c", "cat > %s" % helper],
+    if _HELPER_READY.get(cname) == _HELPER_SHA:
+        return helper
+    r = subprocess.run(["docker", "exec", "-i", cname, "sh", "-c", "cat > %s" % helper],
                        input=_PDF_HELPER.encode(), capture_output=True, timeout=20)
-        r = subprocess.run(["docker", "exec", "-i", cname, "python3", helper],
-                           input=raw, capture_output=True, timeout=120)
+    if r.returncode == 0:
+        _HELPER_READY[cname] = _HELPER_SHA
+    return helper
+
+
+def _pdf_extract(raw: bytes, with_images: bool = False) -> dict:
+    """借 docreader 的 pypdf 解析 PDF（脚本 + 二进制都走 stdin，**不共享磁盘** ✓）。
+
+    `with_images=False`（默认）只抽文本 —— pypdf 的 `pg.images` 是**主要耗时**，
+    挪到 `action="image"` 时才跑（2026-10-29：内网 3MB PDF 每次 40s → 只抽文本后降到几秒）。
+    """
+    cname = _docreader_container()
+    try:
+        helper = _ensure_helper(cname)
+        args = ["docker", "exec", "-i", cname, "python3", helper]
+        if with_images:
+            max_pages = int(os.environ.get("BODHI_PDF_MAX_IMAGE_PAGES", "20") or 0)
+            args += ["--with-images", "--max-img-pages=%d" % max_pages]
+        timeout = int(os.environ.get("BODHI_PDF_TIMEOUT", "90") or 90)
+        r = subprocess.run(args, input=raw, capture_output=True, timeout=timeout)
     except FileNotFoundError:
-        return {"error": "docker_missing",
-                "detail": "宿主机没有 docker 命令；docreader 不可达"}
+        return {"error": "docker_missing", "detail": "宿主机没有 docker 命令；docreader 不可达"}
     except subprocess.TimeoutExpired:
-        return {"error": "docreader_timeout", "detail": "docreader 超过 120s 未返回"}
+        return {"error": "pdf_parse_timeout",
+                "detail": "超过 %ss：可设 BODHI_PDF_TIMEOUT 调大，或把 PDF 拆页/转 docx"
+                          % os.environ.get("BODHI_PDF_TIMEOUT", "90")}
     if r.returncode != 0:
         return {"error": "extractor_failed",
                 "detail": (r.stderr or b"").decode("utf-8", "replace")[:300]}
@@ -119,6 +156,7 @@ def _pdf_extract(raw: bytes) -> dict:
     except json.JSONDecodeError:
         return {"error": "extractor_bad_json",
                 "detail": (r.stdout or b"")[:200].decode("utf-8", "replace")}
+
 
 
 
@@ -144,14 +182,20 @@ def fetch(doc_id: str) -> tuple:
         return b"", {"error": "ext_unreachable", "url": url, "detail": repr(exc)[:200]}
 
 
-def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str) -> tuple:
-    """按类型选解析器 → `(sections, images, quality)`。"""
+def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
+                         with_images: bool = False) -> tuple:
+    """按类型选解析器 → `(sections, images, quality)`。
+
+    `with_images=False`（默认）：PDF **只抽文本**（图证据在 `action="image"` 时才取），
+    DOCX/TXT 本来很快、照旧带图。
+    """
     ext = os.path.splitext(str(name or ""))[1].lower()
     if raw[:5] == b"%PDF-":
-        got = _pdf_extract(raw)
+        got = _pdf_extract(raw, with_images=with_images)
         if got.get("error"):
             return [], [], {"text_source": "none", "images_available": False,
                             "error": got.get("error"), "detail": got.get("detail", "")}
+
         pages = got.get("pages") or []
         text = "\n".join((p.get("text") or "").strip() for p in pages).strip()
         secs = D._sections_from_text(text, title) if text else [
@@ -171,6 +215,8 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str) -> tupl
             images.append({"name": "图片%d.%s" % (k, im.get("ext") or "png"),
                            "path": "files/" + fn, "page": im.get("page")})
         return secs, images, {"text_source": "pdf_pypdf", "pages": len(pages),
+                              "with_images": bool(with_images),
+                              "images_skipped": (not with_images),
                               "images_available": bool(images), "tables_text_only": True}
     if ext == ".docx" or raw[:2] == b"PK":
         import tempfile
@@ -214,8 +260,10 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                 "duration_ms": {"fetch": t_fetch, "parse": 0, "total": t_fetch}, **meta}
     did = str(doc_id or "").strip()
     title = str(doc_title or "").strip() or did
+    need_images = action == "image"
     sig = _sig(raw)
-    hit = _DOC_CACHE.get(did) if _cache_on() else None
+    ckey = (did, need_images)
+    hit = _DOC_CACHE.get(ckey) if _cache_on() else None
     cache_hit = bool(hit and hit.get("sig") == sig)
     if cache_hit:
         secs, images, quality = hit["secs"], hit["images"], hit["quality"]
@@ -223,14 +271,17 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
     else:
         t1 = time.time()
         secs, images, quality = _sections_and_images(raw, did, title,
-                                                     str(meta.get("content_type") or ""))
+                                                     str(meta.get("content_type") or ""),
+                                                     with_images=need_images)
         t_parse = int((time.time() - t1) * 1000)
         if _cache_on() and not quality.get("error"):
             if len(_DOC_CACHE) >= _CACHE_MAX:
                 _DOC_CACHE.pop(next(iter(_DOC_CACHE)), None)
-            _DOC_CACHE[did] = {"sig": sig, "secs": secs, "images": images, "quality": quality}
+            _DOC_CACHE[ckey] = {"sig": sig, "secs": secs, "images": images, "quality": quality}
     timing = {"fetch": t_fetch, "parse": t_parse, "total": int((time.time() - t0) * 1000),
-              "cache_hit": cache_hit}
+              "cache_hit": cache_hit, "with_images": need_images,
+              "pages": int(quality.get("pages") or 0)}
+
 
     if quality.get("error"):
         return {"ok": False, "tool": "ext_doc_parse", "doc_id": did, "error": quality["error"],

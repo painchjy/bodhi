@@ -312,13 +312,43 @@ def _objects_by_tool(kb_id: str, tool: str) -> list:
     return [x for x in out if x.get("slug")]
 
 
+def _has_kb_sources() -> bool:
+    """本进程**是否具备读绑定**的能力（有 `ke_db` 或 `ke_neo4j`）。
+
+    04（it_platform）包只带 5 个 ext 运行库（store/docs/flow/issues/catalog），
+    既没有图也没有库 ⇒ 它们**不该判断调用方是否绑定**（绑定是 02 的职责）。
+    """
+    try:
+        import ke_db  # noqa: F401,PLC0415
+        return True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import ke_neo4j  # noqa: F401,PLC0415
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def resolve_binding(tool: str, kb_id: str = "", object_slug: str = "") -> dict:
-    """→ `{ok, binding, object, candidates, why}`（**不抛**；入口据此给可读回执）。"""
+    """→ `{ok, binding, object, candidates, why}`（**不抛**；入口据此给可读回执）。
+
+    2026-10-29 用户口径（架构纠偏）：**外部服务不判断绑定** ——
+    04（无图/无库）直接放行（`source="unbound"`），按入参工作；
+    "对象是否绑定了外部服务"由 **02** 决定（02 的 `_attrs_of` 已图优先）。
+    """
     tool = str(tool or "").strip()
+    if not _has_kb_sources():
+        return {"ok": True, "source": "unbound",
+                "binding": {"tool": tool, "modes": ["query", "maintain"], "keys": [], "impl": ""},
+                "object": {"slug": str(object_slug or "").strip()},
+                "warn": ("本服务不校验绑定（无图/库能力，属外部服务职责边界）；"
+                         "绑定是否存在由 02 的 ext_describe / 报告门禁判断")}
     try:                                     # 首次使用：把种子数据补进容器根（幂等 ✓）
         bootstrap()
     except Exception:  # noqa: BLE001  种子复制失败不影响"能不能用"
         pass
+
     slug = str(object_slug or "").strip()
     # 2026-10-25：`kb_id` 可省 —— 只给 slug 也能反查；`kb_id + slug` 都给了但本库查不到绑定时
     # 会跨库兜底（智能体常传"工作库"，而绑定写在领域库 ⇒ 不能直接判 no_binding ✗）
