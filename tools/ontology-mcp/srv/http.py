@@ -197,16 +197,29 @@ class MCPHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._json({"error": str(exc)}, 400, self.CORS)
             return
-        if path in ("/bodhi/ext/update", "/bodhi/ext/describe", "/bodhi/ext/sync-report"):
-            # 面板写台账 / 刷新契约 / 快照回写（2026-10-25）：与 MCP 工具同一实现，只是换成普通 JSON 出入口
+        if path in ("/bodhi/ext/update", "/bodhi/ext/describe", "/bodhi/ext/sync-report",
+                    "/bodhi/ext/bind", "/bodhi/ext/unbind", "/bodhi/ext/mapping",
+                    "/bodhi/ext/tool/refresh", "/bodhi/ext/tool/sync"):
+            # 面板写台账 / 刷新契约 / 快照回写 / 绑定与映射（2026-10-29）
             try:
                 from srv import ext_api                     # noqa: PLC0415
                 if path.endswith("update"):
                     out = ext_api.update_payload(body)
                 elif path.endswith("sync-report"):
                     out = ext_api.sync_report_payload(body)
+                elif path.endswith("/bind"):
+                    out = ext_api.bind_payload(body)
+                elif path.endswith("/unbind"):
+                    out = ext_api.unbind_payload(body)
+                elif path.endswith("/mapping"):
+                    out = ext_api.mapping_payload(body)
+                elif path.endswith("/tool/refresh"):
+                    out = ext_api.tool_refresh_payload(body)
+                elif path.endswith("/tool/sync"):
+                    out = ext_api.tool_sync_payload(body)
                 else:
                     out = ext_api.describe_payload(body)
+
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] %s 失败：%s" % (path, exc))
                 self._json({"error": str(exc)}, 400, self.CORS)
@@ -423,14 +436,21 @@ class MCPHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse.urlparse(self.path)
         path = parsed.path.rstrip("/")
-        if path in ("/bodhi/ext/list", "/bodhi/ext/schema"):
-            # 面板读台账 / 读接口列清单（2026-10-25）：列口径与数据都来自外部服务回执；
-            # `kb_id` 可省（按 slug 反查）；`review_no` 可省（从页面上下文解析 ✓）
+        if path in ("/bodhi/ext/list", "/bodhi/ext/schema",
+                    "/bodhi/ext/binding", "/bodhi/ext/tool"):
+            # 面板读台账 / 读接口列清单 / 读绑定与工具契约（2026-10-29）
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
                 from srv import ext_api                   # noqa: PLC0415
-                out = (ext_api.schema_payload(params) if path.endswith("/schema")
-                       else ext_api.list_payload(params))
+                if path.endswith("/schema"):
+                    out = ext_api.schema_payload(params)
+                elif path.endswith("/binding"):
+                    out = ext_api.binding_payload(params)
+                elif path.endswith("/tool"):
+                    out = ext_api.tool_payload(params)
+                else:
+                    out = ext_api.list_payload(params)
+
                 self._json(out, 200 if out.get("ok") else 400, self.CORS)
             except Exception as exc:  # noqa: BLE001
                 print("[mcp] %s 失败：%s" % (path, exc))

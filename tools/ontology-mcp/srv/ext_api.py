@@ -232,6 +232,125 @@ def list_payload(params: dict) -> dict:
 
 
 
+def _tool_rows(kb_id: str) -> list:
+    """该库已建模的工具（`agent/tool/*`）→ `[{tool, slug, hash, modes, keys}]`。"""
+    try:
+        import ke_neo4j                                  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (t:BodhiInstance {kb_id:$kb}) WHERE t.slug STARTS WITH 'agent/tool/' "
+            "RETURN coalesce(t.name, last(split(t.slug,'/'))) AS tool, t.slug AS slug, "
+            "       coalesce(t.toolSchemaHash,'') AS hash, coalesce(t.toolModes,'') AS modes, "
+            "       coalesce(t.toolKeyFields,'') AS keys ORDER BY tool",
+            {"kb": kb_id}, timeout=8) or []
+    except Exception:                                    # noqa: BLE001
+        return []
+    return [{"tool": str(r.get("tool") or ""), "slug": str(r.get("slug") or ""),
+             "schema_hash": str(r.get("hash") or ""), "modes": str(r.get("modes") or ""),
+             "keys": str(r.get("keys") or "")} for r in rows]
+
+
+def binding_payload(params: dict) -> dict:
+    """`GET /bodhi/ext/binding` —— 该对象**当前绑定**（关系）+ 可绑工具候选。
+
+    用户口径（2026-10-29）：**有没有绑定只看关系实例**；面板据此显示"绑定/解绑"，
+    不再读页面元数据（`page_metadata` 那 4 个属性已下线）。
+    """
+    slug = str(params.get("object") or params.get("slug") or "").strip()
+    if not slug:
+        return {"ok": False, "error": "need_object"}
+    kb = _resolve_kb(params) or str(params.get("kb_id") or "")
+    binds = STORE.list_bindings(kb, slug)
+    tools = _tool_rows(kb) if kb else []
+    bound = {b["tool"] for b in binds}
+    return {"ok": True, "object": slug, "kb_id": kb, "bindings": binds,
+            "tools": tools,
+            "unbound_tools": [t for t in tools if t["tool"] not in bound],
+            "bound": bool(binds)}
+
+
+def bind_payload(body: dict) -> dict:
+    """`POST /bodhi/ext/bind` —— 建绑定关系（默认 `draft`，映射完成后 `confirmed`）。"""
+    slug = str(body.get("object") or body.get("slug") or "").strip()
+    kb = _resolve_kb(body) or str(body.get("kb_id") or "")
+    if not slug or not kb:
+        return {"ok": False, "error": "need_object_and_kb"}
+    return STORE.set_binding(kb, slug, str(body.get("tool") or ""),
+                             role=str(body.get("role") or "readwrite"),
+                             tool_kb=str(body.get("tool_kb") or kb),
+                             status=str(body.get("status") or "draft"))
+
+
+def unbind_payload(body: dict) -> dict:
+    """`POST /bodhi/ext/unbind` —— 删绑定关系（`tool` 省略 ⇒ 删全部）。"""
+    slug = str(body.get("object") or body.get("slug") or "").strip()
+    kb = _resolve_kb(body) or str(body.get("kb_id") or "")
+    if not slug or not kb:
+        return {"ok": False, "error": "need_object_and_kb"}
+    return STORE.delete_binding(kb, slug, str(body.get("tool") or ""))
+
+
+def mapping_payload(body: dict) -> dict:
+    """`POST /bodhi/ext/mapping` —— 写映射（业务字段 → 工具字段，领域列序为准）。"""
+    slug = str(body.get("object") or body.get("slug") or "").strip()
+    kb = _resolve_kb(body) or str(body.get("kb_id") or "")
+    if not slug or not kb:
+        return {"ok": False, "error": "need_object_and_kb"}
+    return STORE.set_mapping(kb, slug, str(body.get("tool") or ""),
+                             body.get("fields") or [],
+                             status=str(body.get("status") or "confirmed"))
+
+
+def tool_payload(params: dict) -> dict:
+    """`GET /bodhi/ext/tool` —— 工具页数据（契约快照 + 绑定它的对象）。"""
+    kb = str(params.get("kb_id") or "").strip()
+    tool = str(params.get("tool") or "").strip()
+    if not tool:
+        return {"ok": False, "error": "need_tool"}
+    rows = [t for t in _tool_rows(kb) if t["tool"] == tool] if kb else []
+    objs = []
+    try:
+        import ke_neo4j                                  # noqa: PLC0415
+        objs = ke_neo4j.query(
+            "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
+            "WHERE type(r) = $rel AND coalesce(t.name, last(split(t.slug,'/'))) = $tool "
+            "RETURN o.slug AS slug, coalesce(r.mappingStatus,'') AS st ORDER BY slug",
+            {"rel": STORE.REL_BINDING, "tool": tool}, timeout=8) or []
+    except Exception:                                    # noqa: BLE001
+        objs = []
+    return {"ok": True, "tool": tool, "kb_id": kb,
+            "modeled": bool(rows), "tool_row": rows[0] if rows else {},
+            "bound_objects": [{"slug": str(r.get("slug") or ""),
+                               "mapping_status": str(r.get("st") or "")} for r in objs]}
+
+
+def tool_refresh_payload(body: dict) -> dict:
+    """`POST /bodhi/ext/tool/refresh` —— **只刷新已建模的工具**的契约（不新建实例）。"""
+    kb = str(body.get("kb_id") or "").strip()
+    tool = str(body.get("tool") or "").strip()
+    if not kb:
+        return {"ok": False, "error": "need_kb"}
+    modeled = {t["tool"] for t in _tool_rows(kb)}
+    want = [tool] if tool else sorted(modeled)
+    unknown = [t for t in want if t and t not in modeled]
+    if tool and unknown:
+        return {"ok": False, "error": "tool_not_modeled", "tool": tool,
+                "hint": ("本库还没有该工具页 ⇒ 先在「MCP 服务页」同步工具契约"
+                         "（POST /bodhi/ext/tool/sync）再刷新")}
+    import ke_ext_tools as TOOLS                          # noqa: PLC0415
+    return TOOLS.sync(str(body.get("service") or "it_platform"), kb, tools=[t for t in want if t])
+
+
+def tool_sync_payload(body: dict) -> dict:
+    """`POST /bodhi/ext/tool/sync` —— 从 MCP 服务同步**选定工具**为 `agent:Tool` 页。"""
+    kb = str(body.get("kb_id") or "").strip()
+    if not kb:
+        return {"ok": False, "error": "need_kb"}
+    import ke_ext_tools as TOOLS                          # noqa: PLC0415
+    return TOOLS.sync(str(body.get("service") or "it_platform"), kb,
+                      tools=body.get("tools") or None,
+                      dry_run=bool(body.get("dry_run")))
+
+
 def update_payload(body: dict) -> dict:
     """改/增/删一行（写台账）。默认 `dry_run=true`（只回 diff）。"""
     slug = str(body.get("object") or "").strip()

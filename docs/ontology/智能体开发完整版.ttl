@@ -446,3 +446,10 @@ bpmn:dataObjectBindingTool rdf:type owl:ObjectProperty ;
     rdfs:range xsd:string ;
     rdfs:comment "最近一次从服务端 tools/list 同步契约的时间。"@zh .
 
+:toolName rdf:type owl:DatatypeProperty ;
+    rdfs:label "工具名"@zh ;
+    rdfs:domain :Tool ;
+    rdfs:range xsd:string ;
+    rdfs:comment "服务端 tools/list 里的工具名（本实例的标识，与 slug 末段一致）。"@zh .
+
+

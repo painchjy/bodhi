@@ -74,6 +74,14 @@
     });
   }
 
+  // 当前知识库 id（面板调接口要带 `kb_id`；URL 里两种写法都认）
+  function currentKb() {
+    var m = /knowledge-bases\/([0-9a-fA-F-]{36})/.exec(window.location.pathname || '');
+    if (m) return m[1];
+    m = /[?&]kb_id=([0-9a-fA-F-]{36})/.exec(window.location.search || '');
+    return m ? m[1] : '';
+  }
+
   function parseBlock(text) {
     var out = {};
     (text || '').split('\n').forEach(function (ln) {
@@ -427,28 +435,154 @@
                (res.fetched_at || '') + ' ｜ 只读：列/枚举只认 `tools/list`（服务端单一真源）');
     }
 
-    function resubscribe() {
-      note('', '重新订阅契约…');
-      api('/bodhi/ext/describe',
-          { object: meta.object, write_projection: true, write_anchor: true })
-        .then(function (r) {
-          if (r.ok) {
-            draw(r);
-            note('ok', '契约已更新（' + ((r.contract || {}).schemaHash || '') +
-                       '），投射已写入；页面即将刷新…');
-            setTimeout(function () { window.location.reload(); }, 900);
-          } else {
-            note('err', '订阅失败：' + (r.error || '') + (r.hint ? '\n' + r.hint : ''));
-          }
+    // ── 绑定 / 映射（2026-10-29 用户口径）────────────────────────────────────
+    //   绑定 = **图关系**（`bpmn:dataObjectBindingTool`），有边即绑定；
+    //   映射 = 业务列名/列序（以 DataObject 为准）→ 工具字段，写在边上 `fieldMap`。
+    var bindBox = document.createElement('div');
+    bindBox.className = 'bx-bind';
+    panel.appendChild(bindBox);
+
+    function renderBind(res) {
+      bindBox.textContent = '';
+      var kb = res.kb_id || currentKb();
+      var head2 = document.createElement('div');
+      head2.className = 'bx-msg';
+      head2.textContent = (res.bound
+        ? '已绑定工具：' + (res.bindings || []).map(function (b) { return b.tool; }).join(', ')
+        : '未绑定外部工具 —— 本对象按「软定义表格」处理（智能体按 definition/note 自行处理，不调外部服务）');
+      bindBox.appendChild(head2);
+
+      (res.bindings || []).forEach(function (b) {
+        var row = document.createElement('div');
+        row.style.cssText = 'margin:4px 0';
+        row.appendChild(tag('bx-tag', b.tool));
+        row.appendChild(tag('bx-tag', '映射 ' +
+          (b.status === 'confirmed' ? '已定稿' : (b.status ? b.status : '未映射'))));
+        row.appendChild(btn('解绑', 'ghost', function () {
+          api('/bodhi/ext/unbind', { object: meta.object, kb_id: kb, tool: b.tool })
+            .then(function (r) {
+              note(r.ok ? 'ok' : 'err', r.ok ? ('已解绑 ' + b.tool) : ('解绑失败：' + (r.error || '')));
+              loadBind();
+            });
+        }));
+        row.appendChild(btn('写映射…', 'ghost', function () { openMapping(b, res); }));
+        bindBox.appendChild(row);
+      });
+
+      var rest = res.unbound_tools || [];
+      if (rest.length) {
+        var sel = document.createElement('select');
+        rest.forEach(function (t) {
+          var o = document.createElement('option');
+          o.value = t.tool;
+          o.textContent = t.tool + (t.schema_hash ? '' : '（未同步契约）');
+          sel.appendChild(o);
         });
+        bindBox.appendChild(sel);
+        bindBox.appendChild(btn('绑定', '', function () {
+          api('/bodhi/ext/bind', { object: meta.object, kb_id: kb, tool: sel.value })
+            .then(function (r) {
+              note(r.ok ? 'ok' : 'err',
+                   r.ok ? ('已绑定 ' + sel.value + '（映射待定稿）') : ('绑定失败：' + (r.error || '')));
+              loadBind();
+            });
+        }));
+      } else if (!(res.bindings || []).length) {
+        bindBox.appendChild(btn('同步工具契约', 'ghost', function () {
+          api('/bodhi/ext/tool/sync', { kb_id: kb }).then(function (r) {
+            note(r.ok ? 'ok' : 'err',
+                 r.ok ? ('已同步 ' + ((r.synced || []).length) + ' 个工具页') : ('同步失败：' + (r.error || '')));
+            loadBind();
+          });
+        }));
+      }
     }
 
-    // 打开即读（write_projection=false：读不写，避免每次进页面都改库 ✓）
-    api('/bodhi/ext/describe', { object: meta.object, write_projection: false })
-      .then(function (r) {
-        if (r.ok) draw(r);
-        else note('err', '取契约失败：' + (r.error || '') + (r.hint ? '\n' + r.hint : ''));
+    function openMapping(b, res) {
+      var cols = ((res.contract || {}).columns) || [];
+      var cur = {};
+      try { cur = JSON.parse(b.field_map || '{}') || {}; } catch (e) { cur = {}; }
+      var box = document.createElement('div');
+      box.style.cssText = 'margin:6px 0;padding:6px;border:1px dashed #dcdfe6';
+      var inputs = cols.map(function (c, i) {
+        var row = document.createElement('div');
+        row.style.cssText = 'margin:2px 0';
+        row.appendChild(tag('bx-tag', c.field));
+        var inp = document.createElement('input');
+        inp.value = (((cur.items || [])[i] || {}).label) || c.label || '';
+        inp.placeholder = '业务列名（领域口径）';
+        inp.style.cssText = 'width:180px';
+        inp.dataset.field = c.field;
+        row.appendChild(inp);
+        box.appendChild(row);
+        return inp;
       });
+      box.appendChild(btn('保存映射（定稿）', '', function () {
+        var arr = inputs.map(function (inp) {
+          return { field: inp.dataset.field, label: inp.value.trim() || inp.dataset.field };
+        });
+        api('/bodhi/ext/mapping', { object: meta.object, kb_id: (res.kb_id || currentKb()),
+                                    tool: b.tool, fields: arr })
+          .then(function (r) {
+            note(r.ok ? 'ok' : 'err',
+                 r.ok ? ('映射已定稿（' + (r.columns || 0) + ' 列）') : ('保存失败：' + (r.error || '')));
+            if (r.ok) { try { box.remove(); } catch (e) { /* 忽略 */ } loadBind(); }
+          });
+      }));
+      bindBox.appendChild(box);
+    }
+
+    function loadBind() {
+      var kb = currentKb();
+      api('/bodhi/ext/binding?object=' + encodeURIComponent(meta.object) +
+          (kb ? ('&kb_id=' + encodeURIComponent(kb)) : ''))
+        .then(function (r) { if (r && r.ok) renderBind(r); });
+    }
+    if (meta.kind !== 'tool') loadBind();
+
+    function resubscribe() {
+      var kb = currentKb();
+      var isTool = (meta.kind === 'tool') || /^agent\/tool\//.test(meta.object || '');
+      note('', isTool ? '刷新契约（工具页）…' : '重新订阅契约…');
+      var req = isTool
+        ? api('/bodhi/ext/tool/refresh',
+              { kb_id: kb, tool: meta.tool || String(meta.object || '').split('/').pop() })
+        : api('/bodhi/ext/describe',
+              { object: meta.object, write_projection: true, write_anchor: true });
+      req.then(function (r) {
+        if (r.ok) {
+          draw(r);
+          note('ok', isTool
+            ? ('契约已刷新：' + ((r.synced || []).map(function (x) { return x.tool + ' ' +
+                (x.schemaHash || ''); }).join('、') || '无变化'))
+            : ('契约已更新（' + ((r.contract || {}).schemaHash || '') + '）'));
+          setTimeout(function () { window.location.reload(); }, 900);
+        } else {
+          note('err', '刷新失败：' + (r.error || '') + (r.hint ? '\n' + r.hint : ''));
+        }
+      });
+    }
+
+    // 打开即读（读不写）
+    if (meta.kind === 'tool' || /^agent\/tool\//.test(meta.object || '')) {
+      var toolName = meta.tool || String(meta.object || '').split('/').pop();
+      api('/bodhi/ext/tool?kb_id=' + encodeURIComponent(currentKb()) +
+          '&tool=' + encodeURIComponent(toolName))
+        .then(function (r) {
+          if (!r.ok) { note('err', '取工具契约失败：' + (r.error || '')); return; }
+          draw({ contract: { columns: [], schemaHash: (r.tool_row || {}).schema_hash },
+                 binding: { tool: r.tool },
+                 service: { url: (r.tool_row || {}).modes || '' } });
+          note('', '本库' + (r.modeled ? '已建模' : '未建模') + ' ｜ 绑定对象 ' +
+                   ((r.bound_objects || []).length) + ' 个');
+        });
+    } else {
+      api('/bodhi/ext/describe', { object: meta.object, write_projection: false })
+        .then(function (r) {
+          if (r.ok) draw(r);
+          else note('err', '取契约失败：' + (r.error || '') + (r.hint ? '\n' + r.hint : ''));
+        });
+    }
   }
 
   // 2026-10-25 修：**不能只靠 class** —— 多数 Markdown 渲染器对未知语言只给 `class="hljs"`，

@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import time
 import os
 import re
 import sys
@@ -239,24 +240,27 @@ def _kbs_with_slug(slug: str, exclude: str = "") -> list:
 
 
 def _attrs_of(kb_id: str, slug: str) -> dict:
-    """读绑定（**关系优先** → 图节点属性 → PG 元数据；键可带/不带前缀）。
+    """读绑定（**只认关系实例**；2026-10-29 用户口径）。
 
-    2026-10-29（用户口径 / 图本原则）：绑定 = **关系实例**
-    `(:BodhiInstance)-[:`bpmn:dataObjectBindingTool`]->(:BodhiInstance)`，
-    **有边即绑定**；工具侧的 modes / keys / impl 一律取自**工具节点**（边属性可覆盖）。
-    这样"一个对象默认一个工具、多工具用 role 区分"，也不再依赖页面元数据。
+    绑定 = `(:BodhiInstance)-[:`bpmn:dataObjectBindingTool`]->(:BodhiInstance)`，
+    **有边即绑定、无边即未绑定**。页面上的 `dataObject*` 属性（以及 PG
+    `page_metadata` 里的同名键）**不再参与判断** —— 它们只描述"本系统如何操作外部工具"
+    的业务说明，绑定关系由面板/工具写图。
+
+    逃生门：`BODHI_EXT_LEGACY_BINDING=1` 时才回落到"节点属性 → PG"（迁移期用，默认关）。
     """
     blank = {a: "" for a in BINDING_ATTRS}
-    # ① 关系（图本）
+    # ① 关系（唯一真源）—— 用 `type(r)` 比对，避免反引号/命名空间写法差异导致静默失效
     try:
         import ke_neo4j  # noqa: PLC0415
         rows = ke_neo4j.query(
-            "MATCH (o:BodhiInstance)-[r:`bpmn:dataObjectBindingTool`]->(t:BodhiInstance) "
+            "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
             "WHERE o.slug = $s AND ($kb = '' OR o.kb_id = $kb) "
+            "  AND type(r) = 'bpmn:dataObjectBindingTool' "
             "RETURN coalesce(t.name, last(split(t.slug,'/'))) AS tool, "
             "       coalesce(t.toolModes, r.modes, '') AS modes, "
             "       coalesce(t.toolKeyFields, r.keys, '') AS keys, "
-            "       coalesce(t.toolImpl, r.impl, '') AS impl "
+            "       coalesce(r.impl, '') AS impl "
             "ORDER BY t.slug",
             {"kb": kb_id, "s": slug}, timeout=8) or []
         if rows:
@@ -264,9 +268,11 @@ def _attrs_of(kb_id: str, slug: str) -> dict:
                     "dataObjectAccessMode": ";".join(str(r.get("modes") or "") for r in rows),
                     "dataObjectKeyFields": ";".join(str(r.get("keys") or "") for r in rows),
                     "dataObjectInterfaceRef": ";".join(str(r.get("impl") or "") for r in rows)}
-    except Exception:  # noqa: BLE001  图不可用 ⇒ 继续回落
-        pass
-    # ② 图节点属性（历史写法）
+    except Exception:  # noqa: BLE001  图不可用 ⇒ 视为未绑定（fail-closed）
+        return blank
+    if os.environ.get("BODHI_EXT_LEGACY_BINDING", "") not in ("1", "true", "yes"):
+        return blank
+    # ② 迁移期逃生门：图节点属性（历史写法）
     try:
         import ke_neo4j  # noqa: PLC0415
         rows = ke_neo4j.query(
@@ -286,6 +292,7 @@ def _attrs_of(kb_id: str, slug: str) -> dict:
                 return got
     except Exception:  # noqa: BLE001  图不可用 ⇒ 回 PG
         pass
+
 
     try:
         import ke_db  # noqa: PLC0415
@@ -312,7 +319,23 @@ def _objects_by_tool(kb_id: str, tool: str) -> list:
     """
     needle = str(tool or "")
     out = []
-    try:
+    try:                                     # ① 关系（图本）：哪些对象绑定了本工具
+        import ke_neo4j  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
+            "WHERE ($kb = '' OR o.kb_id = $kb) AND type(r) = 'bpmn:dataObjectBindingTool' "
+            "  AND coalesce(t.name, last(split(t.slug,'/'))) = $q "
+            "RETURN o.slug AS slug, coalesce(o.name,'') AS name, coalesce(o.kb_id,'') AS kb "
+            "ORDER BY name LIMIT 10", {"kb": kb_id or "", "q": needle}, timeout=8) or []
+        out = [{"slug": str(r.get("slug")), "name": str(r.get("name") or ""),
+                "kb_id": str(r.get("kb") or "")} for r in rows]
+    except Exception:  # noqa: BLE001
+        out = []
+    if out:
+        return [x for x in out if x.get("slug")]
+    if os.environ.get("BODHI_EXT_LEGACY_BINDING", "") not in ("1", "true", "yes"):
+        return []
+    try:                                     # 迁移期逃生门：图节点属性（历史写法）
         import ke_neo4j  # noqa: PLC0415
         rows = ke_neo4j.query(
             "MATCH (n:BodhiInstance) WHERE ($kb = '' OR n.kb_id = $kb) AND n.page_type IN $types "
@@ -323,6 +346,7 @@ def _objects_by_tool(kb_id: str, tool: str) -> list:
         out = [{"slug": str(r.get("slug")), "name": str(r.get("name") or ""),
                 "kb_id": str(r.get("kb") or "")} for r in rows]
     except Exception:  # noqa: BLE001  图不可用 ⇒ 回 PG
+
         try:
             import ke_db  # noqa: PLC0415
             where_kb = (" AND knowledge_base_id = %s" % ke_db.sql_str(kb_id)) if kb_id else ""
@@ -337,6 +361,112 @@ def _objects_by_tool(kb_id: str, tool: str) -> list:
         except Exception:  # noqa: BLE001
             out = []
     return [x for x in out if x.get("slug")]
+
+
+REL_BINDING = "bpmn:dataObjectBindingTool"
+
+
+def list_bindings(kb_id: str, object_slug: str) -> list:
+    """该对象当前绑定的工具（关系实例）→ `[{tool, slug, role, status, field_map, modes, keys}]`。"""
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
+            "WHERE o.slug = $s AND ($kb = '' OR o.kb_id = $kb) AND type(r) = $rel "
+            "RETURN coalesce(t.name, last(split(t.slug,'/'))) AS tool, t.slug AS slug, "
+            "       coalesce(r.role,'') AS role, coalesce(r.mappingStatus,'') AS status, "
+            "       coalesce(r.fieldMap,'') AS fmap, coalesce(t.toolModes,'') AS modes, "
+            "       coalesce(t.toolKeyFields,'') AS keys "
+            "ORDER BY tool", {"s": object_slug, "kb": kb_id or "", "rel": REL_BINDING},
+            timeout=8) or []
+    except Exception:  # noqa: BLE001
+        return []
+    return [{"tool": str(r.get("tool") or ""), "slug": str(r.get("slug") or ""),
+             "role": str(r.get("role") or ""), "status": str(r.get("status") or ""),
+             "field_map": str(r.get("fmap") or ""), "modes": str(r.get("modes") or ""),
+             "keys": str(r.get("keys") or "")} for r in rows]
+
+
+def set_binding(kb_id: str, object_slug: str, tool: str, role: str = "readwrite",
+                tool_kb: str = "", field_map: dict | None = None,
+                status: str = "draft") -> dict:
+    """建/改**绑定关系**（有边即绑定）。工具节点不存在则按 slug 建一个占位（name 取末段）。
+
+    用户口径（2026-10-29）：绑定**只能由面板/工具写关系**，不再写页面元数据；
+    `fieldMap`（业务词→工具字段）记在**边**上，`mappingStatus=draft|confirmed`。
+    """
+    tool = str(tool or "").strip()
+    if not tool:
+        return {"ok": False, "error": "need_tool"}
+    slug = "agent/tool/%s" % tool
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        ke_neo4j.query(
+            "MERGE (t:BodhiInstance {kb_id:$tkb, slug:$tslug}) "
+            "ON CREATE SET t.page_type='agent:Tool', t.module='agent', t.name=$tool "
+            "WITH t "
+            "MATCH (o:BodhiInstance {kb_id:$kb, slug:$obj}) "
+            "MERGE (o)-[r:`bpmn:dataObjectBindingTool`]->(t) "
+            "SET r.role=$role, r.mappingStatus=$st, "
+            "    r.mappedAt=toString(datetime()) "
+            + (" , r.fieldMap=$fm" if field_map is not None else ""),
+            {"kb": kb_id, "obj": object_slug, "tkb": tool_kb or kb_id,
+             "tslug": slug, "tool": tool, "role": role or "readwrite",
+             "st": status or "draft",
+             "fm": json.dumps(field_map or {}, ensure_ascii=False)}, timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": "graph_write_failed", "detail": repr(exc)[:200]}
+    return {"ok": True, "object": object_slug, "tool": tool, "tool_slug": slug,
+            "role": role, "mapping_status": status}
+
+
+def delete_binding(kb_id: str, object_slug: str, tool: str = "") -> dict:
+    """删绑定关系（`tool` 省略 ⇒ 删该对象的**全部**绑定）。"""
+    tool = str(tool or "").strip()
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (o:BodhiInstance {kb_id:$kb, slug:$obj})-[r]->(t:BodhiInstance) "
+            "WHERE type(r) = $rel "
+            "  AND ($tool = '' OR coalesce(t.name, last(split(t.slug,'/'))) = $tool) "
+            "WITH r, coalesce(t.name, last(split(t.slug,'/'))) AS tool "
+            "DELETE r RETURN collect(tool) AS removed",
+            {"kb": kb_id, "obj": object_slug, "rel": REL_BINDING, "tool": tool},
+            timeout=10) or []
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": "graph_write_failed", "detail": repr(exc)[:200]}
+    removed = (rows[0].get("removed") if rows else []) or []
+    return {"ok": True, "object": object_slug, "removed": removed}
+
+
+def set_mapping(kb_id: str, object_slug: str, tool: str, fields: list,
+                status: str = "confirmed") -> dict:
+    """写**映射**（业务字段 → 工具字段，含顺序）：`fields=[{field,label,business,note}]`。
+
+    用户口径：领域内列名/列序**以 DataObject 为准**；即使与工具完全一致也要显式映射一次，
+    便于"语义转换"留痕（以后不一致时直接改这一处）。
+    """
+    tool = str(tool or "").strip()
+    rows = list_bindings(kb_id, object_slug)
+    hit = [r for r in rows if r["tool"] == tool]
+    if not hit:
+        return {"ok": False, "error": "no_binding",
+                "hint": "先绑定工具（POST /bodhi/ext/bind）再写映射"}
+    fmap = {"order": [f.get("field") for f in fields if f.get("field")],
+            "items": fields, "updatedAt": time.strftime("%Y-%m-%d %H:%M:%S")}
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        ke_neo4j.query(
+            "MATCH (o:BodhiInstance {kb_id:$kb, slug:$obj})-[r]->(t:BodhiInstance) "
+            "WHERE type(r) = $rel AND coalesce(t.name, last(split(t.slug,'/'))) = $tool "
+            "SET r.fieldMap=$fm, r.mappingStatus=$st",
+            {"kb": kb_id, "obj": object_slug, "rel": REL_BINDING, "tool": tool,
+             "fm": json.dumps(fmap, ensure_ascii=False), "st": status or "confirmed"},
+            timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": "graph_write_failed", "detail": repr(exc)[:200]}
+    return {"ok": True, "object": object_slug, "tool": tool,
+            "mapping_status": status, "columns": len(fmap["order"])}
 
 
 def _has_kb_sources() -> bool:
