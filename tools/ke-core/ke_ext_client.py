@@ -134,6 +134,8 @@ def call(tool: str, args: dict | None = None, service: str = "it_platform",
     return {"ok": False, "error": "unreachable", "service": service,
             "tried": cands, "detail": errs[:3]}
 
+
+def describe(service: str, tool: str, url: str = "", timeout: float = 8.0) -> dict:
     """连服务取 `x-ext` 契约 → `{ok, url, tool, contract, tools, error?}`（**不抛**）。"""
     cands = [url] if url else service_urls(service)
     if not cands:

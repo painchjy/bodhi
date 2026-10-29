@@ -239,8 +239,34 @@ def _kbs_with_slug(slug: str, exclude: str = "") -> list:
 
 
 def _attrs_of(kb_id: str, slug: str) -> dict:
-    """读 4 个绑定属性（图节点属性优先，回退 PG 元数据；键可带/不带前缀）。"""
+    """读绑定（**关系优先** → 图节点属性 → PG 元数据；键可带/不带前缀）。
+
+    2026-10-29（用户口径 / 图本原则）：绑定 = **关系实例**
+    `(:BodhiInstance)-[:`bpmn:dataObjectBindingTool`]->(:BodhiInstance)`，
+    **有边即绑定**；工具侧的 modes / keys / impl 一律取自**工具节点**（边属性可覆盖）。
+    这样"一个对象默认一个工具、多工具用 role 区分"，也不再依赖页面元数据。
+    """
     blank = {a: "" for a in BINDING_ATTRS}
+    # ① 关系（图本）
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (o:BodhiInstance)-[r:`bpmn:dataObjectBindingTool`]->(t:BodhiInstance) "
+            "WHERE o.slug = $s AND ($kb = '' OR o.kb_id = $kb) "
+            "RETURN coalesce(t.name, last(split(t.slug,'/'))) AS tool, "
+            "       coalesce(t.toolModes, r.modes, '') AS modes, "
+            "       coalesce(t.toolKeyFields, r.keys, '') AS keys, "
+            "       coalesce(t.toolImpl, r.impl, '') AS impl "
+            "ORDER BY t.slug",
+            {"kb": kb_id, "s": slug}, timeout=8) or []
+        if rows:
+            return {"dataObjectInterface": ",".join(str(r.get("tool") or "") for r in rows),
+                    "dataObjectAccessMode": ";".join(str(r.get("modes") or "") for r in rows),
+                    "dataObjectKeyFields": ";".join(str(r.get("keys") or "") for r in rows),
+                    "dataObjectInterfaceRef": ";".join(str(r.get("impl") or "") for r in rows)}
+    except Exception:  # noqa: BLE001  图不可用 ⇒ 继续回落
+        pass
+    # ② 图节点属性（历史写法）
     try:
         import ke_neo4j  # noqa: PLC0415
         rows = ke_neo4j.query(
@@ -260,6 +286,7 @@ def _attrs_of(kb_id: str, slug: str) -> dict:
                 return got
     except Exception:  # noqa: BLE001  图不可用 ⇒ 回 PG
         pass
+
     try:
         import ke_db  # noqa: PLC0415
         sel = ", ".join(
