@@ -43,12 +43,31 @@ do_switch() {
   # overlay 挂载若没生效（老部署先用 docker cp 兜底；容器重建后需重新挂载）
   if [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' http://localhost/ext-panel.js)" != "200" ]; then
     docker cp "$HERE/frontend/ext-panel.js" WeKnora-frontend:/usr/share/nginx/html/ext-panel.js 2>/dev/null \
-      && echo "  !! overlay 未挂载 → 已 docker cp 兜底（长期请用 docker-compose.weknora.yml 的 frontend.volumes）"
+      && echo "  !! overlay 未挂载 → 已 docker cp 脚本兜底（长期请用 docker-compose.weknora.yml 的 frontend.volumes）"
     docker restart WeKnora-frontend >/dev/null && sleep 5
+  fi
+  # ② 注入规则：`GET /ext-panel.js` 200 只说明**文件在**，页面要不要加载它还看 nginx 有没有
+  #    `sub_filter + location = /ext-panel.js`。老部署没挂载 `/etc/nginx/templates/` 时，上面 cp 到宿主机无效 ⇒
+  #    这里直接把模板放进**容器内** templates，再重启（entrypoint 会 envsubst 生成 default.conf）。
+  if [ "$(docker exec WeKnora-frontend grep -c ext-panel /etc/nginx/conf.d/default.conf 2>/dev/null || echo 0)" = "0" ]; then
+    if docker exec WeKnora-frontend test -d /etc/nginx/templates 2>/dev/null; then
+      docker cp "$HERE/frontend/default.conf.template" \
+        WeKnora-frontend:/etc/nginx/templates/default.conf.template 2>/dev/null \
+        && echo "  !! nginx 未注入 → 已 docker cp 模板进容器 templates（重启后生效）"
+      docker restart WeKnora-frontend >/dev/null && sleep 6
+    else
+      echo "  !! 容器没有 /etc/nginx/templates（非官方 entrypoint）⇒ 需手工在 server{} 里加："
+      echo "     sub_filter '</body>' '<script src=\"/ext-panel.js\" defer></script></body>';"
+      echo "     sub_filter_once on;  sub_filter_types text/html;"
+      echo "     location = /ext-panel.js { root /usr/share/nginx/html; }"
+      echo "     然后 docker exec WeKnora-frontend nginx -s reload"
+    fi
   fi
   echo "  GET /ext-panel.js      -> $(curl -s -o /dev/null -m 10 -w '%{http_code} %{size_download}B' http://localhost/ext-panel.js)"
   echo "  index 注入 <script>    -> $(curl -s -m 10 http://localhost/ | grep -c 'ext-panel.js') 处（应 ≥1）"
+  echo "  nginx 配置注入         -> $(docker exec WeKnora-frontend grep -c ext-panel /etc/nginx/conf.d/default.conf 2>/dev/null || echo 0) 处（应 ≥1）"
 }
+
 
 
 do_check() {
