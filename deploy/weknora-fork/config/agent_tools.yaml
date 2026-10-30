@@ -42,6 +42,8 @@ agents:
     mcp_service_names:
       - bodhi_ontology
       - it_platform
+    # 2026-10-30 用户口径：建模智能体的**工作库 = 所有领域库（含企业知识管理领域自己）**
+    all_domain_kbs: true
 
   - id: ""
     name: 技术方案评审智能体（测试）
@@ -52,3 +54,7 @@ agents:
     mcp_service_names:
       - bodhi_ontology
       - it_platform
+    # P3：测试领域库 + 测试工作库（先建库，再把名字写这里）
+    knowledge_base_names:
+      - 技术方案评审领域模型（测试）
+      - 技术方案评审任务知识库（测试）

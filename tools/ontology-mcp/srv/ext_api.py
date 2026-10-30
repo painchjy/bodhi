@@ -221,6 +221,36 @@ def list_payload(params: dict) -> dict:
         out["kb_id"] = kb
         out["review_no"] = review_no
         out["review_no_source"] = src
+        # ── 映射（2026-10-30）：**展示走业务口径**（列名/列序/枚举），`schema` 保持工具口径 ──
+        try:
+            import ke_ext_map as MAP  # noqa: PLC0415
+            binds = STORE.list_bindings(kb, slug) if kb else []
+            fmap = binds[0].get("field_map") if binds else ""
+            m = MAP.parse(fmap)
+            if m["has"]:
+                pairs = MAP.business_columns(fmap, (out.get("schema") or {}).get("order") or [])
+                out["display"] = {
+                    "labels": {f: (lb or f) for f, lb in pairs},
+                    "order": [f for f, _lb in pairs],
+                    "enums": m["enums"],
+                    "mapping_status": binds[0].get("status") or "",
+                    "source": "binding.fieldMap",
+                }
+                if str(params.get("view") or "rows") == "table":
+                    md2, unmapped = MAP.render_table(
+                        out.get("rows") or [], out.get("schema") or {}, fmap,
+                        params.get("columns"))
+                    if md2:
+                        out["markdown"] = md2
+                    if unmapped:
+                        out.setdefault("warnings", []).append(
+                            "unmapped_enum: %s" % "、".join(unmapped[:5]))
+            else:
+                out["display"] = {"mapping_status": (binds[0].get("status") if binds else ""),
+                                  "source": "none",
+                                  "note": "该对象未写映射 ⇒ 按工具口径展示（列名/枚举取契约）"}
+        except Exception as exc:  # noqa: BLE001  映射失败不影响读台账
+            out.setdefault("warnings", []).append("mapping_failed: %r" % (str(exc)[:120],))
         # 引用块：basis/tool 用回执里的 binding（04 回 `unbound` 时也照实写），不再读本地绑定
         _b = out.get("binding") or {}
         out["ref_block"] = ("```bodhi-ext\nobject: %s\nreview_no: %s\nbasis: %s / %s\nrev: %s\n"

@@ -83,7 +83,28 @@ def test_config_has_no_drift(cfg):
         assert name in out, "回执里缺智能体：%s" % name
 
 
-def test_modeling_prompt_markers(cfg):
+def test_modeling_agent_binds_all_domain_kbs(cfg):
+    """建模智能体：工作库 = **所有领域库（含企业知识管理领域自己）**。"""
+    aid = cfg._find_by_name("企业知识管理建模智能体")
+    assert aid
+    cur = cfg._current(aid)
+    names = {str(r["name"]) for r in cfg.ke_db.psql_csv(
+        "SELECT name FROM knowledge_bases WHERE id IN (%s)"
+        % ", ".join(cfg.ke_db.sql_str(x) for x in (cur.get("kbs") or [])))}
+    assert "企业知识管理领域" in names, "建模智能体没绑自己的领域库：%r" % names
+    assert len(names) >= 3, "领域库数量过少：%r" % names
+
+
+def test_test_agent_binds_test_kbs(cfg):
+    """测试评审智能体：只绑**测试领域库 + 测试工作库**（不污染生产库）。"""
+    aid = cfg._find_by_name("技术方案评审智能体（测试）")
+    assert aid
+    cur = cfg._current(aid)
+    names = {str(r["name"]) for r in cfg.ke_db.psql_csv(
+        "SELECT name FROM knowledge_bases WHERE id IN (%s)"
+        % ", ".join(cfg.ke_db.sql_str(x) for x in (cur.get("kbs") or [])))}
+    assert names == {"技术方案评审领域模型（测试）", "技术方案评审任务知识库（测试）"}, names
+
     """建模智能体提示词必须写明：以任务页为步骤 / 不把技能当流程 / 绑定=图关系。"""
     aid = cfg._find_by_name("企业知识管理建模智能体")
     assert aid

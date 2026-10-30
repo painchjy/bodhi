@@ -59,17 +59,18 @@ def _prompt_text(path: str) -> str:
 def _current(agent_id: str) -> dict:
     rows = ke_db.psql_csv(
         "SELECT config->>'system_prompt' AS prompt, config->'allowed_tools' AS tools, "
-        "       config->'mcp_services' AS svcs "
+        "       config->'mcp_services' AS svcs, config->'knowledge_bases' AS kbs "
         "  FROM custom_agents WHERE id = %s" % ke_db.sql_str(agent_id))
     if not rows:
         return {}
     r = rows[0]
-    for k in ("tools", "svcs"):
+    for k in ("tools", "svcs", "kbs"):
         try:
             r[k] = json.loads(r[k] or "[]")
         except Exception:  # noqa: BLE001
             r[k] = []
     return r
+
 
 
 def _find_by_name(name: str) -> str:
@@ -123,6 +124,34 @@ def _resolve_svcs(agent: dict) -> list:
     return out
 
 
+def _resolve_kbs(agent: dict) -> list:
+    """知识库绑定：`knowledge_base_names` 按名解析；`all_domain_kbs: true` ⇒ 所有领域库。
+
+    用户口径（2026-10-30）：**建模智能体**的工作库 = **所有领域库（含企业知识管理领域自己）**；
+    其"方法层领域库"仍是企业知识管理领域。`knowledge_bases` 直接给 id 时原样保留。
+    """
+    ids = [str(x) for x in (agent.get("knowledge_bases") or [])]
+    names = [str(x) for x in (agent.get("knowledge_base_names") or []) if str(x).strip()]
+    if agent.get("all_domain_kbs"):
+        rows = ke_db.psql_csv(
+            "SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL "
+            "AND name LIKE %s AND name NOT LIKE %s ORDER BY name"
+            % (ke_db.sql_str("%领域%"), ke_db.sql_str("\\_test\\_%")))
+        got = [str(r["id"]) for r in rows if r.get("id")]
+        print("   领域库（%d）：%s" % (len(got), "、".join(str(r["name"]) for r in rows)))
+        ids = got + [i for i in ids if i not in got]
+    if names:
+        rows = ke_db.psql_csv(
+            "SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL AND name IN (%s)"
+            % ", ".join(ke_db.sql_str(n) for n in names))
+        got = {str(r.get("name")): str(r.get("id")) for r in rows}
+        ids += [got[n] for n in names if n in got and got[n] not in ids]
+        missing = [n for n in names if n not in got]
+        if missing:
+            print("   ⚠ knowledge_base_names 未找到：%s" % "、".join(missing))
+    return ids
+
+
 def _want_tools(agent: dict):
     """**内置工具**清单（`allowed_tools` 的语义，2026-10-27 修正）。
 
@@ -145,6 +174,10 @@ def _diff(agent: dict, cur: dict) -> dict:
     want_prompt = _prompt_text(os.path.join(CONF, agent.get("prompt_file") or ""))
     have_prompt = (cur.get("prompt") or "").strip()
     want_svcs = _resolve_svcs(agent)
+    managed_kbs = bool(agent.get("knowledge_bases") or agent.get("knowledge_base_names")
+                       or agent.get("all_domain_kbs"))
+    want_kbs = _resolve_kbs(agent) if managed_kbs else []
+    kbs = list(cur.get("kbs") or [])
     svcs = list(cur.get("svcs") or [])
     return {
         "tools": {"add": sorted(set(want_tools) - set(have_tools)),
@@ -157,8 +190,12 @@ def _diff(agent: dict, cur: dict) -> dict:
                    "chars_from": len(have_prompt), "chars_to": len(want_prompt)},
         "svcs": {"changed": bool(want_svcs) and sorted(want_svcs) != sorted(svcs),
                  "n_from": len(svcs), "n_to": len(want_svcs or svcs)},
-        "_want": {"tools": want_list, "prompt": want_prompt, "svcs": want_svcs},
+        "kbs": {"changed": managed_kbs and sorted(want_kbs) != sorted(kbs),
+                "n_from": len(kbs), "n_to": len(want_kbs or kbs), "managed": managed_kbs},
+        "_want": {"tools": want_list, "prompt": want_prompt, "svcs": want_svcs,
+                  "kbs": want_kbs if managed_kbs else None},
     }
+
 
 
 def _apply(agent_id: str, want: dict) -> str:
@@ -182,7 +219,11 @@ def _nest(want: dict) -> str:
     if want.get("svcs"):
         expr = ("jsonb_set(%s, '{mcp_services}', %s::jsonb, true)"
                 % (expr, ke_db.sql_str(json.dumps(want["svcs"], ensure_ascii=False))))
+    if want.get("kbs") is not None:
+        expr = ("jsonb_set(%s, '{knowledge_bases}', %s::jsonb, true)"
+                % (expr, ke_db.sql_str(json.dumps(want["kbs"], ensure_ascii=False))))
     return expr
+
 
 
 def main() -> int:
@@ -241,7 +282,14 @@ def main() -> int:
               % (d["svcs"]["n_from"], d["svcs"]["n_to"],
                  ("有变化" if d["svcs"]["changed"] else "一致")
                  if _resolve_svcs(a) else "保持 UI 现值（本文件未指定）"))
-        if not (d["tools"]["changed"] or d["prompt"]["changed"] or d["svcs"]["changed"]):
+        if d["kbs"]["managed"]:
+            print("   知识库：%d → %d  %s"
+                  % (d["kbs"]["n_from"], d["kbs"]["n_to"],
+                     "有变化" if d["kbs"]["changed"] else "一致"))
+        else:
+            print("   知识库：保持 UI 现值（本文件未指定）")
+        if not (d["tools"]["changed"] or d["prompt"]["changed"] or d["svcs"]["changed"]
+                or d["kbs"]["changed"]):
             print("   ✓ 无漂移")
             continue
         drift += 1
@@ -254,9 +302,12 @@ def main() -> int:
                     or (d["_want"]["tools"] is not None
                         and sorted(cur2.get("tools") or []) == sorted(d["_want"]["tools"])))
         ok = tools_ok and (cur2.get("prompt") or "").strip() == d["_want"]["prompt"]
-        print("   %s 已写入并复核（工具 %d 个 / 提示词 %d 字）"
+        if d["kbs"]["managed"]:
+            ok = ok and sorted(cur2.get("kbs") or []) == sorted(d["_want"]["kbs"] or [])
+        print("   %s 已写入并复核（工具 %d 个 / 提示词 %d 字 / 库 %d 个）"
               % ("✓" if ok else "✗", len(cur2.get("tools") or []),
-                 len((cur2.get("prompt") or "").strip())))
+                 len((cur2.get("prompt") or "").strip()), len(cur2.get("kbs") or [])))
+
         if not ok:
             bad += 1
     return 1 if (bad or (drift and not args.apply)) else 0
