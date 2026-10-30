@@ -17,8 +17,7 @@ import ke_neo4j
 import ke_pages
 
 _PROP = {"name": "toolName", "service": "toolService", "modes": "toolModes",
-         "keys": "toolKeyFields", "cols": "toolColumns", "schema": "toolSchemaHash",
-         "at": "toolContractAt", "impl": "toolImpl"}
+         "keys": "toolKeyFields", "schema": "toolSchemaHash"}
 
 
 BLOCK = "```bodhi-ext-contract"
@@ -139,9 +138,8 @@ def _attrs(tool: str, service: str, con: dict, at: str, impl: str) -> dict:
     return {"agent:" + _PROP["name"]: tool,
             "agent:" + _PROP["modes"]: ",".join(con.get("modes") or []),
             "agent:" + _PROP["keys"]: ",".join(_keys_of(con)),
-            "agent:" + _PROP["cols"]: json.dumps(cols, ensure_ascii=False),
-            "agent:" + _PROP["schema"]: con.get("schemaHash") or "",
-            "agent:" + _PROP["at"]: at}
+            "agent:" + _PROP["schema"]: con.get("schemaHash") or ""}
+
 
 
 
@@ -225,14 +223,14 @@ def sync(service: str, kb_id: str, tools: list | None = None, dry_run: bool = Fa
             "              s.endpoint=$url "
             "WITH s "
             "MERGE (t:BodhiInstance {kb_id:$kb, slug:$slug}) "
-            "SET t.page_type='agent:Tool', t.module='agent', t.name=$tool, "
+            "SET t.page_type='agent:Tool', t.module='agent', t.toolName=$tool, t.name=$tool, "
             "    t.toolModes=$modes, t.toolKeyFields=$keys, "
-            "    t.toolColumns=$cols, t.toolSchemaHash=$hash, t.toolContractAt=$at "
+            "    t.toolSchemaHash=$hash "
             "MERGE (t)-[:`agent:toolProvidedByMcp`]->(s)",
             {"kb": kb_id, "slug": slug, "tool": tool, "svc": service, "svc_slug": svc_slug,
              "url": url, "modes": attrs["agent:toolModes"], "keys": attrs["agent:toolKeyFields"],
-             "cols": attrs["agent:toolColumns"], "hash": con.get("schemaHash") or "",
-             "at": at})
+             "hash": con.get("schemaHash") or ""})
+
 
         done.append({"tool": tool, "slug": slug, "version": ver,
                      "schemaHash": con.get("schemaHash"),
