@@ -437,6 +437,19 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                             skip_folders=defer_maintenance, skip_crud=defer_maintenance)
     summary["stage"] = "graph"
     summary["pending_confirmation"] = blocked
+    # 2026-10-30（用户实测）：**业务对象 / 工具页一落库就补契约块** ——
+    # 否则面板不出现 ⇒ 绑定/刷新契约都没入口（不靠新增工具，走写库主路径）。
+    if mode == "apply":
+        try:
+            import ke_ext_tools as _ET  # noqa: PLC0415
+            _blk = []
+            for _e in (summary.get("created") or []) + (summary.get("merged") or []):
+                _s = _e.get("slug") or _e.get("into")
+                if _s:
+                    _blk.append(_ET.ensure_contract_block(kb_id, _s))
+            summary["panel_blocks"] = [b for b in _blk if isinstance(b, dict) and b.get("changed")]
+        except Exception as exc:  # noqa: BLE001
+            summary["panel_blocks_error"] = str(exc)[:160]
     summary["context"] = ctx["id"]
     summary["maintenance"] = ("deferred" if defer_maintenance else "inline")
     # P0-b（2026-10-09）：**把关系真正写进图** —— 旧实现只把关系渲染进页面正文、不写图，

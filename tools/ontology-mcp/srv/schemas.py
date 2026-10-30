@@ -170,9 +170,9 @@ TOOL_SCHEMAS = [
                                         "**取不到会话身份 → 拒绝写库**（回执 `need_session=true` + `reason`）——"
                                         "会话编号不由你编造，必须是运行时给你的编号（或写在会话页属性 `bmm:sessionNo`）。")},
                     "context": {"type": "string",
-                                "enum": ["domain_modeling", "ea_overview_design", "service_detailed_design"],
-                                "description": ("本技能上下文：决定文案（缺 source_text 时写哪句、报告页标题/分类）。"
-                                                "不传时按旧口径（概要设计）渲染")},
+                                "description": ("本技能上下文（**可选，自由字符串**）：如 `domain_modeling` / "
+                                                "`rule_engineering` / `process_modeling`；未登记的值按默认文案渲染"
+                                                "（**不再做枚举校验** ✗ 旧的 ea_* 枚举已下线）。")},
                     "stage": {"type": "string", "enum": ["report", "graph"],
                               "description": "report=先落报告页（返回 slug）；graph=再落细分节点与关系"},
                     "relations_only": {

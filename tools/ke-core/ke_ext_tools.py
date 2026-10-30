@@ -43,6 +43,12 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
             return {"ok": False, "error": "page_not_found"}
         row = rows[0]
         md = row.get("c") or ""
+        _pt = str(row.get("page_type") or "")
+        # 2026-10-30（用户实测死锁）：**未绑定也要有块** —— 否则面板不出现 ⇒ 永远绑不上。
+        # 工具页（agent:Tool）同样要有块，UI 才能"刷新契约"。
+        _kind = "tool" if _pt == "agent:Tool" else "contract"
+        if _kind == "tool" and not tool:
+            tool = object_slug.rsplit("/", 1)[-1]
         binds = _S.list_bindings(kb_id, object_slug)
         b = binds[0] if binds else {}
         tool = tool or b.get("tool") or ""
@@ -58,7 +64,7 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
             svc = str((got[0] or {}).get("svc") or "") if got else ""
         except Exception:  # noqa: BLE001
             svc = ""
-        block = "\n".join([BLOCK, "kind: contract", "object: %s" % object_slug,
+        block = "\n".join([BLOCK, "kind: %s" % _kind, "object: %s" % object_slug,
                            "tool: %s" % tool, "service: %s" % svc,
                            "mapping_status: %s" % (b.get("status") or ""),
                            "```", ""])

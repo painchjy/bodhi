@@ -571,8 +571,8 @@ def resolve_binding(tool: str, kb_id: str = "", object_slug: str = "") -> dict:
     if not binds:
         return {"ok": False, "why": "no_binding", "object": {"slug": slug},
                 "searched_kbs": searched[:5], "candidates": [],
-                "hint": ("该页没有声明接口（`bpmn:dataObjectInterface` 为空）；"
-                         "多个接口用逗号分隔，模式/主键用分号按序对齐")}
+                "hint": ("该对象**尚未绑定外部工具**（软定义表格，属合规状态）："
+                         "在对象页面板点「绑定」选工具；绑定后才调外部服务。")}
     hit = [b for b in binds if b.get("tool") == tool]
     if not hit:
         return {"ok": False, "why": "tool_mismatch", "object": {"slug": slug},

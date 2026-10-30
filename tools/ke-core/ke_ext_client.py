@@ -46,6 +46,15 @@ def service_urls(name: str) -> list:
                 "AND name = %s ORDER BY updated_at DESC LIMIT 1" % ke_db.sql_str(name))
             if rows and rows[0].get("url"):
                 out.append(rows[0]["url"])
+            if not out:                      # 2026-10-30：名称不一致（如「IT工作平台」）⇒ 按 URL 兜底
+                rows = ke_db.psql_csv(
+                    "SELECT name, url FROM mcp_services WHERE deleted_at IS NULL AND enabled "
+                    "AND url LIKE %s ORDER BY updated_at DESC LIMIT 3"
+                    % ke_db.sql_str("%/mcp"))
+                for r in rows or []:
+                    u = str(r.get("url") or "")
+                    if u and (u not in out):
+                        out.append(u)
         except Exception:                # noqa: BLE001  没有库也能用 env 兜底
             pass
     alt = [u.replace("host.docker.internal", "127.0.0.1") for u in out]
