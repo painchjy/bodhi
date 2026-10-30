@@ -440,6 +440,44 @@ def mapping_candidates_payload(params: dict) -> dict:
             "hint": "确认后 POST /bodhi/ext/mapping 一次性写入（可一键全接受）"}
 
 
+def mapping_stale_payload(params: dict) -> dict:
+    """`GET /bodhi/ext/mapping/stale` —— 列出「工具契约已变但对象未重映射」的绑定（2026-10-30）。"""
+    kb = str(params.get("kb_id") or "").strip()
+    if not kb:
+        return {"ok": False, "error": "need_kb"}
+    import json as _j  # noqa: PLC0415
+    tools = {t["tool"]: t for t in _tool_rows(kb)}
+    out = []
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        rows = ke_neo4j.query(
+            "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
+            "WHERE o.kb_id=$kb AND type(r) = 'bpmn:dataObjectBindingTool' "
+            "RETURN o.slug AS object, last(split(t.slug,'/')) AS tool, "
+            "       coalesce(t.toolSchemaHash,'') AS hash, "
+            "       coalesce(r.mappingStatus,'') AS status, "
+            "       coalesce(r.fieldMap,'') AS fmap", {"kb": kb}, timeout=10) or []
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": "graph_unavailable", "detail": str(exc)[:160]}
+    for r in rows:
+        try:
+            fm = _j.loads(r.get("fmap") or "{}") or {}
+        except Exception:  # noqa: BLE001
+            fm = {}
+        snap = str(fm.get("contractHash") or "")
+        cur = str(r.get("hash") or "")
+        if cur and snap and snap != cur:
+            out.append({"object": r["object"], "tool": r["tool"],
+                        "status": r.get("status"), "contractHash_bound": snap,
+                        "contractHash_now": cur})
+        elif cur and not snap:
+            out.append({"object": r["object"], "tool": r["tool"],
+                        "status": r.get("status"), "contractHash_bound": "",
+                        "contractHash_now": cur, "note": "尚未记录快照（首版可忽略）"})
+    return {"ok": True, "kb_id": kb, "stale": out, "count": len(out),
+            "hint": "有 stale ⇒ 跑 bpmn/task/接口变更重映射（人工确认后重写 fieldMap）"}
+
+
 def tool_create_payload(body: dict) -> dict:
     """`POST /bodhi/ext/tool/create` —— **只为勾选的工具建页**（白名单必填；无服务页自动补）。"""
     kb = str(body.get("kb_id") or "").strip()
