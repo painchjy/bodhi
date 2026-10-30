@@ -47,7 +47,7 @@ agents:
 
   - id: ""
     name: 技术方案评审智能体（测试）
-    prompt_file: agent_review_prompt.md
+    prompt_file: agent_review_test_prompt.md
     builtin_tools:
       - data_schema
       - data_analysis
