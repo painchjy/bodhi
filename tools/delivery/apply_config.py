@@ -72,6 +72,57 @@ def _current(agent_id: str) -> dict:
     return r
 
 
+def _find_by_name(name: str) -> str:
+    """按**名字**找智能体 id（2026-10-30：多环境 id 不同 ⇒ 发布器要能按名定位）。"""
+    name = (name or "").strip()
+    if not name:
+        return ""
+    rows = ke_db.psql_csv(
+        "SELECT id FROM custom_agents WHERE coalesce(config->>'name','') = %s "
+        " OR name = %s ORDER BY updated_at DESC LIMIT 2"
+        % (ke_db.sql_str(name), ke_db.sql_str(name)))
+    ids = [str(r.get("id") or "") for r in rows if r.get("id")]
+    return ids[0] if len(set(ids)) == 1 else ""
+
+
+def _create_agent(name: str, want_prompt: str, svcs: list) -> str:
+    """建一行 `custom_agents`（最小配置：名字 + 提示词 + MCP 服务），返回新 id。"""
+    import uuid  # noqa: PLC0415
+    aid = str(uuid.uuid4())
+    cfg = {"name": name, "system_prompt": want_prompt,
+           "mcp_services": list(svcs or []), "allowed_tools": []}
+    ke_db.psql(
+        "INSERT INTO custom_agents (id, name, config, tenant_id, created_at, updated_at) "
+        "VALUES (%s, %s, %s::jsonb, 10000, now(), now());"
+        % (ke_db.sql_str(aid), ke_db.sql_str(name),
+           ke_db.sql_str(json.dumps(cfg, ensure_ascii=False))),
+        stdin=True)
+    return aid
+
+
+
+
+def _resolve_svcs(agent: dict) -> list:
+    """MCP 服务：`mcp_services` 直接给 id；`mcp_service_names` 按 **name** 解析成 id。
+
+    为什么要按 name（2026-10-30）：`mcp_services` 的 id 是**每套环境自己的**，
+    yaml 里写死 id 换环境就错。按 name 解析后，内网/本机都能用同一份配置真源 ✓。
+    """
+    ids = [str(x) for x in (agent.get("mcp_services") or [])]
+    names = [str(x) for x in (agent.get("mcp_service_names") or []) if str(x).strip()]
+    if not names:
+        return ids
+    rows = ke_db.psql_csv(
+        "SELECT id, name FROM mcp_services WHERE name IN (%s) ORDER BY name"
+        % ", ".join(ke_db.sql_str(n) for n in names))
+    got = {str(r.get("name")): str(r.get("id")) for r in rows}
+    out = [got[n] for n in names if n in got] + ids
+    missing = [n for n in names if n not in got]
+    if missing:
+        print("   ⚠ mcp_service_names 未登记：%s（跳过；先在 UI/DB 建服务）" % "、".join(missing))
+    return out
+
+
 def _want_tools(agent: dict):
     """**内置工具**清单（`allowed_tools` 的语义，2026-10-27 修正）。
 
@@ -93,7 +144,7 @@ def _diff(agent: dict, cur: dict) -> dict:
     stale = sorted(t for t in have_tools if str(t).startswith("mcp_"))
     want_prompt = _prompt_text(os.path.join(CONF, agent.get("prompt_file") or ""))
     have_prompt = (cur.get("prompt") or "").strip()
-    want_svcs = list(agent.get("mcp_services") or [])
+    want_svcs = _resolve_svcs(agent)
     svcs = list(cur.get("svcs") or [])
     return {
         "tools": {"add": sorted(set(want_tools) - set(have_tools)),
@@ -139,11 +190,14 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="写入（默认只比对）")
     ap.add_argument("--check", action="store_true", help="只比对（默认行为，保留以便脚本自解释）")
     ap.add_argument("--only", default="", help="只处理某个 agent id")
+    ap.add_argument("--create", action="store_true",
+                    help="按 name 找不到时新建智能体（2026-10-30；内网无需 UI 手建）")
     ap.add_argument("--conf", default=os.path.join(CONF, "agent_tools.yaml"))
     args = ap.parse_args()
 
     doc = _yaml(args.conf)
-    agents = [a for a in (doc.get("agents") or []) if a.get("id")]
+    # 2026-10-30：`id` 可空 ⇒ 按 `name` 解析（多环境 id 不同）；`--create` 时库里没有就建。
+    agents = [a for a in (doc.get("agents") or []) if a.get("id") or a.get("name")]
     if args.only:
         agents = [a for a in agents if a["id"] == args.only]
     if not agents:
@@ -152,7 +206,20 @@ def main() -> int:
 
     drift, bad = 0, 0
     for a in agents:
-        aid = a["id"]
+        aid = str(a.get("id") or "").strip()
+        if not aid:                                   # 按名字解析
+            aid = _find_by_name(a.get("name") or "")
+            if not aid and args.create:
+                want_prompt = _prompt_text(os.path.join(CONF, a.get("prompt_file") or ""))
+                aid = _create_agent(a.get("name") or "", want_prompt,
+                                    _resolve_svcs(a))
+                print("== 新建智能体 %s（%s）id=%s" % (a.get("name") or "", aid,
+                                                       aid[:8] + "…"))
+            if not aid:
+                print("✗ %s：库里找不到同名智能体（加 `--create` 由发布器新建，"
+                      "或先在 UI 建好并填 id）" % (a.get("name") or "?"))
+                bad += 1
+                continue
         cur = _current(aid)
         if not cur:
             print("✗ %s：库里没有这个智能体（先按 MANUAL 建 custom_agents 行）" % aid)
@@ -173,7 +240,7 @@ def main() -> int:
         print("   mcp_services：%d → %d  %s"
               % (d["svcs"]["n_from"], d["svcs"]["n_to"],
                  ("有变化" if d["svcs"]["changed"] else "一致")
-                 if a.get("mcp_services") else "保持 UI 现值（本文件未指定）"))
+                 if _resolve_svcs(a) else "保持 UI 现值（本文件未指定）"))
         if not (d["tools"]["changed"] or d["prompt"]["changed"] or d["svcs"]["changed"]):
             print("   ✓ 无漂移")
             continue

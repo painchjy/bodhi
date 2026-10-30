@@ -29,3 +29,26 @@ agents:
     mcp_services:
       - a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001
       - a7c1f0d2-1b2e-4f3a-9c4d-b0d100000002
+
+  # ── 2026-10-30：L1 建模智能体 + 测试评审智能体 ───────────────────────────────
+  #  `id` 留空 ⇒ 按 `name` 查找；库里没有就 `--create` 新建（内网不必先在 UI 建）
+  #  `mcp_service_names` 按**服务名**解析成 id（id 每套环境不同，写死会错库 ✓）
+  - id: ""
+    name: 企业知识管理建模智能体
+    prompt_file: agent_modeling_prompt.md
+    builtin_tools:
+      - data_schema
+      - data_analysis
+    mcp_service_names:
+      - bodhi_ontology
+      - it_platform
+
+  - id: ""
+    name: 技术方案评审智能体（测试）
+    prompt_file: agent_review_prompt.md
+    builtin_tools:
+      - data_schema
+      - data_analysis
+    mcp_service_names:
+      - bodhi_ontology
+      - it_platform
