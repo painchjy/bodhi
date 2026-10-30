@@ -35,6 +35,21 @@ from srv.session_link import (  # noqa: E402
 )
 
 
+def _page_ref_to_slug(kb_id: str, ref: str) -> str:
+    """把「slug 或页面标题」解析成本库 slug（2026-10-30：顶层 edges 允许写标题）。"""
+    ref = str(ref or "").strip()
+    if not ref or not kb_id:
+        return ""
+    try:
+        rows = psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id=%s AND deleted_at IS NULL "
+            "AND (slug=%s OR title=%s) ORDER BY (slug=%s) DESC LIMIT 1"
+            % (sql_str(kb_id), sql_str(ref), sql_str(ref), sql_str(ref)))
+        return str((rows[0] or {}).get("slug") or "") if rows else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm",
                    report: dict | None = None, nodes: list | None = None, edges: list | None = None,
                    relations_only: bool = False,
@@ -487,6 +502,55 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             _all = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
             _all += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
             _all = list(dict.fromkeys(_all))
+            # 2026-10-30（用户实测 3 次都丢边）：**顶层 `edges` 也要生效** ——
+            # 源/目标可以是**本库已有页**（报告/评测页不在本批 nodes 里），按 slug 或标题解析。
+            _ext_total, _ext_miss = 0, []
+            for _e in (edges or []):
+                _rel = str((_e or {}).get("type") or "").strip()
+                _s = str((_e or {}).get("source") or (_e or {}).get("from") or "").strip()
+                _t = str((_e or {}).get("target_slug") or (_e or {}).get("target")
+                         or (_e or {}).get("to") or "").strip()
+                if not (_rel and _s and _t):
+                    continue
+                _ss = _page_ref_to_slug(kb_id, _s)
+                _ts = _page_ref_to_slug(kb_id, _t)
+                if not (_ss and _ts):
+                    _ext_miss.append({"source": _s, "type": _rel, "target": _t,
+                                      "resolved_source": _ss, "resolved_target": _ts})
+                    continue
+                if (_ss, _rel, _ts) not in _triples:
+                    _triples.append((_ss, _rel, _ts))
+                _ext_total += 1
+            if _ext_total:
+                _planned += _ext_total        # 计入计划数（否则 edges_written 被算成 0）
+                # 2026-10-30（用户实测）：顶层 edges 已自行解析成功 ⇒ **清掉设计校验留下的
+                # "目标解析不到页面"残影**（否则成功回执里同时出现"7 条违规 + 7 条成功"）。
+                _ok_pairs = {(s, r, t) for (s, r, t) in _triples}
+                _ok_refs = set()
+                for _e in (edges or []):
+                    _ts = _page_ref_to_slug(kb_id, str((_e or {}).get("target_slug")
+                                                      or (_e or {}).get("target")
+                                                      or (_e or {}).get("to") or ""))
+                    _ss = _page_ref_to_slug(kb_id, str((_e or {}).get("source")
+                                                      or (_e or {}).get("from") or ""))
+                    if _ss and _ts:
+                        _ok_refs.add((_ss, _ts))
+
+                def _is_stale(v):
+                    v = v or {}
+                    _s = str(v.get("source") or v.get("from") or "")
+                    _t = str(v.get("target") or v.get("target_slug") or v.get("to") or "")
+                    for _ss, _ts in _ok_refs:
+                        if (_s in (_ss, _ts.rsplit("/", 1)[-1]) or _ss.endswith(_s)) and \
+                                (_t in (_ts, _ts.rsplit("/", 1)[-1]) or _ts.endswith(_t)):
+                            return True
+                    return False
+
+                for _k in ("violations",):
+                    if isinstance(summary.get(_k), list):
+                        summary[_k] = [v for v in summary[_k] if not _is_stale(v)]
+                    if isinstance(checked.get(_k), list):
+                        checked[_k] = [v for v in checked[_k] if not _is_stale(v)]
             # P3-0f2（2026-10-10）：**批量写图 + 批量 strip**。
             # 旧实现：每条边 `add_edge`（4 次 PG + 5 次 Neo4j，实测 `_page_type`=2×边数、
             # `_ensure_instance`=2×边数）+ 每页逐条 strip（读正文 + UPDATE 各 1 次 psql）→ 27 边/33 页 =
@@ -519,6 +583,10 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                                 "stripped": _strip.get("stripped"),
                                 "strip_total": _strip.get("total"),
                                 "batched": True}
+            if _ext_total or _ext_miss:
+                summary["graph"]["external_edges"] = {
+                    "planned": _ext_total, "unresolved": _ext_miss[:10],
+                    "unresolved_total": len(_ext_miss)}
             # C 回归防护：声明了边却一条都没落图 → 显式告警（防"循环静默失效"回归）
             if _planned and _n_edges == 0:
                 summary["graph"]["warn"] = (
