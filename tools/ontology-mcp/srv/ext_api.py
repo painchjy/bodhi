@@ -376,6 +376,81 @@ def tool_refresh_payload(body: dict) -> dict:
     return TOOLS.sync(str(body.get("service") or "it_platform"), kb, tools=[t for t in want if t])
 
 
+def service_tools_payload(params: dict) -> dict:
+    """`GET /bodhi/ext/service/tools` —— **只列工具清单，不建任何页**（2026-10-30）。"""
+    service = str(params.get("service") or "it_platform").strip()
+    import ke_ext_client as C  # noqa: PLC0415
+    tried = []
+    for u in C.service_urls(service):
+        try:
+            names = list(C.list_tools(u) or [])
+        except Exception as exc:  # noqa: BLE001
+            tried.append({"url": u, "error": str(exc)[:120]})
+            continue
+        tried.append({"url": u, "tools": len(names)})
+        if names:
+            return {"ok": True, "service": service, "endpoint": u,
+                    "tools": names, "count": len(names), "tried": tried}
+    return {"ok": False, "service": service, "error": "no_tools",
+            "hint": "服务不可达或 tools/list 为空：检查 mcp_services 的 url（应为 http://127.0.0.1:<port>/mcp）",
+            "tried": tried}
+
+
+def mapping_candidates_payload(params: dict) -> dict:
+    """`GET /bodhi/ext/mapping/candidates` —— 业务列 ↔ 工具列 + 枚举差异（供 UI 表 + 一键全接受）。"""
+    slug = str(params.get("object") or params.get("slug") or "").strip()
+    kb = _resolve_kb(params) or str(params.get("kb_id") or "")
+    tool = str(params.get("tool") or "").strip()
+    if not slug or not kb:
+        return {"ok": False, "error": "need_object_and_kb"}
+    binds = STORE.list_bindings(kb, slug)
+    hit = [b for b in binds if (not tool or b["tool"] == tool)]
+    if not hit:
+        return {"ok": False, "error": "no_binding",
+                "hint": "先绑定工具（/bodhi/ext/bind）再出映射候选"}
+    b = hit[0]
+    con = {}
+    rows = _tool_rows(kb)
+    for t in rows:
+        if t["tool"] == b["tool"]:
+            try:
+                import json as _j  # noqa: PLC0415
+                con = _j.loads(t.get("columns") or "{}") or {}
+            except Exception:  # noqa: BLE001
+                con = {}
+    tool_cols = list(con.get("order") or [])
+    labels = con.get("labels") or {}
+    cur = {}
+    try:
+        import json as _j2  # noqa: PLC0415
+        cur = _j2.loads(b.get("field_map") or "{}") or {}
+    except Exception:  # noqa: BLE001
+        cur = {}
+    mapped = {i.get("field"): (i.get("label") or "") for i in (cur.get("items") or [])}
+    cand = []
+    for f in tool_cols:
+        cand.append({"field": f, "tool_label": labels.get(f) or f,
+                     "business_label": mapped.get(f) or labels.get(f) or f,
+                     "mapped": f in mapped,
+                     "enum": {}})
+    missing = [f for f in mapped if f and f not in tool_cols]
+    return {"ok": True, "object": slug, "kb_id": kb, "tool": b["tool"],
+            "candidates": cand, "missing_in_tool": missing,
+            "conflicts": ([{"type": "field_not_in_contract", "fields": missing}] if missing else []),
+            "hint": "确认后 POST /bodhi/ext/mapping 一次性写入（可一键全接受）"}
+
+
+def tool_create_payload(body: dict) -> dict:
+    """`POST /bodhi/ext/tool/create` —— **只为勾选的工具建页**（白名单必填；无服务页自动补）。"""
+    kb = str(body.get("kb_id") or "").strip()
+    tools = [str(x).strip() for x in (body.get("tools") or []) if str(x).strip()]
+    if not kb:
+        return {"ok": False, "error": "need_kb"}
+    if not tools:
+        return {"ok": False, "error": "need_tools",
+                "hint": "先 GET /bodhi/ext/service/tools 拿清单，再把要绑定的工具名放进来（不传=不建页）"}
+    import ke_ext_tools as TOOLS  # noqa: PLC0415
+    return TOOLS.sync(str(body.get("service") or "it_platform"), kb, tools=tools)
 def tool_sync_payload(body: dict) -> dict:
     """`POST /bodhi/ext/tool/sync` —— 从 MCP 服务同步**选定工具**为 `agent:Tool` 页。"""
     kb = str(body.get("kb_id") or "").strip()

@@ -199,7 +199,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             return
         if path in ("/bodhi/ext/update", "/bodhi/ext/describe", "/bodhi/ext/sync-report",
                     "/bodhi/ext/bind", "/bodhi/ext/unbind", "/bodhi/ext/mapping",
-                    "/bodhi/ext/tool/refresh", "/bodhi/ext/tool/sync"):
+                    "/bodhi/ext/tool/refresh", "/bodhi/ext/tool/sync",
+                    "/bodhi/ext/tool/create"):
             # 面板写台账 / 刷新契约 / 快照回写 / 绑定与映射（2026-10-29）
             try:
                 from srv import ext_api                     # noqa: PLC0415
@@ -217,6 +218,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                     out = ext_api.tool_refresh_payload(body)
                 elif path.endswith("/tool/sync"):
                     out = ext_api.tool_sync_payload(body)
+                elif path.endswith("/tool/create"):
+                    out = ext_api.tool_create_payload(body)
                 else:
                     out = ext_api.describe_payload(body)
 
@@ -437,7 +440,8 @@ class MCPHandler(BaseHTTPRequestHandler):
         parsed = urlparse.urlparse(self.path)
         path = parsed.path.rstrip("/")
         if path in ("/bodhi/ext/list", "/bodhi/ext/schema",
-                    "/bodhi/ext/binding", "/bodhi/ext/tool"):
+                    "/bodhi/ext/binding", "/bodhi/ext/tool",
+                    "/bodhi/ext/service/tools", "/bodhi/ext/mapping/candidates"):
             # 面板读台账 / 读接口列清单 / 读绑定与工具契约（2026-10-29）
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
@@ -446,6 +450,10 @@ class MCPHandler(BaseHTTPRequestHandler):
                     out = ext_api.schema_payload(params)
                 elif path.endswith("/binding"):
                     out = ext_api.binding_payload(params)
+                elif path.endswith("/service/tools"):
+                    out = ext_api.service_tools_payload(params)
+                elif path.endswith("/mapping/candidates"):
+                    out = ext_api.mapping_candidates_payload(params)
                 elif path.endswith("/tool"):
                     out = ext_api.tool_payload(params)
                 else:
