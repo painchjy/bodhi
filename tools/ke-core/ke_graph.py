@@ -614,7 +614,7 @@ def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
             errors.append({"source": src, "type": rel, "target_slug": tgt,
                            "error": "不能把关系指向本页"})
             continue
-        v = validate_edge(kb_id, src, rel, tgt, info=info, resolve=(ctx is None))
+        v = validate_edge(kb_id, src, rel, tgt, info=info, resolve=True)
         if not v.get("ok"):
             item = {"source": src, "type": rel, "target_slug": tgt,
                     "code": v.get("code"), "hint": v.get("hint"),
