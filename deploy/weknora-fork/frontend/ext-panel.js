@@ -113,7 +113,7 @@
     return ta;
   }
 
-  var VER = 'v4.5';
+  var VER = 'v4.6';
 
   function renderPanel(mount, meta) {
     style();
@@ -401,7 +401,11 @@
         head.appendChild(tag('bx-msg warn', '⚠ 契约已变（上次 ' +
                              ((res.drift || {}).previous_hash || '—') + '）'));
       }
-      head.appendChild(btn('刷新契约', 'ghost', function () { resubscribe(); }));
+      // 2026-10-30（用户口径）：**「刷新契约」只属于工具页**；业务对象页只做 绑定/解绑/映射。
+      var isToolPage = (meta.kind === 'tool') || /^agent\/tool\//.test(meta.object || '');
+      if (isToolPage) {
+        head.appendChild(btn('刷新契约', 'ghost', function () { resubscribe(); }));
+      }
 
       var cols = ((res.contract || {}).columns) || [];
       if (!cols.length) {
@@ -488,10 +492,16 @@
             });
         }));
       } else if (!(res.bindings || []).length) {
+        var hint = document.createElement('div');
+        hint.className = 'bx-msg';
+        hint.textContent = '本库还没有工具页 ⇒ 先「同步工具契约」（会写入 agent/tool/* 与 agent/mcpservice/*）';
+        bindBox.appendChild(hint);
         bindBox.appendChild(btn('同步工具契约', 'ghost', function () {
           api('/bodhi/ext/tool/sync', { kb_id: kb }).then(function (r) {
+            var names = (r.synced || []).map(function (x) { return x.tool; });
             note(r.ok ? 'ok' : 'err',
-                 r.ok ? ('已同步 ' + ((r.synced || []).length) + ' 个工具页') : ('同步失败：' + (r.error || '')));
+                 r.ok ? ('已同步 ' + names.length + ' 个工具：' + (names.join('、') || '无变化'))
+                      : ('同步失败：' + (r.error || '') + (r.hint ? ' ｜ ' + r.hint : '')));
             loadBind();
           });
         }));
