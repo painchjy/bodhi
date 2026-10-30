@@ -64,19 +64,28 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
             svc = str((got[0] or {}).get("svc") or "") if got else ""
         except Exception:  # noqa: BLE001
             svc = ""
+        _fmap_items = []
+        try:
+            import json as _j3  # noqa: PLC0415
+            _fmap_items = ((_j3.loads(b.get("field_map") or "{}") or {}).get("items") or [])
+        except Exception:  # noqa: BLE001
+            _fmap_items = []
+
         block = "\n".join([BLOCK, "kind: %s" % _kind, "object: %s" % object_slug,
                            "tool: %s" % tool, "service: %s" % svc,
                            "mapping_status: %s" % (b.get("status") or ""),
+                           "mapped_columns: %d" % len((_fmap_items or [])),
                            "```", ""])
-        # 已有块 ⇒ **按当前绑定刷新**（tool/service/mapping_status 可能已变）；内容相同才跳过
+        # 已有块 ⇒ **先去重再写入**（防重复：旧实现只删第一个块，属性渲染可能又插一个）
         import re as _re  # noqa: PLC0415
-        old = _re.search(r"(?ms)^```bodhi-ext-contract\s*$.*?^```\s*$", md)
-        if old and old.group(0).strip() == block.strip():
+        _blocks = list(_re.finditer(r"(?ms)^```bodhi-ext-contract\s*$.*?^```\s*$", md))
+        if _blocks and len(_blocks) == 1 and _blocks[0].group(0).strip() == block.strip():
             return {"ok": True, "changed": False, "reason": "has_block",
                     "tool": tool, "service": svc}
         rest = md
-        if old:
-            rest = (md[:old.start()] + md[old.end():]).lstrip("\n")
+        for _b in reversed(_blocks):
+            rest = rest[:_b.start()] + rest[_b.end():]
+        rest = rest.lstrip("\n")
         new_md = block + ("\n" + rest if rest.strip() else "")
         meta = json.loads(row.get("md") or "{}")
         ke_pages.upsert_page(kb_id, object_slug, row.get("title") or object_slug,
