@@ -257,7 +257,7 @@ def _attrs_of(kb_id: str, slug: str) -> dict:
             "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
             "WHERE o.slug = $s AND ($kb = '' OR o.kb_id = $kb) "
             "  AND type(r) = 'bpmn:dataObjectBindingTool' "
-            "RETURN coalesce(t.name, last(split(t.slug,'/'))) AS tool, "
+            "RETURN last(split(t.slug,'/')) AS tool, "
             "       coalesce(t.toolModes, r.modes, '') AS modes, "
             "       coalesce(t.toolKeyFields, r.keys, '') AS keys, "
             "       coalesce(r.impl, '') AS impl "
@@ -324,7 +324,7 @@ def _objects_by_tool(kb_id: str, tool: str) -> list:
         rows = ke_neo4j.query(
             "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
             "WHERE ($kb = '' OR o.kb_id = $kb) AND type(r) = 'bpmn:dataObjectBindingTool' "
-            "  AND coalesce(t.name, last(split(t.slug,'/'))) = $q "
+            "  AND last(split(t.slug,'/')) = $q "
             "RETURN o.slug AS slug, coalesce(o.name,'') AS name, coalesce(o.kb_id,'') AS kb "
             "ORDER BY name LIMIT 10", {"kb": kb_id or "", "q": needle}, timeout=8) or []
         out = [{"slug": str(r.get("slug")), "name": str(r.get("name") or ""),
@@ -373,7 +373,7 @@ def list_bindings(kb_id: str, object_slug: str) -> list:
         rows = ke_neo4j.query(
             "MATCH (o:BodhiInstance)-[r]->(t:BodhiInstance) "
             "WHERE o.slug = $s AND ($kb = '' OR o.kb_id = $kb) AND type(r) = $rel "
-            "RETURN coalesce(t.name, last(split(t.slug,'/'))) AS tool, t.slug AS slug, "
+            "RETURN last(split(t.slug,'/')) AS tool, t.slug AS slug, "
             "       coalesce(r.role,'') AS role, coalesce(r.mappingStatus,'') AS status, "
             "       coalesce(r.fieldMap,'') AS fmap, coalesce(t.toolModes,'') AS modes, "
             "       coalesce(t.toolKeyFields,'') AS keys "
@@ -404,6 +404,7 @@ def set_binding(kb_id: str, object_slug: str, tool: str, role: str = "readwrite"
         ke_neo4j.query(
             "MERGE (t:BodhiInstance {kb_id:$tkb, slug:$tslug}) "
             "ON CREATE SET t.page_type='agent:Tool', t.module='agent', t.name=$tool "
+            "SET t.name=$tool "
             "WITH t "
             "MATCH (o:BodhiInstance {kb_id:$kb, slug:$obj}) "
             "MERGE (o)-[r:`bpmn:dataObjectBindingTool`]->(t) "
@@ -436,8 +437,8 @@ def delete_binding(kb_id: str, object_slug: str, tool: str = "") -> dict:
         rows = ke_neo4j.query(
             "MATCH (o:BodhiInstance {kb_id:$kb, slug:$obj})-[r]->(t:BodhiInstance) "
             "WHERE type(r) = $rel "
-            "  AND ($tool = '' OR coalesce(t.name, last(split(t.slug,'/'))) = $tool) "
-            "WITH r, coalesce(t.name, last(split(t.slug,'/'))) AS tool "
+            "  AND ($tool = '' OR last(split(t.slug,'/')) = $tool) "
+            "WITH r, last(split(t.slug,'/')) AS tool "
             "DELETE r RETURN collect(tool) AS removed",
             {"kb": kb_id, "obj": object_slug, "rel": REL_BINDING, "tool": tool},
             timeout=10) or []
@@ -466,15 +467,22 @@ def set_mapping(kb_id: str, object_slug: str, tool: str, fields: list,
         import ke_neo4j  # noqa: PLC0415
         ke_neo4j.query(
             "MATCH (o:BodhiInstance {kb_id:$kb, slug:$obj})-[r]->(t:BodhiInstance) "
-            "WHERE type(r) = $rel AND coalesce(t.name, last(split(t.slug,'/'))) = $tool "
+            "WHERE type(r) = $rel AND last(split(t.slug,'/')) = $tool "
             "SET r.fieldMap=$fm, r.mappingStatus=$st",
             {"kb": kb_id, "obj": object_slug, "rel": REL_BINDING, "tool": tool,
              "fm": json.dumps(fmap, ensure_ascii=False), "st": status or "confirmed"},
             timeout=10)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": "graph_write_failed", "detail": repr(exc)[:200]}
+    # 映射定稿后也要刷新契约块（mapping_status 变了）
+    try:
+        import ke_ext_tools as _T  # noqa: PLC0415
+        _T.ensure_contract_block(kb_id, object_slug, tool)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "object": object_slug, "tool": tool,
             "mapping_status": status, "columns": len(fmap["order"])}
+
 
 
 def _has_kb_sources() -> bool:

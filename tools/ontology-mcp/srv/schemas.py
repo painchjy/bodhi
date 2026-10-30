@@ -362,6 +362,30 @@ TOOL_SCHEMAS = [
                 "required": ["kb_id", "spec"]},
         },
         {
+            "name": "ke_rule_check",
+            "description": ("**规则体检（门禁一，只读）**：字段齐 / 实现方式受控 / 抽取型必填项齐 / "
+                            "枚举与台账一致 / 可回溯。回执 `errors[]`（硬错，阻断）+ `warns[]`（分级提醒，"
+                            "如「未声明 applies_when」「含模糊词无可量化判据」「参考规范为空」）+ `md`（体检报告）。"
+                            "**规则化/规则发布任务页指定的就是本工具**；若不可用，可用 "
+                            "`ke_rule_publish(apply=false)` 的 `warns/check_errors` 等价替代并自报 `tool_deviation`。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "领域库（规则/策略都在这里）"},
+                "spec": {"type": "string",
+                         "description": "`policy:<策略 slug>`（推荐）| `direct:<规则 slug,…>`；默认按技术方案评审策略"}},
+                "required": ["kb_id"]},
+        },
+        {
+            "name": "ke_rule_publish",
+            "description": ("**规则发布（双门禁）**：体检 + 回放评测都通过才写 `bmm:ruleHash`；"
+                            "`apply=false`（默认）只算不写。回执含 `warns[]`（分级提醒）、`check_errors[]`、"
+                            "`gate`（ok/blocked）、`hash_before/hash_after/changed`、`rules[]`（每条 ruleHash）。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "领域库"},
+                "spec": {"type": "string", "description": "`policy:<策略 slug>`（推荐）"},
+                "apply": {"type": "boolean", "description": "true=真写 `bmm:ruleHash`；默认 false（dry_run）"}},
+                "required": ["kb_id"]},
+        },
+        {
             "name": "extract_candidates",
             "description": ("**候选抽取（只定位，不判定）**：按 `ke_plan` 的必需事实，从**源文档**（WeKnora `chunks` "
                             "直读 ✓）里定位**逐字行 + 章节位置**，返回 `candidates[]`（每项 `{line, locator}` ✓）。"

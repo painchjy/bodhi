@@ -64,4 +64,6 @@ from srv.handlers import context_ as _context  # noqa: E402,F401
 from srv.handlers import media as _media  # noqa: E402,F401
 # 2026-10-28：外部文档三件套（探测附件 / 推送并绑档案 / 解析正文）
 from srv.handlers import ext_docs as _ext_docs  # noqa: E402,F401
+# 2026-10-30：规则工程工具（ke_rule_check 体检）
+from srv.handlers import rules as _rules  # noqa: E402,F401
 

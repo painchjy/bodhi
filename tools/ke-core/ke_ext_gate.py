@@ -207,7 +207,7 @@ def _service_of(binding: dict) -> str:
             "WHERE t.slug STARTS WITH 'agent/tool/' "
             "  AND coalesce(t.name, last(split(t.slug,'/'))) = $tool "
             "  AND s.slug STARTS WITH 'agent/mcpservice/' "
-            "RETURN coalesce(s.name, last(split(s.slug,'/'))) AS svc LIMIT 1",
+            "RETURN last(split(s.slug,'/')) AS svc LIMIT 1",
             {"tool": tool}, timeout=6) or []
         return str(rows[0].get("svc") or "") if rows else ""
     except Exception:                                  # noqa: BLE001

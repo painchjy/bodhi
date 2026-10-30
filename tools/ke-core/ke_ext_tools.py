@@ -44,8 +44,6 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
             return {"ok": False, "error": "page_not_found"}
         row = rows[0]
         md = row.get("c") or ""
-        if BLOCK in md and ("object: %s" % object_slug) in md.split(BLOCK, 1)[1][:400]:
-            return {"ok": True, "changed": False, "reason": "has_block"}
         binds = _S.list_bindings(kb_id, object_slug)
         b = binds[0] if binds else {}
         tool = tool or b.get("tool") or ""
@@ -54,9 +52,9 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
             import ke_neo4j  # noqa: PLC0415
             got = ke_neo4j.query(
                 "MATCH (t:BodhiInstance)-[]->(s:BodhiInstance) "
-                "WHERE t.kb_id=$kb AND coalesce(t.name,last(split(t.slug,'/'))) = $tool "
+                "WHERE t.kb_id=$kb AND last(split(t.slug,'/')) = $tool "
                 "  AND s.slug STARTS WITH 'agent/mcpservice/' "
-                "RETURN coalesce(s.name,last(split(s.slug,'/'))) AS svc LIMIT 1",
+                "RETURN last(split(s.slug,'/')) AS svc LIMIT 1",
                 {"kb": kb_id, "tool": tool}, timeout=6) or []
             svc = str((got[0] or {}).get("svc") or "") if got else ""
         except Exception:  # noqa: BLE001
@@ -65,7 +63,16 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
                            "tool: %s" % tool, "service: %s" % svc,
                            "mapping_status: %s" % (b.get("status") or ""),
                            "```", ""])
-        new_md = block + ("\n" + md if md.strip() else "")
+        # 已有块 ⇒ **按当前绑定刷新**（tool/service/mapping_status 可能已变）；内容相同才跳过
+        import re as _re  # noqa: PLC0415
+        old = _re.search(r"(?ms)^```bodhi-ext-contract\s*$.*?^```\s*$", md)
+        if old and old.group(0).strip() == block.strip():
+            return {"ok": True, "changed": False, "reason": "has_block",
+                    "tool": tool, "service": svc}
+        rest = md
+        if old:
+            rest = (md[:old.start()] + md[old.end():]).lstrip("\n")
+        new_md = block + ("\n" + rest if rest.strip() else "")
         meta = json.loads(row.get("md") or "{}")
         ke_pages.upsert_page(kb_id, object_slug, row.get("title") or object_slug,
                              row.get("page_type") or "bpmn:DataObject", new_md,
