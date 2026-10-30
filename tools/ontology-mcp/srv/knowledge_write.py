@@ -37,6 +37,7 @@ from srv.session_link import (  # noqa: E402
 
 def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm",
                    report: dict | None = None, nodes: list | None = None, edges: list | None = None,
+                   relations_only: bool = False,
                    mode: str = "dry_run", confirmed_new_applications: list | None = None,
                    high: float = DEFAULT_HIGH, low: float = DEFAULT_LOW,
                    session: dict | None = None, kb_ids: list | None = None,
@@ -360,6 +361,45 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             summary["source_session_link"] = {"ok": False, "reason": session_warn or "无会话身份"}
         return _attach_session(summary, ident, session_warn)
 
+    # ── 纯关系模式（2026-10-30 用户口径）：**只补边、不写页、不动版本** ──────────────
+    #   场景：报告/评测页必须单独建（`stage="report"`，document 类要有正文），
+    #   建完再补"报告 ↔ 对象/规则"这类边；此时源页不在本批 payload 里，旧实现无能为力。
+    #   入参：`edges=[{"source":"<slug>","type":"agent:evaluationOfRule","target_slug":"<slug>"}]`
+    #   语义：`violations` 只回报不阻断（strict=true 时改为拦截）；`mode=dry_run` 只校验不写。
+    if relations_only:
+        rows = []
+        for e in (edges or []):
+            e = e or {}
+            src = str(e.get("source") or e.get("from") or "").strip()
+            rel = str(e.get("type") or e.get("rel_type") or "").strip()
+            tgt = str(e.get("target_slug") or e.get("target") or e.get("to") or "").strip()
+            if src and rel and tgt:
+                rows.append((src, rel, tgt))
+        if not rows:
+            return {"ok": False, "stage": "graph", "relations_only": True,
+                    "error": "edges 为空：需要 [{source,type,target_slug}, …]"}
+        import ke_pages as _kp  # noqa: PLC0415
+        if mode != "apply":
+            import ke_graph as _kg  # noqa: PLC0415
+            info = _kg.page_info_map(kb_id, sorted({s for r in rows for s in (r[0], r[2])}))
+            checks = []
+            for src, rel, tgt in rows:
+                v = _kg.validate_edge(kb_id, src, rel, tgt, info=info)
+                checks.append({"source": src, "type": rel, "target_slug": tgt,
+                               "code": v.get("code"), "hint": v.get("hint"),
+                               "st": v.get("st"), "tt": v.get("tt"),
+                               "would_write": bool(v.get("ok")) or v.get("code") in
+                               ("domain_mismatch", "range_mismatch", "unconstrained")})
+            return {"ok": True, "stage": "graph", "relations_only": True, "dry_run": True,
+                    "kb_id": kb_id, "total": len(rows), "checks": checks,
+                    "write_note": "未写库（dry_run）：确认后用 mode=\"apply\" 同一份 edges 重跑"}
+        out = _kp.write_relations_batch(kb_id, [{"source": s, "type": r, "target_slug": t}
+                                                for s, r, t in rows])
+        return {"ok": bool(out.get("ok")), "stage": "graph", "relations_only": True,
+                "kb_id": kb_id, "total": out.get("total"), "written": out.get("written"),
+                "violations": out.get("violations") or [],
+                "errors": out.get("errors") or [],
+                "note": ("violation 只记录不阻断（BODHI_STRICT_RELATIONS=1 可改为拦截）")}
     payloads, checked = design_elements(
         model, model_obj, nodes or [], edges or [], doc_meta,
         upstream=[s for s in ((report or {}).get("upstream") or []) if s],

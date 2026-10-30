@@ -416,8 +416,16 @@ def set_binding(kb_id: str, object_slug: str, tool: str, role: str = "readwrite"
              "fm": json.dumps(field_map or {}, ensure_ascii=False)}, timeout=10)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": "graph_write_failed", "detail": repr(exc)[:200]}
+    # 绑定成功后：**给对象页补契约块**（否则前端"绑定/映射"面板不出现）
+    block = {}
+    try:
+        import ke_ext_tools as _T  # noqa: PLC0415
+        block = _T.ensure_contract_block(kb_id, object_slug, tool)
+    except Exception as exc:  # noqa: BLE001
+        block = {"ok": False, "error": "block_failed", "detail": repr(exc)[:120]}
     return {"ok": True, "object": object_slug, "tool": tool, "tool_slug": slug,
-            "role": role, "mapping_status": status}
+            "role": role, "mapping_status": status, "contract_block": block}
+
 
 
 def delete_binding(kb_id: str, object_slug: str, tool: str = "") -> dict:

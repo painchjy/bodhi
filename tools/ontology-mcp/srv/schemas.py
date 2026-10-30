@@ -175,6 +175,13 @@ TOOL_SCHEMAS = [
                                                 "不传时按旧口径（概要设计）渲染")},
                     "stage": {"type": "string", "enum": ["report", "graph"],
                               "description": "report=先落报告页（返回 slug）；graph=再落细分节点与关系"},
+                    "relations_only": {
+                        "type": "boolean",
+                        "description": ("**纯关系模式**（2026-10-30）：`stage=graph` 时**只补边、不写页、不动版本**。"
+                                        "用于「报告/评测页先单独建（stage=report）→ 再补它与对象/规则的关系」；"
+                                        "此时 `edges` 的 source/target 只要求**页已存在**（不必在本次 nodes 里）。"
+                                        "`violations`（domain/range 不匹配、属性无 domain）**只回报不阻断**；"
+                                        "`BODHI_STRICT_RELATIONS=1` 时改为拦截。`mode=dry_run` 只校验不写。")},
                     "model": {"type": "string", "description": "本体模块 key：`bmm`（默认，BMM/EA 业务本体）或 `agent`（智能体开发本体：技能/工具/MCP/评估）；`ea` 已退役（模块已删，传它会报错）"},
                     "report": {
                         "type": "object",

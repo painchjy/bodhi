@@ -21,6 +21,60 @@ _PROP = {"name": "toolName", "service": "toolService", "modes": "toolModes",
          "at": "toolContractAt", "impl": "toolImpl"}
 
 
+BLOCK = "```bodhi-ext-contract"
+
+
+def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
+    """给**已绑定**的业务对象页补 ````bodhi-ext-contract```` 块（面板靠它渲染）。
+
+    为什么要它（2026-10-30 用户实测）：对象页没有这个块 ⇒ 前端"绑定/映射/刷新契约"面板不出现 ⇒
+    用户以为绑定没生效。绑定成功后自动补块，幂等（已有同 object 的块 ⇒ 不动）。
+    """
+    try:
+        import json  # noqa: PLC0415
+
+        import ke_db  # noqa: PLC0415
+        import ke_ext_store as _S  # noqa: PLC0415
+        import ke_pages  # noqa: PLC0415
+        rows = ke_db.psql_csv(
+            "SELECT title, page_type, coalesce(content,'') AS c, page_metadata::text AS md "
+            "FROM wiki_pages WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL LIMIT 1"
+            % (ke_db.sql_str(kb_id), ke_db.sql_str(object_slug)))
+        if not rows:
+            return {"ok": False, "error": "page_not_found"}
+        row = rows[0]
+        md = row.get("c") or ""
+        if BLOCK in md and ("object: %s" % object_slug) in md.split(BLOCK, 1)[1][:400]:
+            return {"ok": True, "changed": False, "reason": "has_block"}
+        binds = _S.list_bindings(kb_id, object_slug)
+        b = binds[0] if binds else {}
+        tool = tool or b.get("tool") or ""
+        svc = ""
+        try:
+            import ke_neo4j  # noqa: PLC0415
+            got = ke_neo4j.query(
+                "MATCH (t:BodhiInstance)-[]->(s:BodhiInstance) "
+                "WHERE t.kb_id=$kb AND coalesce(t.name,last(split(t.slug,'/'))) = $tool "
+                "  AND s.slug STARTS WITH 'agent/mcpservice/' "
+                "RETURN coalesce(s.name,last(split(s.slug,'/'))) AS svc LIMIT 1",
+                {"kb": kb_id, "tool": tool}, timeout=6) or []
+            svc = str((got[0] or {}).get("svc") or "") if got else ""
+        except Exception:  # noqa: BLE001
+            svc = ""
+        block = "\n".join([BLOCK, "kind: contract", "object: %s" % object_slug,
+                           "tool: %s" % tool, "service: %s" % svc,
+                           "mapping_status: %s" % (b.get("status") or ""),
+                           "```", ""])
+        new_md = block + ("\n" + md if md.strip() else "")
+        meta = json.loads(row.get("md") or "{}")
+        ke_pages.upsert_page(kb_id, object_slug, row.get("title") or object_slug,
+                             row.get("page_type") or "bpmn:DataObject", new_md,
+                             metadata=meta, sync_folders=False)
+        return {"ok": True, "changed": True, "tool": tool, "service": svc}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": "write_failed", "detail": repr(exc)[:200]}
+
+
 def _impl_of(service: str, tool: str) -> str:
     """实现落点（尽力而为的默认值；人工可改）。"""
     base = "tools/ke-core/ke_ext_%s.py"

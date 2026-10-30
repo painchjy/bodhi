@@ -366,6 +366,53 @@ def _pt_for_validate(kb_id: str, slug: str) -> str:
     return _page_type(kb_id, slug)
 
 
+def validate_edge(kb_id: str, src: str, rel: str, tgt: str,
+                  info: dict | None = None, resolve: bool = True) -> dict:
+    """**结构化边校验**（2026-10-30）：不再抛异常，返回 `{ok, code, hint, st, tt}`。
+
+    code：
+      - `missing_page`     源/目标页不存在（图与 PG 都没有）
+      - `unknown_relation` 本体里没有这个对象属性（**必须拦**，否则图里出现野生边）
+      - `domain_mismatch`  关系的 rdfs:domain 不覆盖**源页类**（多为 page_type 写成了父类/错类）
+      - `range_mismatch`   目标页类不在 range 闭包内
+      - `unconstrained`    该属性**未声明 domain**（本体放行，但要在回执里可见）
+    `ok=False` 且 `code in (domain_mismatch, range_mismatch, unconstrained)` 时，
+    调用方可选择"**记 violation 但仍写边**"（用户口径 2026-10-30：violation 不阻断）。
+    """
+    import ke_ontology  # noqa: PLC0415
+    info = info or {}
+    st = str(((info.get(src) or {}).get("pt")) or "")
+    tt = str(((info.get(tgt) or {}).get("pt")) or "")
+    if resolve:
+        if not st:
+            st = _pt_for_validate(kb_id, src)
+        if not tt:
+            tt = _pt_for_validate(kb_id, tgt)
+    if not st or not tt:
+        return {"ok": False, "code": "missing_page", "st": st, "tt": tt,
+                "hint": "源/目标页不存在（图上与 PG 都没有）：先建页再连边"}
+    allowed = ke_ontology.relation_type_map(st) if st else {}
+    closure = ke_ontology.target_closure(rel)
+    row = allowed.get(rel)
+    if not row and not closure:
+        return {"ok": False, "code": "unknown_relation", "st": st, "tt": tt,
+                "hint": "本体没有对象属性 `%s`（先在 TTL 声明 domain/range 再重建投影）" % rel}
+    if not row:
+        cands = sorted(allowed)[:8]
+        return {"ok": False, "code": "domain_mismatch", "st": st, "tt": tt,
+                "hint": ("`%s` 的 domain 不覆盖 %s；该类型可用关系：%s"
+                         "（或把页面 page_type 改成声明 domain 的那个类）"
+                         % (rel, st, "、".join(cands) or "无"))}
+    if closure and tt not in closure:
+        return {"ok": False, "code": "range_mismatch", "st": st, "tt": tt,
+                "hint": "目标页类型 %s 不在 `%s` 的 range 内（%s）"
+                        % (tt, rel, "、".join(closure[:8]))}
+    if not str(row.get("domain") or "").strip():
+        return {"ok": True, "code": "unconstrained", "st": st, "tt": tt,
+                "hint": "该属性未声明 domain（本体放行；建议补 domain）"}
+    return {"ok": True, "code": "", "st": st, "tt": tt}
+
+
 def _check_domain(rel_type: str, source_type: str) -> None:
     import ke_ontology  # noqa: PLC0415
     allowed = ke_ontology.relation_type_map(source_type) if source_type else {}
@@ -551,6 +598,14 @@ def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
     info = (ctx or {}).get("info") or {}
     by_type: dict = {}
     errors: list = []
+    violations: list = []
+    strict = bool((ctx or {}).get("strict"))
+    if not strict:
+        try:
+            import ke_db as _db  # noqa: PLC0415
+            strict = str(_db.env_value("BODHI_STRICT_RELATIONS", "0")).lower() in ("1", "true", "yes")
+        except Exception:  # noqa: BLE001
+            strict = False
     for row in (triples or []):
         src, rel, tgt = (str(row[0]).strip(), str(row[1]).strip(), str(row[2]).strip())
         if not (src and rel and tgt):
@@ -559,24 +614,23 @@ def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
             errors.append({"source": src, "type": rel, "target_slug": tgt,
                            "error": "不能把关系指向本页"})
             continue
-        # P0-c-2（2026-10-10）：校验类类型读**图优先** —— 传了 `ctx`（批量路径）就用调用方预读的
-        # `info`；没传则 `_pt_for_validate`（1 Neo4j，图里没有才 1 psql）。旧实现恒为 2 次 psql/边。
-        st = str(((info.get(src) or {}).get("pt")) or "") or (None if ctx is not None else _pt_for_validate(kb_id, src))
-        tt = str(((info.get(tgt) or {}).get("pt")) or "") or (None if ctx is not None else _pt_for_validate(kb_id, tgt))
-        try:
-            if not tt and ctx is None:
-                tt = _pt_for_validate(kb_id, tgt)
-            if not tt:
-                raise ValueError("目标页不存在：%s" % tgt)
-            if st is None:
-                st = _pt_for_validate(kb_id, src)
-            _check_domain(rel, st or "")
-            _check_range(rel, tt)
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"source": src, "type": rel, "target_slug": tgt,
-                           "error": str(exc)[:160]})
-            continue
+        v = validate_edge(kb_id, src, rel, tgt, info=info, resolve=(ctx is None))
+        if not v.get("ok"):
+            item = {"source": src, "type": rel, "target_slug": tgt,
+                    "code": v.get("code"), "hint": v.get("hint"),
+                    "st": v.get("st"), "tt": v.get("tt")}
+            # 2026-10-30 用户口径：domain/range/unconstrained **只记 violation、不阻断**
+            if v.get("code") in ("domain_mismatch", "range_mismatch", "unconstrained") \
+                    and not strict:
+                violations.append(item)
+            else:
+                errors.append(dict(item, error=v.get("hint") or v.get("code")))
+                continue
+        elif v.get("code") == "unconstrained":
+            violations.append({"source": src, "type": rel, "target_slug": tgt,
+                               "code": "unconstrained", "hint": v.get("hint")})
         by_type.setdefault(rel, []).append({"s": src, "t": tgt})
+
     written = 0
     for rel, rows in by_type.items():
         res = _run("UNWIND $rows AS row MATCH (a:BodhiInstance {kb_id:$kb, slug:row.s}) "
@@ -584,8 +638,9 @@ def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
                    "MERGE (a)-[r:`%s`]->(b) RETURN count(r) AS n" % _etyp(rel),
                    {"kb": kb_id, "rows": rows})
         written += int((res[0].get("n") if res else 0) or 0)
-    return {"ok": True, "written": written, "errors": errors,
+    return {"ok": True, "written": written, "errors": errors, "violations": violations,
             "types": len(by_type), "total": len(triples or [])}
+
 
 
 def upsert_nodes_batch(kb_id: str, rows: list) -> int:
