@@ -455,6 +455,43 @@ def mapping_candidates_payload(params: dict) -> dict:
             "hint": "确认后 POST /bodhi/ext/mapping 一次性写入（可一键全接受）"}
 
 
+def doc_image_payload(params: dict) -> dict:
+    """`GET /bodhi/ext/doc-image?doc_id=&name=` —— 取解析出的文档内嵌图（受控目录）。
+
+    2026-10-31：只允许 `state/doc_parse/files/` 下、命名形如 `<doc_id>_img<N>.<ext>` 的文件；
+    ≤64KB 回 `data_url`（前端可直接渲染），超限只回元信息（避免把大图塞进浏览器/上下文）。
+    """
+    import base64  # noqa: PLC0415
+    import os  # noqa: PLC0415
+    import re as _re  # noqa: PLC0415
+    doc_id = str(params.get("doc_id") or "").strip()
+    name = str(params.get("name") or "").strip()
+    if not doc_id or not name:
+        return {"ok": False, "error": "need_doc_id_and_name"}
+    if not _re.fullmatch(r"[A-Za-z0-9._-]+\.(jpg|jpeg|png)", name, _re.I) or \
+            not _re.fullmatch(r"[A-Za-z0-9._-]{1,80}_img\d+\.(jpg|jpeg|png)", name, _re.I):
+        return {"ok": False, "error": "bad_name"}
+    try:
+        import ke_doc_parse as D  # noqa: PLC0415
+        root = D.doc_root()
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "doc_root_unavailable"}
+    base = os.path.basename(name)
+    path = os.path.join(root, "files", base)
+    if not os.path.isfile(path):
+        return {"ok": False, "error": "not_found", "hint": "先调 ext_doc_parse(action=\"image\") 生成"}
+    size = os.path.getsize(path)
+    ext = base.rsplit(".", 1)[-1].lower()
+    ctype = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+    out = {"ok": True, "name": base, "bytes": size, "content_type": ctype}
+    if size <= 64 * 1024:
+        with open(path, "rb") as fh:
+            out["data_url"] = "data:%s;base64,%s" % (ctype, base64.b64encode(fh.read()).decode())
+    else:
+        out["inline_skipped"] = "too_large"
+    return out
+
+
 def mapping_stale_payload(params: dict) -> dict:
     """`GET /bodhi/ext/mapping/stale` —— 列出「工具契约已变但对象未重映射」的绑定（2026-10-30）。"""
     kb = str(params.get("kb_id") or "").strip()

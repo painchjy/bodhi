@@ -442,7 +442,7 @@ class MCPHandler(BaseHTTPRequestHandler):
         if path in ("/bodhi/ext/list", "/bodhi/ext/schema",
                     "/bodhi/ext/binding", "/bodhi/ext/tool",
                     "/bodhi/ext/service/tools", "/bodhi/ext/mapping/candidates",
-                    "/bodhi/ext/mapping/stale"):
+                    "/bodhi/ext/mapping/stale", "/bodhi/ext/doc-image"):
             # 面板读台账 / 读接口列清单 / 读绑定与工具契约（2026-10-29）
             params = dict(urlparse.parse_qsl(parsed.query))
             try:
@@ -457,6 +457,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                     out = ext_api.mapping_candidates_payload(params)
                 elif path.endswith("/mapping/stale"):
                     out = ext_api.mapping_stale_payload(params)
+                elif path.endswith("/doc-image"):
+                    out = ext_api.doc_image_payload(params)
                 elif path.endswith("/tool"):
                     out = ext_api.tool_payload(params)
                 else:
