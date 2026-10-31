@@ -410,14 +410,29 @@ def mapping_candidates_payload(params: dict) -> dict:
                 "hint": "先绑定工具（/bodhi/ext/bind）再出映射候选"}
     b = hit[0]
     con = {}
-    rows = _tool_rows(kb)
-    for t in rows:
-        if t["tool"] == b["tool"]:
-            try:
-                import json as _j  # noqa: PLC0415
-                con = _j.loads(t.get("columns") or "{}") or {}
-            except Exception:  # noqa: BLE001
-                con = {}
+    # 2026-10-30 修：`_tool_rows` 不返回 columns ⇒ 直接读**工具页属性** `agent:toolColumns`
+    try:
+        import json as _jc  # noqa: PLC0415
+        prows = ke_db.psql_csv(
+            "SELECT coalesce(page_metadata->'ontology'->'attributes'->>'agent:toolColumns','') AS cols "
+            "FROM wiki_pages WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL LIMIT 1"
+            % (ke_db.sql_str(kb), ke_db.sql_str("agent/tool/%s" % b["tool"])))
+        con = _jc.loads((prows[0].get("cols") if prows else "") or "{}") or {}
+    except Exception:  # noqa: BLE001
+        con = {}
+    if not (con.get("order") or con.get("columns")):
+        # 2026-10-30：工具页不再存列清单（TTL 精简）⇒ **实时向服务取 x-ext 契约**
+        try:
+            import ke_ext_client as _C  # noqa: PLC0415
+            d = _C.describe("it_platform", b["tool"])
+            if d.get("ok"):
+                ext = d.get("contract") or {}
+                con = {"order": [c.get("field") for c in (ext.get("columns") or [])
+                                 if c.get("field")],
+                       "labels": {c.get("field"): c.get("label")
+                                  for c in (ext.get("columns") or []) if c.get("field")}}
+        except Exception:  # noqa: BLE001
+            pass
     tool_cols = list(con.get("order") or [])
     labels = con.get("labels") or {}
     cur = {}

@@ -146,6 +146,7 @@ def call(tool: str, args: dict | None = None, service: str = "it_platform",
 
 def describe(service: str, tool: str, url: str = "", timeout: float = 8.0) -> dict:
     """连服务取 `x-ext` 契约 → `{ok, url, tool, contract, tools, error?}`（**不抛**）。"""
+    service = str(service or "").strip() or "it_platform"   # 2026-10-30：空服务名默认平台
     cands = [url] if url else service_urls(service)
     if not cands:
         return {"ok": False, "error": "no_service_url", "service": service,
