@@ -58,33 +58,15 @@ def save_knowledge_tool(args: dict) -> dict:
     _stage = str(args.get("stage", "report"))
     _gate = {}
     _anchor = {}
+    # 2026-10-31（用户口径 A）：**引用块由任务步骤按台账回执原样插入**。
+    # `save_knowledge` 不再"补块"，也不再做**依赖领域知识**的台账/契约校验
+    # （否则领域知识一改，写库能力就静默失效 ✗）。块的生成/校验下放到：
+    #   · 任务步骤（`ext_issue_list(view="table")` 回执的 `ref_block` 原样插入）
+    #   · 独立巡检（`ke_ext_gate.check_report`，按需跑、不阻断写库）
     if _stage == "report":
-        _rep = args.get("report") or {}
-        _md = str((_rep or {}).get("content_md") or "")
-        if _md:
-            try:
-                import ke_ext_gate as _G
-                # ① 缺引用块 ⇒ **工具补锚点**（编号/rev/hash 全来自台账与契约，不让模型手写 ✗）
-                _anchor = _G.auto_ref_block(_md, kb_id=str(args.get("kb_id") or ""))
-                if _anchor.get("changed"):
-                    _rep["content_md"] = _anchor["md"]
-                    args["report"] = _rep
-                    _md = _anchor["md"]
-            except Exception:                     # noqa: BLE001  补锚点失败不影响写库
-                _anchor = {"changed": False, "reason": "error"}
-            try:
-                import ke_ext_gate as _G
-                _apply = str(args.get("mode", "dry_run")) == "apply"
-                _gate = _G.check_report(_md, kb_id=str(args.get("kb_id") or ""), enforce=_apply)
-            except Exception:                     # noqa: BLE001  闸门自身异常不得挡住写库
-                _gate = {"ok": True, "warnings": ["ext_gate_error"]}
-            if _gate.get("unknown_items") and _gate.get("ok") is False:
-                return {"ok": False, "tool": "save_knowledge", "error": "ext_unknown_items",
-                        "unknown_items": _gate["unknown_items"],
-                        "ledger": _gate.get("ledger"), "ledger_rev": _gate.get("ledger_rev"),
-                        "counts": _gate.get("counts"),
-                        "hint": ("报告里的条目编号必须来自外部台账（先 `ext_issue_list` 取/建条目，"
-                                 "不要自己编号 ✗）；确认无误后重试")}
+        _anchor = {"changed": False, "reason": "disabled_by_design"}
+        _gate = {"ok": True, "skipped": "ext_gate_disabled",
+                 "note": "台账/契约校验已下放到任务步骤（ext_issue_list 回执 + 任务页自检）"}
     _out = save_knowledge(
         str(args["kb_id"]), stage=str(args.get("stage", "report")),
         model=str(args.get("model", "bmm")), report=args.get("report"),
