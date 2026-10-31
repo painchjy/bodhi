@@ -251,19 +251,50 @@ def list_payload(params: dict) -> dict:
                                   "note": "该对象未写映射 ⇒ 按工具口径展示（列名/枚举取契约）"}
         except Exception as exc:  # noqa: BLE001  映射失败不影响读台账
             out.setdefault("warnings", []).append("mapping_failed: %r" % (str(exc)[:120],))
-        # 引用块：basis/tool 用回执里的 binding（04 回 `unbound` 时也照实写），不再读本地绑定
+        # ── 引用块（2026-10-31 用户口径）：**由 02 按对象规范组装**，04 只提供台账数据 ──
+        #   字段：object / review_no / basis(service / tool) / rev / schema_hash / columns(order)
         _b = out.get("binding") or {}
-        out["ref_block"] = ("```bodhi-ext\nobject: %s\nreview_no: %s\nbasis: %s / %s\nrev: %s\n"
-                            "schema_hash: %s\n%s```"
-                            % (slug, review_no,
-                               str(_b.get("impl") or "").split(":")[0]
-                               or ((STORE.parse_binding(STORE._attrs_of(kb, slug)) or [{}])[0]
-                                   .get("impl") or "").split(":")[0] or "ext",
-                               _b.get("tool") or "",
-                               out.get("rev"), (out.get("schema") or {}).get("schemaHash")
-                               or ((out.get("projection") or {}).get("schemaHash") or ""),
-                               ("columns: %s\n" % params.get("columns"))
-                               if params.get("columns") else ""))
+        _binds = STORE.list_bindings(kb, slug) if kb else []
+        _one = _binds[0] if _binds else {}
+        _tool = str(_b.get("tool") or _one.get("tool") or "")
+        _svc = ""
+        try:
+            if _tool:                                   # 工具 → MCP 服务（关系）
+                import ke_neo4j as _kg  # noqa: PLC0415
+                _rows = _kg.query(
+                    "MATCH (t:BodhiInstance)-[]->(s:BodhiInstance) "
+                    "WHERE t.slug STARTS WITH 'agent/tool/' AND last(split(t.slug,'/')) = $tool "
+                    "  AND s.slug STARTS WITH 'agent/mcpservice/' "
+                    "RETURN last(split(s.slug,'/')) AS svc LIMIT 1", {"tool": _tool}, timeout=6) or []
+                _svc = str((_rows[0] or {}).get("svc") or "") if _rows else ""
+        except Exception:  # noqa: BLE001
+            _svc = ""
+        _hash = ""
+        for _t in _tool_rows(kb) if kb else []:
+            if _t["tool"] == _tool and _t.get("schema_hash"):
+                _hash = _t["schema_hash"]
+                break
+        if not _hash:
+            _hash = str((out.get("schema") or {}).get("schemaHash") or "")
+        _cols = list((out.get("schema") or {}).get("order") or [])
+        _missing = []
+        if not _svc:
+            _missing.append("service")
+        if not _hash:
+            _missing.append("schema_hash")
+        _lines = ["```bodhi-ext", "object: %s" % slug, "review_no: %s" % review_no,
+                  "basis: %s / %s" % (_svc or "ext", _tool or "—"),
+                  "rev: %s" % (out.get("rev") if out.get("rev") is not None else "待澄清")]
+        if _hash:
+            _lines.append("schema_hash: %s" % _hash)
+        if _cols:
+            _lines.append("columns: %s" % ",".join(_cols))
+        _lines.append("```")
+        out["ref_block"] = "\n".join(_lines)
+        out["ref_block_meta"] = {"source": "binding+ledger",
+                                 "missing": _missing,
+                                 "columns_source": "schema.order" if _cols else "",
+                                 "schema_hash_source": "tool.toolSchemaHash" if _hash else ""}
     return out
 
 
