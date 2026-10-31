@@ -244,7 +244,7 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
 
 
 def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: int = 0,
-          limit_chars: int = 6000, inline_media: bool = True, doc_title: str = "") -> dict:
+          limit_chars: int = 6000, inline_media: bool = False, doc_title: str = "") -> dict:
     """取原件 + 解析 → `outline` / `section` / `image` / `full`（逐字，不改写 ✓）。
 
     回执带 `duration_ms{fetch,parse,total}` 与 `bytes`（2026-10-28：超时排查用，只量不改语义）。
@@ -311,16 +311,79 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                                      "chars": len(s.get("text") or "")} for s in secs],
                 "hint": "取正文用 action=section（section_path 或 cursor 定位）"}
     if action == "image":
-        out = []
+        # 4) 只取正文图：重复 logo / 过小图 过滤（2026-10-31）
+        import hashlib as _hl  # noqa: PLC0415
+        _sig_cnt = {}
+        for x in images:
+            p0 = os.path.join(doc_root(), str(x.get("path") or ""))
+            if os.path.isfile(p0):
+                try:
+                    _sig_cnt[_hl.md5(open(p0, "rb").read()).hexdigest()] = \
+                        _sig_cnt.get(_hl.md5(open(p0, "rb").read()).hexdigest(), 0) + 1
+                except Exception:  # noqa: BLE001
+                    pass
+        _pages_n = int(quality.get("pages") or 0) or 1
+        kept, skipped_detail = [], []
         for x in images:
             p = os.path.join(doc_root(), str(x.get("path") or ""))
             item = dict(x, readable=os.path.isfile(p))
-            if inline_media and item["readable"]:
-                with open(p, "rb") as fh:
-                    item["data_url"] = ("data:image/png;base64,"
-                                        + base64.b64encode(fh.read()).decode())
-            out.append(item)
-        return {**base, "images": out}
+            if not item["readable"]:
+                skipped_detail.append({"page": x.get("page"), "reason": "unreadable"})
+                continue
+            size = os.path.getsize(p)
+            try:
+                _md5 = _hl.md5(open(p, "rb").read()).hexdigest()
+            except Exception:  # noqa: BLE001
+                _md5 = ""
+            if _md5 and _pages_n >= 3 and _sig_cnt.get(_md5, 0) * 2 >= _pages_n:
+                skipped_detail.append({"page": x.get("page"), "reason": "repeated_logo", "bytes": size})
+                continue
+            if size < 6000:
+                skipped_detail.append({"page": x.get("page"), "reason": "tiny", "bytes": size})
+                continue
+            item["bytes"] = size
+            ext = str(x.get("name") or "").rsplit(".", 1)[-1].lower()
+            item["content_type"] = ("image/jpeg" if ext in ("jpg", "jpeg")
+                                    else ("image/png" if ext == "png" else "application/octet-stream"))
+            item["url"] = "/bodhi/ext/doc-image?doc_id=%s&name=%s" % (did, x.get("name") or "")
+            # 5) 上下文标注（按页码近似定位章节 + 前后文）
+            try:
+                if secs:
+                    idx = min(len(secs) - 1, max(0, int((int(x.get("page") or 1) - 1)
+                                                         * len(secs) / float(_pages_n))))
+                    s0 = secs[idx]
+                    t0 = str(s0.get("text") or "")
+                    item["context"] = {"section": s0.get("title") or s0.get("path") or "",
+                                       "prev_text": t0[-160:], "next_text": t0[:160]}
+            except Exception:  # noqa: BLE001
+                pass
+            kept.append(item)
+        out = kept
+        total_b64 = 0
+        try:
+            cap = int(os.environ.get("BODHI_IMG_INLINE_KB", "64") or 64) * 1024
+        except ValueError:
+            cap = 64 * 1024
+        for item in out:
+            if not inline_media:
+                continue
+            if int(item.get("bytes") or 0) > cap:
+                item["inline_skipped"] = "too_large"
+                continue
+            p = os.path.join(doc_root(), str(item.get("path") or ""))
+            try:
+                enc = base64.b64encode(open(p, "rb").read()).decode()
+            except Exception:  # noqa: BLE001
+                continue
+            if total_b64 + len(enc) > 131072:
+                item["inline_skipped"] = "payload_cap"
+                continue
+            total_b64 += len(enc)
+            item["data_url"] = "data:%s;base64,%s" % (item.get("content_type"), enc)
+        return {**base, "images": out, "counts": {"sections": len(secs), "images": len(out)},
+                "images_skipped_detail": skipped_detail[:40],
+                "images_skipped_total": len(skipped_detail),
+                "images_total_bytes": sum(int(i.get("bytes") or 0) for i in out)}
     if action == "full":
         return {**base, "sections": secs, "images": images}
     i = int(cursor or 0)
