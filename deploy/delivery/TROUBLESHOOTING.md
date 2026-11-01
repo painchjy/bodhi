@@ -912,4 +912,11 @@ docker exec WeKnora-postgres psql -U postgres -d WeKnora -t -A -c \
 **口径**：正文/块只讲**业务列名**（人读）；工具字段是**机器口径**——只出现在
 `ext_table.columns`（回执）与 04 的入参里，**不进报告** ✗。
 
+**同类坑：同一个 slug 在两份库里各有一份映射（领域库 + 概念副本）**
+
+- 症状：面板上一套列名，`ext_table` / `GET /bodhi/ext/list?kb_id=…` 另一套（甚至出现重名列）；
+- 2026-11-02 起：**不传 `kb_id` 时以「已定稿且最后更新的那份映射」为准**（`_resolve_kb`），
+  回执里的 `kb_id` 告诉你用的是哪一份；传了 `kb_id` 就严格用你指定的那份；
+- 根治：删掉多余副本，或把两份映射对齐（`POST /bodhi/ext/mapping`，`status=confirmed`）。
+
 

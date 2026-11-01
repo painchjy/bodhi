@@ -50,7 +50,31 @@ def _resolve_kb(params: dict) -> str:
     cands = STORE._kbs_with_slug(slug)          # noqa: SLF001  同仓库内部解析器
     if len(cands) == 1:
         return cands[0]
-    for kb_id in cands:                         # 多库同名：以"有绑定"的那个为准 ✓
+    # 多库同名（领域库 + 概念副本，**两份都可能已绑定**）：
+    # 以「**已定稿且最新的映射**」为准（2026-11-02 用户实测：旧副本把 desc 标成「判定结论」，
+    # 面板里改的是另一份 ⇒ 谁最后定稿谁权威 ✓）。都没映射才退回带绑定的那个，再退回第一个。
+    best, best_key = "", None
+    for kb_id in cands:
+        try:
+            binds = STORE.list_bindings(kb_id, slug)
+        except Exception:                       # noqa: BLE001
+            binds = []
+        stamp, confirmed = "", False
+        for b in binds or []:
+            try:
+                fm = json.loads(b.get("field_map") or "{}")
+            except Exception:                   # noqa: BLE001  坏 JSON ⇒ 当没映射
+                fm = {}
+            stamp = max(stamp, str(fm.get("updatedAt") or ""))
+            confirmed = confirmed or (str(b.get("status") or "") == "confirmed")
+        if not binds:
+            continue
+        key = (1 if confirmed else 0, stamp)     # 先看"定稿"，再比"更新时间"
+        if best_key is None or key > best_key:
+            best, best_key = kb_id, key
+    if best:
+        return best
+    for kb_id in cands:                         # 有绑定但没写映射：仍按"有绑定"取
         try:
             if STORE.parse_binding(STORE._attrs_of(kb_id, slug)):
                 return kb_id
