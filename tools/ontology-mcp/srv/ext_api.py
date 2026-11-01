@@ -251,15 +251,19 @@ def list_payload(params: dict) -> dict:
                                   "note": "该对象未写映射 ⇒ 按工具口径展示（列名/枚举取契约）"}
         except Exception as exc:  # noqa: BLE001  映射失败不影响读台账
             out.setdefault("warnings", []).append("mapping_failed: %r" % (str(exc)[:120],))
-        # ── 引用块（2026-10-31 用户口径）：**由 02 按对象规范组装**，04 只提供台账数据 ──
-        #   字段：object / review_no / basis(service / tool) / rev / schema_hash / columns(order)
+        # ── 引用块（2026-10-31 v2 用户口径）：**内容全部来自 DataObject 自身**
+        #   · keys：主键**字段名由对象定义**、值取自页面/实例数据（不是"回执给的"）
+        #     单键 `keys: review_no=2026...`；联合键 `keys: a=1;b=2`
+        #   · basis：绑定边 service / tool；columns：对象映射顺序；schema_hash：工具页（可选）
+        #   · **rev 不再作为块字段**（它不是主键，缺了不影响展示外部数据）
         _b = out.get("binding") or {}
         _binds = STORE.list_bindings(kb, slug) if kb else []
         _one = _binds[0] if _binds else {}
         _tool = str(_b.get("tool") or _one.get("tool") or "")
+        _keys = [k for k in str(_one.get("keys") or "").split(",") if k.strip()]
         _svc = ""
         try:
-            if _tool:                                   # 工具 → MCP 服务（关系）
+            if _tool:
                 import ke_neo4j as _kg  # noqa: PLC0415
                 _rows = _kg.query(
                     "MATCH (t:BodhiInstance)-[]->(s:BodhiInstance) "
@@ -274,26 +278,29 @@ def list_payload(params: dict) -> dict:
             if _t["tool"] == _tool and _t.get("schema_hash"):
                 _hash = _t["schema_hash"]
                 break
-        if not _hash:
-            _hash = str((out.get("schema") or {}).get("schemaHash") or "")
         _cols = list((out.get("schema") or {}).get("order") or [])
-        _missing = []
-        if not _svc:
-            _missing.append("service")
-        if not _hash:
-            _missing.append("schema_hash")
-        _lines = ["```bodhi-ext", "object: %s" % slug, "review_no: %s" % review_no,
-                  "basis: %s / %s" % (_svc or "ext", _tool or "—"),
-                  "rev: %s" % (out.get("rev") if out.get("rev") is not None else "待澄清")]
+        # 主键值：只有"单主键且等于 review_no"时，才把本次编号写进去；联合键留给页面任务按对象规范填
+        _key_line = ""
+        if _keys:
+            if len(_keys) == 1 and _keys[0].strip().lower() in ("review_no", "评审编号"):
+                _key_line = "keys: %s=%s" % (_keys[0].strip(), review_no)
+            elif len(_keys) > 1:
+                _key_line = "keys: " + ";".join("%s=<待填>" % k.strip() for k in _keys)
+            else:
+                _key_line = "keys: %s=<待填>" % _keys[0].strip()
+        _lines = ["```bodhi-ext", "object: %s" % slug]
+        if _key_line:
+            _lines.append(_key_line)
+        _lines.append("basis: %s / %s" % (_svc or "ext", _tool or "—"))
         if _hash:
             _lines.append("schema_hash: %s" % _hash)
         if _cols:
             _lines.append("columns: %s" % ",".join(_cols))
         _lines.append("```")
         out["ref_block"] = "\n".join(_lines)
-        out["ref_block_meta"] = {"source": "binding+ledger",
-                                 "missing": _missing,
-                                 "columns_source": "schema.order" if _cols else "",
+        out["ref_block_meta"] = {"source": "dataobject+binding",
+                                 "key_fields": _keys,
+                                 "columns_source": "dataobject.mapping",
                                  "schema_hash_source": "tool.toolSchemaHash" if _hash else ""}
     return out
 
