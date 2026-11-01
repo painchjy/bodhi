@@ -58,6 +58,66 @@ def business_columns(fmap, tool_order: list | None = None) -> list:
     return [(f, m["labels"].get(f) or "") for f in base]
 
 
+def resolve_columns(schema: dict, fmap, columns) -> tuple:
+    """业务列名 ↔ 工具字段的归一化。→ `(字段有序列表, 未知列列表)`
+
+    为什么要它（2026-11-01 用户实测）
+    --------------------------------
+    报告里的引用块 / 模板「数据对象字段」列写的是**业务列名**（`编号,问题描述,…`），
+    而外部接口只认**工具字段**（`issue_no,desc,…`）⇒ 面板把块原样透传就 400。
+    报告是人读的、接口是机器读的 ⇒ **入口这里翻一次**，两边都不用改口径 ✓。
+
+    匹配顺序：字段名 → `fieldMap.labels`（领域先）→ 契约 `schema.labels` → `schema.columns[].label`；
+    **未知列不抛**（原样回给调用方 warn）：少一列 ≠ 整块挂不上。
+    """
+    if isinstance(columns, str):
+        items = [c.strip() for c in columns.replace("，", ",").split(",")]
+    elif isinstance(columns, (list, tuple)):
+        items = [str(c).strip() for c in columns]
+    else:
+        items = []
+    items = [c for c in items if c]
+    if not items:
+        return [], []
+    sch = schema or {}
+    order = [str(f) for f in (sch.get("order") or sch.get("fields") or [])]
+    m = parse(fmap)
+    known = set(order) | set(m["labels"] or {}) | set(sch.get("labels") or {})
+    by_label: dict = {}
+    for f, lb in (m["labels"] or {}).items():          # 领域映射优先
+        if lb:
+            by_label.setdefault(str(lb), str(f))
+    for f, lb in (sch.get("labels") or {}).items():     # 契约标签兜底
+        if lb:
+            by_label.setdefault(str(lb), str(f))
+    for c in (sch.get("columns") or []):                # 旧格式：[{field,label}]
+        if isinstance(c, dict) and c.get("field") and c.get("label"):
+            by_label.setdefault(str(c["label"]), str(c["field"]))
+    fields, unknown = [], []
+    for c in items:
+        f = c if c in known else by_label.get(c, "")
+        if not f:
+            unknown.append(c)
+        elif f not in fields:
+            fields.append(f)
+    return fields, unknown
+
+
+def block_columns(schema: dict, fmap, columns=None) -> list:
+    """`ref_block.columns` 用：**有序业务列名**（与 `render_table` 表头逐字一致）。
+
+    口径（2026-11-01）：块是"这张表的说明书"，人读时必须和表头同一套名字 ⇒ 写 label 不写字段；
+    机器信息（绑定是谁、契约版本）由 `basis` / `schema_hash` 承担 ✓。
+    """
+    fields, _unknown = resolve_columns(schema, fmap, columns) if columns else ([], [])
+    sch = schema or {}
+    pairs = business_columns(fmap, [str(f) for f in (sch.get("order") or sch.get("fields") or [])])
+    if fields:
+        keep = set(fields)
+        pairs = [(f, lb) for f, lb in pairs if f in keep]
+    return [(lb or f) for f, lb in pairs]
+
+
 def to_business_value(field: str, value, fmap) -> tuple:
     """工具值 → 业务值。→ `(业务值, 是否命中映射)`；未命中原样返回 `False`（调用方 warn）。"""
     m = parse(fmap)
@@ -91,13 +151,11 @@ def render_table(rows: list, schema: dict, fmap, columns=None) -> tuple:
 
     - 表头用 `label`（业务列名），列序＝`order`（领域顺序）；
     - 值用业务枚举（工具值 → 业务值）；
-    - `columns`（工具字段子集）若给了 ⇒ 只显示这几列（顺序仍按领域顺序）。
+    - `columns`（**业务列名或工具字段**，见 `resolve_columns`）若给了 ⇒ 只显示这几列（顺序仍按领域顺序）。
     """
-    cols = columns or []
-    if isinstance(cols, str):
-        cols = [c.strip() for c in cols.split(",") if c.strip()]
-    m = parse(fmap)
-    pairs = business_columns(fmap, [c for c in (schema.get("order") or [])])
+    cols = resolve_columns(schema, fmap, columns)[0] if columns else []
+    pairs = business_columns(fmap, [c for c in ((schema or {}).get("order")
+                                               or (schema or {}).get("fields") or [])])
     if cols:
         pairs = [(f, lb) for f, lb in pairs if f in cols]
     if not pairs:

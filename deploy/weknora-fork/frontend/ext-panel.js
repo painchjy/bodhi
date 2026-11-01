@@ -18,7 +18,9 @@
  *
  * 纪律：**列/枚举只认回执**（面板不写死列）；写库带 `if_rev`（冲突就重取，不覆盖）；
  *      **编号不写死**：块里没有就用 `/bodhi/ext/schema` 的 `key_label` 去页面表格里认，或交后端按标题解析；
- *      报告只用哪几列由**模板**给（引用块里的 `columns:` 行）⇒ 面板按它渲染、按它回写 ✓。
+ *      报告只用哪几列由**模板/引用块**给（块里的 `columns:` 行）⇒ 面板按它渲染、按它回写 ✓。
+ *      **`columns:` 写业务列名**（与表头逐字一致，2026-11-01 口径）：面板先按 label 反查 field，
+ *      再按 field 兜底；未知列跳过 + console.warn（不出空列 ✗）。
  */
 (function () {
   'use strict';
@@ -128,7 +130,7 @@
     return ta;
   }
 
-  var VER = 'v4.8';
+  var VER = 'v4.9';
 
   function renderPanel(mount, meta) {
     style();
@@ -342,15 +344,29 @@
               return { field: f, label: state.labels[f] };
             });
           }
-          // 模板给了字段子集 ⇒ 只留这些列，且**按模板顺序**（工具字段可能多于报告所需 ✓）
+          // 块/模板给的 `columns:` 是**业务列名**（与正文表头逐字一致，2026-11-01 口径）；
+          // 契约里才有 field ⇒ **先按 label 反查**，再按 field 兜底；都未命中 ⇒ 跳过 + warn（不出空列 ✗）
           if (meta.columns) {
             var want = String(meta.columns).split(',').map(function (s) { return s.trim(); })
               .filter(Boolean);
-            var byField = {};
-            cols.forEach(function (c) { byField[c.field] = c; });
-            var picked = want.map(function (f) {
-              return byField[f] || { field: f, label: state.labels[f] };
+            var byField = {}, byLabel = {};
+            cols.forEach(function (c) {
+              if (c.field) byField[c.field] = c;
+              if (c.label) byLabel[c.label] = c;
             });
+            Object.keys(state.labels).forEach(function (f) {
+              if (state.labels[f] && !byLabel[state.labels[f]]) {
+                byLabel[state.labels[f]] = { field: f, label: state.labels[f] };
+              }
+            });
+            var picked = [], missing = [];
+            want.forEach(function (k) {
+              var c = byLabel[k] || byField[k];
+              if (c) { picked.push(c); } else { missing.push(k); }
+            });
+            if (missing.length) {
+              console.warn('[bodhi-ext] 块里的 columns 有未知列（已跳过）：' + missing.join('、'));
+            }
             if (picked.length) cols = picked;
           }
           state.cols = cols;

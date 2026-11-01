@@ -188,13 +188,29 @@ def list_payload(params: dict) -> dict:
                 "hint": ("面板要知道是哪一份台账：引用块缺 `review_no` 时，"
                          "请带上页面 `slug`（后端会从正文表格的「%s」行解析）"
                          % (schema_payload({"object": slug, "kb_id": kb}).get("key_label") or "主键"))}
+    # ── 列名归一化（2026-11-01 用户实测：块/模板写**业务列名**，外部接口只认**工具字段**）──
+    # 面板把块的 `columns:` 原样透传 ⇒ 以前直接 400（`bad columns`）。这里翻一次：
+    # 未知列**不抛、不猜**（回 `columns_unknown` + warnings），少一列 ≠ 整块挂不上 ✓。
+    _sch0 = schema_payload({"object": slug, "kb_id": kb}) if slug else {}
+    _binds0 = []
+    try:
+        _binds0 = STORE.list_bindings(kb, slug) if kb else []
+    except Exception:                                   # noqa: BLE001
+        _binds0 = []
+    _fmap0 = _binds0[0].get("field_map") if _binds0 else ""
+    fields, unknown_cols = [], []
+    try:
+        import ke_ext_map as _MAP  # noqa: PLC0415
+        fields, unknown_cols = _MAP.resolve_columns(_sch0, _fmap0, params.get("columns"))
+    except Exception:                                   # noqa: BLE001  归一化失败不阻断读台账
+        fields = []
     # 数据来源（2026-10-29）：**优先调 04**（it_platform MCP），不再读本地文件——
     # 02 与 04 独立部署、不共享磁盘；本地文件只在 04 不可达时作兜底（同机/离线）。
     # 04 只回数据行（2026-11-01 用户口径：**渲染归知识侧**）⇒ 一律要 rows，
     # 表格在本函数里按**对象映射**渲染（`ke_ext_map.render_table`），不再拿外部服务的 markdown
     q = {"mode": "query", "action": "list", "review_no": review_no, "view": "rows"}
-    if params.get("columns"):
-        q["columns"] = params["columns"]
+    if fields:
+        q["columns"] = ",".join(fields)                 # 04 只认工具字段
     if slug:
         q["object"] = slug
     if kb:
@@ -212,7 +228,7 @@ def list_payload(params: dict) -> dict:
     if not out:
         out = ISSUE.maintain(kb_id=kb, object_slug=slug, mode="query", action="list",
                              review_no=review_no, view=str(params.get("view") or "rows"),
-                             columns=params.get("columns"))
+                             columns=(",".join(fields) if fields else None))
         src_kind = "local_store"
         if remote_err:
             out["remote_error"] = remote_err
@@ -222,6 +238,13 @@ def list_payload(params: dict) -> dict:
         out["kb_id"] = kb
         out["review_no"] = review_no
         out["review_no_source"] = src
+        if params.get("columns"):                       # 只回报，不回显成"已用"（见 columns）
+            out["columns_requested"] = str(params.get("columns"))
+        if unknown_cols:                                # 未知列不阻断：跳过 + warn（不猜 ✓）
+            out["columns_unknown"] = list(unknown_cols)
+            out.setdefault("warnings", []).append(
+                "unknown_columns: %s" % "、".join(unknown_cols))
+        _fmap_eff = ""                                  # 实际用于渲染/出块的映射（无映射时=契约合成）
         # ── 映射（2026-10-30）：**展示走业务口径**（列名/列序/枚举），`schema` 保持工具口径 ──
         try:
             import ke_ext_map as MAP  # noqa: PLC0415
@@ -229,6 +252,7 @@ def list_payload(params: dict) -> dict:
             fmap = binds[0].get("field_map") if binds else ""
             m = MAP.parse(fmap)
             if m["has"]:
+                _fmap_eff = fmap
                 pairs = MAP.business_columns(fmap, (out.get("schema") or {}).get("order") or [])
                 out["display"] = {
                     "labels": {f: (lb or f) for f, lb in pairs},
@@ -257,6 +281,7 @@ def list_payload(params: dict) -> dict:
                 _order = _sch.get("order") or []
                 synth = {"order": _order,
                          "items": [{"field": f, "label": _labs.get(f, f)} for f in _order]}
+                _fmap_eff = _fmap_eff or synth
                 md3, _un = MAP.render_table(out.get("rows") or [], _sch, synth,
                                             params.get("columns"))
                 out["markdown"] = md3
@@ -290,7 +315,16 @@ def list_payload(params: dict) -> dict:
             if _t["tool"] == _tool and _t.get("schema_hash"):
                 _hash = _t["schema_hash"]
                 break
-        _cols = list((out.get("schema") or {}).get("order") or [])
+        # 块里 `columns:` = **业务列名有序列表**（与正文表头逐字一致，2026-11-01 用户口径）：
+        # 块是"这张表的说明书"，人读必须同一套名字；机器信息由 `basis` / `schema_hash` 承担 ✓
+        try:
+            import ke_ext_map as _M2  # noqa: PLC0415
+            _cols = _M2.block_columns(out.get("schema") or {}, _fmap_eff or {},
+                                      params.get("columns"))
+        except Exception:                              # noqa: BLE001
+            _cols = []
+        if _cols:
+            out["column_labels"] = list(_cols)         # 与 markdown 表头逐字同序
         # 块内 keys = **台账主键（分片键）**：取对象主键的第一个（通常是 review_no），值来自页面上下文；
         # 行级主键（如 issue_no）不进块，它在表体里逐行体现。
         _key_field = _keys[0].strip() if _keys else ""

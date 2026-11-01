@@ -91,3 +91,41 @@ def test_to_tool_items_keeps_unknown_values():
     items, unmapped = M.to_tool_items([{"结论": "待定"}], FMAP)
     assert items[0]["verdict"] == "待定"
     assert unmapped == ["verdict=待定"]
+
+
+# ── 列名归一化（2026-11-01 用户实测：块/模板写业务列名，外部接口只认工具字段）────────────
+def test_resolve_columns_accepts_business_labels_and_fields():
+    """中文列名 / 工具字段 / 全角逗号 都能归一成字段；顺序按调用方给的顺序。"""
+    import ke_ext_map as M
+    fields, unknown = M.resolve_columns(SCHEMA, FMAP, "编号,触发规则,问题描述")
+    assert fields == ["issue_no", "rule", "desc"], fields
+    assert unknown == [], unknown
+    fields, unknown = M.resolve_columns(SCHEMA, FMAP, "issue_no，severity")
+    assert fields == ["issue_no", "severity"] and unknown == [], (fields, unknown)
+
+
+def test_resolve_columns_unknown_is_not_fatal():
+    """未知列**不抛**（旧版直接 400）：原样回给调用方 warn，其余列照常返回。"""
+    import ke_ext_map as M
+    fields, unknown = M.resolve_columns(SCHEMA, FMAP, "编号,不存在的列,判定")
+    assert fields == ["issue_no", "verdict"], fields
+    assert unknown == ["不存在的列"], unknown
+
+
+def test_resolve_columns_prefers_field_map_labels():
+    """同一字段在映射与契约里标签不同 ⇒ **领域映射优先**（问题 vs 问题描述）。"""
+    import ke_ext_map as M
+    fields, _unknown = M.resolve_columns(SCHEMA, FMAP, "问题")
+    assert fields == ["desc"], fields
+
+
+def test_block_columns_match_table_header():
+    """`ref_block.columns` 与 `render_table` 表头**逐字一致**（块 = 这张表的说明书 ✓）。"""
+    import ke_ext_map as M
+    md, _un = M.render_table(ROWS, SCHEMA, FMAP)
+    head = [c.strip() for c in md.splitlines()[0].strip().strip("|").split("|")]
+    assert M.block_columns(SCHEMA, FMAP) == head, (M.block_columns(SCHEMA, FMAP), head)
+    # 子集：业务列名入参也认，只出这两列（顺序仍按领域顺序）
+    md2, _un2 = M.render_table(ROWS, SCHEMA, FMAP, "结论,编号")
+    assert md2.splitlines()[0].strip() == "| 编号 | 结论 |", md2
+    assert M.block_columns(SCHEMA, FMAP, "结论,编号") == ["编号", "结论"]

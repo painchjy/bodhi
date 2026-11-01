@@ -134,6 +134,8 @@ def ext_table(args: dict) -> dict:
            "review_no": review_no, "rows_count": int((got.get("counts") or {}).get("items") or 0),
            "rev": got.get("rev"),
            "columns": list(schema.get("columns") or []),
+           "column_labels": list(got.get("column_labels") or []),
+           "columns_unknown": list(got.get("columns_unknown") or []),
            "labels": disp.get("labels") or schema.get("labels") or {},
            "markdown": md,
            "mapping_status": (disp.get("mapping_status") or

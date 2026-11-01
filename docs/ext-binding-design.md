@@ -71,13 +71,15 @@
 
 ```bodhi-ext
 object: bpmn/dataobject/问题清单
-review_no: YYYYMM-11111111
+keys: review_no=YYYYMM-11111111
 basis: it_platform / ext_issue_list
-rev: 7
+columns: 编号,问题描述,触发规则,文档位置,原文摘录,判定,严重度,修改建议,可信度,规则指纹,专家反馈
 schema_hash: sha256:fb9b71cd8b67f376
 ```
 
-- 前端遇该块 ⇒ `GET /bodhi/ext/list?...`（nginx → bodhi 代理到 it-platform；浏览器不直连 8770）⇒ 渲染**可编辑表格**；
+- **`columns:` 写业务列名**（= 正文表头逐字，2026-11-01 用户口径）：块是"这张表的说明书"，人读要与表头同一套名字；工具字段（`issue_no,desc,…`）只出现在 `ext_table.columns` / 04 入参里；
+- 前端遇该块 ⇒ `GET /bodhi/ext/list?...`（nginx → bodhi 代理；浏览器不直连 8770）⇒ 渲染**可编辑表格**；
+  `columns` 入参**两种都认**（label 优先、字段兜底），未知列**跳过 + `columns_unknown`/warnings**（不再 400）；
 - 列 / 列序 / 标签 / 枚举 / 只读列**全部来自 projection**；不给加列；
 - 行内编辑 ⇒ `POST /bodhi/ext/update`（`actor` / `session_no` / `if_rev`）；`conflict` ⇒ 提示并重取，**不覆盖**；
 - 成功后：刷新面板 → **回写快照**（`view=table` 的 markdown 节级替换）+ `rev/hash` 同步 + 报告 `version+1`。
@@ -89,8 +91,11 @@ schema_hash: sha256:fb9b71cd8b67f376
 
 1. 模板（`schema:DocumentTemplate` 实例）该小节的章节结构里给出**字段子集** —— 表头加一列
    **「数据对象字段（逗号分隔，顺序即展示顺序）」**，`—` = 该节不取外部数据；
-2. 组文时调 `ext_issue_list(view="table", columns="<模板那格>")` —— 台账表只出这几列；
-   非法字段 ⇒ `bad_columns` + `allowed`（**不静默丢列** ✗）；
+   这一格写的是**业务列名**（与正文表头一致），不是字段代码；
+2. 组文时调 `ext_table(object=…, keys={<主键>: "<值>"}, columns="<模板那格>")` ——
+   **表体直接用回执 `markdown`**，`column_labels` 就是表头逐字（旧法
+   `ext_issue_list(view="table", columns=…)` 仍可用，属兼容路径）；
+   列名不存在 ⇒ **只跳过该列** + 回 `columns_unknown`/`warnings`（不静默丢列、也不 400 ✓）；
 3. 引用块带上同一份子集（`columns:` 行，`sync-report` 会自动写回），面板按它**只渲染这几列**（顺序同模板）；
 4. 回写快照时按同一 `columns` 重出表 ⇒ 正文列集与模板永远一致（列集真源 = 模板；契约真源 = `x-ext`）。
 

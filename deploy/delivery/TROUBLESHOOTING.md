@@ -552,13 +552,15 @@ tail -f /var/log/bodhi-mcp.log        # 同上（:8765）
 #   keys: <主键字段>=<值>[;<主键2>=<值2>]
 #   basis: <service> / <tool>
 #   schema_hash: sha256:…   （可选）
-#   columns: <列1,列2,…>     （可选，按对象映射）
+#   columns: <业务列名1,业务列名2,…>   （可选；**与正文表头逐字一致**，不写字段代码 ✗）
 ```
 
 - 巡检**不再检查**代码块/台账一致性（G4/G5 已删：那属业务表达，不在工具职责内 ✓）；
 - 面板侧已容错：`isRefBlock` 只认 `object:`；编号缺省时由后端按页面标题解析
   （`GET /bodhi/ext/list?object=…&title=<页面标题>`，回执带 `review_no` + `review_no_source`），
   解析成功时面板标签会显示「编号取自报告上下文」；v2 的 `keys:` 行由面板 v4.8 起直接解析；
+- `columns:` **写业务列名**（2026-11-01）：面板 v4.9 先按 label 反查字段、再按字段兜底，
+  未知列**跳过 + console.warn**（不出空列）；后端 `columns` 入参两种都认（label 优先），不报 400；
 - `object` 多候选（多个 DataObject 的表头都能对上）时**不猜** ⇒ 先在 DataObject 页 `ext_describe` 订阅契约，
   再让人工确认表头该归哪个对象。
 
@@ -866,4 +868,48 @@ SELECT name, url, enabled FROM mcp_services WHERE deleted_at IS NULL ORDER BY na
 
 > 补充：`assert_can_write` 自 2026-10-28 起**默认放行**（`BODHI_OPEN_WRITE_ACL=1`，权限控制停用），
 > 所以"身份缺失 → 拒写"只会在显式设 `=0` 时出现；删除类操作仍先 `dry_run` 出范围预览。
+
+## 16. 面板报 `bad columns`（HTTP 400）/ 块里列名与表头不一致（2026-11-01 用户实测）
+
+**症状**：Console 里 `[bodhi-ext] v4.9 loaded`、面板也挂载了，但
+`GET /bodhi/ext/list?...&columns=%E7%BC%96%E5%8F%B7,…` 返回 **400**，表格出不来；
+或者表格出来了但**整列空白**。
+
+**根因（同一个根，两处表现）**：
+
+1. 引用块 / 模板「数据对象字段」写的是**业务列名**（`编号,问题描述,…`），而
+   `/bodhi/ext/list` 与外部接口只认**工具字段**（`issue_no,desc,…`）
+   ⇒ 旧版 `_columns()` 抛 `ValueError` → 400；
+2. 面板旧版把 `columns:` 当**字段名**去匹配 ⇒ 中文匹配不到 ⇒ 退化成 `{field:'编号'}` ⇒ 全列空白。
+
+**已修（2026-11-01）**：
+
+- 后端 `ext_api.list_payload` 入口**归一化**（`ke_ext_map.resolve_columns`）：
+  字段名 / `fieldMap.labels` / 契约 `labels` / `columns[].label` 依次匹配；
+  **未知列不抛**（回 `columns_unknown` + `warnings`），只跳过该列；
+- `ext_table` 回执新增 `column_labels`（**与 markdown 表头逐字同序**），
+  且 `ref_block.columns` 输出**业务列名**（块 = 这张表的说明书，人读要与表头同一套名字）；
+- 面板 **v4.9**：先按 label 反查字段、再按字段兜底；未知列 `console.warn` 跳过（不出空列）。
+
+**排查三步**
+
+```bash
+# ① 契约里这一列到底叫什么（表头/label 逐字抄这里，别自己造词）
+curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<DataObject slug>' \
+  | python3 -m json.tool | sed -n '/labels/,/}/p'
+
+# ② 同一请求带**中文列名**应当 200（不再是 400）
+curl -sG -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8765/bodhi/ext/list' \
+  --data-urlencode 'object=<DataObject slug>' --data-urlencode 'review_no=<编号>' \
+  --data-urlencode 'columns=编号,问题描述'
+
+# ③ 页面里的块写的是哪套名字
+docker exec WeKnora-postgres psql -U postgres -d WeKnora -t -A -c \
+  "SELECT substring(content from position('columns:' in content) for 120) \
+     FROM wiki_pages WHERE slug='<报告 slug>';"
+```
+
+**口径**：正文/块只讲**业务列名**（人读）；工具字段是**机器口径**——只出现在
+`ext_table.columns`（回执）与 04 的入参里，**不进报告** ✗。
+
 
