@@ -52,22 +52,13 @@ def page_attributes_set(args: dict) -> dict:
 def save_knowledge_tool(args: dict) -> dict:
     """写库唯一入口（`stage=graph|report`）。**参数解析逐字照搬**原 `if name == "save_knowledge"` 分支 ✓
 
-    2026-10-25（P3 闸门，分级）：`stage=report` 时先跑外部台账闸门 ——
-    **G3 硬**（报告里的条目编号必须来自台账，`mode=apply` 才拦）、**G1/G2 软**（契约漂移 / 行数不符 ⇒ `warnings`）。
+    职责边界（2026-11-01 用户口径，最终版）：**写库不判领域**。
+    - 报告里的台账表/引用块**写成什么、写不写**，由**任务步骤 + 业务对象页规范**决定（智能体侧）；
+    - 本工具只做本体/模板层面的校验（章节完整性、模板解析）与落库；
+    - 不补块（`auto_ref_block` 已删）、不比对台账/契约（`ke_ext_gate` 已删）、
+      不产出 `ext_ref_block` / `ext_gate` / `ext_schema_stale` 之类**领域告警** ✗。
     """
-    _stage = str(args.get("stage", "report"))
-    _gate = {}
-    _anchor = {}
-    # 2026-10-31（用户口径 A）：**引用块由任务步骤按台账回执原样插入**。
-    # `save_knowledge` 不再"补块"，也不再做**依赖领域知识**的台账/契约校验
-    # （否则领域知识一改，写库能力就静默失效 ✗）。块的生成/校验下放到：
-    #   · 任务步骤（`ext_issue_list(view="table")` 回执的 `ref_block` 原样插入）
-    #   · 独立巡检（`ke_ext_gate.check_report`，按需跑、不阻断写库）
-    if _stage == "report":
-        _anchor = {"changed": False, "reason": "disabled_by_design"}
-        _gate = {"ok": True, "skipped": "ext_gate_disabled",
-                 "note": "台账/契约校验已下放到任务步骤（ext_issue_list 回执 + 任务页自检）"}
-    _out = save_knowledge(
+    return save_knowledge(
         str(args["kb_id"]), stage=str(args.get("stage", "report")),
         model=str(args.get("model", "bmm")), report=args.get("report"),
         nodes=args.get("nodes") or [], edges=args.get("edges") or [],
@@ -79,15 +70,4 @@ def save_knowledge_tool(args: dict) -> dict:
         session_no=str(args.get("session_no", "")),
         doc_id=str(args.get("doc_id", "")), intent=str(args.get("intent", "")),
         acknowledge_intent_change=bool(args.get("acknowledge_intent_change", False)))
-    # 软警告（G1/G2）与闸门明细一并回给调用方（不拦写 ✓）
-    if isinstance(_out, dict) and _gate.get("warnings"):
-        _w = list(dict.fromkeys((_out.get("warnings") or []) + _gate["warnings"]))
-        _out["warnings"] = _w
-        _out["ext_gate"] = _gate
-    if isinstance(_out, dict) and _anchor.get("changed"):
-        # 让调用方知道"锚点是工具补的"（编号取自报告上下文 → 台账分片 ✓）
-        _out["ext_ref_block"] = {k: _anchor.get(k) for k in
-                                 ("object", "review_no", "rev", "columns",
-                                  "review_no_source", "reason")}
-    return _out
 

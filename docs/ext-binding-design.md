@@ -115,7 +115,7 @@ DataObject 页正文（`write_anchor=true`，已有同类块就整块替换、�
 
 | 环节 | 做法 |
 |---|---|
-| **写库时补锚点** | `save_knowledge(stage="report")` 检测到"正文有条目表但**没有** `bodhi-ext` 块" ⇒ `ke_ext_gate.auto_ref_block` **自动补**（插在匹配到的表之后）。回执给 `ext_ref_block{object, review_no, rev, columns, review_no_source}` |
+| **报告写块**（2026-11-01 起） | 由**任务步骤/智能体**按业务对象页规范写；`ext_table` 回执带现成的 `ref_block`（v2：`object`/`keys`/`basis`/`schema_hash`/`columns`）可整块复制。`save_knowledge` **不补块、不校验块** ✗ | 
 | **编号从哪来** | ① 正文里出现的**台账分片名**（= 外层主键值，唯一命中才算）→ ② 台账分片名不在正文时退回"条目编号重叠"。**不再依赖引用块、也不写死** ✓ |
 | **object 从哪来** | 该库（本库没有 ⇒ 全库）里**契约标签与该表表头对得上**的 DataObject（`labels[order[0]]` 必须在表头，且命中 ≥3 列）；**多候选不猜**（回 `object_ambiguous` + candidates）✓ |
 | **面板不硬要编号** | 引用块缺 `review_no` / 缺 `schema_hash` 也照样挂载（`isRefBlock` 只认 `object:`）；编号由后端解析：`GET /bodhi/ext/list?object=…&title=<页面标题>`（或 `&slug=`）⇒ 回执带 `review_no` + `review_no_source`；面板标题显示「编号取自报告上下文」 |
@@ -193,18 +193,24 @@ TTL 的章节规范也补了：`② 规则清单` 的 `规则指纹` **取 `fing
 
 实测（修复后 `rules_resolve` 回执）：6/6 条全是页上原值（16 位 hex），与 YYYYMM-11111111 完全一致。
 
-## 5.3 报告写入闸门（P3，分级；`ke_ext_gate.py`）
+## 5.3 报告写入（**已撤销闸门**，2026-11-01）
 
-在 `save_knowledge(stage="report")` 外层执行（**写库前**；闸门自身异常不挡写）：
+`save_knowledge(stage="report")` **不再做任何外部台账/契约判定**（`ke_ext_gate.py` 已删除）：
 
-| 闸 | 判定 | 强度 | 回执 |
-|---|---|---|---|
-| **G3** 编号不来自台账 | 报告表里的 `编号` ⊄ 台账主键 | **硬失败**（仅 `mode=apply`） | `ok=false, error=ext_unknown_items, unknown_items[], ledger, ledger_rev` |
-| G2 行数不符 | 表行数 ≠ 台账条目数 | 软 | `warnings:["ext_count_mismatch"], counts{report,ledger}` |
-| G1 契约漂移 | 正文 `schema_hash` ≠ 当前 `x-ext.schemaHash` | 软 | `ext_schema_stale`；无引用块 ⇒ `ext_no_ref_block` |
+| 原闸 | 现状 |
+|---|---|
+| G3 编号不来自台账（硬失败） | **删除**（写库不判领域：工具不知道智能体用的是哪套任务步骤/模板） |
+| G1/G2 软警告（契约漂移 / 行数不符） | **删除**（同上） |
+| 缺块自动补锚点 `auto_ref_block` | **删除**（块由任务步骤按业务对象页规范写；`ext_table` 回执给现成的 `ref_block`） |
 
-台账分片按"与报告编号重叠最多"选择（同一编号不同轮次不混）。实测：真实报告放行（11/11）；
-伪造 `P-99` ⇒ dry_run 只给软警告、`apply` **硬失败且未落库**。
+谁负责什么（2026-11-01 用户口径）：
+
+| 事 | 归属 |
+|---|---|
+| 台账数据行（rows + 契约 schema） | 外部接口（04 / `ext_issue_list`），**不产 markdown** |
+| 报告清单节表体的 markdown（列名/列序/枚举） | 知识侧 `ext_table`（按 `DataObject` 绑定的 `fieldMap` 渲染） |
+| 报告里的 `bodhi-ext` 块 | 任务步骤/智能体（对象页 `对象建模` v2 规范；可整块复制 `ext_table.ref_block`） |
+| 写库 | `save_knowledge`：只做本体/模板校验与落库 |
 
 ## 5.4 前端面板（P4，2026-10-25）
 
@@ -241,18 +247,19 @@ TTL 的章节规范也补了：`② 规则清单` 的 `规则指纹` **取 `fing
 |---|---|---|
 | **P0** | 24 处域词清零（4 文件，含一处冗余正则分支）+ 基线 | ✅ 域词 24 → **0**，`test_no_business_semantics` 全绿 |
 | **P1** | it-platform `tools/list` 下发 `x-ext`；日志加 `rpc` | ✅ 11 列 / 2 枚举 / `schemaHash`；日志见 `rpc=tools/call/ext_issue_list` |
-| **P2** | bodhi `ext_describe`（订阅 + projection + hash + drift）；写口规则（projection 拒写、绑定 ASCII 校验） | ✅ 38 工具；投射已落库并回读；三条写口规则实测（见 §5 备注） |
-| **P3** | 报告 `bodhi-ext` 引用块 + G3 硬 / G1·G2 软 | ✅ 闸门已挂 `save_knowledge`（§5.3 实测）；引用块随 P4 面板一起加 |
-| **P4** | 前端面板 `BodhiExtTable` + `/bodhi/ext/*` + 快照回写 | ✅ 面板 v4.5（按块内容识别、`object:` 即可挂载、契约卡）、接口（`list`/`schema`/`update`/`describe`/`sync-report`）、快照回写（含 `columns:` 写回 + 自动刷新）、**缺块时工具自动补锚点**（§4.3）；实测 666555 报告从"无块无面板"→ 补块后 11 行可编辑 |
-| P5 | `audit_scan(scope="ext")`（G4）+ 回归用例 | ✅ `ke_audit.check_ext_ledger`（G4 low；绑定/台账不可读**也从实报**）+ `tests/test_ext_tools.py` 6 例（块解析/rev 纯函数/落后/持平/不可读/门禁只数第一张表）；实测：改台账 → 巡检报「差 1 版」→ 同步 → 归零 |
+| **P2** | bodhi `ext_describe`（订阅 + projection + hash + drift）；写口规则（projection 拒写、绑定 ASCII 校验） | ✅ 43 工具（2026-11-01 实测）；投射已落库并回读；三条写口规则实测（见 §5 备注） |
+| **P3** | 报告 `bodhi-ext` 引用块 + G3 硬 / G1·G2 软 | ⚠️ **2026-11-01 撤销**：闸门与自动补块已删（写库不判领域）；块由任务步骤按对象规范写，表体走 `ext_table` |
+| **P4** | 前端面板 `BodhiExtTable` + `/bodhi/ext/*` + 快照回写 | ✅ 面板 v4.8（按块内容识别、`object:` 即可挂载、**支持 v2 的 `keys:`**、契约卡）、接口（`list`/`schema`/`update`/`describe`/`sync-report`/`ext_table`）、快照回写（含 `columns:` 写回 + 自动刷新） |
+| P5 | `audit_scan(scope="ext")`（G4/G5） | ❌ **2026-11-01 删除**：G4/G5 检查报告正文块/台账一致性 = 业务表达，不属工具职责；`scope=ext` 只保留 G7（参考规范抓取留痕） |
 | P6 | 迁移收口：删 DataObject definition 列清单、任务页 note 去"11 列"；模板加「数据对象字段」列 | ✅ definition 只留口径（列名/列序/列数一律不写）、note 与任务页 note 去列数、列号引用改列名；模板「章节结构」加**第 5 列「数据对象字段」**（`③ 问题清单` = 11 字段有序），`ke_report.parse_template_sections` 回 `fields`、`sync-report` 把 `columns:` 写回引用块 |
 
 ## 7 回归与回滚
 
 - P1 属于 `tools/list` 的**附加字段** → 标准 JSON 客户端忽略未知字段；若某客户端严格校验，
   回滚只需把 `server.handle_rpc` 的 `tools/list` 改回 `S.TOOLS`（保留 `schemas.x_ext()` 供 `ext_describe` 用）。
-- 相关测试：`tests/test_ext_tools.py`（38）、`tests/test_report_template.py`（9）、
-  `tests/test_no_business_semantics.py`（0 命中）、`tests/test_tools_contract.py`（38 工具无漂移）。
+- 相关测试：`tests/test_ext_tools.py`（45 绿 + 7 个**既有**红：附件导入用例仍在 patch `ke_ext_docs` 里
+  已不存在的私有符号，与本次解耦无关）、`tests/test_report_template.py`（9）、
+  `tests/test_no_business_semantics.py`（0 命中）、`tests/test_tools_contract.py`（43 工具无漂移）。
 
 ## 8 已知遗留 / 运维注意（2026-10-25 收尾）
 
@@ -260,7 +267,7 @@ TTL 的章节规范也补了：`② 规则清单` 的 `规则指纹` **取 `fing
 |---|---|---|
 | 面板浏览器验收 | 后端/接口/巡检均已实测；面板 v4.5 的**挂载与自动刷新**需在浏览器点一次确认 | 报告页 `Ctrl+Shift+R`；Console 应只有 `[bodhi-ext] v4.5 loaded` |
 | 两页「首个版本生成」被重渲重置 | **已修复（2026-10-26）**：口径改为「= DB 首版时间」，页头**幂等**（不再每次保存多一段）；存量 11 页已用 `ke_admin.py fix-head` 收敛+校准 | 复核：`fix-head <kb> <slug>` 默认 dry_run |
-| `666555` 报告已补锚点 | 该页原**无**引用块；工具 `auto_ref_block` 补了一块（version 2→3），内容未变 | 无需处理 |
+| `666555` 报告曾缺锚点 | 历史记录：当时由 `auto_ref_block` 补过一块（该函数**已于 2026-11-01 删除**） | 现由任务步骤写块；存量页面无需处理 |
 | 跨库找模板 | 报告在工作库、模板在领域库 ⇒ `resolve_template` **全库唯一命中才用**，回执 `template.scope=global` + `local_reason`（不静默） | 想"只用本库"就显式传 `template=<slug>`，或把模板复制到工作库 |
 | `deploy/bodhi-ops.sudoers` / `wsl-up.sh` 免密 | `wsl-up.sh` 里"重启服务/起容器"等步骤需要免密 sudo；当前用 `wsl -u root` 也可 | 待定：是否安装 sudoers（影响运维脚本能否一键跑） |
 | 工作区未提交 | **已关闭（2026-10-26）**：按主题分批提交（读口径治理 / 数据边界 / 发布 04+配置矩阵）；`git status` 干净 | — |

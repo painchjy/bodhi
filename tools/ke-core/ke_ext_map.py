@@ -79,6 +79,13 @@ def to_tool_value(field: str, value, fmap) -> tuple:
     return value, (not emap)
 
 
+def _cell(v) -> str:
+    """单元格转义：竖线 → `\\|`，换行 → `<br>`（否则多行摘录会把表格撑散）。"""
+    s = "" if v is None else str(v)
+    s = s.replace("|", "\\|").replace("\r\n", "\n").replace("\r", "\n")
+    return s.replace("\n", "<br>")
+
+
 def render_table(rows: list, schema: dict, fmap, columns=None) -> tuple:
     """按**业务口径**渲染 Markdown 表。→ `(markdown, unmapped[])`
 
@@ -96,7 +103,7 @@ def render_table(rows: list, schema: dict, fmap, columns=None) -> tuple:
     if not pairs:
         return "（无条目）", []
     unmapped = []
-    head = ["| " + " | ".join(lb or f for f, lb in pairs) + " |",
+    head = ["| " + " | ".join(_cell(lb or f) for f, lb in pairs) + " |",
             "|" + "---|" * len(pairs)]
     body = []
     for row in rows or []:
@@ -108,7 +115,7 @@ def render_table(rows: list, schema: dict, fmap, columns=None) -> tuple:
             v, ok = to_business_value(f, v, fmap)
             if not ok:
                 unmapped.append("%s=%s" % (f, v))
-            cells.append("" if v is None else str(v))
+            cells.append(_cell(v))
         body.append("| " + " | ".join(cells) + " |")
     return "\n".join(head + body), unmapped[:20]
 

@@ -532,31 +532,35 @@ tail -f /var/log/bodhi-it-mcp.log     # 智能体真调用时应看到 POST /mcp
 tail -f /var/log/bodhi-mcp.log        # 同上（:8765）
 ```
 
-## 报告页**没有**外部接口面板 / 面板数据不对（2026-10-25 实测）
+## 报告页**没有**外部接口面板 / 面板数据不对（2026-10-25 实测；2026-11-01 口径更新）
 
 **症状**：报告页 ③ 节表格有内容，但表格下面**没有可编辑面板**；或面板出现了但编号是别的评审。
 
 **根因（三类）**：
 
 1. **正文没有 `bodhi-ext` 引用块** ⇒ 面板没有锚点（`position('bodhi-ext' in content) = 0`）；
-2. 引用块**缺 `review_no`**（智能体只写了 `object:`，或照抄了示例编号）；
+2. 引用块**缺主键值**（v2 是 `keys: <主键>=<值>`；智能体只写了 `object:`，或照抄了示例编号）；
 3. 引用块写了编号，但那是**示例编号**（如 `YYYYMM-11111111`），与本次报告 ① 表里的编号不一致。
 
-**修法**（从可靠到兜底）：
+**修法**：
 
-```bash
-# ① 让工具把锚点补上（编号从正文里的台账编号认，不靠模型手写）
-#    走 MCP save_knowledge(stage="report", mode="apply") 重写同一份正文即可；
-#    回执里 ext_ref_block 会告诉你补了什么：
-#    {"object": "...", "review_no": "...", "rev": 11, "review_no_source": "report_context", "columns": [...]}
+```text
+# 引用块由**任务步骤/智能体按业务对象页规范**写（写库不补块、不校验块 ✗）。
+# 现成值从哪拿：ext_table(object=<DataObject slug>, keys={<主键>: "<值>"}) 的 ref_block 整块复制。
+# 块格式（对象建模 v2）：
+#   object: <DataObject slug>
+#   keys: <主键字段>=<值>[;<主键2>=<值2>]
+#   basis: <service> / <tool>
+#   schema_hash: sha256:…   （可选）
+#   columns: <列1,列2,…>     （可选，按对象映射）
 ```
 
-- 巡检也能看出来：`audit_scan(scope="ext")` 的 `G4`/`G5`；
+- 巡检**不再检查**代码块/台账一致性（G4/G5 已删：那属业务表达，不在工具职责内 ✓）；
 - 面板侧已容错：`isRefBlock` 只认 `object:`；编号缺省时由后端按页面标题解析
   （`GET /bodhi/ext/list?object=…&title=<页面标题>`，回执带 `review_no` + `review_no_source`），
-  解析成功时面板标签会显示「编号取自报告上下文」；
-- `object` 多候选（多个 DataObject 的表头都能对上）时工具**不猜** ⇒ 回 `object_ambiguous` + `candidates`，
-  需人工在正文里补一次块或先在 DataObject 页 `ext_describe` 订阅契约。
+  解析成功时面板标签会显示「编号取自报告上下文」；v2 的 `keys:` 行由面板 v4.8 起直接解析；
+- `object` 多候选（多个 DataObject 的表头都能对上）时**不猜** ⇒ 先在 DataObject 页 `ext_describe` 订阅契约，
+  再让人工确认表头该归哪个对象。
 
 **排障命令**
 

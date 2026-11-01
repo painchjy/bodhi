@@ -269,35 +269,117 @@
   ],
   "type": "object"
  },
- "ext_describe": {
+ "ext_attach_probe": {
   "properties": {
-   "kb_id": {
-    "description": "业务对象所在库（必填）",
+   "doc_title": {
+    "description": "文件名关键字（可选）",
     "type": "string"
    },
-   "object": {
-    "description": "业务对象页 slug（必填）",
+   "limit": {
+    "description": "最多列几份（默认 10）",
+    "type": "integer"
+   },
+   "session_no": {
+    "description": "WeKnora 会话编号（可选）",
+    "type": "string"
+   }
+  },
+  "type": "object"
+ },
+ "ext_doc_parse": {
+  "properties": {
+   "action": {
+    "enum": [
+     "outline",
+     "section",
+     "image",
+     "full"
+    ],
     "type": "string"
    },
-   "tool": {
-    "description": "指定接口名（省略 ⇒ 用该页第一个绑定）",
+   "cursor": {
+    "type": "integer"
+   },
+   "doc_id": {
+    "description": "it_platform 的 doc_id（ext_doc_push 回执里给）",
     "type": "string"
    },
-   "url": {
-    "description": "直接给服务地址（省略 ⇒ 查注册表）",
+   "doc_title": {
     "type": "string"
    },
-   "write_anchor": {
-    "description": "默认 false：是否把契约卡锚点块（```bodhi-ext-contract）幂等写进页面正文",
+   "inline_media": {
     "type": "boolean"
    },
-   "write_projection": {
-    "description": "默认 true：把契约投射到页面元数据",
-    "type": "boolean"
+   "limit_chars": {
+    "type": "integer"
+   },
+   "section_path": {
+    "type": "string"
    }
   },
   "required": [
-   "kb_id",
+   "doc_id"
+  ],
+  "type": "object"
+ },
+ "ext_doc_push": {
+  "properties": {
+   "actor": {
+    "type": "string"
+   },
+   "doc_id": {
+    "description": "自定义 doc_id（缺省按内容 hash 生成）",
+    "type": "string"
+   },
+   "doc_title": {
+    "description": "文件名（同名多份时必须给；不传取最新）",
+    "type": "string"
+   },
+   "review_no": {
+    "description": "流程编号（外层主键，必填）",
+    "type": "string"
+   },
+   "session_no": {
+    "description": "会话编号（配合 messages.attachments 探测）",
+    "type": "string"
+   },
+   "title": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "review_no"
+  ],
+  "type": "object"
+ },
+ "ext_table": {
+  "properties": {
+   "columns": {
+    "description": "要展示的字段子集（逗号分隔；顺序仍按对象映射）",
+    "type": "string"
+   },
+   "kb_id": {
+    "description": "业务对象所在库（可省 ⇒ 按 object 全库反查）",
+    "type": "string"
+   },
+   "keys": {
+    "description": "主键名→值（外层键取值 = 台账分片）",
+    "type": "object"
+   },
+   "object": {
+    "description": "DataObject 页 slug（列口径与主键从该对象来）",
+    "type": "string"
+   },
+   "review_no": {
+    "description": "等价简写：外层主键值",
+    "type": "string"
+   },
+   "title": {
+    "description": "页面标题（缺 review_no 时按页面上下文解析）",
+    "type": "string"
+   }
+  },
+  "required": [
    "object"
   ],
   "type": "object"
@@ -549,6 +631,42 @@
   },
   "required": [
    "source"
+  ],
+  "type": "object"
+ },
+ "ke_rule_check": {
+  "properties": {
+   "kb_id": {
+    "description": "领域库（规则/策略都在这里）",
+    "type": "string"
+   },
+   "spec": {
+    "description": "`policy:<策略 slug>`（推荐）| `direct:<规则 slug,…>`；默认按技术方案评审策略",
+    "type": "string"
+   }
+  },
+  "required": [
+   "kb_id"
+  ],
+  "type": "object"
+ },
+ "ke_rule_publish": {
+  "properties": {
+   "apply": {
+    "description": "true=真写 `bmm:ruleHash`；默认 false（dry_run）",
+    "type": "boolean"
+   },
+   "kb_id": {
+    "description": "领域库",
+    "type": "string"
+   },
+   "spec": {
+    "description": "`policy:<策略 slug>`（推荐）",
+    "type": "string"
+   }
+  },
+  "required": [
+   "kb_id"
   ],
   "type": "object"
  },

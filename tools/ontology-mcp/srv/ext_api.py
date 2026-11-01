@@ -190,8 +190,9 @@ def list_payload(params: dict) -> dict:
                          % (schema_payload({"object": slug, "kb_id": kb}).get("key_label") or "主键"))}
     # 数据来源（2026-10-29）：**优先调 04**（it_platform MCP），不再读本地文件——
     # 02 与 04 独立部署、不共享磁盘；本地文件只在 04 不可达时作兜底（同机/离线）。
-    q = {"mode": "query", "action": "list", "review_no": review_no,
-         "view": str(params.get("view") or "rows")}
+    # 04 只回数据行（2026-11-01 用户口径：**渲染归知识侧**）⇒ 一律要 rows，
+    # 表格在本函数里按**对象映射**渲染（`ke_ext_map.render_table`），不再拿外部服务的 markdown
+    q = {"mode": "query", "action": "list", "review_no": review_no, "view": "rows"}
     if params.get("columns"):
         q["columns"] = params["columns"]
     if slug:
@@ -249,6 +250,17 @@ def list_payload(params: dict) -> dict:
                 out["display"] = {"mapping_status": (binds[0].get("status") if binds else ""),
                                   "source": "none",
                                   "note": "该对象未写映射 ⇒ 按工具口径展示（列名/枚举取契约）"}
+            # 无映射也要能出表（2026-11-01：外部服务不再产 markdown）⇒ 用契约 labels 合成映射
+            if str(params.get("view") or "rows") == "table" and not out.get("markdown"):
+                _sch = out.get("schema") or {}
+                _labs = _sch.get("labels") or {}
+                _order = _sch.get("order") or []
+                synth = {"order": _order,
+                         "items": [{"field": f, "label": _labs.get(f, f)} for f in _order]}
+                md3, _un = MAP.render_table(out.get("rows") or [], _sch, synth,
+                                            params.get("columns"))
+                out["markdown"] = md3
+                out.setdefault("warnings", []).append("markdown_from_contract_labels")
         except Exception as exc:  # noqa: BLE001  映射失败不影响读台账
             out.setdefault("warnings", []).append("mapping_failed: %r" % (str(exc)[:120],))
         # ── 引用块（2026-10-31 v2 用户口径）：**内容全部来自 DataObject 自身**

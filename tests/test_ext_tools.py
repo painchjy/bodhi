@@ -69,7 +69,7 @@ def test_catalog_ls_filters(ext):
     r = C.query(kb_id="kb", action="ls", vendor="Apache")
     names = {x["software"] for x in r["rows"]}
     assert names == {"Apache Tomcat", "Kafka"}, r
-    assert "Apache Tomcat" in r["markdown"]
+    assert "markdown" not in r, "外部服务只回数据行：表格由 ext_table 按对象映射渲染"
     one = C.query(kb_id="kb", action="ls", name="Tomcat")
     assert one["counts"]["rows"] == 1 and one["rows"][0]["software"] == "Apache Tomcat", one
 
@@ -107,7 +107,8 @@ def test_issues_list_seeded(ext):
     r = I.maintain(kb_id="kb", review_no="YYYYMM-889888", view="table")
     assert r["ok"] and r["counts"]["items"] == 2, r
     assert r["rev"] == 2 and r["summary"].get("符合") == 1, r
-    assert "专家反馈" in r["markdown"], "表格必须带专家反馈列（新增栏位 ✓）"
+    assert "expert_feedback" in (r["schema"].get("order") or []), "契约仍带专家反馈列 ✓"
+    assert "markdown" not in r, "回执不再产 markdown（渲染归 ext_table）"
 
 
 def test_issues_create_is_idempotent(ext):
@@ -155,11 +156,7 @@ def test_issues_columns_subset_and_order(ext):
     cols = ["verdict", "issue_no", "expert_feedback"]
     assert r["schema"]["columns"] == cols, r["schema"]
     assert len(r["schema"]["order"]) == 11, "order 仍是工具全量契约（报告可配置任意子集）"
-    lab = r["schema"]["labels"]
-    assert r["markdown"].splitlines()[0] == "| " + " | ".join(lab[c] for c in cols) + " |", \
-        r["markdown"].splitlines()[0]
-    body = r["markdown"].splitlines()[2]
-    assert body.count("|") == len(cols) + 1, "行内单元格数必须等于所选列数：%r" % body
+    assert "markdown" not in r, "子集只回 rows/columns；排版走 ext_table（对象映射顺序）"
 
 
 def test_issues_columns_unknown_rejected(ext):
@@ -169,17 +166,6 @@ def test_issues_columns_unknown_rejected(ext):
     assert bad["ok"] is False and bad["error"] == "bad_columns", bad
     assert "plan_fix_date" in bad["detail"], bad
     assert "issue_no" in bad["allowed"] and "expert_feedback" in bad["allowed"], bad
-
-
-# ── G4（`audit_scan(scope="ext")`）：报告快照落后台账 ─────────────────────
-def _ref_block(rev: str, rno: str = "R9") -> str:
-    return ("```bodhi-ext\nobject: bpmn/dataobject/x\nreview_no: %s\n"
-            "basis: it_platform / ext_issue_list\nrev: %s\nschema_hash: sha256:aa\n```"
-            % (rno, rev))
-
-
-def _report_page(content: str) -> dict:
-    return {"slug": "bmm/report/sample", "page_type": "bmm:Report", "content": content}
 
 
 def test_template_section_fields(ext):
@@ -200,46 +186,6 @@ def test_template_section_fields(ext):
     # 老模板（没有第 5 列）⇒ fields 全空，行为不变 ✓
     old = "## 章节结构\n| 序号 | 章节 | 必填 | 要求 |\n|---|---|---|---|\n| 1 | ① 结论 | 是 | x |\n"
     assert R.parse_template_sections(old)[0]["fields"] == []
-
-
-def test_ext_blocks_parse_only_fenced_bodhi_ext(ext):
-    """只抽 ```` ```bodhi-ext ```` 块（正文别处的 `rev:` 不算）；basis 拆出工具名 ✓。"""
-    kv = A.ext_blocks("前言\nrev: 99\n\n" + _ref_block("2") + "\n\n后记")[0]
-    assert kv["review_no"] == "R9" and kv["rev"] == "2", kv
-    assert A.ext_block_tool(kv) == "ext_issue_list", kv
-    assert A.ext_blocks("没有块") == []
-
-
-def test_gate_report_items_first_table_only(ext):
-    """G2 只数**第一张**带编号列的表（表后补充块里的「编号」表头不得把行数算大 ✗）。"""
-    import ke_ext_gate as G
-    md = ("| 编号 | 判定 |\n|---|---|\n| P-01 | 符合 |\n| P-02 | 不符合 |\n\n"
-          "## 表后补充\n| 编号 | 需反馈内容 |\n|---|---|\n| P-03 | x |\n")
-    items = G._report_items(md)                       # noqa: SLF001  单测内部函数
-    assert [i["issue_no"] for i in items] == ["P-01", "P-02"], items
-
-
-# ── G5（`audit_scan(scope="ext")`）：模板·契约·正文三方一致 + 职责边界 ──────
-def _tpl_items(fields: str) -> list:
-    """构造一份模板候选（`pick_template` 的入参形状）。"""
-    content = ("## 章节结构\n| 序号 | 章节 | 必填 | 要求 | 数据对象字段 |\n|---|---|---|---|---|\n"
-               "| 1 | ① 条目清单 | 是 | 逐条 | %s |\n" % fields)
-    return [{"slug": "tpl/x", "title": "模板X", "version": 1, "content": content,
-             "types": ["bmm:Report"], "selector": ""}]
-
-
-def _g5_ctx(md: str, meta: str = "{}", page_type: str = "bmm:Report") -> dict:
-    return {"kb_id": "kb", "data": {},
-            "pages": [{"slug": "bmm/report/sample", "page_type": page_type,
-                       "content": md, "meta": meta}]}
-
-
-def _report_md(header: str, columns: str = "", rows: str = "| P-01 | 符合 |") -> str:
-    sep = "|" + "---|" * len(header.split("|"))
-    return ("## ① 条目清单\n|%s\n%s\n%s\n\n"
-            "```bodhi-ext\nobject: bpmn/dataobject/x\nreview_no: R9\n"
-            "basis: it_platform / ext_issue_list\n%sschema_hash: sha256:aa\n```\n"
-            % (header, sep, rows, ("columns: %s\n" % columns) if columns else ""))
 
 
 # ── 开源软件清单：允许版本范围 / 有效期（2026-10-26） ─────────────────────
@@ -453,161 +399,6 @@ def test_import_chat_without_attachment(ext, monkeypatch):
     assert r["ok"] is False and r["error"] == "chat_attachment_not_found", r
 
 
-def test_gate_skips_doc_without_ext_ref(ext):
-    """与接口无关的页（模板/说明页）⇒ 门禁直接跳过，不报 `ext_no_ref_block` ✗。"""
-    import ke_ext_gate as G
-    r = G.check_report("# 模板\n\n## 章节结构\n| 序号 | 章节 |\n|---|---|\n| 1 | ① 结论 |\n")
-    assert r["warnings"] == [], r
-    assert r.get("skipped") == "no_ext_ref", r
-
-
-def test_auto_ref_block_added_from_report_context(ext, monkeypatch):
-    """缺引用块 ⇒ 工具补锚点：**编号从正文主键列对台账反查**，object 按契约标签匹配 ✓。"""
-    import ke_ext_gate as G
-    _bump_ledger("R9", 3)                       # 台账 rev=3、条目 P-01
-    monkeypatch.setattr(G, "_kb_objects", lambda kb: [
-        {"slug": "bpmn/dataobject/x", "kb_id": "kb",
-         "binding": {"tool": "ext_issue_list", "keys": ["review_no"],
-                     "impl": "it_platform:tools/ke-core/ke_ext_issues.py"}}])
-    monkeypatch.setattr(G, "_contract_of",
-                        lambda obj: {"labels": {"issue_no": "编号", "verdict": "判定",
-                                                "severity": "严重度"},
-                                     "order": ["issue_no", "verdict", "severity"],
-                                     "source": "projection"})
-    monkeypatch.setattr(G, "_schema_hash", lambda kb, slug: "sha256:aa")
-    md = "## ③ 清单\n\n| 编号 | 判定 | 严重度 |\n|---|---|---|\n| P-01 | 符合 |  |\n"
-    r = G.auto_ref_block(md, "kb")
-    assert r["changed"] is True, r
-    assert r["review_no"] == "R9" and r["rev"] == 3, r
-    assert "review_no: R9" in r["md"] and "columns: issue_no,verdict,severity" in r["md"], r["md"]
-    assert r["md"].index("bodhi-ext") > r["md"].index("| P-01 |"), "块必须紧跟表格之后"
-
-
-def test_auto_ref_block_skips_when_present_or_ambiguous(ext, monkeypatch):
-    """已有块 ⇒ 不动；object 多候选 ⇒ **不猜**（交人定）✓。"""
-    import ke_ext_gate as G
-    _bump_ledger("R9", 1)
-    assert G.auto_ref_block(_ref_block("1"), "kb")["changed"] is False
-    assert G.auto_ref_block("## ① 无表\n正文", "kb")["reason"] == "no_item_table"
-    monkeypatch.setattr(G, "_kb_objects", lambda kb: [
-        {"slug": "a", "kb_id": "kb", "binding": {"tool": "t", "keys": ["review_no"], "impl": "s:x"}},
-        {"slug": "b", "kb_id": "kb", "binding": {"tool": "t", "keys": ["review_no"], "impl": "s:x"}}])
-    monkeypatch.setattr(G, "_contract_of",
-                        lambda obj: {"labels": {"issue_no": "编号", "verdict": "判定",
-                                                "severity": "严重度"},
-                                     "order": ["issue_no", "verdict", "severity"],
-                                     "source": "projection"})
-    md = "| 编号 | 判定 | 严重度 |\n|---|---|---|\n| P-01 | 符合 |  |\n"
-    r = G.auto_ref_block(md, "kb")
-    assert r["changed"] is False and r["reason"] == "object_ambiguous", r
-    assert r["candidates"] == ["a", "b"], r
-
-
-def test_g5_consistent_report_no_finding(ext, monkeypatch):
-    """表头 = 契约 labels(columns) = 模板 fields ⇒ 不报（三方一致是常态 ✓）。"""
-    monkeypatch.setattr(A, "_template_items_of", lambda kb_id="": _tpl_items("issue_no,verdict"))
-    rep = A.Report("kb", "ext", 50)
-    ctx = _g5_ctx(_report_md(" 编号 | 判定 ", "issue_no,verdict"))
-    A.check_ext_consistency(ctx, rep)
-    assert rep.totals.get("G5") is None, rep.findings
-    d = ctx["data"]["ext_consistency"]
-    assert d["reports"] == 1 and d["ledger_checked"] == 1 and d["template_checked"] == 1, d
-
-
-def test_g5_template_mismatch_reported(ext, monkeypatch):
-    """正文列集与模板「数据对象字段」不一致 ⇒ G5 medium（模板是口径真源 ✓）。"""
-    monkeypatch.setattr(A, "_template_items_of", lambda kb_id="": _tpl_items("issue_no,verdict"))
-    rep = A.Report("kb", "ext", 50)
-    ctx = _g5_ctx(_report_md(" 编号 | 判定 | 严重度 ", "issue_no,verdict,severity"))
-    A.check_ext_consistency(ctx, rep)
-    hits = [f for f in rep.findings if f["check"] == "G5" and "模板" in f["detail"]]
-    assert hits and hits[0]["severity"] == "medium", rep.findings
-    assert ctx["data"]["ext_consistency"]["header_mismatch"] == 0, "与回执一致时不该报回执不符 ✗"
-
-
-def test_g5_columns_not_in_contract_reported(ext, monkeypatch):
-    """引用块 `columns:` 写了契约外字段 ⇒ G5 medium（不静默放过 ✓）。"""
-    monkeypatch.setattr(A, "_template_items_of", lambda kb_id="": _tpl_items("issue_no,verdict"))
-    rep = A.Report("kb", "ext", 50)
-    ctx = _g5_ctx(_report_md(" 编号 | 判定 ", "issue_no,nope"))
-    A.check_ext_consistency(ctx, rep)
-    hits = [f for f in rep.findings if "契约外字段" in f["detail"]]
-    assert hits, rep.findings
-    assert ctx["data"]["ext_consistency"]["columns_not_in_contract"] == 1
-
-
-def test_g5_dataobject_definition_overreach_low(ext, monkeypatch):
-    """DataObject 定义又写「1 名称｜2 名称｜…」列清单 ⇒ G5 low（职责越界 ✓）。"""
-    monkeypatch.setattr(A, "_template_items_of", lambda kb_id="": [])
-    bad = {"ontology": {"attributes": {"skos:definition":
-           "口径：\n1 编号｜2 描述｜3 规则｜4 位置｜5 摘录｜"}}}
-    rep = A.Report("kb", "ext", 50)
-    ctx = _g5_ctx("", meta=json.dumps(bad, ensure_ascii=False), page_type="bpmn:DataObject")
-    A.check_ext_consistency(ctx, rep)
-    hits = [f for f in rep.findings if "职责越界" in f["detail"]]
-    assert hits and hits[0]["severity"] == "low", rep.findings
-
-    clean = {"ontology": {"attributes": {"skos:definition":
-             "本页只写接口定义：字段口径来自契约投影，列集由模板决定 ✓"}}}
-    rep2 = A.Report("kb", "ext", 50)
-    ctx2 = _g5_ctx("", meta=json.dumps(clean, ensure_ascii=False), page_type="bpmn:DataObject")
-    A.check_ext_consistency(ctx2, rep2)
-    assert rep2.totals.get("G5") is None, rep2.findings
-
-
-def test_ext_block_lag_pure(ext):
-    """rev 比对是纯函数：落后/持平/不可比 三种都覆盖（台账不可比不得当 0 版）✓。"""
-    assert A.ext_block_lag({"rev": "2"}, 5)["lag"] == 3
-    assert A.ext_block_lag({"rev": "5"}, 5)["lag"] == 0
-    assert A.ext_block_lag({"rev": "7"}, 5)["lag"] == 0, "快照比台账新也不算落后（台账被回滚过）"
-    assert A.ext_block_lag({"rev": "?"}, 5)["comparable"] is False
-
-
-def _bump_ledger(rno: str, rev_target: int) -> None:
-    """把测试台账推到指定 rev（create 起 1，之后每次 update +1）。"""
-    I.maintain(kb_id="kb", review_no=rno, mode="maintain", action="create", issue_no="P-01",
-               actor="t", dry_run=False, fields={"desc": "x"})
-    for i in range(1, rev_target):
-        I.maintain(kb_id="kb", review_no=rno, mode="maintain", action="update", issue_no="P-01",
-                   actor="t", dry_run=False, if_rev=i, fields={"desc": "v%d" % (i + 1)})
-
-
-def test_g4_stale_snapshot_reported(ext):
-    """快照 rev < 台账 rev ⇒ 一条 low（能定位到页 + 差几版 + 一行修法）✓。"""
-    _bump_ledger("R9", 3)                     # 台账 rev = 3
-    rep = A.Report("kb", "ext", 50)
-    ctx = {"kb_id": "kb", "pages": [_report_page(_ref_block("1"))], "data": {}}
-    A.check_ext_ledger(ctx, rep)
-    assert rep.totals.get("G4") == 1, rep.totals
-    f = rep.findings[0]
-    assert f["severity"] == "low" and f["subject"] == "bmm/report/sample", f
-    assert "落后" in f["detail"] and "差 2 版" in f["detail"], f["detail"]
-    assert ctx["data"]["ext_ledger"]["stale"] == 1
-
-
-def test_g4_fresh_snapshot_no_finding(ext):
-    """快照与台账同版 ⇒ 不报（巡检不能靠\"随便报一条\"刷存在感 ✗）。"""
-    _bump_ledger("R9", 3)
-    rep = A.Report("kb", "ext", 50)
-    ctx = {"kb_id": "kb", "pages": [_report_page(_ref_block("3"))], "data": {}}
-    A.check_ext_ledger(ctx, rep)
-    assert rep.totals.get("G4") is None, rep.totals
-    assert ctx["data"]["ext_ledger"]["ledgers"] == 1
-
-
-def test_g4_unreadable_ledger_still_reported(ext, monkeypatch):
-    """绑定/台账不可读 ⇒ 也从实报（否则\"0 问题\"是假象），且提示怎么修 ✓。"""
-    monkeypatch.setattr(S, "resolve_binding",
-                        lambda tool, kb_id="", object_slug="": {"ok": False, "why": "no_binding"})
-    rep = A.Report("kb", "ext", 50)
-    ctx = {"kb_id": "kb", "pages": [_report_page(_ref_block("1"))], "data": {}}
-    A.check_ext_ledger(ctx, rep)
-    assert rep.totals.get("G4") == 1, rep.totals
-    assert "不可读" in rep.findings[0]["detail"] and "no_binding" in rep.findings[0]["detail"]
-    assert ctx["data"]["ext_ledger"]["unreadable"] == 1
-
-
-# ── 文档 / 附件 / 图（2026-10-26：样例文档换成真实案例 ⇒ 断言按"结构"而非固定条数） ──
 def test_docs_outline_and_section(ext):
     o = D.access(kb_id="kb", action="outline", doc_id="doc-sample-1")
     assert o["ok"] and o["counts"]["sections"] >= 5, o

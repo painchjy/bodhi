@@ -790,5 +790,21 @@ TOOL_SCHEMAS = [
                 "doc_title": {"type": "string"}},
                 "required": ["doc_id"]},
         },
+        {
+            "name": "ext_table",
+            "description": ("**按业务对象映射把台账行渲染成 Markdown 表**（报告清单节表体的来源）："
+                            "列名/列序/枚举取 `DataObject` 绑定的 `fieldMap`；未写映射退回契约 labels。"
+                            "只读；同时回 `ref_block`（对象规范 v2，可直接贴表后）。"
+                            "外部服务只提供数据行，**排版在知识侧** ✓"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string", "description": "业务对象所在库（可省 ⇒ 按 object 全库反查）"},
+                "object": {"type": "string", "description": "DataObject 页 slug（列口径与主键从该对象来）"},
+                "keys": {"type": "object", "description": "主键名→值（外层键取值 = 台账分片）"},
+                "review_no": {"type": "string", "description": "等价简写：外层主键值"},
+                "columns": {"type": "string",
+                            "description": "要展示的字段子集（逗号分隔；顺序仍按对象映射）"},
+                "title": {"type": "string", "description": "页面标题（缺 review_no 时按页面上下文解析）"}},
+                "required": ["object"]},
+        },
 
     ]

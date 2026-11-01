@@ -15,6 +15,7 @@ import json
 from srv.handlers import handle
 
 TOOL = "ext_describe"
+TOOL_TABLE = "ext_table"
 
 
 def _binds(kb_id: str, slug: str) -> list:
@@ -76,6 +77,75 @@ def _upsert_anchor(kb_id: str, slug: str, block: str) -> dict:
         % (ke_db.sql_str(new), ke_db.sql_str(kb_id), ke_db.sql_str(slug)), stdin=True)
     return {"written": True, "changed": True,
             "version": int(rows[0].get("version") or 1) + 1}
+
+
+@handle(TOOL_TABLE)
+def ext_table(args: dict) -> dict:
+    """**按业务对象映射把台账行渲染成 Markdown 表** —— 报告清单节表体的唯一来源。
+
+    为什么放在知识侧（2026-11-01 用户口径）
+    --------------------------------------
+    - 外部接口只提供**数据行**（`rows` + 契约 `schema`），排版是知识侧的表达，不该由外部服务决定；
+    - 列名 / 列序 / 枚举取 **DataObject 绑定的 `fieldMap`**（业务口径）；没写映射 ⇒ 退回契约 labels；
+    - 入参只认「对象 + 键」，**不出现任何领域名词** ✓。
+
+    回执：`{ok, object, review_no, columns, labels, markdown, rows_count, rev,
+            mapping_status, display_source, ref_block, warnings}`；`ref_block` 是对象规范 v2 的块
+    （可直接贴在该表之后，编号/绑定/契约哈希都由对象自身给）。
+    """
+    import ke_ext_store as S
+    from srv import ext_api as X
+
+    kb = str(args.get("kb_id") or "").strip()
+    slug = str(args.get("object") or "").strip()
+    review_no = str(args.get("review_no") or "").strip()
+    keys = args.get("keys")
+    if not review_no and isinstance(keys, dict) and keys:
+        review_no = str(list(keys.values())[0] or "").strip()
+    if not review_no and isinstance(keys, str):
+        for part in keys.replace(";", ",").split(","):
+            if "=" in part:
+                _k, _v = part.split("=", 1)
+                if _v.strip():
+                    review_no = _v.strip()
+                    break
+    if not slug:
+        return {"ok": False, "tool": TOOL_TABLE, "error": "need_object",
+                "hint": "object = DataObject 页 slug（列口径与主键都从该对象来）"}
+    if not review_no:
+        return {"ok": False, "tool": TOOL_TABLE, "error": "need_keys", "object": {"slug": slug},
+                "hint": "传 keys={\"<主键字段>\": \"<值>\"} 或等价简写 review_no=<值>"}
+
+    got = X.list_payload({"kb_id": kb, "object": slug, "review_no": review_no,
+                          "view": "table", "columns": args.get("columns")})
+    if not got.get("ok"):
+        return {"ok": False, "tool": TOOL_TABLE, "object": {"slug": slug},
+                **{k: got[k] for k in ("error", "hint", "why", "candidates") if got.get(k)}}
+
+    disp = got.get("display") or {}
+    schema = got.get("schema") or {}
+    binds = []
+    try:
+        binds = S.list_bindings(kb, slug) if kb else []
+    except Exception:                                  # noqa: BLE001  绑定读不到不影响出表
+        binds = []
+    md = str(got.get("markdown") or "")
+    out = {"ok": bool(md), "tool": TOOL_TABLE, "object": slug, "kb_id": got.get("kb_id") or kb,
+           "review_no": review_no, "rows_count": int((got.get("counts") or {}).get("items") or 0),
+           "rev": got.get("rev"),
+           "columns": list(schema.get("columns") or []),
+           "labels": disp.get("labels") or schema.get("labels") or {},
+           "markdown": md,
+           "mapping_status": (disp.get("mapping_status") or
+                              ((binds[0].get("status") if binds else "") or "")),
+           "display_source": disp.get("source") or "",
+           "ref_block": got.get("ref_block") or "",
+           "source": got.get("data_source") or "",
+           "warnings": got.get("warnings") or []}
+    if not md:
+        out.update({"error": "render_failed",
+                    "hint": "台账读到了但没有表：先确认该对象已写映射（status=confirmed），或直接看 rows"})
+    return out
 
 
 @handle(TOOL)

@@ -104,39 +104,6 @@ def _sorted_items(items: list) -> list:
     return sorted(items or [], key=key)
 
 
-def _md(items: list, schema: dict, columns=None) -> str:
-    """按声明顺序渲染 Markdown 表（报告可直接插；缺失值留空 ✓）。
-
-    `columns`（可选）：**模板选中的字段子集**（逗号分隔或列表，**顺序即展示顺序**）——
-    工具字段可能比某份报告要用的多（服务端字段集 ⊋ 报告字段集），
-    ⇒ 报告要哪几列、什么顺序，由**模板**决定，这里只做筛选 ✓。
-    """
-    if not items:
-        return "（无条目）"
-    cols = _columns(schema, columns)
-    labels = schema["labels"]
-    out = ["| " + " | ".join(labels.get(c, c) for c in cols) + " |",
-           "|" + "---|" * len(cols)]
-    for it in _sorted_items(items):
-        out.append("| " + " | ".join(_cell(it.get(c)) for c in cols) + " |")
-    return "\n".join(out)
-
-
-def _cell(v) -> str:
-    """单元格文本：**必须先压平换行**（2026-10-26 用户实测 bug）。
-
-    为什么：文档里表格行的摘录天然带 `\\n`（如「达梦数据库 DM8\\n业务库\\n8.1.3.100\\n同城」），
-    旧实现只转义了 `|` ⇒ 一行被写散成多行，Markdown 表格当场断掉（列数 11 → 5 混排），
-    报告页看起来就是"表格错位"，而且同步时只认连续 `|` 行 ⇒ 尾部坏行永远清不掉。
-
-    口径：换行 → `<br>`（报告是 HTML 渲染，语义保留 ✓）；竖线 → `\\|`；首尾空白去掉。
-    """
-    s = str(v if v is not None else "")
-    s = s.replace("\r\n", "\n").replace("\r", "\n").replace("|", "\\|")
-    parts = [p.strip() for p in s.split("\n")]
-    return "<br>".join(p for p in parts if p)
-
-
 def _columns(schema: dict, columns=None) -> list:
     """把模板给的字段子集解析成**有序列表**（非法字段抛 ValueError，由入口转可读回执）。"""
     order = list(schema.get("order") or schema.get("fields") or [])
@@ -212,8 +179,7 @@ def maintain(kb_id: str = "", object_slug: str = "", mode: str = "query", action
             _i, it = _find(doc, issue_no)
             if it is None:
                 return {"ok": False, "tool": TOOL, "error": "not_found", "issue_no": issue_no}
-            return _pack(mode, obj, binding, schema, row=it, rev=doc.get("rev", 0),
-                         markdown=_md([it], schema, sel))
+            return _pack(mode, obj, binding, schema, row=it, rev=doc.get("rev", 0))
         items = doc["items"]
         if issue_no:                      # 兼容：用 issue_no 过滤单条
             _i, it = _find(doc, issue_no)
@@ -221,8 +187,6 @@ def maintain(kb_id: str = "", object_slug: str = "", mode: str = "query", action
         out = _pack(mode, obj, binding, schema, rows=items, rev=doc.get("rev", 0),
                     updated_at=doc.get("updated_at") or "",
                     counts={"items": len(items)}, summary=_summary(items))
-        if view == "table":
-            out["markdown"] = _md(items, schema, sel)
         return out
 
     # ── 维护（写）───────────────────────────────────────────────────────
@@ -293,8 +257,6 @@ def maintain(kb_id: str = "", object_slug: str = "", mode: str = "query", action
                     rev=fresh["rev"], created=created, updated=updated, rejected=bad,
                     counts={"items": len(fresh["items"])},
                     rev_note="rev = 该编号台账的写入版本（本次 +1，不等于业务轮次）")
-        if view == "table":
-            out["markdown"] = _md(fresh["items"], schema, sel)
         return out
     # 2026-10-25：**工具侧**补版本指纹（本体口径：机器生成必须有；人工条目带 human_input 则留空 ✓）
     if not istr(payload.get("rule_fp")):

@@ -2,7 +2,7 @@
 name: rule_judge
 id: rule_judge
 when: 需要把规则逐条判成 符合/不符合/无法判定/不适用 并留字段级依据时（成批判定、入库前复核、出报告前）
-tools: [knowledge_lookup, evidence_score, ext_issue_list, save_knowledge]
+tools: [knowledge_lookup, evidence_score, ext_table, save_knowledge]
 description: 规则判定——先判**适用性**（规则页 `knowledgeSpec.applies_when`），再读「规则契约」+「知识计划(ke_plan) 的 derived/items」，对每条规则给出 符合/不符合/无法判定/不适用 与依据（字段级），固定输出「结论集合」供报告引用。判定只看规则声明与已提取事实，不做自由发挥。
 ---
 
@@ -67,11 +67,11 @@ description: 规则判定——先判**适用性**（规则页 `knowledgeSpec.ap
 
 | 步骤 | 怎么做 | 依据 |
 |---|---|---|
-| ① 取表头 | `mode=query, action=list, <主键>=…, view=table`；**回执的 `schema.order` / `schema.labels` 就是列名与顺序**（台账 0 条时同法当模板 ✓） | 该对象页的列规范 + `bpmn:dataObjectKeyFields` |
+| ① 取列口径 | `mode=query, action=list, <主键>=…`；**回执的 `schema.order` / `schema.labels` 就是列名与顺序**（台账 0 条时同法当模板 ✓） | 该对象页的列规范 + `bpmn:dataObjectKeyFields` |
 | ② 写条目 | `mode=maintain, action=create`；主键取 `bpmn:dataObjectKeyFields`；**必带 `actor`（执行者）+ `session_no`（会话编号，审计用）**；**编号由台账分配，禁止自编号** ✗ | 同上 |
 | ③ 先预览 | 写前 `dry_run=true` 把 `diff` 给用户看；确认后才 `dry_run=false`（`bpmn:dataObjectAccessMode` 含 `maintain` 才可写） | 写库纪律 |
 | ④ 回写反馈 | `action=update` + `fields={…}` + `if_rev=<台账 rev>`（台账级）+ `actor`/`session_no`；回执 `conflict` ⇒ 重新 `list` 再改（**不静默覆盖** ✗） | 乐观并发 |
-| ⑤ 报告呈现 | 报告里那张表**逐字嵌入** `view=table` 回执的 `markdown`（不改列名、不加列、不重排 ✓） | 列口径真源 = 回执 + 对象页 |
+| ⑤ 报告呈现 | 报告里那张表**用 `ext_table` 回执的 `markdown`**（列名/列序/枚举＝对象映射，不改列、不加列、不重排 ✓） | 渲染 = 知识侧（对象映射） |
 | ⑥ 不可用 | 工具不可用 ⇒ 相关判定记「无法判定」并注明「台账不可用（待澄清）」；**不得自造清单** ✗ | 反假断言 |
 
 > 工具名 / 模式 / 主键**一律从对象页读**（`bpmn:dataObjectInterface` / `bpmn:dataObjectAccessMode` /

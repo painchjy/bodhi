@@ -36,7 +36,7 @@ TOOLS = [
     {
         "name": "ext_issue_list",
         "description": ("**内网工作台接口（参考实现）· 条目清单（查询 + 维护）**：`mode=query` 读"
-                        "（`action=list|get`；`view=table` 回 Markdown 表）；`mode=maintain` 写"
+                        "（`action=list|get`；回 `rows` + `schema`，**不产出 markdown**）；`mode=maintain` 写"
                         "（`create|update|close|delete`，默认 `dry_run=true`）。"
                         "幂等键 = `(review_no, issue_no)`；`update/close/delete` 支持 `if_rev`，"
                         "不匹配回 `conflict`。字段含 `expert_feedback`（外部专家反馈栏位）。"),
@@ -57,7 +57,8 @@ TOOLS = [
                       "description": ("**批量 create**：一次提交全部条目（每条含 issue_no + 上面 fields），"
                                       "整批只让 `rev` +1（避免\"一条一个版本\"）；"
                                       "回执给 created/updated/rejected")},
-            "view": {"type": "string", "description": "rows | table"},
+            "view": {"type": "string",
+                     "description": "**已废弃**（仅为兼容保留）：只回 rows；表格渲染走 BODHI 的 `ext_table`（按业务对象映射）"},
             "columns": {"type": "string",
                         "description": ("**报告要用哪几列**（逗号分隔，顺序即展示顺序；省略=全部）。"
                                         "工具字段可多于某份报告所需（服务端字段集 ⊋ 报告字段集）"

@@ -115,17 +115,6 @@ def _range_hit(rows: list, software: str, version: str) -> list:
     return out
 
 
-def _md(rows: list, labels: dict) -> str:
-    if not rows:
-        return "（无记录）"
-    head = ["software", "version", "vendor", "license", "status"]
-    out = ["| " + " | ".join(labels.get(k, k) for k in head) + " |",
-           "|" + "---|" * len(head)]
-    for r in rows:
-        out.append("| " + " | ".join(str(r.get(k) or "") for k in head) + " |")
-    return "\n".join(out)
-
-
 def _pack(mode: str, obj: dict, binding: dict, schema: dict, **kw) -> dict:
     now = _now()
     out = {"ok": True, "tool": TOOL, "mode": mode, "object": obj.get("slug"),
@@ -157,8 +146,7 @@ def query(kb_id: str = "", object_slug: str = "", mode: str = "query", action: s
         if action == "denied":
             rows = [r for r in deny["items"] if not name or _same(r.get("software"), name)]
             return _pack(mode, obj, binding, schema, rows=rows[:max(1, int(limit))],
-                         counts={"rows": len(rows)}, rev=deny.get("rev", 0),
-                         markdown=_md(rows, schema["labels"]))
+                         counts={"rows": len(rows)}, rev=deny.get("rev", 0))
         if action == "ls":
             rows = [r for r in allow["items"]
                     if (not name or str(name).lower() in str(r.get("software") or "").lower())
@@ -166,8 +154,7 @@ def query(kb_id: str = "", object_slug: str = "", mode: str = "query", action: s
                     and (not license or str(license).lower() in str(r.get("license") or "").lower())
                     and (not status or _same(r.get("status"), status))]
             return _pack(mode, obj, binding, schema, rows=rows[:max(1, int(limit))],
-                         counts={"rows": len(rows)}, rev=allow.get("rev", 0),
-                         markdown=_md(rows, schema["labels"]))
+                         counts={"rows": len(rows)}, rev=allow.get("rev", 0))
         if not str(name or "").strip():
             return {"ok": False, "tool": TOOL, "error": "check 需要 name",
                     "hint": "name=软件名；version 建议一并给（逐字比对含补丁位）"}

@@ -110,15 +110,18 @@ def test_replace_repairs_broken_multiline_rows():
 
 
 def test_md_escapes_newlines_in_cells():
-    """台账渲染：单元格内换行 → `<br>`，竖线 → `\\|`；行数必须 = 条目数 + 2。"""
-    import ke_ext_issues as ISS
+    """表体渲染（`ke_ext_map.render_table`）：单元格内换行 → `<br>`，竖线 → `\\|`；行数必须 = 条目数 + 2。"""
+    import ke_ext_map as MAP
     schema = {"fields": ["issue_no", "quote"], "order": ["issue_no", "quote"],
               "labels": {"issue_no": "编号", "quote": "原文摘录"},
               "verdict_enum": [], "severity_enum": []}
+    fmap = {"items": [{"field": "issue_no", "label": "编号"},
+                      {"field": "quote", "label": "原文摘录"}]}
     items = [{"issue_no": "P-01", "quote": "达梦数据库 DM8\n业务库\n8.1.3.100\n同城"},
              {"issue_no": "P-02", "quote": "a|b"}]
-    md = ISS._md(items, schema)
+    md, unmapped = MAP.render_table(items, schema, fmap)
     lines = md.splitlines()
     assert len(lines) == 4, md
     assert "达梦数据库 DM8<br>业务库<br>8.1.3.100<br>同城" in lines[2]
     assert "a\\|b" in lines[3]
+    assert unmapped == [], unmapped
