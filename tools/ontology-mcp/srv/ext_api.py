@@ -279,15 +279,10 @@ def list_payload(params: dict) -> dict:
                 _hash = _t["schema_hash"]
                 break
         _cols = list((out.get("schema") or {}).get("order") or [])
-        # 主键值：只有"单主键且等于 review_no"时，才把本次编号写进去；联合键留给页面任务按对象规范填
-        _key_line = ""
-        if _keys:
-            if len(_keys) == 1 and _keys[0].strip().lower() in ("review_no", "评审编号"):
-                _key_line = "keys: %s=%s" % (_keys[0].strip(), review_no)
-            elif len(_keys) > 1:
-                _key_line = "keys: " + ";".join("%s=<待填>" % k.strip() for k in _keys)
-            else:
-                _key_line = "keys: %s=<待填>" % _keys[0].strip()
+        # 块内 keys = **台账主键（分片键）**：取对象主键的第一个（通常是 review_no），值来自页面上下文；
+        # 行级主键（如 issue_no）不进块，它在表体里逐行体现。
+        _key_field = _keys[0].strip() if _keys else ""
+        _key_line = ("keys: %s=%s" % (_key_field, review_no)) if _key_field else ""
         _lines = ["```bodhi-ext", "object: %s" % slug]
         if _key_line:
             _lines.append(_key_line)
