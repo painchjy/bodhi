@@ -244,6 +244,12 @@ def list_payload(params: dict) -> dict:
             out["columns_unknown"] = list(unknown_cols)
             out.setdefault("warnings", []).append(
                 "unknown_columns: %s" % "、".join(unknown_cols))
+        # 行摊平（2026-11-01 实测）：04 的行是 `{主键, fields:{…}}` ⇒ 不摊平的话面板只有主键列有值 ✗
+        try:
+            import ke_ext_map as _MF  # noqa: PLC0415
+            out["rows"] = _MF.flatten_rows(out.get("rows") or [])
+        except Exception:                              # noqa: BLE001
+            pass
         _fmap_eff = ""                                  # 实际用于渲染/出块的映射（无映射时=契约合成）
         # ── 映射（2026-10-30）：**展示走业务口径**（列名/列序/枚举），`schema` 保持工具口径 ──
         try:

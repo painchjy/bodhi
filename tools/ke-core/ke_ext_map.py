@@ -118,6 +118,25 @@ def block_columns(schema: dict, fmap, columns=None) -> list:
     return [(lb or f) for f, lb in pairs]
 
 
+def flatten_rows(rows) -> list:
+    """台账分片的行是**两层**：`{主键, fields:{desc:…, verdict:…}}` → 摊平成扁平行。
+
+    口径：**顶层优先、`fields` 兜底**（主键在顶层，业务列在 `fields` 里）；
+    非 dict / 没有 `fields` 的行原样保留（不猜、不改结构）✓。
+    """
+    out = []
+    for r in rows or []:
+        if isinstance(r, dict) and isinstance(r.get("fields"), dict):
+            flat = {k: v for k, v in r.items() if k != "fields"}
+            for k, v in (r["fields"] or {}).items():
+                if flat.get(k) in (None, ""):
+                    flat[k] = v
+            out.append(flat)
+        else:
+            out.append(r)
+    return out
+
+
 def to_business_value(field: str, value, fmap) -> tuple:
     """工具值 → 业务值。→ `(业务值, 是否命中映射)`；未命中原样返回 `False`（调用方 warn）。"""
     m = parse(fmap)

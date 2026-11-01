@@ -129,3 +129,18 @@ def test_block_columns_match_table_header():
     md2, _un2 = M.render_table(ROWS, SCHEMA, FMAP, "结论,编号")
     assert md2.splitlines()[0].strip() == "| 编号 | 结论 |", md2
     assert M.block_columns(SCHEMA, FMAP, "结论,编号") == ["编号", "结论"]
+
+
+def test_flatten_rows_merges_nested_fields():
+    """04 的行是 `{主键, fields:{…}}` ⇒ 摊平（顶层优先、fields 兜底），否则面板只剩主键有值 ✗。"""
+    import ke_ext_map as M
+    rows = [{"issue_no": "ISS-01", "fields": {"desc": "缺图", "verdict": "不符合"},
+             "created_at": "2026-10-31"},
+            {"issue_no": "ISS-02", "fields": {}},              # 空 fields 也要保留主键
+            {"issue_no": "ISS-03", "desc": "顶层已有",         # 顶层优先
+             "fields": {"desc": "被覆盖", "verdict": "符合"}}]
+    flat = M.flatten_rows(rows)
+    assert flat[0]["issue_no"] == "ISS-01" and flat[0]["desc"] == "缺图"
+    assert flat[0]["verdict"] == "不符合" and flat[0].get("fields") is None
+    assert flat[1] == {"issue_no": "ISS-02"}
+    assert flat[2]["desc"] == "顶层已有" and flat[2]["verdict"] == "符合"

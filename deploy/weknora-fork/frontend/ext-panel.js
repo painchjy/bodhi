@@ -130,7 +130,7 @@
     return ta;
   }
 
-  var VER = 'v4.9';
+  var VER = 'v4.10';
 
   function renderPanel(mount, meta) {
     style();
@@ -335,7 +335,17 @@
             state.reviewSrc = res.review_no_source || 'report_context';
           }
           state.rev = res.rev;
-          state.rows = res.rows || [];
+          // 行可能是**两层**：`{issue_no, fields:{desc:…, verdict:…}}`（04 台账分片就是这个结构）
+          // ⇒ 先摊平（顶层优先、`fields` 兜底），否则只有主键列有值、其余全空 ✗（2026-11-01 实测）
+          state.rows = (res.rows || []).map(function (r) {
+            if (!r || !r.fields || typeof r.fields !== 'object') return r;
+            var flat = {};
+            Object.keys(r).forEach(function (k) { flat[k] = r[k]; });
+            Object.keys(r.fields).forEach(function (k) {
+              if (flat[k] == null || flat[k] === '') flat[k] = r.fields[k];
+            });
+            return flat;
+          });
           var sc = res.schema || {};
           state.labels = sc.labels || {};
           var cols = ((res.projection || {}).contract || {}).columns;
