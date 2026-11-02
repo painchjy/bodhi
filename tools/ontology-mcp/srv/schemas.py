@@ -371,7 +371,7 @@ TOOL_SCHEMAS = [
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string", "description": "领域库（规则/策略都在这里）"},
                 "spec": {"type": "string",
-                         "description": "`policy:<策略 slug>`（推荐）| `direct:<规则 slug,…>`；默认按技术方案评审策略"}},
+                         "description": "`policy:<策略 slug>`（推荐）| `direct:<规则 slug,…>`；默认取 env BODHI_DEFAULT_RULE_SPEC（未配则必填）"}},
                 "required": ["kb_id"]},
         },
         {

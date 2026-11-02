@@ -22,6 +22,7 @@ import ke_domain_docs as D  # noqa: E402
 import ke_domain_items as I  # noqa: E402
 import ke_domain_store as S  # noqa: E402  容器文件（04 侧）
 import ke_ext_binding as B  # noqa: E402  绑定解析（02 侧）
+import ke_ext_docs_client as P  # noqa: E402  会话附件 → 推送 04（02 侧）
 import ke_ref_cache as R  # noqa: E402  参考规范抓取留痕（02 侧）
 
 BINDING = {"scheme": "mcp", "tool": "ext_catalog_query", "modes": ["query", "maintain"],
@@ -293,8 +294,8 @@ def _mk_docx(path, paras):
         z.writestr("word/document.xml", xml)
 
 
-def test_document_upload_then_sections(ext):
-    """上传 docx ⇒ 落文件 + 切节 + 挂索引；随后 outline/section 可读（内网未接通时的补位）✓。"""
+def test_document_upload_stores_only_no_parse(ext):
+    """04 **只存文件、不解析正文**（2026-10-28 用户口径）：`sections=0` + 回执指路 `ext_doc_parse` ✓。"""
     import tempfile
     tmp = tempfile.mkdtemp()
     src = os.path.join(tmp, "方案.docx")
@@ -303,103 +304,95 @@ def test_document_upload_then_sections(ext):
     up = D.save_document(doc_id="doc-up-1", review_no="R-UP", filename="方案.docx",
                          raw=raw, title="方案（上传）", actor="t")
     assert up["ok"] and up["doc_id"] == "doc-up-1", up
-    assert up["sections"] >= 2, up                      # 「1 概述」「2.1 应用架构」
+    assert up["sections"] == 0, up                       # 04 不再切节（解析在 02）
+    assert "ext_doc_parse" in (up.get("next") or ""), up  # 回执明确指路
     assert up["url"].endswith("/files/doc-up-1"), up
-    out = D.access(kb_id="kb", action="outline", doc_id="doc-up-1", review_no="R-UP")
-    assert out["ok"] and out["counts"]["sections"] >= 2, out
-    sec = D.access(kb_id="kb", action="section", doc_id="doc-up-1", section_path="2.1")
-    assert sec["ok"] and "涉及系统" in (sec.get("text") or ""), sec
     dl = D.doc_file("doc-up-1")
     assert dl["ok"] and dl["path"].endswith("doc-up-1.docx"), dl
 
 
-def test_import_knowledge_creates_doc_and_flow(ext, monkeypatch):
-    """**智能体用工具导入附件**（用户上传的那份）⇒ 建档 + 绑文档 + 可读正文（不走 shell）✓。"""
+def test_import_knowledge_binds_uploaded_doc(ext):
+    """**先上传、再绑定**（2026-10-28 用户口径）：`import_knowledge(doc_id=…)` 只挂档案，不查知识库 ✓。"""
     import tempfile
     tmp = tempfile.mkdtemp()
     src = os.path.join(tmp, "方案.docx")
     _mk_docx(src, ["1 概述", "正文", "2.1 设计", "细节"])
     raw = open(src, "rb").read()
-    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [
-        {"id": "kid-1", "tenant_id": 10000, "knowledge_base_id": "kb-x",
-         "title": "方案.docx", "file_name": "方案.docx"}])
-    monkeypatch.setattr(D, "_read_knowledge_bytes", lambda t, k, f="": (raw, {"path": "/x"}))
-    r = D.import_knowledge(review_no="R-IMP", doc_title="方案.docx", actor="t")
-    assert r["ok"] and r["doc_id"] == "doc-kid-1", r
-    assert r["sections"] >= 2, r
+    up = D.save_document(doc_id="doc-imp-1", review_no="R-IMP", filename="方案.docx",
+                         raw=raw, title="方案.docx", actor="t")
+    assert up["ok"], up
+    r = D.import_knowledge(review_no="R-IMP", doc_id="doc-imp-1", actor="t")
+    assert r["ok"] and r["doc_id"] == "doc-imp-1", r
     assert r["flow"]["ok"] and r["flow"]["created"] is True, r
     idx = json.load(open(os.path.join(_sys(ext, "docs/index.json")), encoding="utf-8"))
-    assert "doc-kid-1" in (idx.get("R-IMP") or []), idx
-    o = D.access(kb_id="kb", action="outline", doc_id="doc-kid-1", review_no="R-IMP")
-    assert o["ok"] and o["counts"]["sections"] >= 2, o
+    assert "doc-imp-1" in (idx.get("R-IMP") or []), idx
+    # 绑定回执给的是"文件在 + 去哪儿解析"，不是正文
+    assert "ext_doc_parse" in (r.get("next") or ""), r
 
 
-def test_import_knowledge_ambiguous_does_not_guess(ext, monkeypatch):
-    """同名附件多份 ⇒ `doc_ambiguous` + candidates（**不猜** ✗）。"""
-    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [
-        {"id": "k1", "title": "a.docx", "file_name": "a.docx", "knowledge_base_id": "kb1"},
-        {"id": "k2", "title": "a.docx", "file_name": "a.docx", "knowledge_base_id": "kb2"}])
+def test_import_knowledge_needs_doc_id(ext):
+    """只给标题不给 doc_id ⇒ `need_doc_id`（04 **不猜**、不查知识库 ✗）。"""
     r = D.import_knowledge(review_no="R-IMP2", doc_title="a.docx")
+    assert r["ok"] is False and r["error"] == "need_doc_id", r
+    assert "POST /files" in (r.get("hint") or ""), r
+
+
+def test_import_knowledge_doc_not_found(ext):
+    """doc_id 不在本服务 ⇒ `doc_not_found` + known 清单（排障要知道有哪些）✓。"""
+    r = D.import_knowledge(review_no="R-IMP3", doc_id="no-such-doc")
+    assert r["ok"] is False and r["error"] == "doc_not_found", r
+    assert isinstance(r.get("known"), list), r
+
+
+# ── 会话附件 → 推送 04（**02 侧**，2026-11-02 按现架构重写：ke_ext_docs_client）──────────
+def test_push_without_attachment(monkeypatch):
+    """会话里没有附件 ⇒ `attachment_not_found`（**不猜** ✗）。"""
+    monkeypatch.setattr(P, "probe", lambda **kw: {"ok": False, "files": [],
+                                                  "error": "attachment_not_found",
+                                                  "hint": "让用户重新上传"})
+    r = P.push(review_no="R-CHAT2", doc_title="方案.pdf")
+    assert r["ok"] is False and r["error"] == "attachment_not_found", r
+
+
+def test_push_ambiguous_does_not_guess(monkeypatch):
+    """同名多份 ⇒ `doc_ambiguous` + candidates，**不上传** ✓。"""
+    files = [{"path": "/data/x/chat_attachment_1_方案.pdf", "size": 10, "mtime": 1},
+             {"path": "/data/x/chat_attachment_2_方案.pdf", "size": 11, "mtime": 2}]
+    monkeypatch.setattr(P, "probe", lambda **kw: {"ok": True, "files": files})
+    r = P.push(review_no="R-CHAT", doc_title="方案.pdf")
     assert r["ok"] is False and r["error"] == "doc_ambiguous", r
-    assert len(r["candidates"]) == 2
+    assert len(r["candidates"]) == 2, r
 
 
-def test_import_knowledge_file_unreadable(ext, monkeypatch):
-    """容器里读不到附件 ⇒ `file_not_found` + diag（排障要能看到路径/rc）✓。"""
-    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [
-        {"id": "k3", "tenant_id": 1, "title": "b.docx", "file_name": "b.docx",
-         "knowledge_base_id": "kb"}])
-    monkeypatch.setattr(D, "_read_knowledge_bytes", lambda t, k, f="": (b"", {"rc": 1, "path": "/x"}))
-    r = D.import_knowledge(review_no="R-IMP3", doc_title="b.docx")
-    assert r["ok"] is False and r["error"] == "file_not_found" and r["diag"], r
+def test_push_picks_and_uploads(monkeypatch):
+    """唯一命中 ⇒ docker 读原件 → `POST /files/<doc_id>`；回执带 doc_id / sha / flow ✓。"""
+    files = [{"path": "/data/x/exports/chat_attachment_9_方案.pdf", "size": 13, "mtime": 5}]
+    monkeypatch.setattr(P, "probe", lambda **kw: {"ok": True, "files": files})
 
+    class _Docker:
+        returncode = 0
+        stdout = b"%PDF-1.4 fake"
+        stderr = b""
 
-def test_import_from_chat_uses_session_attachment(ext, monkeypatch):
-    """**直接用会话里上传的附件**（`messages.attachments` + exports 原件）⇒ 建档+图+节 ✓。"""
-    monkeypatch.setattr(D, "_latest_chat_attachment", lambda s="": {
-        "message_id": "m-1", "session_id": "s-1", "at": "2026-10-26 05:26:25",
-        "epoch": 1792992386, "items": [{"id": "a-1", "content": "1 概述\n正文"}]})
-    monkeypatch.setattr(D, "_pick_chat_file", lambda ep, g: {
-        "path": "/data/files/10000/exports/chat_attachment_x_1.pdf", "size": 10,
-        "mtime": ep, "gap": 1, "candidates": 1})
-    monkeypatch.setattr(D, "_container_bytes", lambda p: b"%PDF-1.4 fake")
-    monkeypatch.setattr(D, "_pdf_sections_and_images", lambda raw, did, title: (
-        [{"path": "1 概述", "title": "1 概述", "text": "正文"}],
-        [{"name": "图片1.png", "path": "files/x_img1.png"}],
-        {"text_source": "pdf_pypdf", "pages": 1, "images_available": True,
-         "tables_text_only": True}))
-    r = D.import_knowledge(review_no="R-CHAT", doc_title="方案.pdf", source="chat", actor="t")
-    assert r["ok"] and r["source"] == "chat" and r["images"] == 1, r
-    assert r["quality"]["tables_text_only"] is True
-    assert "tables_text_only" in (r["warnings"] or []), r
-    assert r["flow"]["ok"] and r["flow"]["created"] is True, r
-    doc = json.load(open(os.path.join(_sys(ext, "docs/%s.json" % r["doc_id"])), encoding="utf-8"))
-    assert doc["source"] == "chat" and doc["origin_path"].endswith(".pdf"), doc
+    monkeypatch.setattr(P.subprocess, "run", lambda *a, **k: _Docker())
 
+    class _Resp:
+        def __enter__(self):
+            return self
 
-def test_import_auto_falls_back_to_chat(ext, monkeypatch):
-    """`source=auto`：知识库没有 ⇒ **自动改用会话附件**，回执 `tried=[kb, chat]` ✓。"""
-    monkeypatch.setattr(D, "_knowledge_rows", lambda **kw: [])
-    monkeypatch.setattr(D, "_latest_chat_attachment", lambda s="": {
-        "message_id": "m-2", "session_id": "s-2", "at": "2026-10-26 05:26:25",
-        "epoch": 1792992386, "items": [{"id": "a-2", "content": "1 概述"}]})
-    monkeypatch.setattr(D, "_pick_chat_file", lambda ep, g: {
-        "path": "/data/files/10000/exports/chat_attachment_y_2.pdf", "size": 9,
-        "mtime": ep, "gap": 2, "candidates": 3})
-    monkeypatch.setattr(D, "_container_bytes", lambda p: b"%PDF-1.4 fake")
-    monkeypatch.setattr(D, "_pdf_sections_and_images", lambda raw, did, title: (
-        [{"path": "全文", "title": "全文", "text": "1 概述"}], [],
-        {"text_source": "pdf_pypdf", "pages": 1, "images_available": False}))
-    r = D.import_knowledge(review_no="R-AUTO", doc_title="方案.pdf", actor="t")
-    assert r["ok"] and r["source"] == "chat" and r["tried"] == ["kb", "chat"], r
-    assert "images_unavailable" in (r["warnings"] or []), r
+        def __exit__(self, *a):
+            return False
 
+        def read(self):
+            return json.dumps({"ok": True, "doc_id": "chat-abc12345", "size": 13,
+                               "sha256": "0" * 16,
+                               "url": "http://127.0.0.1:8770/files/chat-abc12345",
+                               "flow": {"ok": True, "created": True}}).encode()
 
-def test_import_chat_without_attachment(ext, monkeypatch):
-    """会话里没有带附件的消息 ⇒ `chat_attachment_not_found`（不猜 ✗）。"""
-    monkeypatch.setattr(D, "_latest_chat_attachment", lambda s="": {})
-    r = D.import_knowledge(review_no="R-CHAT2", source="chat")
-    assert r["ok"] is False and r["error"] == "chat_attachment_not_found", r
+    monkeypatch.setattr(P.urllib.request, "urlopen", lambda *a, **k: _Resp())
+    r = P.push(review_no="R-CHAT", doc_title="方案.pdf", actor="t")
+    assert r["ok"] and r["doc_id"].startswith("chat-"), r
+    assert r["flow"]["ok"] is True and r["source"]["name"].endswith(".pdf"), r
 
 
 def test_docs_outline_and_section(ext):

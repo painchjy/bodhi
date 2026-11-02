@@ -29,6 +29,8 @@
     },
     "ext_issue_list": {
       "objectKind": "issue_list",
+      "fingerprint": {"fields": ["rule", "doc_loc", "verdict", "quote"],
+                      "algo": "sha256", "length": 6, "prefix": "r-"},
       "keyFields": ["review_no", "issue_no"],
       "modes": ["query", "maintain"],
       "revScope": "document",

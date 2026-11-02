@@ -641,7 +641,7 @@
     "type": "string"
    },
    "spec": {
-    "description": "`policy:<策略 slug>`（推荐）| `direct:<规则 slug,…>`；默认按技术方案评审策略",
+    "description": "`policy:<策略 slug>`（推荐）| `direct:<规则 slug,…>`；默认取 env BODHI_DEFAULT_RULE_SPEC（未配则必填）",
     "type": "string"
    }
   },

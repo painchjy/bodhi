@@ -19,26 +19,32 @@ import time
 import ke_domain_store as S
 
 TOOL = "ext_issue_list"
-FIELDS = ["issue_no", "desc", "rule", "doc_loc", "quote", "verdict", "severity",
-          "fix", "confidence", "rule_fp", "expert_feedback"]
 
 
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _fingerprint(rule: str, doc_loc: str, verdict: str, quote: str) -> str:
-    """版本指纹（本体口径 ✓）：`hash(rule_slug + 文档位置 + 判定 + 原文摘录)` 的**短哈希**，形如 `r-8f3a21`。
+def _fingerprint(item: dict) -> str:
+    """版本指纹：**按契约声明算**（`x_ext.ext_issue_list.fingerprint`），代码不写死要素。
 
-    - **机器生成的条目必须有指纹**（评测据此区分"机器判的"与"人工提交的" ⇒ 人工留空 ✗）；
-    - 四个要素缺一个就回空（宁缺不编 ✓）；
-    - 由**工具侧**统一算：调用方（模型）不需要自己拼 hash，避免各端算法漂移。
+    - `fields`：参与哈希的字段（缺一个 ⇒ 回空，**宁缺不编** ✓）；
+    - `algo` / `length` / `prefix`：算法、截断长度、前缀（如 `r-`）；
+    - 契约没声明 ⇒ 不算（不猜、不内置默认 ✓）；由**工具侧**统一算，避免各端算法漂移。
     """
-    parts = [str(x or "").strip() for x in (rule, doc_loc, verdict, quote)]
+    spec = _schema().get("fingerprint") or {}
+    fields = [str(f) for f in (spec.get("fields") or []) if str(f).strip()]
+    if not fields:
+        return ""
+    parts = [istr(item.get(f)) for f in fields]
     if not all(parts):
         return ""
+    algo = str(spec.get("algo") or "sha256").lower()
+    if algo != "sha256":
+        return ""
     raw = "|".join(parts)
-    return "r-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:6]
+    n = int(spec.get("length") or 6)
+    return str(spec.get("prefix") or "") + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:n]
 
 
 def _fill_fp(item: dict) -> dict:
@@ -47,8 +53,7 @@ def _fill_fp(item: dict) -> dict:
         return item
     if item.get("human_input"):
         return item
-    fp = _fingerprint(item.get("rule"), item.get("doc_loc"),
-                      item.get("verdict"), item.get("quote"))
+    fp = _fingerprint(item)
     if fp:
         item["rule_fp"] = fp
     return item
@@ -59,12 +64,25 @@ def istr(v) -> str:
 
 
 def _schema() -> dict:
+    """列集 / 列序 / 标签 / 枚举 / 指纹口径 **全部来自契约**（`x_ext.<tool>`）。
+
+    2026-11-02（P3）：删掉代码里的 `FIELDS` 常量与指纹四要素 —— 契约是唯一真源；
+    旧键 `issue_order` / `issue_labels` 仅在 `x_ext` 缺失的**旧部署**上兜底（过渡用）。
+    """
     sc = S.read_json(os.path.join(S.system_dir(), "schema.json"), {}) or {}
-    order = sc.get("issue_order") or FIELDS
-    return {"fields": FIELDS, "order": [k for k in order if k in FIELDS] or FIELDS,
-            "labels": sc.get("issue_labels") or {},
+    tool = ((sc.get("x_ext") or {}).get(TOOL) or {})
+    cols = [c for c in (tool.get("columns") or []) if isinstance(c, dict) and c.get("field")]
+    fields = [str(c["field"]) for c in cols]
+    labels = {str(c["field"]): (c.get("label") or str(c["field"])) for c in cols}
+    fingerprint = tool.get("fingerprint") or {}
+    if not fields:                                   # 过渡：旧契约键
+        fields = [str(f) for f in (sc.get("issue_order") or []) if str(f).strip()]
+        labels = dict(sc.get("issue_labels") or {})
+        fingerprint = sc.get("issue_fingerprint") or {}
+    return {"fields": fields, "order": list(fields), "labels": labels,
             "verdict_enum": sc.get("verdict_enum") or [],
-            "severity_enum": sc.get("severity_enum") or []}
+            "severity_enum": sc.get("severity_enum") or [],
+            "fingerprint": fingerprint}
 
 
 def _path(review_no: str) -> str:
@@ -220,8 +238,7 @@ def maintain(kb_id: str = "", object_slug: str = "", mode: str = "query", action
                 bad.append({"index": i, "issue_no": no, "error": "bad_severity"})
                 continue
             if not istr(it.get("rule_fp")):     # 调用方给了就**原样保留**（模板口径：= 规则页 ruleHash ✓）
-                fp = _fingerprint(it.get("rule"), it.get("doc_loc"),
-                                  it.get("verdict"), it.get("quote"))
+                fp = _fingerprint(it)
                 if fp:
                     it["rule_fp"] = fp
             rows.append((no, it))
@@ -262,8 +279,7 @@ def maintain(kb_id: str = "", object_slug: str = "", mode: str = "query", action
     if not istr(payload.get("rule_fp")):
         _cur_for_fp = _find(doc, issue_no)[1] or {}     # 注意：`cur` 在下面才赋值，这里单独取
         merged = dict(_cur_for_fp, **payload)
-        fp = _fingerprint(merged.get("rule"), merged.get("doc_loc"),
-                          merged.get("verdict"), merged.get("quote"))
+        fp = _fingerprint(merged)
         if fp:
             payload["rule_fp"] = fp
     if if_rev not in (None, "") and int(if_rev) != int(doc.get("rev") or 0):

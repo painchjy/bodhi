@@ -97,7 +97,7 @@ def doc_root() -> str:
 #   - 键 = doc_id；值 = {sig: (len, sha256[:16]), secs, images, quality}
 #   - 文件变了（长度或 sha 变）自动失效；`BODHI_DOC_CACHE=0` 可关；最多留 8 份。
 _DOC_CACHE: dict = {}
-_CACHE_MAX = 64          # 一次评审可能顺序读几十份/多节（原来 8 份会被挤掉）
+_CACHE_MAX = 64          # 一次任务可能顺序读几十份/多节（原来 8 份会被挤掉）
 
 
 def _cache_on() -> bool:

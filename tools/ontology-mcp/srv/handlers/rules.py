@@ -1,7 +1,18 @@
 """规则工程工具：`ke_rule_check`（体检）+ `ke_rule_publish`（双门禁）。"""
 from __future__ import annotations
 
+import os
+
 from srv.handlers import handle
+
+
+def _default_spec() -> str:
+    """默认规则集 spec：**由部署配置给**（`BODHI_DEFAULT_RULE_SPEC`），代码不写领域名 ✓。
+
+    铁律①：工具只认"策略/规则页"这类**类型**，不认具体策略名 ⇒ 默认值走 env，
+    没配就让调用方显式传 `spec`（宁可不猜 ✗）。
+    """
+    return str(os.environ.get("BODHI_DEFAULT_RULE_SPEC") or "").strip()
 
 
 @handle("ke_rule_check")
@@ -13,10 +24,14 @@ def _rule_check(args: dict) -> dict:
     """
     import ke_rule_check as C  # noqa: PLC0415
     kb = str(args.get("kb") or args.get("kb_id") or "").strip()
-    spec = str(args.get("spec") or "").strip() or "policy:bmm/businesspolicy/技术方案评审策略"
+    spec = str(args.get("spec") or "").strip() or _default_spec()
     if not kb:
         return {"ok": False, "error": "need_kb",
-                "hint": "传 kb_id（领域库）；spec 默认 policy:<策略 slug>"}
+                "hint": "传 kb_id（领域库）；spec=policy:<策略 slug> 或 direct:<规则 slug,…>"}
+    if not spec:
+        return {"ok": False, "error": "need_spec",
+                "hint": ("传 spec=policy:<策略页 slug> 或 direct:<规则 slug,…>"
+                         "（默认值可由 env BODHI_DEFAULT_RULE_SPEC 配）")}
     res = C.check_rules(kb, spec)
     return dict(res, tool="ke_rule_check", kb=kb, spec=spec,
                 counts={"rules": res.get("rules", 0),
@@ -35,10 +50,14 @@ def _rule_publish(args: dict) -> dict:
     import ke_rule_check as C  # noqa: PLC0415
     import ke_rule_publish as P  # noqa: PLC0415
     kb = str(args.get("kb") or args.get("kb_id") or "").strip()
-    spec = str(args.get("spec") or "").strip() or "policy:bmm/businesspolicy/技术方案评审策略"
+    spec = str(args.get("spec") or "").strip() or _default_spec()
     apply = bool(args.get("apply"))
     if not kb:
         return {"ok": False, "error": "need_kb", "hint": "传 kb_id（领域库）"}
+    if not spec:
+        return {"ok": False, "error": "need_spec",
+                "hint": ("传 spec=policy:<策略页 slug> 或 direct:<规则 slug,…>"
+                         "（默认值可由 env BODHI_DEFAULT_RULE_SPEC 配）")}
     out = P.publish_with_hash(kb, spec, apply=apply)
     chk = C.check_rules(kb, spec)
     out.update({"tool": "ke_rule_publish", "kb": kb, "spec": spec,

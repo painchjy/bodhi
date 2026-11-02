@@ -17,7 +17,6 @@ import time
 import ke_domain_store as S
 
 TOOL = "ext_catalog_query"
-_FALLBACK_STATUS = ["已认证", "未认证", "待定"]
 
 
 def _now() -> str:
@@ -25,10 +24,14 @@ def _now() -> str:
 
 
 def _schema() -> dict:
+    """列集 / 标签 / 状态枚举 **全部来自契约**（`x_ext.<tool>`），代码不内置字段清单。"""
     sc = S.read_json(os.path.join(S.system_dir(), "schema.json"), {}) or {}
-    return {"fields": ["software", "version", "vendor", "license", "status"],
-            "status_enum": sc.get("status_enum") or _FALLBACK_STATUS,
-            "labels": sc.get("labels") or {}}
+    tool = ((sc.get("x_ext") or {}).get(TOOL) or {})
+    cols = [c for c in (tool.get("columns") or []) if isinstance(c, dict) and c.get("field")]
+    fields = [str(c["field"]) for c in cols]
+    labels = {str(c["field"]): (c.get("label") or str(c["field"])) for c in cols}
+    return {"fields": fields, "labels": labels or (sc.get("labels") or {}),
+            "status_enum": sc.get("status_enum") or []}
 
 
 def _allow_path() -> str:
