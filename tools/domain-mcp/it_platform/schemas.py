@@ -159,7 +159,7 @@ def _contract() -> dict:
     """容器数据契约（含 `x_ext`）：**服务目录 → 种子目录 → 容器根** 依次找。
 
     读序（2026-10-26 用户裁定）：
-      ① `tools/it-platform-mcp/schema.json` —— 契约**跟着服务版本走**（发布包里一定有 ✓）；
+      ① `tools/domain-mcp/it_platform/schema.json` —— 契约**跟着服务版本走**（发布包里一定有 ✓）；
       ② `BODHI_EXT_SEED` / `deploy/mock-ext/it-platform/schema.json` —— 现场自定义（可选覆盖）；
       ③ 容器根 `state/it-platform/schema.json` —— 首次 bootstrap 的旧副本（兜底）。
 
@@ -185,7 +185,7 @@ def _contract() -> dict:
         seed = os.environ.get("BODHI_EXT_SEED", "")
         if seed:                                     # 现场自定义（默认种子目录）
             cands.append(os.path.join(seed, "it-platform", "schema.json"))
-        # 发布包布局：`<包根>/tools/it-platform-mcp/schema.json` + `<包根>/deploy/mock-ext/it-platform/schema.json`
+        # 发布包布局：`<包根>/tools/domain-mcp/it_platform/schema.json` + `<包根>/deploy/mock-ext/it-platform/schema.json`
         cands.append(os.path.join(here, "..", "..", "deploy", "mock-ext", "it-platform", "schema.json"))
     for path in cands:
         doc = S.read_json(path, None) if S is not None else _read_json(path)

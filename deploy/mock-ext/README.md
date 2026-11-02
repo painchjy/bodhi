@@ -18,10 +18,10 @@
 
 ## 2. 契约文件在哪
 
-`it-platform/schema.json` **已迁到** `tools/it-platform-mcp/schema.json`（契约跟服务版本走）。
+`it-platform/schema.json` **已迁到** `tools/domain-mcp/it_platform/schema.json`（契约跟服务版本走）。
 
-读取顺序（`tools/it-platform-mcp/schemas.py::_contract`）：
-1. `tools/it-platform-mcp/schema.json`（**包内必有**）；
+读取顺序（`tools/domain-mcp/it_platform/schemas.py::_contract`）：
+1. `tools/domain-mcp/it_platform/schema.json`（**包内必有**）；
 2. `$BODHI_EXT_SEED/it-platform/schema.json`（现场覆盖，可选）；
 3. `$BODHI_EXT_ROOT/it-platform/schema.json`（首次 bootstrap 的旧副本，兜底）。
 

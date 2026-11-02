@@ -22,13 +22,15 @@ FIX = os.path.join(ROOT, "tools", "ke-core", "tests", "fixtures")
 
 
 def evaluate(kb: str, spec: str) -> dict:
+    """**格式门禁**（2026-11-02 用户口径：先做格式/规范性校验，样例指标验证后续再做）。
+
+    - 校验：字段齐全 / `ruleMode`+`ruleLanguage` 合法 / `knowledgeNeed` 过该语言的 schema；
+    - 旧的"样例一致性 ≥0.90、假断言 0"**不再参与发布**（保留 `ke_rule_eval` 供以后单测/回归用）。
+    """
     import ke_rule_check
-    import ke_rule_eval
 
     chk = ke_rule_check.check_rules(kb, spec)
-    fixtures = sorted(glob.glob(os.path.join(FIX, "facts_s*.json")))
-    ev = ke_rule_eval.eval_samples(fixtures, kb) if fixtures else {"ok": False, "total": 0}
-    return {"check": chk, "eval": ev, "ok": bool(chk.get("ok")) and bool(ev.get("ok"))}
+    return {"check": chk, "ok": bool(chk.get("ok"))}
 
 
 def publish(kb: str, spec: str, apply: bool = False) -> dict:
@@ -39,21 +41,20 @@ def publish(kb: str, spec: str, apply: bool = False) -> dict:
     res = evaluate(kb, spec)
     if not res["ok"]:
         return {"ok": False, "published": 0, "reason": "门禁未过 ⇒ 不发布 ✗",
-                "check_errors": res["check"].get("errors"), "eval": {
-                    "consistency": res["eval"].get("consistency"),
-                    "false_claims": len(res["eval"].get("false_claims") or [])}}
+                "check_errors": res["check"].get("errors")}
     import ke_lookup
 
     lk = ke_lookup.knowledge_lookup(kb, mode="rules", spec=spec)
-    # 发布戳：**不再写 rules_hash** ✗（哈希走属性 `bmm:ruleHash` ✓）
-    stamp = ("已发布 %s｜体检 ✓｜评测 ✓（一致性 %.2f、假断言 0）"
-             % (time.strftime("%Y-%m-%d"), float(res["eval"].get("consistency") or 0)))
+    # 发布戳：**不再写 rules_hash** ✗（哈希走属性 `bmm:ruleHash` ✓）；戳上带规则语言（口径可追溯）
+    date = time.strftime("%Y-%m-%d")
     done, failed = [], []
     for r in lk.get("rules") or []:
         slug = str(r.get("slug") or "")
         if not slug:
             continue
         rh = ke_fp.rule_hash(r)          # **规则级**哈希 ✓（本规则内容算出）
+        stamp = ("已发布 %s｜格式 ✓（%s）｜样例验证待做"
+                 % (date, str(r.get("ruleLanguage") or "-")))
         if not apply:
             done.append({"slug": slug, "ruleHash": rh, "dry_run": True})
             continue
@@ -71,8 +72,7 @@ def publish(kb: str, spec: str, apply: bool = False) -> dict:
         except Exception as exc:  # noqa: BLE001
             failed.append({"slug": slug, "ruleHash": rh, "error": str(exc)[:140]})
     return {"ok": True, "apply": apply, "published": len(done), "failed": failed,
-            "stamp": stamp, "rules": done,
-            "consistency": res["eval"].get("consistency")}
+            "rules": done, "gate": "format_only（样例验证后续再做）"}
 
 
 def main() -> None:

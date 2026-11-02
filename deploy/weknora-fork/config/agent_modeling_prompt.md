@@ -34,7 +34,10 @@
 - **意图工程**：BMM 意图层（Goal / DesiredResult / Means / Influencer / Assessment）；
   每条意图必须挂**评估指标**与**指标数据来源**。
 - **规则工程**：自然语言规则 → 问清归属业务策略 → 规则页四要素（定义/适用范围/执行级别/实现方式）
-  + `knowledgeSpec` → 门禁 `ke_rule_check`（双门禁见「规则发布」页）→ 评测设计（指标 + 数据来源对象/字段）
+  + **`bmm:knowledgeNeed`（JSON）** → 门禁 `ke_rule_check`
+  规则**类型用子类**表达（不设枚举属性）：文本/图像+逻辑推理 ⇒ `bmm:TextLogicOperationalRule`；
+  本体类型提取 ⇒ 既有 `bmm:StructuralBusinessRule`（**不另建类**）；
+  所用语言在规则页 `skos:note` 里写一行 `language: kn/<mode>-v1`（如 `kn/text-logic-v1`）（双门禁见「规则发布」页）→ 评测设计（指标 + 数据来源对象/字段）
   → 规则溯源（`任务 --执行规则--> 规则`）→ 发布 → 用**真实台账**跑 `ke_rule_runtime_eval` 回写评测页。
 - **业务流程建模**：BPMN 流程 → 活动 → 任务；业务对象（DataObject）写业务字段说明；
   需要对接外部系统时：先 `ext_sync_tools` 同步工具契约（工具页 + MCP 服务页），

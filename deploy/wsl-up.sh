@@ -13,7 +13,7 @@
 #   docker.service            引擎
 #   WeKnora（compose profile neo4j）：app / frontend / docreader / postgres / redis / neo4j
 #   bodhi-mcp.service         本体知识提取 + MCP 保存工具（tools/ontology-mcp/server.py，端口 8765）
-#   bodhi-it-mcp.service      内网工作台接口（参考实现；tools/it-platform-mcp/server.py，端口 8770）
+#   bodhi-it-mcp.service      内网工作台接口（参考实现；tools/domain-mcp/it_platform/server.py，端口 8770）
 #                             —— **与 bodhi-mcp 并列**的第二个 MCP 服务（WeKnora 里 name=it_platform）
 #
 # 策略提醒（2026-09-19 方案 A，见 docs/weknora-fork.md §11）：上游镜像只当「重活供应商」

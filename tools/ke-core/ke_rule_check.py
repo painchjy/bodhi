@@ -35,6 +35,7 @@ def _verdicts() -> tuple:
 
 def check_rules(kb: str, spec: str) -> dict:
     import ke_lookup  # noqa: PLC0415
+    import ke_rule_lang as L  # noqa: PLC0415  机器口径（模式/语言/格式）
 
     lk = ke_lookup.knowledge_lookup(kb, mode="rules", spec=spec)
     rules = lk.get("rules") or []
@@ -53,8 +54,6 @@ def check_rules(kb: str, spec: str) -> dict:
         if impl and not any(k in impl for k in IMPL_ALLOWED):
             p.append("实现方式不受控：%r" % impl[:20])
         if r.get("needs_extract"):
-            if not str(r.get("knowledgeNeed") or "").strip():
-                p.append("抽取型缺 knowledgeNeed")
             rf = r.get("required_fields") or {}
             if not rf:
                 p.append("抽取型缺 required_fields")
@@ -68,7 +67,31 @@ def check_rules(kb: str, spec: str) -> dict:
             aw = str(r.get("applies_when") or "").strip()
             if aw in ("", "always"):
                 w.append("未声明适用条件（applies_when=always）：条件性规则请在 "
-                         "`skos:note` 的 ```knowledgeSpec 块里写 applies_when")
+                         "`bmm:knowledgeNeed` 里写 applies_when")
+        # 2026-11-02（用户口径）：**类型用子类表达**（不建枚举属性）；语言在 note 里声明
+        #   · 文本/图像 + 逻辑推理 ⇒ bmm:TextLogicOperationalRule
+        #   · 本体类型提取       ⇒ bmm:StructuralBusinessRule（不另建类）
+        mode = str(r.get("ruleMode") or "").strip()      # ke_review 由「类 + note」推出
+        lang = str(r.get("ruleLanguage") or "").strip()
+        need_obj = r.get("knowledge_need")
+        if not mode:
+            p.append("规则类认不出模式：文本/图像+逻辑推理用 `bmm:TextLogicOperationalRule`，"
+                     "本体类型提取用 `bmm:StructuralBusinessRule`（或者 note 里写 `language: kn/…`）")
+        else:
+            expect = L.expected_language(mode)
+            if not lang:
+                p.append("note 里缺语言声明（应为 `language: %s`）" % expect)
+            elif lang != expect:
+                p.append("note 里的语言与规则类不匹配（%s ≠ %s）" % (lang, expect))
+            if r.get("knowledge_need_error"):
+                p.append("knowledgeNeed 不是合法 JSON（%s）⇒ 跑 `ke_rule_lang` 迁移"
+                         % r.get("knowledge_need_error"))
+            elif not isinstance(need_obj, dict):
+                p.append("knowledgeNeed 为空（机器口径必须有）")
+            else:
+                p += L.validate(mode, need_obj)
+        if (r.get("knowledge_spec") or {}):
+            w.append("note 里仍有 ```knowledgeSpec 块（**已废弃**）⇒ 迁移到 bmm:knowledgeNeed")
         dfn = str(r.get("definition") or "")
         if dfn and len(re.sub(r"\s", "", dfn)) < 10:
             w.append("定义过短（%d 字）" % len(dfn))

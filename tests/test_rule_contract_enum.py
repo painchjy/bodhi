@@ -2,7 +2,7 @@
 
 背景：规则契约以前硬编码 `合规｜违规｜待澄清` + `高｜中｜低`，台账/报告用
 `符合｜不符合｜无法判定｜不适用` + `严重｜一般｜建议` ⇒ 模型每轮都要心算映射。
-现在 `ke_review._ledger_enums()` 直接读 `tools/it-platform-mcp/schema.json`。
+现在 `ke_review._ledger_enums()` 直接读 `tools/domain-mcp/it_platform/schema.json`。
 本测试的断言方式：**不写死期望值**，而是比对两份真源（改一处忘另一处会红 ✓）。
 """
 import json
@@ -17,7 +17,8 @@ import ke_review  # noqa: E402
 
 
 def _ledger_schema() -> dict:
-    with open(os.path.join(REPO, "tools", "it-platform-mcp", "schema.json"), encoding="utf-8") as fh:
+    with open(os.path.join(REPO, "tools", "domain-mcp", "it_platform", "schema.json"),
+              encoding="utf-8") as fh:
         return json.load(fh)
 
 

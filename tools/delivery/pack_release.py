@@ -414,7 +414,7 @@ def pkg_ext(stage: pathlib.Path) -> dict:
     """04 ext 服务包：**it-platform MCP 独立服务**（文件存取 + 流程 + 台账）+ 自带运行库 + 安装/自检。
 
     口径（2026-10-28 用户裁定：**完全独立**）：
-      - `tools/it-platform-mcp/**` 只在本包（02 已排除）；
+      - `tools/domain-mcp/it_platform/**` 只在本包（02 已排除）；
       - **自带 ext 运行库**：`ke_ext_{store,docs,flow,issues,catalog}.py` 随包走
         ⇒ 不依赖 02 的 `tools/ke-core`，也不依赖 WeKnora/PG/docker；
       - 文档正文**不解析**（PDF/DOCX 由 bodhi-mcp 的 `ext_doc_parse` 拉原件再解析）；

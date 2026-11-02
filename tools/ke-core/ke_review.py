@@ -513,8 +513,10 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                 "OPTIONAL MATCH (n)-[rel]->(m:BodhiInstance {kb_id:$kb}) "
                 "RETURN n.slug AS slug, n.name AS title, n.definition AS dfn, "
                 "       n.ruleImplementation AS impl, n.knowledgeNeed AS need, "
+                "       n.ruleMode AS mode, n.ruleLanguage AS lang, "
                 "       n.enforcementLevel AS lvl, n.ruleScope AS scope, "
                 "       n.ruleReference AS ref, n.note AS note, n.ruleHash AS rhash, "
+                "       n.page_type AS ptype, "
                 "       collect(DISTINCT {t: type(rel), s: m.slug}) AS outs",
                 {"kb": kb_id, "slugs": want}, timeout=6) or []:
             g[str(r.get("slug") or "")] = r
@@ -529,10 +531,13 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                 "SELECT slug, COALESCE(title,'') AS title, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleImplementation','') AS impl, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:knowledgeNeed','') AS need, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleMode','') AS mode, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleLanguage','') AS lang, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleScope','') AS scope, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:enforcementLevel','') AS lvl, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleReference','') AS ref, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'bmm:ruleHash','') AS rhash, "
+                "  COALESCE(page_type,'') AS ptype, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:definition','') AS dfn, "
                 "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
                 " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL AND slug IN (%s) "
@@ -543,6 +548,13 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
     for slug in sorted(want):
         r = g.get(slug) or pg.get(slug) or {}
         impl, need = str(r.get("impl") or ""), str(r.get("need") or "")
+        try:
+            import ke_rule_lang as _RL   # 机器口径：**类 → 模式**，note → 语言；顺带解析 JSON
+            _need_obj, _need_err = _RL.parse_need(need)
+            _mode = _RL.mode_of(str(r.get("ptype") or ""), _note)
+            _lang = _RL.language_of(_note)
+        except Exception:                # noqa: BLE001
+            _need_obj, _need_err, _mode, _lang = None, "parser_unavailable", "", ""
         if slug in g:
             pols = [e.get("s") for e in (r.get("outs") or [])
                     if e.get("s") and e.get("t") in ("bmm:isDerivedFrom", "bmm:isBasisFor")]
@@ -579,6 +591,9 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                     "ruleHash": _rhash, "ruleHashSource": "page" if _rhash else "computed",
                     "fingerprint": _fp,
                     "implementation": impl, "knowledgeNeed": need, "scope": str(r.get("scope") or ""),
+                    "ruleMode": _mode, "ruleLanguage": _lang,
+                    "ruleClass": str(r.get("ptype") or ""), "note": _note,
+                    "knowledge_need": _need_obj, "knowledge_need_error": _need_err,
                     "enforcement": str(r.get("lvl") or ""), "reference": str(r.get("ref") or ""),
                     "needs_extract": bool(need) or ("知识提取" in impl),
                     "strategies": pols,
