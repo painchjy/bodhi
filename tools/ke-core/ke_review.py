@@ -561,6 +561,10 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
     for slug in sorted(want):
         r = g.get(slug) or pg.get(slug) or {}
         impl, need = str(r.get("impl") or ""), str(r.get("need") or "")
+        _title = str(r.get("title") or "")
+        # 页面类型/备注的**真源在 PG**（图是投影，retag 后可能滞后）⇒ PG 优先，图兜底
+        _note = str((extra.get(slug) or {}).get("note") or r.get("note") or "")
+        _ptype = str((extra.get(slug) or {}).get("ptype") or r.get("ptype") or "")
         try:
             import ke_rule_lang as _RL   # 机器口径：**类 → 模式**，note → 语言；顺带解析 JSON
             _need_obj, _need_err = _RL.parse_need(need)
@@ -581,9 +585,6 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                 pols = []
             src = "pg:page_metadata"
         pols = [p for i, p in enumerate(pols) if p and p not in pols[:i]]
-        _title = str(r.get("title") or "")
-        _note = str(r.get("note") or "") or str((extra.get(slug) or {}).get("note") or "")
-        _ptype = str(r.get("ptype") or "") or str((extra.get(slug) or {}).get("ptype") or "")
         # `note` 现在是「结构化块载体」（knowledgeSpec / 发布/体检/评测留痕）⇒ 只在**没有 definition**
         # 时才拿它当定义，且去掉围栏块（否则定义里会混进 spec 文本 ✗）
         _defn = str(r.get("dfn") or "")
