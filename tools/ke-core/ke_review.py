@@ -544,6 +544,19 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                 " ORDER BY slug" % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(s) for s in miss))):
             pg[str(r["slug"])] = r
 
+    # 图节点未必带 `skos:note` / `page_type`（规则页的 note 常只在 PG）⇒ 批量补一次（只读）
+    extra = {}
+    try:
+        for r in ke_db.psql_csv(
+                "SELECT slug, COALESCE(page_type,'') AS ptype, "
+                "  COALESCE(page_metadata->'ontology'->'attributes'->>'skos:note','') AS note "
+                " FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+                "   AND slug IN (%s)"
+                % (ke_db.sql_str(kb_id), ", ".join(ke_db.sql_str(s) for s in want))):
+            extra[str(r["slug"])] = {"ptype": r.get("ptype") or "", "note": r.get("note") or ""}
+    except Exception:  # noqa: BLE001  PG 不可用 ⇒ 只靠图
+        extra = {}
+
     out = []
     for slug in sorted(want):
         r = g.get(slug) or pg.get(slug) or {}
@@ -551,7 +564,7 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
         try:
             import ke_rule_lang as _RL   # 机器口径：**类 → 模式**，note → 语言；顺带解析 JSON
             _need_obj, _need_err = _RL.parse_need(need)
-            _mode = _RL.mode_of(str(r.get("ptype") or ""), _note)
+            _mode = _RL.mode_of(_ptype, _note)
             _lang = _RL.language_of(_note)
         except Exception:                # noqa: BLE001
             _need_obj, _need_err, _mode, _lang = None, "parser_unavailable", "", ""
@@ -569,7 +582,8 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
             src = "pg:page_metadata"
         pols = [p for i, p in enumerate(pols) if p and p not in pols[:i]]
         _title = str(r.get("title") or "")
-        _note = str(r.get("note") or "")
+        _note = str(r.get("note") or "") or str((extra.get(slug) or {}).get("note") or "")
+        _ptype = str(r.get("ptype") or "") or str((extra.get(slug) or {}).get("ptype") or "")
         # `note` 现在是「结构化块载体」（knowledgeSpec / 发布/体检/评测留痕）⇒ 只在**没有 definition**
         # 时才拿它当定义，且去掉围栏块（否则定义里会混进 spec 文本 ✗）
         _defn = str(r.get("dfn") or "")
@@ -592,7 +606,7 @@ def _rule_contracts(kb_id: str, slugs: list, kb_name: str = "") -> list:
                     "fingerprint": _fp,
                     "implementation": impl, "knowledgeNeed": need, "scope": str(r.get("scope") or ""),
                     "ruleMode": _mode, "ruleLanguage": _lang,
-                    "ruleClass": str(r.get("ptype") or ""), "note": _note,
+                    "ruleClass": _ptype, "note": _note,
                     "knowledge_need": _need_obj, "knowledge_need_error": _need_err,
                     "enforcement": str(r.get("lvl") or ""), "reference": str(r.get("ref") or ""),
                     "needs_extract": bool(need) or ("知识提取" in impl),
