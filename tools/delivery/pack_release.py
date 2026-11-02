@@ -178,6 +178,10 @@ def check_no_duplicates(stage: pathlib.Path) -> dict:
                 if rel.endswith("/schema.json") and prev.endswith("/schema.json") \
                         and "it-platform" in rel and "it-platform" in prev:
                     continue                       # 契约双份（02 读标签 / 04 服务）——见 docstring
+                # 2026-11-02：`ke_fs.py` 是**同源副本** —— 04 必须自带运行库（不指向 02），
+                # 两份内容一致由 `tests/test_mcp_isolation.py::test_ke_fs_copies_identical` 断言。
+                if rel.endswith("/ke_fs.py") and prev.endswith("/ke_fs.py"):
+                    continue
                 dups.append((seen[h][0], prev, rel))
             else:
                 seen[h] = (pkg.name, rel)

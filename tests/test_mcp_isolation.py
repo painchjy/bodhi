@@ -103,12 +103,25 @@ def test_pack_layout_points_to_domain_dir():
         assert os.path.isfile(os.path.join(DOMAIN, name)), name
 
 
+def test_ke_fs_copies_identical():
+    """`ke_fs.py` 两份副本（02 `tools/ke-core` / 04 `tools/domain-mcp/lib`）必须逐字节一致。
+
+    04 必须自带运行库（不能 import 02），所以它是**同源副本**；打包的"不许重复"检查为此开了
+    例外（`pack_release.check_no_duplicates`），一致性就由这条测试守住（改了忘同步 ⇒ 红）。
+    """
+    a = os.path.join(TOOLS, "ke-core", "ke_fs.py")
+    b = os.path.join(DOMAIN, "lib", "ke_fs.py")
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        assert fa.read() == fb.read(), "ke_fs.py 两份副本已漂移：改一份必须同步另一份"
+
+
 if __name__ == "__main__":
     fails = 0
     for fn in (test_domain_mcp_does_not_depend_on_bodhi_side,
                test_domain_lib_is_self_contained,
                test_bodhi_side_does_not_import_domain_impl,
-               test_pack_layout_points_to_domain_dir):
+               test_pack_layout_points_to_domain_dir,
+               test_ke_fs_copies_identical):
         try:
             fn()
             print("✓ %s" % fn.__name__)

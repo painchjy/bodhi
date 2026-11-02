@@ -137,3 +137,90 @@ def test_note_with_language_is_idempotent():
     assert "kn/compute-v1" in L.note_with_language(once, "compute"), "换语言要替换旧行"
 
 
+# ── schema v1.1（2026-11-02）：lint 两档 + 新字段 ─────────────────────────────
+def _tl(**kw):
+    need = json.loads(json.dumps(NEED_TL))
+    need.update(kw)
+    return need
+
+
+def test_lint_shape_and_validate_compat():
+    """`lint` = {errors,warns}；`validate` 保留为 lint["errors"]（向后兼容）。"""
+    res = L.lint("text-logic", NEED_TL)
+    assert set(res) == {"errors", "warns"}, res
+    assert res["errors"] == []
+    assert L.validate("text-logic", NEED_TL) == res["errors"]
+
+
+def test_class_concept_requires_class():
+    need = _tl(concepts=[{"id": "c1", "kind": "class", "facts": ["部署单元"]}], derived=[])
+    errs = L.lint("text-logic", need)["errors"]
+    assert any("kind=class" in e and "class" in e for e in errs), errs
+    need["concepts"][0]["class"] = "bmm:SubSystem"
+    assert L.lint("text-logic", need)["errors"] == []
+
+
+def test_required_without_on_missing_warns_not_blocks():
+    """用户口径：required 未写 on_missing ⇒ **只提醒**（缺省按「无法判定」，不替它改数据）。"""
+    need = _tl(concepts=[{"id": "c1", "kind": "text", "facts": ["停机窗口"], "required": True}],
+               derived=[])
+    before = json.dumps(need, ensure_ascii=False)
+    res = L.lint("text-logic", need)
+    assert res["errors"] == [], res
+    assert any("on_missing" in w and "无法判定" in w for w in res["warns"]), res
+    assert json.dumps(need, ensure_ascii=False) == before, "lint 不得改数据（尤其不许偷偷补 on_missing）"
+
+
+def test_on_missing_must_be_verdict():
+    need = _tl(concepts=[{"id": "c1", "kind": "text", "required": True, "on_missing": "跳过"}],
+               derived=[])
+    errs = L.lint("text-logic", need)["errors"]
+    assert any("on_missing" in e for e in errs), errs
+
+
+def test_derived_by_controlled_set():
+    """`by` 收编为受控集：`check` 合法，其它取值直接报错（不再\"非空即可\"）。"""
+    ok = _tl(derived=[{"id": "v", "by": "check", "from": ["c1"],
+                       "rule": "逐项核对：全部满足 ⇒ 符合"}])
+    assert L.lint("text-logic", ok)["errors"] == []
+    ok["derived"][0]["by"] = "guess"
+    errs = L.lint("text-logic", ok)["errors"]
+    assert any("derived[0].by" in e for e in errs), errs
+
+
+def test_old_verdict_error_and_fix_only_conclusion_slots():
+    """旧枚举（合规/违规/待澄清）：结论位置由 fix 换成四态；非结论位置 **不替你改** ⇒ error。"""
+    need = _tl(derived=[{"id": "v", "by": "inference", "from": ["c1"],
+                         "rule": "缺回退方案 ⇒ 违规"}])
+    fixed = L.fix_need(need)
+    assert "⇒ 不符合" in fixed["derived"][0]["rule"], fixed
+    assert L.lint("text-logic", need)["errors"] == [], L.lint("text-logic", need)
+    # 「否则 X」也是结论位置（实测开源软件规则：`⇒ 合规；否则违规`）
+    both = _tl(derived=[{"id": "v", "by": "compare", "from": ["c1"],
+                         "rule": "(name,version) ∈ 清单 ⇒ 合规；否则违规"}])
+    assert L.fix_need(both)["derived"][0]["rule"].endswith("否则不符合"), L.fix_need(both)
+    assert L.lint("text-logic", both)["errors"] == [], L.lint("text-logic", both)
+    bad = _tl(derived=[{"id": "v", "by": "inference", "from": ["c1"],
+                        "rule": "违规项须补齐整改材料"}])
+    errs = L.lint("text-logic", bad)["errors"]
+    assert any("旧结论枚举" in e for e in errs), errs
+
+
+def test_tools_columns_confidence_rule_ref_warn():
+    need = _tl(concepts=[{"id": "c1", "kind": "table", "facts": ["配置项"]},
+                         {"id": "c2", "kind": "image"}],
+               derived=[],
+               answer={"conclusion": "符合", "evidence": "x", "locator": "3.2",
+                       "confidence": "mid"})
+    warns = L.lint("text-logic", need)["warns"]
+    assert any("columns" in w for w in warns), warns
+    assert any("tools" in w for w in warns), warns
+    assert any("confidence" in w for w in warns), warns
+    assert any("rule_ref" in w for w in warns), warns
+    need["answer"]["confidence"] = "high"
+    need["answer"]["rule_ref"] = "bmm/textlogicoperationalrule/示例"
+    warns2 = L.lint("text-logic", need)["warns"]
+    assert not any("confidence" in w or "rule_ref" in w for w in warns2), warns2
+
+
+

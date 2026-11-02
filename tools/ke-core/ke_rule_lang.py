@@ -8,15 +8,24 @@
 - 三种模式先行：`text-logic`（文本/图像提取 + 真实性完整性 + 逻辑推理）、
   `ontology-extract`（按本体类型抽取）、`compute`（取数 + 公式阈值）。
 
-三种语言的 schema（宽松：允许多余键，不写死业务词）
---------------------------------------------------
-text-logic        {concepts:[{id,kind∈text|table|image|external|graph,facts:[..],required?}],
-                   derived?:[{id,by∈compare|inference|calc,from:[conceptId],rule}],
-                   answer:{conclusion,evidence,locator}, applies_when?}
+三种语言的 schema（**v1.1**，宽松：允许多余键，不写死业务词）
+------------------------------------------------------------------
+text-logic        {concepts:[{id, kind∈text|table|image|external|graph|class, facts:[..],
+                             required?, on_missing?∈四态, tools?:[..], columns?:[..],
+                             class?（kind=class 必填，本体类名）}],
+                   derived?:[{id, by∈check|compare|inference|calc, from:[conceptId], rule}],
+                   answer:{conclusion,evidence,locator, rule_ref?, confidence?∈high|medium|low},
+                   applies_when?}
 ontology-extract  {types:[{class,required?}], relations?:[{from,rel,to,min?}],
                    answer:{conclusion,evidence,locator}}
 compute           {inputs:[{id,source,field?}], formula, threshold?:{...},
                    answer:{conclusion,evidence,locator}}
+
+体检分两档（2026-11-02 v1.1）：`lint()` → `{errors, warns}`；errors **阻断**、warns **只提醒**。
+    · 阻断：结构缺失 / `kind=class` 缺 `class` / `by` 不在受控集 / `on_missing` 非四态 /
+            结论位置仍写旧枚举（合规·违规·待澄清）
+    · 提醒：`table` 缺 `columns`、`image|table|external` 缺 `tools`、`required` 缺 `on_missing`
+            （**缺省按「无法判定」，不替你猜**）、`answer.confidence` 非三档、`answer.rule_ref` 为空
 
 命令行
 ------
@@ -49,8 +58,13 @@ DERIVE_ALIAS = {"infer": "inference", "logic": "inference", "rule": "inference",
                 "eq": "compare", "compute": "calc", "calculation": "calc"}
 # 旧口径（台账统一前）→ 四态（2026-11-02 迁移用；只换**取值**，不改散文）
 VERDICT_MAP = {"合规": "符合", "违规": "不符合", "待澄清": "无法判定"}
-DERIVE_BY = ("compare", "inference", "calc")
+DERIVE_BY = ("check", "compare", "inference", "calc")
 VERDICTS = ("符合", "不符合", "不适用", "无法判定")
+CONFIDENCE = ("high", "medium", "low")
+TOOL_KINDS = ("image", "table", "external")      # 这几类输入通常要工具才取得到
+# 「结论位置」= `conclusion/结论 = …`、`⇒`、`->`、`→`、`否则` 之后 —— **只有这里**才允许换旧枚举
+CONCL_MARK = re.compile(r"(?i)(?:conclusion|结论)\s*[=:：]|⇒|->|→|否则")
+CONCL_END = re.compile(r"[;；。\n]")
 SPEC_RE = re.compile(r"(?ms)^```knowledgeSpec[^\n]*\n(.*?)^```")
 
 
@@ -74,6 +88,28 @@ def parse_need(raw) -> tuple:
     return got, ""
 
 
+def _map_concl_text(text: str) -> str:
+    """把**结论位置**（`conclusion/结论 =`、`⇒`、`->`、`→` 之后）的旧枚举换成四态。
+
+    其它位置（如「违规项的整改要求」这种定语）**原样保留** —— 由 lint 报 error 交人改写 ✓
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    out, last = [], 0
+    for m in CONCL_MARK.finditer(s):
+        out.append(s[last:m.end()])
+        rest = s[m.end():]
+        cut = CONCL_END.search(rest)
+        seg = rest[:cut.start()] if cut else rest
+        for old, new in VERDICT_MAP.items():
+            seg = seg.replace(old, new)
+        out.append(seg)
+        last = m.end() + len(seg)
+    out.append(s[last:])
+    return "".join(out)
+
+
 def fix_need(need: dict) -> dict:
     """把旧口径**就地规范化**（深拷贝）：`kind` 别名归一 + 结论换成台账四态。
 
@@ -90,6 +126,8 @@ def fix_need(need: dict) -> dict:
         if isinstance(d, dict):
             b = str(d.get("by") or "").strip().lower()
             d["by"] = DERIVE_ALIAS.get(b, b)
+            if str(d.get("rule") or "").strip():      # 只动**结论位置**的旧枚举（2026-11-02 口径）
+                d["rule"] = _map_concl_text(str(d["rule"]))
     ans = out.get("answer")
     if not isinstance(ans, dict):                  # 迁移：answer 缺失 ⇒ 补**骨架**（不编结论）
         out["answer"] = {"conclusion": "|".join(VERDICTS),
@@ -124,8 +162,8 @@ def _ans_err(need: dict) -> list:
     return errs
 
 
-def validate(mode: str, need: dict) -> list:
-    """按模式校验 `knowledgeNeed` 的**格式**（语义/样例验证后续再做）。→ errors[]"""
+def _errors_only(mode: str, need: dict) -> list:
+    """按模式校验 `knowledgeNeed` 的**格式**（语义/样例验证后续再做）。→ errors[]（阻断项）"""
     mode = str(mode or "").strip()
     if mode not in MODES:
         return ["ruleMode 必须是 %s 之一（当前 %r）" % (" / ".join(MODES), mode)]
@@ -150,6 +188,13 @@ def validate(mode: str, need: dict) -> list:
                     ids.add(cid)
                 if str(c.get("kind") or "") not in KINDS:
                     errs.append("concepts[%d].kind 必须是 %s 之一" % (i, "/".join(KINDS)))
+                if str(c.get("kind") or "") == "class" and not str(c.get("class") or "").strip():
+                    errs.append("concepts[%d]（kind=class）缺 class（本体类名，如 bmm:SubSystem）" % i)
+                if c.get("required") is True:
+                    om = str(c.get("on_missing") or "").strip()
+                    if om and om not in VERDICTS:
+                        errs.append("concepts[%d].on_missing 必须是四态之一（%s）"
+                                    % (i, "/".join(VERDICTS)))
                 facts = c.get("facts")
                 if facts is not None and not isinstance(facts, list):
                     errs.append("concepts[%d].facts 必须是字符串数组" % i)
@@ -157,15 +202,22 @@ def validate(mode: str, need: dict) -> list:
                 if not isinstance(d, dict):
                     errs.append("derived[%d] 必须是对象" % i)
                     continue
-                # `by` 宽松处理：只要求非空（未来可能有新推演方式；已知集合见 DERIVE_BY）
-                if not str(d.get("by") or "").strip():
-                    errs.append("derived[%d].by 不能为空（建议 %s）" % (i, "/".join(DERIVE_BY)))
+                # v1.1（2026-11-02）：`by` 收编为受控集（新增 `check`=按清单/条件逐项核对）
+                _by = str(d.get("by") or "").strip()
+                if _by not in DERIVE_BY:
+                    errs.append("derived[%d].by 必须是 %s 之一（当前 %r）"
+                                % (i, "｜".join(DERIVE_BY), _by))
                 bad_from = [f for f in (d.get("from") or []) if str(f) not in ids]
                 if bad_from:
                     errs.append("derived[%d].from 引用了不存在的 concept：%s"
                                 % (i, "、".join(str(x) for x in bad_from)))
                 if not str(d.get("rule") or "").strip():
                     errs.append("derived[%d].rule 不能为空" % i)
+                else:
+                    _old = [v for v in VERDICT_MAP if v in str(d["rule"])]
+                    if _old:
+                        errs.append("derived[%d].rule 用了旧结论枚举（%s）⇒ 结论位置只许四态：%s"
+                                    % (i, "、".join(_old), "/".join(VERDICTS)))
     elif mode == "ontology-extract":
         ts = need.get("types")
         if not isinstance(ts, list) or not ts:
@@ -188,6 +240,45 @@ def validate(mode: str, need: dict) -> list:
         if not str(need.get("formula") or "").strip():
             errs.append("compute 需要 formula（如 `pass = p95 <= 200`）")
     return errs
+
+
+def _warns_only(mode: str, need: dict) -> list:
+    """**不阻断**的提醒（v1.1，2026-11-02）：取数信息缺失 / `on_missing` 未写（默认「无法判定」）。"""
+    if not isinstance(need, dict):
+        return []
+    need = fix_need(need)
+    w = []
+    if str(mode or "").strip() != "text-logic":
+        return w
+    for i, c in enumerate(need.get("concepts") or []):
+        if not isinstance(c, dict):
+            continue
+        kind = str(c.get("kind") or "")
+        if kind == "table" and not c.get("columns"):
+            w.append("concepts[%d]（table）建议写 columns（要读哪几列）" % i)
+        if kind in TOOL_KINDS and not c.get("tools"):
+            w.append("concepts[%d]（%s）建议写 tools（取数工具：image_extract/doc_outline/grep_chunks…）"
+                     % (i, kind))
+        if c.get("required") is True and not str(c.get("on_missing") or "").strip():
+            w.append("concepts[%d] required=true 但未写 on_missing ⇒ 缺该输入时按「无法判定」处理"
+                     "（建议显式写，不替你猜 ✗）" % i)
+    ans = need.get("answer") if isinstance(need.get("answer"), dict) else {}
+    conf = str(ans.get("confidence") or "").strip()
+    if conf and conf not in CONFIDENCE:
+        w.append("answer.confidence 建议取 %s（当前 %r）" % ("/".join(CONFIDENCE), conf))
+    if not str(ans.get("rule_ref") or "").strip():
+        w.append("answer.rule_ref 为空（建议写本规则页 slug，便于溯源）")
+    return w
+
+
+def lint(mode: str, need: dict) -> dict:
+    """格式体检（schema v1.1）：`{errors:[…], warns:[…]}` —— **errors 阻断，warns 只进回执**。"""
+    return {"errors": _errors_only(mode, need), "warns": _warns_only(mode, need)}
+
+
+def validate(mode: str, need: dict) -> list:
+    """兼容旧调用：只返回 errors（等价 `lint()["errors"]`）。"""
+    return lint(mode, need)["errors"]
 
 
 def infer_mode(need: dict) -> str:
@@ -346,13 +437,19 @@ def migrate(kb: str = "", apply: bool = False, limit: int = 500) -> dict:
             plan.append({"slug": r["slug"], "action": "author_needed" if empty else "manual",
                          "need_raw": raw[:80], "notes": notes})
             continue
-        errs = validate(mode, need)
+        errs = lint(mode, need)["errors"]
         item = {"slug": r["slug"], "title": r.get("title"), "kb": r.get("kb"),
                 "mode": mode, "language": LANG_BY_MODE[mode], "notes": notes,
-                "errors": errs, "preview": json.dumps(need, ensure_ascii=False)[:280]}
+                "errors": errs, "warns": lint(mode, need)["warns"],
+                "preview": json.dumps(need, ensure_ascii=False)[:280]}
         if not apply or errs:
             plan.append(item)
             continue
+        ans = need.get("answer") if isinstance(need.get("answer"), dict) else {}
+        if str(ans.get("rule_ref") or "").strip() in ("", "…", "...", "-", "—"):
+            # v1.1：迁移时补**溯源**（本规则页 slug）—— 占位符不算溯源，同样覆盖 ✓
+            ans["rule_ref"] = r["slug"]
+            need["answer"] = ans
         attrs = {"bmm:knowledgeNeed": json.dumps(need, ensure_ascii=False)}
         note = SPEC_RE.sub("", str(r.get("note") or "")).strip()
         note2 = note_with_language(note, mode)

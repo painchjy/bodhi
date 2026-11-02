@@ -7,6 +7,8 @@
   ③ **无歧义**：definition 不得只有模糊词（合理/适当/尽量/完善/良好/必要时…）✗
   ④ **可回溯**：`reference`（参考规范）建议非空（warn）；
      required_fields 必须含 conclusion / evidence / severity / rule_ref ✓ 且 conclusion 枚举四态 ✓
+  ⑤ **格式（语言 schema v1.1）**：`bmm:knowledgeNeed` 过 `ke_rule_lang.lint()`
+     —— errors 阻断；warns（tools / columns / on_missing / confidence / rule_ref）只进回执 ✓
 
 CLI：
   python3 ke_rule_check.py [--kb <领域库名>] [--spec policy:<策略页名>] [--write]
@@ -89,7 +91,10 @@ def check_rules(kb: str, spec: str) -> dict:
             elif not isinstance(need_obj, dict):
                 p.append("knowledgeNeed 为空（机器口径必须有）")
             else:
-                p += L.validate(mode, need_obj)
+                # v1.1（2026-11-02）：格式分两档 —— errors 阻断、warns 只进回执
+                _lr = L.lint(mode, need_obj)
+                p += _lr["errors"]
+                w += _lr["warns"]
         if (r.get("knowledge_spec") or {}):
             w.append("note 里仍有 ```knowledgeSpec 块（**已废弃**）⇒ 迁移到 bmm:knowledgeNeed")
         dfn = str(r.get("definition") or "")
