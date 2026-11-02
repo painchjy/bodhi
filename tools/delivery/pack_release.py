@@ -71,10 +71,10 @@ PACKAGES = (("01-frontend", "bodhi2-01-frontend.tar.gz"),
             ("03-manual", "bodhi2-03-manual.tar.gz"),
             ("04-it-platform-mcp", "bodhi2-04-it-platform-mcp.tar.gz"))
 # 04 独立服务包口径（2026-10-26 用户裁定）：
-#   - `tools/it-platform-mcp/**` **只进 04**（02 排除，两个服务互不牵连）；
+#   - `tools/domain-mcp/**` **只进 04**（02 排除，两个服务互不牵连）；
 #   - 只带文本种子（allowlist/denylist/issues/flows），**不带** docs/files/images 二进制；
 #   - `ke-core` 是 02/04 共用的运行时库 ⇒ **不复制**（重复内容会被去重断言拦），由 install.sh 指向 02 的 tools/ke-core。
-EXT_TOOL_DIR = "it-platform-mcp"
+EXT_TOOL_DIR = "domain-mcp"
 EXT_SEED_SKIP = ("docs", "files", "images", "state")
 
 
@@ -423,16 +423,13 @@ def pkg_ext(stage: pathlib.Path) -> dict:
     """
     d = stage / "04-it-platform-mcp"
     d.mkdir(parents=True, exist_ok=True)
+    # 整目录搬：`tools/domain-mcp/{it_platform,lib}`（lib 自带，不指向 02）✓
     copy_tree(REPO / "tools" / EXT_TOOL_DIR, d / "tools" / EXT_TOOL_DIR)
-    # 自带运行库（只这 5 个文件，不带 ke-core 其余）
-    ext_lib = d / "tools" / "ke-core"
-    ext_lib.mkdir(parents=True, exist_ok=True)
-    for name in ("ke_ext_store.py", "ke_ext_docs.py", "ke_ext_flow.py",
-                 "ke_ext_issues.py", "ke_ext_catalog.py"):
-        src = REPO / "tools" / "ke-core" / name
-        if not src.is_file():
-            raise SystemExit("!! 04 包缺少运行库文件：tools/ke-core/%s" % name)
-        shutil.copy2(src, ext_lib / name)
+    need = ("ke_domain_store.py", "ke_domain_items.py", "ke_domain_docs.py",
+            "ke_domain_flow.py", "ke_domain_catalog.py", "ke_fs.py")
+    missing = [n for n in need if not (d / "tools" / EXT_TOOL_DIR / "lib" / n).is_file()]
+    if missing:
+        raise SystemExit("!! 04 包缺少运行库：tools/domain-mcp/lib/%s" % "、".join(missing))
     copy_tree(REPO / "deploy" / "mock-ext" / "it-platform",
               d / "deploy" / "mock-ext" / "it-platform", skip_names=EXT_SEED_SKIP)
     for name in ("upload_doc.sh", "README.md"):
@@ -447,8 +444,8 @@ def pkg_ext(stage: pathlib.Path) -> dict:
           "=================================================\n\n"
           "先读 **deploy/delivery/04-it-platform-mcp/README.md**（能力边界、安装、自检），\n"
           "配置口径见 **CONFIG-MATRIX.md**。\n\n"
-          "  tools/it-platform-mcp/       服务代码 + schema.json（**契约真源**，随服务版本走）\n"
-          "  tools/ke-core/               自带 ext 运行库（store/docs/flow/issues/catalog，5 个文件）\n"
+          "  tools/domain-mcp/it_platform/ 服务代码 + schema.json（**契约真源**，随服务版本走）\n"
+          "  tools/domain-mcp/lib/        自带运行库（ke_domain_* + ke_fs，6 个文件）\n"
           "  deploy/mock-ext/it-platform/ 文本种子（allowlist / denylist / issues / flows）\n"
           "  deploy/delivery/04-it-platform-mcp/  install.sh / selfcheck.py / .env.sample / systemd unit\n\n"
           "安装：sudo bash deploy/delivery/04-it-platform-mcp/install.sh --prefix /opt/bodhi-ext\n"
@@ -582,9 +579,9 @@ def main() -> int:
                 "manuals_authoritative": ("按包归属：根目录 MANUAL.md；FRONTEND.md→01；MCP-SERVER.md→02；"
                                           "其余手册 + docs/ + ontology/(TTL 真源) + sql/ + seed/→03"),
                 "split_policy": {"01": "前端材料（镜像/模板/脚本/FRONTEND.md）",
-                                 "02": "本体 MCP 服务：tools/**（除 tools/delivery、tools/it-platform-mcp）+ artifacts/**（除 artifacts/shacl）+ skills/** + 部署件",
+                                 "02": "本体 MCP 服务：tools/**（除 tools/delivery、tools/domain-mcp）+ artifacts/**（除 artifacts/shacl）+ skills/** + 部署件",
                                  "03": "文档 + 本体真源 ontology/** + sql/**（登记 SQL）+ tools/delivery/** + 其余手册（**知识库页面不出包**）",
-                                 "04": "ext MCP 独立服务：tools/it-platform-mcp/** + mock-ext 文本种子 + 04 安装/自检 + CONFIG-MATRIX.md"},
+                                 "04": "ext MCP 独立服务：tools/domain-mcp/** + mock-ext 文本种子 + 04 安装/自检 + CONFIG-MATRIX.md"},
                 "runtime_deps": {"mcp_server": "零第三方 Python 依赖（标准库 + psql）",
                                  "ontology_compile": "rdflib + PyYAML（仅 tools/ontology-compiler）",
                                  "llm": "服务端不调 LLM（无 openai 依赖）"},

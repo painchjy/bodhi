@@ -6,7 +6,7 @@
 ## 1. 启动
 
 ```bash
-python3 tools/it-platform-mcp/server.py --host 0.0.0.0 --port 8770
+python3 tools/domain-mcp/it_platform/server.py --host 0.0.0.0 --port 8770
 # systemd: bodhi-it-mcp.service（EnvironmentFile 复用仓库 .env）
 curl -s http://127.0.0.1:8770/health     # {"ok": true, "server": "it-platform-mcp", "tools": 3}
 ```
@@ -80,7 +80,7 @@ bpmn:dataObjectInterfaceRef   it_platform:tools/ke-core/ke_ext_catalog.py
 
 ## 3.1 契约下发：`tools/list` 的 `x-ext`（2026-10-25）
 
-列的**名称/顺序/枚举/主键/模式/版本策略**只在这里定义一次（`tools/it-platform-mcp/schema.json` 的 `x_ext` 段；
+列的**名称/顺序/枚举/主键/模式/版本策略**只在这里定义一次（`tools/domain-mcp/it_platform/schema.json` 的 `x_ext` 段；
 2026-10-26 迁入服务目录 ⇒ **契约跟服务版本走**，`deploy/mock-ext/` 不再随包携带副本）：
 由 `tools/list` 随工具一起下发；**页面只做投射**（`page_metadata.ontology.projection`，带 `fetched_at` + `schemaHash`），
 不再手写列规范 ⇒ 单一真源、可判漂移。
@@ -104,10 +104,10 @@ curl -s -X POST http://127.0.0.1:8770/mcp -H 'content-type: application/json' \
 ## 4. 内网落地（只改存储层）
 
 1. 保留 `server.py`（协议层）与 `schemas.py`（工具面）不变；
-2. 把 `tools/ke-core/ke_ext_store.py` 的"容器文件"换成**你们库表的读写**（SQL/ORM 均可）：
+2. 把 `tools/domain-mcp/lib/ke_domain_store.py` 的"容器文件"换成**你们库表的读写**（SQL/ORM 均可）：
    - 字段与幂等键照上面 4 个属性；
    - 写操作保持 `dry_run` 默认 true + 审计 + 版本号（`rev`）语义；
-3. `ke_ext_catalog.py` / `ke_ext_issues.py` / `ke_ext_docs.py` 里的口径（黑名单优先、分页、图转 `data_url`）
+3. `ke_domain_catalog.py` / `ke_domain_items.py` / `ke_domain_docs.py` 里的口径（黑名单优先、分页、图转 `data_url`）
    可直接复用。
 
 > 本目录下的 `ke_ext_*` 只做**逻辑参考**：真源仍在 `tools/ke-core/`（bodhi 与本服务共用同一套实现，

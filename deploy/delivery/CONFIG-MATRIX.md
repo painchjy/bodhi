@@ -23,7 +23,7 @@
 
 | 项 | UI 能改？ | 真源 | 写入 | 生效 | 校验 |
 |---|---|---|---|---|---|
-| 契约 `schema.json`（`x_ext`） | ✗ | `tools/it-platform-mcp/schema.json`（服务发布内） | 发新包 | `systemctl restart it-platform-mcp` | `curl tools/list` 看 `x-ext.schemaHash` 变化 |
+| 契约 `schema.json`（`x_ext`） | ✗ | `tools/domain-mcp/it_platform/schema.json`（服务发布内） | 发新包 | `systemctl restart it-platform-mcp` | `curl tools/list` 看 `x-ext.schemaHash` 变化 |
 | 页面投射 | ✗ | 工具 `page_metadata.ontology.projection` | `import_refresh` / 同步工具 | 立即 | 巡检 G1/G2 |
 | 报告取哪几列 | ✓ **改模板**（不是改契约） | 模板页「数据对象字段」列 | 编辑模板页 | 下次组文 | 巡检 G2（列集与回执不符） |
 
@@ -40,8 +40,8 @@
 
 | 目录 | 进包？ | 说明 |
 |---|---|---|
-| `tools/it-platform-mcp/`（含 `schema.json`） | ✓ **只在 04 包** | 02（bodhi-mcp）**排除**：它是独立服务，跟本体服务解耦 |
-| `tools/ke-core/ke_ext_*.py` | ✓ 04 包 | 台账/文档/流程/契约投射 |
+| `tools/domain-mcp/it_platform/`（含 `schema.json`） | ✓ **只在 04 包** | 02（bodhi-mcp）**排除**：它是独立服务，跟本体服务解耦 |
+| `tools/ke-core/ke_domain_*.py` | ✓ 04 包 | 台账/文档/流程/契约投射 |
 | `deploy/mock-ext/{allowlist.json,issues/,flows/}` | ✓ 04 包 | **种子**（演示数据只在 `seed-demo.sh`，默认不跑） |
 | `deploy/mock-ext/{docs/,files/,images/}` | ✗ **不进包**（git 也不跟） | 二进制/抓取产物；由 `upload_doc.sh` 生成 |
 | `tests/fixtures/mock-ext/` | ✗ | 只给单测（合成 2KB docx，无版权风险） |

@@ -30,7 +30,7 @@ def main() -> int:
     ap.add_argument("--skip-agent", action="store_true")
     args = ap.parse_args()
     base = args.base
-    svc = os.path.join(base, "tools", "it-platform-mcp")
+    svc = os.path.join(base, "tools", "domain-mcp", "it_platform")
     seed = os.path.join(base, "deploy", "mock-ext", "it-platform")
     bad = 0
 
@@ -50,11 +50,11 @@ def main() -> int:
     ok("契约含 x_ext（%d 个工具）" % len(doc.get("x_ext") or {}), bool(doc.get("x_ext")))
 
     # ⓪ **独立性**（2026-10-28 用户口径：04 不依赖 02 / WeKnora / PG）
-    lib = os.path.join(base, "tools", "ke-core")
-    need = ["ke_ext_store.py", "ke_ext_docs.py", "ke_ext_flow.py",
-            "ke_ext_issues.py", "ke_ext_catalog.py"]
+    lib = os.path.join(base, "tools", "domain-mcp", "lib")
+    need = ["ke_domain_store.py", "ke_domain_items.py", "ke_domain_docs.py",
+            "ke_domain_flow.py", "ke_domain_catalog.py", "ke_fs.py"]
     missing = [n for n in need if not os.path.isfile(os.path.join(lib, n))]
-    ok("自带 ext 运行库齐（%d 个 ke_ext_*.py）" % len(need), not missing,
+    ok("自带运行库齐（%d 个 ke_domain_*/ke_fs）" % len(need), not missing,
        ("缺：" + "、".join(missing)) if missing else lib)
     src = ""
     try:
@@ -73,7 +73,7 @@ def main() -> int:
     # 只有本包也能 import（不碰 02 目录）
     probe = subprocess.run(
         [sys.executable, "-c",
-         "import sys;sys.path[:0]=[%r,%r];import ke_ext_docs,ke_ext_flow,ke_ext_issues;"
+         "import sys;sys.path[:0]=[%r,%r];import ke_domain_docs,ke_domain_flow,ke_domain_items;"
          "print('ok', 'ke_db' in sys.modules)" % (svc, lib)],
         capture_output=True, text=True)
     ok("仅凭本包可 import 运行库", (probe.returncode == 0 and "ok" in (probe.stdout or "")),
@@ -90,8 +90,8 @@ def main() -> int:
 
     # ③ 工具面
     # 契约读取依赖 ke_ext_store（在 `ke-core`）：04 包不含它（与 02 共用）⇒ 依次找
-    for cand in (os.path.join(base, "tools", "ke-core"), os.environ.get("BODHI_KECORE", ""),
-                 "/opt/bodhi2/tools/ke-core", os.path.join(args.repo, "tools", "ke-core")):
+    for cand in (os.path.join(base, "tools", "domain-mcp", "lib"),
+                 os.environ.get("BODHI_DOMAIN_LIB", "")):
         if cand and os.path.isdir(cand):
             sys.path.insert(0, cand)
             break

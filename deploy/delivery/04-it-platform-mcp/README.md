@@ -7,8 +7,8 @@
 
 | 路径 | 说明 |
 |---|---|
-| `tools/it-platform-mcp/` | 服务代码 + `schema.json`（**契约真源**，随服务版本走） |
-| `tools/ke-core/ke_ext_*.py` + 依赖 | 台账 / 文档 / 流程 / 契约投射 |
+| `tools/domain-mcp/it_platform/` | 服务代码 + `schema.json`（**契约真源**，随服务版本走） |
+| `tools/ke-core/ke_domain_*.py` + 依赖 | 台账 / 文档 / 流程 / 契约投射 |
 | `deploy/mock-ext/{allowlist.json,denylist.json,issues/,flows/}` | 文本种子（**不含** docs/files/images 二进制） |
 | `deploy/delivery/04-it-platform-mcp/{install.sh,selfcheck.py,.env.sample,it-platform-mcp.service}` | 安装/自检 |
 | `CONFIG-MATRIX.md` | 哪些能改、改哪、怎么生效、怎么校验 |

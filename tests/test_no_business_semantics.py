@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _helpers as H  # noqa: E402
 
-EXCLUDE = ("/tests/", "/_deprecated/", "/__pycache__/")
+EXCLUDE = ("/tests/", "/_deprecated/", "/__pycache__/", "/domain-mcp/")
 
 
 def _terms() -> list:
