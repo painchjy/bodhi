@@ -80,6 +80,11 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:subClassOf :BusinessRule .
 
 ### 12. 结构性业务规则 StructuralBusinessRule
+:TextLogicOperationalRule rdf:type owl:Class ;
+    rdfs:label "文本逻辑操作性业务规则"@zh ;
+    rdfs:comment "以**文本/图像证据**为输入的操作性业务规则：先从文档（含图）提取事实，判断真实性与完整性，再做逻辑推理得出结论。机器口径写在 `bmm:knowledgeNeed`（JSON）；所用语言在规则页 `skos:note` 里用一行 `language: kn/text-logic-v1` 声明。**本体提取类规则不要建子类**，用既有的 `:StructuralBusinessRule` 即可。"@zh ;
+    rdfs:subClassOf :OperativeBusinessRule .
+
 :StructuralBusinessRule rdf:type owl:Class ;
     rdfs:label "结构性业务规则"@zh ;
     rdfs:comment "没有执行级别的考虑，根据定义即为真实有效。"@zh ;
@@ -721,4 +726,3 @@ bodhi:aliasKey rdf:type owl:AnnotationProperty ;
 rdfs:label bodhi:aliasKey true .
 skos:altLabel bodhi:aliasKey true .
 :systemAbbr bodhi:aliasKey true .
-
