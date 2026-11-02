@@ -13,6 +13,9 @@
 # 前端将来要从源码构建，Vue/TS 也统一 LF
 *.vue text eol=lf
 *.ts text eol=lf
+# 2026-11-02：外部接口面板是手写 JS（浏览器加载，EOL 无影响）—— 锁 LF，
+# 免得在 Windows 编辑器里存成 CRLF 后被 git 当成整文件改写（假改动）。
+deploy/weknora-fork/frontend/ext-panel.js text eol=lf
 # 2026-09-19 补：前端构建闸门脚本，以及 nginx 配置模板
 # （default.conf.template 由 frontend 容器 entrypoint 用 envsubst 生成 nginx 配置，
 #  带 \r 会污染指令；它挂在容器里只读使用）
