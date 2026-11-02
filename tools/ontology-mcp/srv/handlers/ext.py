@@ -21,7 +21,7 @@ TOOL_TABLE = "ext_table"
 def _binds(kb_id: str, slug: str) -> list:
     """读某个 DataObject 页的绑定（与 `resolve_binding` 同一解析器，不重复实现）。"""
     import ke_ext_binding as S
-    return S.parse_binding(S._attrs_of(kb_id, slug))      # noqa: SLF001  同仓库内部解析器
+    return S.bindings_of(kb_id, slug)
 
 
 def _service_of(binding: dict) -> str:

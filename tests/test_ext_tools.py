@@ -450,26 +450,6 @@ def test_docs_attachment_lists(ext):
 
 
 # ── 绑定解析 / 存储 ─────────────────────────────────────────────────────
-def test_parse_binding_attrs():
-    """4 个数据属性 → 绑定列表（接口逗号分隔；模式/主键/提供方分号顺序对齐）✓"""
-    binds = B.parse_binding({
-        "dataObjectInterface": "ext_a, ext_b",
-        "dataObjectAccessMode": "query;query,maintain",
-        "dataObjectKeyFields": "k1;k2,k3",
-        "dataObjectInterfaceRef": "tools/ke-core/ke_ext_catalog.py;tools/ke-core/ke_ext_issues.py"})
-    assert [b["tool"] for b in binds] == ["ext_a", "ext_b"], binds
-    assert binds[0]["modes"] == ["query"] and binds[0]["keys"] == ["k1"], binds[0]
-    assert binds[1]["modes"] == ["query", "maintain"] and binds[1]["keys"] == ["k2", "k3"], binds[1]
-    assert binds[1]["impl"] == "tools/ke-core/ke_ext_issues.py"
-    assert B.parse_binding({}) == [], "没声明接口 ⇒ 空列表（调用方回 no_binding）✗"
-
-
-def test_parse_binding_single_defaults():
-    """只写接口时：模式默认 query、主键为空（不猜更多 ✓）"""
-    binds = B.parse_binding({"dataObjectInterface": "ext_only"})
-    assert binds == [{"tool": "ext_only", "modes": ["query"], "keys": [], "impl": ""}], binds
-
-
 def test_atomic_write_leaves_valid_json(ext):
     p = str(_sys(ext, "probe.json"))
     S.write_json(p, {"a": 1})

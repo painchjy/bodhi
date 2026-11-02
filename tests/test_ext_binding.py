@@ -102,6 +102,15 @@ def test_relation_wins_over_stale_attributes(graph, kb_id, store):
     assert got["binding_count"] == 1, "旧属性里的其余 2 个工具不该再生效"
 
 
+def test_bindings_of_is_edge_only(graph, kb_id, store):
+    """绑定只认关系边：页面 4 个 `dataObject*` 属性已退役 ⇒ 写了也不算绑定 ✓。"""
+    _mk_object(graph, kb_id, attrs="ext_ghost")
+    assert store.bindings_of(kb_id, OBJ) == [], "只有页面属性、没有边 ⇒ 不算绑定 ✗"
+    assert store.set_binding(kb_id, OBJ, "ext_real")["ok"]
+    got = store.bindings_of(kb_id, OBJ)
+    assert [b["tool"] for b in got] == ["ext_real"], got
+
+
 def test_unbind_means_no_binding(graph, kb_id, store):
     """删边 ⇒ **本库内**没有任何绑定（旧属性不再生效；跨库兜底另算）。"""
     _mk_object(graph, kb_id, attrs="ext_issue_list,ext_doc_push")
@@ -109,8 +118,7 @@ def test_unbind_means_no_binding(graph, kb_id, store):
     assert store.delete_binding(kb_id, OBJ, TOOL)["ok"]
 
     assert store.list_bindings(kb_id, OBJ) == []
-    attrs = store._attrs_of(kb_id, OBJ)                     # noqa: SLF001
-    assert not any(v.strip() for v in attrs.values()), attrs
+    assert store.bindings_of(kb_id, OBJ) == [], "删边后接口列表必须为空（4 属性已退役）✗"
 
     # `resolve_binding` 会跨库兜底（同 slug 在真实业务库里可能确有绑定）⇒ 只断言"不是本库"
     got = store.resolve_binding(TOOL, kb_id, OBJ)

@@ -75,7 +75,7 @@ def _resolve_kb(params: dict) -> str:
         return best
     for kb_id in cands:                         # 有绑定但没写映射：仍按"有绑定"取
         try:
-            if STORE.parse_binding(STORE._attrs_of(kb_id, slug)):
+            if STORE.bindings_of(kb_id, slug):
                 return kb_id
         except Exception:                       # noqa: BLE001
             continue
@@ -95,7 +95,7 @@ def schema_payload(params: dict) -> dict:
     kb = _resolve_kb(params)
     binds = []
     try:
-        binds = STORE.parse_binding(STORE._attrs_of(kb, slug))     # noqa: SLF001
+        binds = STORE.bindings_of(kb, slug)                       # 关系边直读（4 属性已退役）
     except Exception:                                             # noqa: BLE001
         binds = []
     binding = binds[0] if binds else {}
