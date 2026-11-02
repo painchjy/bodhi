@@ -135,10 +135,9 @@ def _page_by_title(title: str, kb_id: str = "") -> str:
 
 
 def _review_no_from_page(kb_id: str, slug: str, key_label: str = "") -> dict:
-    """**从报告上下文取编号**（不写死、不猜）：① 引用块 → ② 正文里出现的**台账分片名** → ③ 表格主键行。
+    """**从报告上下文取编号**（不写死、不猜）：① 引用块 `keys:` → ② 正文表格主键行。
 
-    ② 是最稳的一条：台账按外层主键分片存（文件名=编号），正文里出现哪个编号就用哪个
-    （**必须唯一命中**；多个 ⇒ 不猜，交 ③/人工）✓ 代码里因此不含任何领域词。
+    2026-11-02：删掉"扫 04 的分片目录猜编号"那条路（`ledger_names()`）—— 02 不读 04 的数据 ✓
     """
     import re
     if not (kb_id and slug):
@@ -162,14 +161,6 @@ def _review_no_from_page(kb_id: str, slug: str, key_label: str = "") -> dict:
         hit = re.search(r"(?m)^\s*review_no\s*:\s*(.+?)\s*$", m.group(0))
         if hit and hit.group(1).strip():
             return {"value": hit.group(1).strip(), "source": "ref_block"}
-    try:
-        import ke_ext_store as _S  # noqa: PLC0415
-        names = [str(n) for n in _S.ledger_names() if n]          # 台账分片名（= 外层主键值）
-    except Exception:                                   # noqa: BLE001
-        names = []
-    hit_names = [n for n in names if n in content]
-    if len(hit_names) == 1:
-        return {"value": hit_names[0], "source": "ledger_shard"}
     if key_label:
         for ln in content.splitlines():
             s = ln.strip()

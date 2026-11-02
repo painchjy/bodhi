@@ -35,17 +35,14 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-
-DEFAULT_SYSTEM = "it-platform"
 
 
 # ---------------------------------------------------------------------------
 # 通用文件能力（原子写 / 锁 / 容器根）—— 与 02 共用**同一份实现**，靠 ke_fs 隔离
 # ---------------------------------------------------------------------------
-from ke_fs import (DEFAULT_SYSTEM, locked, read_json,  # noqa: F401,E402
+from ke_fs import (DEFAULT_SYSTEM, REPO, locked, read_json,  # noqa: F401,E402
                    root as ext_root, system_dir, write_json)  # noqa: F401,E402
 
 # 种子数据：随交付走 `deploy/mock-ext/<system>/`，`bootstrap()` **只补缺失文件** ✓
@@ -121,11 +118,16 @@ def bootstrap(system: str = DEFAULT_SYSTEM) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 兼容 shim（C1，2026-11-02）：绑定/映射 → `ke_ext_binding`；抓取留痕 → `ke_ref_cache`
-# 新代码请直接 import 新模块；本段在 C5（04 搬家）时删除 ✗
+
+
 # ---------------------------------------------------------------------------
-from ke_ext_binding import (BINDING_ATTRS, REL_BINDING, _attrs_of,  # noqa: F401,E402
-                            _dataobject_types, _kbs_with_slug, _objects_by_tool,
-                            delete_binding, list_bindings, parse_binding,
-                            resolve_binding, set_binding, set_mapping)
-from ke_ref_cache import ref_cache_load, ref_cache_path, ref_cache_put  # noqa: F401,E402
+# 绑定解析（04 侧口径，2026-11-02 用户裁定）
+#   外部系统**不判断绑定**：收到什么工具/数据就按什么干；"该对象绑了谁"是 02 的事。
+#   （真正的绑定/映射实现已搬到 02 的 `ke_ext_binding.py`，本服务不再 import 它 ✓）
+# ---------------------------------------------------------------------------
+def resolve_binding(tool: str, kb_id: str = "", object_slug: str = "") -> dict:
+    tool = str(tool or "").strip()
+    return {"ok": True, "source": "unbound", "binding_kb": "",
+            "binding": {"tool": tool, "modes": ["query", "maintain"], "keys": [], "impl": ""},
+            "object": {"slug": str(object_slug or "").strip()},
+            "warn": "本服务不校验绑定（属外部系统职责边界；绑定由 02 判定）"}

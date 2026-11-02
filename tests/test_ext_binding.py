@@ -49,8 +49,8 @@ def kb_id(graph):
 
 @pytest.fixture
 def store():
-    import ke_ext_store
-    return ke_ext_store
+    import ke_ext_binding
+    return ke_ext_binding
 
 
 @pytest.fixture

@@ -14,12 +14,13 @@ import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "tools", "ke-core"))
+sys.path.insert(0, os.path.join(REPO, "tools", "domain-mcp", "lib"))
 
-import ke_ext_flow as F  # noqa: E402
-import ke_ext_store as S  # noqa: E402
+import ke_domain_flow as F  # noqa: E402
+import ke_domain_store as S  # noqa: E402
 
 BINDING = {"tool": "ext_review_flow", "modes": ["query", "maintain"],
-           "keys": ["review_no"], "impl": "it_platform:tools/ke-core/ke_ext_flow.py"}
+           "keys": ["review_no"], "impl": "it_platform:tools/domain-mcp/lib/ke_domain_flow.py"}
 
 
 @pytest.fixture
@@ -104,7 +105,7 @@ def test_maintain_requires_actor_and_dry_run(flow):
 
 def test_doc_file_path_guard(flow, monkeypatch):
     """下载路径必须在容器根内（防穿越）⇒ 越界回 `file_not_found` ✓。"""
-    import ke_ext_docs as D
+    import ke_domain_docs as D
     monkeypatch.setenv("BODHI_EXT_ROOT", str(flow))
     p = flow / "it-platform" / "docs" / "doc-a.json"
     p.write_text(json.dumps({"doc_id": "doc-a", "files": [

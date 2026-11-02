@@ -14,12 +14,15 @@ import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "tools", "ke-core"))
+sys.path.insert(0, os.path.join(REPO, "tools", "domain-mcp", "lib"))
 
 import ke_audit as A  # noqa: E402
-import ke_ext_catalog as C  # noqa: E402
-import ke_ext_docs as D  # noqa: E402
-import ke_ext_issues as I  # noqa: E402
-import ke_ext_store as S  # noqa: E402
+import ke_domain_catalog as C  # noqa: E402
+import ke_domain_docs as D  # noqa: E402
+import ke_domain_items as I  # noqa: E402
+import ke_domain_store as S  # noqa: E402  容器文件（04 侧）
+import ke_ext_binding as B  # noqa: E402  绑定解析（02 侧）
+import ke_ref_cache as R  # noqa: E402  参考规范抓取留痕（02 侧）
 
 BINDING = {"scheme": "mcp", "tool": "ext_catalog_query", "modes": ["query", "maintain"],
            "keys": ["software", "version"], "impl": "tools/ke-core/ke_ext_catalog.py"}
@@ -217,11 +220,11 @@ def test_doc_index_and_url(ext):
 # ── 参考规范：抓取留痕 + 巡检 G7（2026-10-26） ───────────────────────────
 def test_ref_cache_roundtrip(ext):
     """`reference_lookup` 抓完要**留痕**（同 URL 覆盖）；巡检据此判"抓过没"。"""
-    r = S.ref_cache_put("http://techdoc.example/a", {"found": True, "reason": "", "chars": 12})
+    r = R.ref_cache_put("http://techdoc.example/a", {"found": True, "reason": "", "chars": 12})
     assert r["ok"], r
-    assert S.ref_cache_load()["http://techdoc.example/a"]["found"] is True
-    S.ref_cache_put("http://techdoc.example/a", {"found": False, "reason": "dns"})
-    assert S.ref_cache_load()["http://techdoc.example/a"]["reason"] == "dns", "同 URL 必须覆盖 ✓"
+    assert R.ref_cache_load()["http://techdoc.example/a"]["found"] is True
+    R.ref_cache_put("http://techdoc.example/a", {"found": False, "reason": "dns"})
+    assert R.ref_cache_load()["http://techdoc.example/a"]["reason"] == "dns", "同 URL 必须覆盖 ✓"
 
 
 def _rule_page(url: str) -> dict:
@@ -240,7 +243,7 @@ def test_gate_reference_missing_cache(ext):
     assert ctx["data"]["ext_reference"]["missing"] == 1
     assert "allow_fetch=true" in rep.findings[0]["fix_hint"]
 
-    S.ref_cache_put("http://techdoc.example/rule-a", {"found": True})
+    R.ref_cache_put("http://techdoc.example/rule-a", {"found": True})
     ctx2 = {"kb_id": "kb", "pages": [_rule_page("http://techdoc.example/rule-a")], "data": {}}
     rep2 = A.Report("kb", "ext", 50)
     A.check_ext_reference(ctx2, rep2)
@@ -456,7 +459,7 @@ def test_docs_attachment_lists(ext):
 # ── 绑定解析 / 存储 ─────────────────────────────────────────────────────
 def test_parse_binding_attrs():
     """4 个数据属性 → 绑定列表（接口逗号分隔；模式/主键/提供方分号顺序对齐）✓"""
-    binds = S.parse_binding({
+    binds = B.parse_binding({
         "dataObjectInterface": "ext_a, ext_b",
         "dataObjectAccessMode": "query;query,maintain",
         "dataObjectKeyFields": "k1;k2,k3",
@@ -465,12 +468,12 @@ def test_parse_binding_attrs():
     assert binds[0]["modes"] == ["query"] and binds[0]["keys"] == ["k1"], binds[0]
     assert binds[1]["modes"] == ["query", "maintain"] and binds[1]["keys"] == ["k2", "k3"], binds[1]
     assert binds[1]["impl"] == "tools/ke-core/ke_ext_issues.py"
-    assert S.parse_binding({}) == [], "没声明接口 ⇒ 空列表（调用方回 no_binding）✗"
+    assert B.parse_binding({}) == [], "没声明接口 ⇒ 空列表（调用方回 no_binding）✗"
 
 
 def test_parse_binding_single_defaults():
     """只写接口时：模式默认 query、主键为空（不猜更多 ✓）"""
-    binds = S.parse_binding({"dataObjectInterface": "ext_only"})
+    binds = B.parse_binding({"dataObjectInterface": "ext_only"})
     assert binds == [{"tool": "ext_only", "modes": ["query"], "keys": [], "impl": ""}], binds
 
 

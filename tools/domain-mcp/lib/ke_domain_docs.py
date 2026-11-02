@@ -14,7 +14,7 @@
     save_document(...)   收一份文件（POST /files/<doc_id> 调它）→ 元数据 + 索引
     doc_file(...)        下发改文件（GET /files/<doc_id>）
     access(action=list|meta|url|outline|section|attachment|image)   读取（正文取决于是否已被平台解析回写）
-    access(action=import) 把**已收下**的文件挂到编号档案（`ke_ext_flow.attach_doc`）
+    access(action=import) 把**已收下**的文件挂到编号档案（`ke_domain_flow.attach_doc`）
 
 口径
 ----
@@ -30,7 +30,7 @@ import os
 import re
 import time
 
-import ke_ext_store as S
+import ke_domain_store as S
 
 TOOL = "ext_doc_access"
 _IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
@@ -308,7 +308,7 @@ def import_knowledge(review_no: str, doc_id: str = "", doc_title: str = "", know
                 "known": sorted(str(k) for k in (_index().get("_default") or []))[:10]}
     flow = {}
     try:
-        import ke_ext_flow as F  # noqa: PLC0415
+        import ke_domain_flow as F  # noqa: PLC0415
         flow = F.attach_doc(rno, {k: d.get(k) for k in
                                   ("doc_id", "title", "mime", "size", "sha256", "round",
                                    "sections", "attachments", "images")},

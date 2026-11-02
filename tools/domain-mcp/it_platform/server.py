@@ -9,13 +9,13 @@
 内网怎么落地（照这套结构改）
 --------------------------
 1. 保持 MCP 协议层（本文件）不变：`initialize` / `tools/list` / `tools/call`；
-2. 把**存储层**换掉：`tools/ke-core/ke_ext_store.py` 的"容器文件"改成你们的库表访问
+2. 把**存储层**换掉：`tools/ke-core/ke_domain_store.py` 的"容器文件"改成你们的库表访问
    （SQL/ORM 皆可），字段与幂等键口径照 `bpmn:dataObject*` 四个数据属性；
 3. 工具名/入参/回执保持不变 ⇒ 领域库里的 DataObject 绑定、技能与提示词都不用改 ✓。
 
 运行
 ----
-    python3 tools/it-platform-mcp/server.py --port 8770
+    python3 tools/domain-mcp/it_platform/server.py --port 8770
 """
 from __future__ import annotations
 
@@ -30,16 +30,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-CORE = os.path.join(REPO, "tools", "ke-core")
-for p in (HERE, CORE):
+LIB = os.path.join(os.path.dirname(HERE), "lib")
+for p in (HERE, LIB):
     if p not in sys.path:
         sys.path.insert(0, p)
 
 import schemas as S  # noqa: E402
-import ke_ext_catalog as CAT  # noqa: E402
-import ke_ext_docs as DOCS  # noqa: E402
-import ke_ext_flow as FLOW  # noqa: E402
-import ke_ext_issues as ISSUE  # noqa: E402
+import ke_domain_catalog as CAT  # noqa: E402
+import ke_domain_docs as DOCS  # noqa: E402
+import ke_domain_flow as FLOW  # noqa: E402
+import ke_domain_items as ISSUE  # noqa: E402
 
 SERVER_NAME = "it-platform-mcp"
 SERVER_VERSION = "0.1.0"

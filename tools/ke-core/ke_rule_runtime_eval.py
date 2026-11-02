@@ -119,19 +119,21 @@ def _mcp(name: str, args: dict) -> dict:
 
 
 def ledger_items(review_no: str) -> list:
-    """台账条目：**先走 MCP 工具**（8766 it-platform）；工具不可用（本机未装该服务）时
-    回退到 `ke_ext_store` 的台账分片（同一体系的官方读写函数，只读 ✓）。"""
-    out = _mcp("ext_issue_list", {"mode": "query", "action": "list",
-                                  "review_no": review_no, "view": "rows"})
-    rows = out.get("rows")
-    if rows:
-        return list(rows)
+    """台账条目：**只走 MCP 工具**（04 it-platform）。
+
+    2026-11-02 用户口径（两个 MCP 彻底解耦）：删掉"读 `ke_ext_store` 分片"的本地兜底 ——
+    02 不读 04 的数据；工具不可用 ⇒ 回 `[]`（调用方据此判"台账不可用"，不猜 ✗）。
+    """
+    out = {}
     try:
-        import ke_ext_store as S  # noqa: PLC0415
-        doc = S.read_json(S.shard_path("issues", review_no, subdir="issues"), {}) or {}
-        return list(doc.get("items") or [])
-    except Exception:  # noqa: BLE001
+        import ke_ext_client as C  # noqa: PLC0415  04 的地址真源（env / mcp_services）
+        out = C.call("ext_issue_list", {"mode": "query", "action": "list",
+                                       "review_no": review_no, "view": "rows"})
+    except Exception:  # noqa: BLE001  04 不可达 ⇒ 视为"台账不可用"
         return []
+    if not out.get("ok"):
+        return []
+    return list(out.get("rows") or [])
 
 
 def _slug_of_rule(kb_id: str, rule: str) -> str:

@@ -92,7 +92,7 @@ def test_relations_only_dry_run_and_apply(env, pages):
 
 
 def test_binding_adds_contract_block(env, pages):
-    import ke_ext_store as S
+    import ke_ext_binding as S
     kb = env["kb"]
     out = S.set_binding(kb, pages["rule"], "ext_issue_list", status="draft")
     assert out["ok"], out

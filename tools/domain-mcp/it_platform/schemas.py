@@ -147,7 +147,7 @@ TOOLS = [
 # 因为容器根里的副本是"首次使用时的初始化数据"、`bootstrap()` **只补缺失不覆盖**，
 # 可能落后于本次发布；契约跟着服务版本走才对 ✓。
 def _read_json(path: str):
-    """读 JSON（失败 ⇒ None）。**不依赖 ke-core**：04 包是独立服务，可能没有 `ke_ext_store`。"""
+    """读 JSON（失败 ⇒ None）。**不依赖 ke-core**：04 包是独立服务，可能没有 `ke_domain_store`。"""
     try:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
@@ -163,14 +163,14 @@ def _contract() -> dict:
       ② `BODHI_EXT_SEED` / `deploy/mock-ext/it-platform/schema.json` —— 现场自定义（可选覆盖）；
       ③ 容器根 `state/it-platform/schema.json` —— 首次 bootstrap 的旧副本（兜底）。
 
-    2026-10-27 修正：`ke_ext_store` 改为**可选**——04 包**不含 ke-core**，旧写法 import 失败就
+    2026-10-27 修正：`ke_domain_store` 改为**可选**——04 包**不含 ke-core**，旧写法 import 失败就
     `return {}`，导致 `selfcheck.py` 在客户现场必红（`x-ext 下发 schemaHash = None`）、
     `tools/list` 也不带 `x-ext`。现在缺它时按**路径**兜底读（①②③ 顺序不变）。
     """
     here = os.path.dirname(os.path.abspath(__file__))
     cands = [os.path.join(here, "schema.json")]
     try:
-        import ke_ext_store as S  # noqa: PLC0415
+        import ke_domain_store as S  # noqa: PLC0415
     except Exception:             # noqa: BLE001  独立部署（04 包）⇒ 走路径兜底
         S = None
     if S is not None:

@@ -14,7 +14,19 @@ import os
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))
+
+
+def _find_repo(start: str) -> str:
+    """仓库/交付根：从 `start` 上溯，找到同时含 `tools/` 与 `deploy/` 的那层。"""
+    d = start
+    for _ in range(6):
+        if os.path.isdir(os.path.join(d, "tools")) and os.path.isdir(os.path.join(d, "deploy")):
+            return d
+        d = os.path.dirname(d)
+    return os.path.dirname(os.path.dirname(start))
+
+
+REPO = _find_repo(HERE)
 
 DEFAULT_SYSTEM = "it-platform"
 
