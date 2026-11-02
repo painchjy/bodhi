@@ -18,8 +18,7 @@ from __future__ import annotations
 import json
 
 import ke_db
-import ke_ext_issues as ISSUE
-import ke_ext_store as STORE
+import ke_ext_binding as STORE
 
 
 def _projection(kb_id: str, slug: str) -> dict:
@@ -106,14 +105,9 @@ def schema_payload(params: dict) -> dict:
     order = [c["field"] for c in cols if c.get("field")]
     source = "projection"
     if not labels:
-        try:
-            import ke_ext_issues as I               # noqa: PLC0415
-            sc = I._schema()                        # noqa: SLF001
-            labels = dict(sc.get("labels") or {})
-            order = list(sc.get("order") or [])
-            source = "contract"
-        except Exception:                           # noqa: BLE001
-            source = "none"
+        # 无投射 ⇒ **不 import 04 的实现**（2026-11-02 用户口径：两个 MCP 代码级隔离）：
+        # 只认工具节点上声明的 keys；列名等投射回来再看（不猜、不借领域模块）
+        labels, order, source = {}, [], "none"
     keys = list(binding.get("keys") or [])
     key = keys[0] if keys and labels.get(keys[0]) else (order[0] if order else "")
     return {"ok": True, "object": slug, "kb_id": kb, "source": source,
@@ -239,7 +233,7 @@ def list_payload(params: dict) -> dict:
         q["object"] = slug
     if kb:
         q["kb_id"] = kb                      # 04 也要能定位库（它不判断绑定，但会用它取契约）
-    out, src_kind, remote_err = {}, "local_store", ""
+    out, src_kind, remote_err = {}, "it_platform_mcp", ""
     try:
         import ke_ext_client as _C  # noqa: PLC0415
         got = _C.call("ext_issue_list", q)
@@ -250,12 +244,12 @@ def list_payload(params: dict) -> dict:
     except Exception:  # noqa: BLE001
         out = {}
     if not out:
-        out = ISSUE.maintain(kb_id=kb, object_slug=slug, mode="query", action="list",
-                             review_no=review_no, view=str(params.get("view") or "rows"),
-                             columns=(",".join(fields) if fields else None))
-        src_kind = "local_store"
-        if remote_err:
-            out["remote_error"] = remote_err
+        # 04 不可达 ⇒ **直接失败**（2026-11-02 用户口径：彻底解耦，不读本地文件兜底 ✗）
+        return {"ok": False, "error": "service_unavailable", "tool": "ext_issue_list",
+                "object": {"slug": slug}, "review_no": review_no,
+                "data_source": "unavailable", "detail": remote_err or "ext_issue_list 不可达",
+                "hint": ("外部接口服务没起来/地址不对：systemctl status bodhi-it-mcp；"
+                         "或检查 mcp_services 里 it_platform.url 与 BODHI_EXT_SERVICE_URLS")}
     out["data_source"] = src_kind
     if out.get("ok"):
         out["projection"] = _projection(kb, slug) if kb else {}
@@ -662,20 +656,44 @@ def tool_sync_payload(body: dict) -> dict:
 
 
 def update_payload(body: dict) -> dict:
-    """改/增/删一行（写台账）。默认 `dry_run=true`（只回 diff）。"""
+    """改/增/删一行（写台账）。默认 `dry_run=true`（只回 diff）。
+
+    2026-11-02：**改走 04 的 MCP 工具**（`ext_issue_list(mode=maintain)`），不再 import 04 的实现
+    ⇒ 两个 MCP 代码级隔离；04 不可达就如实回 `service_unavailable` ✓
+    """
     slug = str(body.get("object") or "").strip()
     kb = _resolve_kb(body)
     if not body.get("actor"):
         return {"ok": False, "error": "need_actor",
                 "hint": "写台账要带执行者（组长/智能体名），审计要用"}
-    return ISSUE.maintain(
-        kb_id=kb, object_slug=slug,
-        mode="maintain", action=str(body.get("action") or "update"),
-        review_no=str(body.get("review_no") or ""), issue_no=str(body.get("issue_no") or ""),
-        fields=body.get("fields") or {}, view=str(body.get("view") or "rows"),
-        if_rev=body.get("if_rev"), dry_run=body.get("dry_run", True) is not False and
-        str(body.get("dry_run", "true")).lower() not in ("false", "0", "no", "off"),
-        actor=str(body.get("actor") or ""), session_no=str(body.get("session_no") or ""))
+    dry = body.get("dry_run", True)
+    if isinstance(dry, str):
+        dry = dry.strip().lower() not in ("false", "0", "no", "off")
+    args = {"mode": "maintain", "action": str(body.get("action") or "update"),
+            "review_no": str(body.get("review_no") or ""),
+            "issue_no": str(body.get("issue_no") or ""),
+            "fields": body.get("fields") or {},
+            "view": str(body.get("view") or "rows"),
+            "dry_run": bool(dry),
+            "actor": str(body.get("actor") or ""),
+            "session_no": str(body.get("session_no") or "")}
+    if body.get("if_rev") is not None:
+        args["if_rev"] = body.get("if_rev")
+    if slug:
+        args["object"] = slug
+    if kb:
+        args["kb_id"] = kb
+    try:
+        import ke_ext_client as C  # noqa: PLC0415
+        got = C.call("ext_issue_list", args)
+    except Exception as exc:  # noqa: BLE001
+        got = {"ok": False, "error": "service_unavailable", "detail": repr(exc)[:200]}
+    if not got.get("ok"):
+        return {"ok": False, "tool": "ext_issue_list",
+                "error": got.get("error") or "service_unavailable",
+                "detail": got.get("detail") or got.get("hint") or "",
+                "hint": "确认 bodhi-it-mcp 在跑（systemctl status bodhi-it-mcp）"}
+    return got
 
 
 def _pipes(line: str) -> int:
@@ -835,10 +853,7 @@ def sync_report_payload(body: dict) -> dict:
     if not review_no:
         return {"ok": False, "error": "need_review_no",
                 "hint": "给 `review_no`，或给 `slug`（后端会从正文表格的主键行解析编号）"}
-    try:                                            # 定位列：用台账回执的标签，不写死领域词 ✓
-        label = (ISSUE._schema().get("labels") or {}).get("issue_no") or ""  # noqa: SLF001
-    except Exception:                               # noqa: BLE001
-        label = ""
+    label = ""                                      # 由回执表头第一格定位（不写死领域词 ✓）
     # 报告页在**工作库**、绑定在**领域库** ⇒ 报告页默认**全库找**（只有显式给 kb_id 才收窄 ✓）
     kb_q = str(body.get("kb_id") or "").strip()
     where = (" AND knowledge_base_id = %s" % ke_db.sql_str(kb_q)) if kb_q else ""
@@ -854,9 +869,9 @@ def sync_report_payload(body: dict) -> dict:
     page = rows[0]
     # 列集优先级：本次显式传入 > 引用块里已声明的 `columns:`（模板配置随块走 ✓）
     cols = str(body.get("columns") or "").strip() or _block_columns(page["content"] or "")
-    led = ISSUE.maintain(kb_id=(kb or page["knowledge_base_id"]), object_slug=object_slug,
-                         mode="query", action="list", review_no=review_no, view="table",
-                         columns=(cols or None))
+    # 台账一律走 02 自己的读路径（内部再调 04；渲染/块由 `ke_ext_map` 统一出）✓
+    led = list_payload({"object": object_slug, "kb_id": (kb or page["knowledge_base_id"]),
+                        "review_no": review_no, "view": "table", "columns": cols or ""})
     if not led.get("ok"):
         return {"ok": False, "error": led.get("error") or "ledger_unreadable",
                 "detail": {k: led.get(k) for k in ("why", "hint") if led.get(k)}}

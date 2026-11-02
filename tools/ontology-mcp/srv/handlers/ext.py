@@ -20,7 +20,7 @@ TOOL_TABLE = "ext_table"
 
 def _binds(kb_id: str, slug: str) -> list:
     """读某个 DataObject 页的绑定（与 `resolve_binding` 同一解析器，不重复实现）。"""
-    import ke_ext_store as S
+    import ke_ext_binding as S
     return S.parse_binding(S._attrs_of(kb_id, slug))      # noqa: SLF001  同仓库内部解析器
 
 
@@ -93,7 +93,7 @@ def ext_table(args: dict) -> dict:
             mapping_status, display_source, ref_block, warnings}`；`ref_block` 是对象规范 v2 的块
     （可直接贴在该表之后，编号/绑定/契约哈希都由对象自身给）。
     """
-    import ke_ext_store as S
+    import ke_ext_binding as S
     from srv import ext_api as X
 
     kb = str(args.get("kb_id") or "").strip()

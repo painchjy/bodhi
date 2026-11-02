@@ -1020,7 +1020,7 @@ def reference_lookup(kb_id: str = "", reference: str = "", allow_fetch: bool = F
                            % (got.get("reason") or "other", str(got.get("detail") or "")[:120]))
         # 抓取留痕（2026-10-26）：巡检 G6 据此判断"参考规范抓过没"（写失败不影响结论 ✓）
         try:
-            import ke_ext_store as _es
+            import ke_ref_cache as _es
             _es.ref_cache_put(ref, {"found": bool(got.get("ok")),
                                     "reason": got.get("reason") or "",
                                     "http_status": got.get("http_status"),

@@ -33,7 +33,7 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
         import json  # noqa: PLC0415
 
         import ke_db  # noqa: PLC0415
-        import ke_ext_store as _S  # noqa: PLC0415
+        import ke_ext_binding as _S  # noqa: PLC0415
         import ke_pages  # noqa: PLC0415
         rows = ke_db.psql_csv(
             "SELECT title, page_type, coalesce(content,'') AS c, page_metadata::text AS md "

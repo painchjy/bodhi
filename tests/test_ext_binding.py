@@ -225,17 +225,20 @@ def test_resolve_binding_without_kb_picks_bound_kb(graph, kb_id, store):
 
 
 def test_list_payload_remote_failure_is_not_success(graph, monkeypatch):
-    """04 回 `ok=false`（如 `need_kb`）⇒ **不得**当成功：必须回落本地并暴露 `remote_error`。
+    """04 回 `ok=false`（如 `need_kb`）⇒ **不得**当成功，也不许偷偷回落本地。
 
-    旧实现把"带 `ok=false` 的回执"直接当数据源，面板显示 `0 行`、`data_source` 却是
-    `it_platform_mcp`（看起来像"台账真的为空"），排查成本极高。
+    历史：旧实现把"带 `ok=false` 的回执"直接当数据源（面板显示 0 行但 `data_source=it_platform_mcp`）；
+    2026-11-01 改成回落本地文件；**2026-11-02 用户口径：彻底解耦** ⇒ 现在如实回
+    `service_unavailable`（`data_source=unavailable` + `detail=远端原因`），让人一眼看出"外部服务不可用"。
     """
     import ke_ext_client as C
     from srv import ext_api
     monkeypatch.setattr(C, "call", lambda *a, **k: {"ok": False, "why": "need_kb"})
     out = ext_api.list_payload({"object": OBJ, "review_no": "no-such-ledger-xyz"})
-    assert out.get("data_source") == "local_store", out
-    assert out.get("remote_error") == "need_kb", out
+    assert out.get("ok") is False, out
+    assert out.get("error") == "service_unavailable", out
+    assert out.get("data_source") == "unavailable", out
+    assert out.get("detail") == "need_kb", out
 
 
 

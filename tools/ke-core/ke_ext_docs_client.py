@@ -20,7 +20,7 @@ import os
 import subprocess
 import urllib.parse
 
-import ke_ext_store as S
+import ke_ext_client as S        # public_base()：04 的对外地址（不 import 04 运行库 ✓）
 
 
 def _app_container() -> str:

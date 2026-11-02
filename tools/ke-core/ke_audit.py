@@ -2122,7 +2122,7 @@ def check_ext_reference(ctx: dict, rep: Report) -> None:
     这里只看**留痕**（`reference_lookup` 抓过会落 `ref_cache.json`），不做网络访问 ✓。
     """
     try:
-        import ke_ext_store as _es
+        import ke_ref_cache as _es
         cache = _es.ref_cache_load()
     except Exception:  # noqa: BLE001  没装/不可读 ⇒ 不判（避免假告警）
         return

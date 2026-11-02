@@ -19,8 +19,8 @@ import json
 import os
 import subprocess
 
-import ke_ext_docs as D          # 复用纯标准库的切节/取图（04 侧也带同一份）
-import ke_ext_store as S
+import ke_docx as D              # 02 自己的 docx 切节（不 import 04 的运行库 ✓）
+import ke_ext_client as S        # public_base()：04 的对外地址属客户端职责
 
 _PDF_HELPER = r'''
 import sys, json, io, base64
@@ -224,7 +224,7 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
         try:
             tmp.write(raw)
             tmp.close()
-            secs = D._docx_sections(tmp.name)
+            secs = D.sections(tmp.name)
         finally:
             try:
                 os.unlink(tmp.name)

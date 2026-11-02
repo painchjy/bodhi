@@ -21,6 +21,19 @@ except Exception:                        # noqa: BLE001  单测/离线场景下�
     ke_db = None
 
 
+def public_base(default: str = "http://127.0.0.1:8770") -> str:
+    """外部接口服务的**对外基地址**（附件下载/上传 URL 用它拼；env 可覆盖）。
+
+    2026-11-02 从 `ke_ext_store` 搬到 02 的 client 层：这是"怎么访问 04"，属客户端职责；
+    02 不再 import 04 的运行库 ✓。
+    """
+    for k in ("IT_MCP_PUBLIC_BASE", "BODHI_EXT_PUBLIC_BASE"):
+        v = (os.environ.get(k) or "").strip().rstrip("/")
+        if v:
+            return v
+    return default
+
+
 def _env_map() -> dict:
     raw = os.environ.get("BODHI_EXT_SERVICE_URLS") or ""
     if not raw.strip():
