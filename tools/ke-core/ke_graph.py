@@ -926,8 +926,12 @@ def instance_count(kb_id: str) -> int:
     return int((rows[0].get("n") if rows else 0) or 0)
 
 
-def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = True) -> dict:
+def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = True,
+                          kb_id: str = "") -> dict:
     """**清理"没有对应知识库"的图节点**（用户 2026-10-10 口径）。
+
+    `kb_id`（2026-11-02）：**只处理这个库**的节点（单库口径；`audit_purge` 只走这条）。
+    不传 = 全库核对（仅运维 CLI 手动用，MCP 工具不再触发全库动作）。
 
     背景：知识库在 WeKnora 侧删除时**只删 PG 记录**，图上的 `BodhiInstance` 留着 →
     库没了、图还在（前端图谱/巡检都会看到幽灵节点）。`ke_audit._hard_delete_graph()` 本是
@@ -942,18 +946,22 @@ def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = Tr
     传 `False` 只清"PG 里连行都没有"的库。**可恢复**：库里页还在时 `rebuild_kb_graph()` 能重投影。
     """
     import ke_db  # noqa: PLC0415
-    rows = _run("MATCH (n:BodhiInstance) RETURN n.kb_id AS kb, count(*) AS n ORDER BY n DESC", {})
+    kb = str(kb_id or "").strip()
+    rows = _run("MATCH (n:BodhiInstance) WHERE ($kb = '' OR n.kb_id = $kb) "
+                "RETURN n.kb_id AS kb, count(*) AS n ORDER BY n DESC", {"kb": kb})
     in_graph = {str(r.get("kb") or ""): int(r.get("n") or 0) for r in (rows or [])}
+    _where = (" AND id = " + ke_db.sql_str(kb)) if kb else ""
     live = {str(r["id"]) for r in ke_db.psql_csv(
-        "SELECT id FROM knowledge_bases WHERE deleted_at IS NULL")}
+        "SELECT id FROM knowledge_bases WHERE deleted_at IS NULL" + _where)}
     soft = {str(r["id"]) for r in ke_db.psql_csv(
-        "SELECT id FROM knowledge_bases WHERE deleted_at IS NOT NULL")}
+        "SELECT id FROM knowledge_bases WHERE deleted_at IS NOT NULL" + _where)}
     # 判定口径：PG 里不存在 → 孤儿；**软删库**是否算孤儿由 `include_soft_deleted` 决定
     # （默认算：WeKnora 删库是软删，用户视角"库已删"）
     orphan = {k: v for k, v in in_graph.items()
               if k and (k not in live if include_soft_deleted else k not in (live | soft))}
-    no_kb = int(in_graph.get("", 0) or 0)
-    out = {"ok": True, "dry_run": bool(dry_run),
+    # 单库口径：没有 kb_id 的历史脏节点**不属于任何库** ⇒ 不处理（避免误删别人的）
+    no_kb = 0 if kb else int(in_graph.get("", 0) or 0)
+    out = {"ok": True, "dry_run": bool(dry_run), "applies_to": kb or "all_kbs_graph",
            "graph_kbs": len([k for k in in_graph if k]), "pg_kbs_live": len(live),
            "pg_kbs_soft_deleted": sorted(soft),
            "orphan_kbs": {k: v for k, v in sorted(orphan.items())},

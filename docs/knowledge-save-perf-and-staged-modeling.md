@@ -76,6 +76,6 @@
 |---|---|
 | 改了没生效 | `systemctl show <unit> -p ExecMainStartTimestamp` 必须**晚于**源文件 mtime（不重启=跑旧字节码） |
 | 回执 `failed>0` | 用**同一份载荷重跑**即续作（节点按 `(kb,slug)`、边按 `(kb,源,类型,目标)` 幂等） |
-| 图上有幽灵节点（库已删） | `audit_scan` 看 `graph_orphans`；`audit_purge(kinds="orphan_graph_nodes")` 一步清 |
+| 图上有幽灵节点（库已删） | `audit_scan` 看 `graph_orphans`；`audit_purge(kb_id=<该库>, kinds="graph")` 一步清（**只清这个库**；全库动作已取消） |
 | 设计单/报告类"没落库" | 看回执 `skipped_document_nodes`：该类必须在 `stage="report"` 带 `wiki_content` |
 | 边没进图 | 回执 `graph:{batched,edges_written,edge_errors}`；`edge_errors` 会给出拒绝原因 |

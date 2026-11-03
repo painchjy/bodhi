@@ -326,16 +326,20 @@ TOOL_SCHEMAS = [
         },
         {
             "name": "audit_purge",
-            "description": ("**巡检清理·一步硬删（写）**：只要调用者对该知识库**有写权限**就执行，不需要后台 plan/confirm。"
-                            "两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理）；"
-                            "② 不给 → 按 `kinds`（all=清理异常+修问题；也可 no_source_pages/deleted_source_pages/"
-                            "mixed_source_refs/soft_deleted_rows/orphan_revisions/**orphan_graph_nodes** 等）生成计划并立即执行。"
-                            "`orphan_graph_nodes` = **图库核对**（全库）：删掉「对应知识库已删除/软删」的孤儿实例节点"
-                            "（WeKnora 删库只删 PG、不删图）；已含在 `kinds=all` 里。"
+            "description": ("**巡检清理·一步硬删（写，**单库**）**：只要调用者对该知识库**有写权限**就执行，"
+                            "不需要后台 plan/confirm。两种用法：① 给 `slugs` → 只硬删这些页（含快照/关系行清理）；"
+                            "② 不给 → 按 `kinds` 生成计划并立即执行：`all`（= pages/rows/edges/graph，**不含 init**）"
+                            "／`pages`（无来源页 / 来源已删页 / 多源页摘引用）／`rows`（软删旧行 / 孤儿版本快照）"
+                            "／`edges`（悬空 / 自环 / 重复关系行）／`graph`（**该库**在图上的孤儿节点）"
+                            "／`init`（清空**该库** wiki+图，保留 `index`；**必须显式**）。"
+                            "**所有 kind 只作用于传入的 `kb_id`**：跨库动作（全库软删残留 `deleted_kb_residue`）**已取消**，"
+                            "清理软删库请用 `kinds=init, kb_id=<该库>`。"
                             "`dry_run=true` 只看影响面。**删除不可逆**，删前先 `audit_scan` 把 target 念给用户确认。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
-                "kinds": {"type": "string", "description": "all（默认）或逗号分隔的具体 kind"},
+                "kinds": {"type": "string",
+                          "description": ("all（默认，单库清理 pages/rows/edges/graph）或逗号分隔的具体 kind"
+                                          "（pages/rows/edges/graph/init）")},
                 "slugs": {"type": "array", "items": {"type": "string"}},
                 "dry_run": {"type": "boolean"}},
                 "required": ["kb_id"]},

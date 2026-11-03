@@ -137,9 +137,11 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 
 > **落库引擎切换（2026-10-10）**：`BODHI_SAVE_ENGINE=kernel` 与 legacy **行为等价已验**（同批回执逐条一致、
 > 正文 strip 后逐字相同）；切换只需在 `.env` 改一行 + **`systemctl restart bodhi-mcp`**（改了不重启=跑旧字节码，
-> 这是本仓最容易踩的坑）。回退：改回 `legacy` 再重启。**巡检清理**新增 kind `orphan_graph_nodes`
-> （图库对账：删掉"对应知识库已删除/软删"的孤儿实例节点；已含在 `kinds=all` 里）——
-> WeKnora 删库只删 PG 记录、不删图，正是它把图库与 PG 对齐。
+> 这是本仓最容易踩的坑）。回退：改回 `legacy` 再重启。**巡检清理**（2026-11-02 起**只做单库**）：
+> `kinds=graph` = 该库在图上的孤儿节点（PG 里该库已软删/不存在）；`kinds=all` 只含
+> `pages/rows/edges/graph`，**不含 `init`**；跨库动作 `deleted_kb_residue` **已取消**
+> （清理软删库用 `kinds=init, kb_id=<该库>`）。WeKnora 删库只删 PG 记录、不删图，
+> 所以按库跑 `graph` 即可把该库的图与 PG 对齐。
 
 `.env.example` 已给出容器部署的推荐值（`BODHI_DB_HOST=postgres`）。
 
