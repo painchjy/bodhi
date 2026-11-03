@@ -332,6 +332,9 @@ def _name_hits(text: str, items: list, key: str = "name", top: int = 2) -> list:
 
 # rules 模式的合法前缀 / 各路线的一句话口径（提示面用，纯类型与关系，无业务名词 ✓）
 _SPEC_KINDS = ("direct", "policy", "influencer", "ask", "path", "task")
+# 2026-11-02（内网会话变慢）：`mode=page` 回执里正文的预算 —— 超出则截断并标 `content_truncated`
+# （note/属性不截断：任务页的判据全在 note 里，通常 <4k）。要看更长正文用 mode=keyword 定位片段。
+PAGE_MD_BUDGET = 12000
 _ROUTE_WHY = {
     "direct": "按给定规则 slug 直接取（不展开策略）",
     "policy": "策略闭包（含子策略）+ 双向规则边（规则↔策略）",
@@ -410,13 +413,16 @@ def _normalize_kb_id(kb_id: str) -> tuple:
         return cands[0]["kb_id"], {"from": raw, "to": cands[0]["kb_id"],
                                    "name": cands[0]["name"], "why": "唯一近似库名 ⇒ 已纠正"}
     if len(cands) > 1:
-        return raw, {"from": raw, "one_of": [c["name"] for c in cands],
-                     "hint": "这些库名都近似：请用**清单里的原名或 id 原样传**（不要自造缩写 b1/b2）",
-                     "retry_args": {"kb_id": cands[0]["kb_id"]}}
+        # 2026-11-02（内网实测）：**不再给 retry_args 指向第一个库**（模型会照抄 ⇒ 查错库）
+        return raw, {"from": raw, "need_kb_confirm": True,
+                     "one_of": [c["name"] for c in cands],
+                     "one_of_ids": [{"kb_id": c["kb_id"], "name": c["name"]} for c in cands],
+                     "hint": "库名不唯一：请用**清单里的原名或 id 原样传**（不要自造缩写 b1/b2）"}
     names = [str(r.get("name") or "") for r in rows][:12]
-    return raw, {"from": raw, "one_of": names,
-                 "hint": "库不存在：`kb_id` 用**下面清单里的原名或 id 原样传**（不要自造缩写 b1/b2）",
-                 "retry_args": {"kb_id": (rows[0].get("id") if rows else "")}}
+    return raw, {"from": raw, "need_kb_confirm": True,
+                 "one_of": names,
+                 "one_of_ids": [{"kb_id": r.get("id"), "name": r.get("name")} for r in rows[:12]],
+                 "hint": "库不存在：`kb_id` 用**下面清单里的原名或 id 原样传**（不要自造缩写 b1/b2）"}
 
 
 def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int) -> dict:
@@ -458,9 +464,26 @@ def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int
         % (" AND ".join(where), _db.sql_str(q), like_parts[0], like_parts[0],
            ", ".join(_db.sql_str(v) for v in variants), _db.sql_str(q)))
     if not rows:
+        # 2026-11-02（内网实测）：**给相似候选**，不让模型瞎猜 slug
+        similar = []
+        try:
+            token = q if len(q) <= 8 else q[:8]
+            cand = _db.psql_csv(
+                "SELECT kb_id, slug, title, page_type FROM ("
+                "  SELECT knowledge_base_id AS kb_id, slug, title, page_type FROM wiki_pages"
+                "   WHERE %s AND (slug ILIKE %s OR title ILIKE %s)"
+                "   ORDER BY updated_at DESC LIMIT 6) t"
+                % (" AND ".join(where), _db.sql_str("%" + token + "%"),
+                   _db.sql_str("%" + token + "%")))
+            similar = [{"slug": c.get("slug"), "title": c.get("title"),
+                        "page_type": c.get("page_type"), "kb_id": c.get("kb_id")}
+                       for c in cand]
+        except Exception:  # noqa: BLE001  相似候选拿不到不影响主流程
+            similar = []
         return {**base, "ok": False, "error": "page_not_found", "query": q,
-                "hint": "slug 写全（可带/不带 `<库名>/` 前缀）；或先用 mode=keyword 找 slug",
-                "counts": {"hits": 0}}
+                "similar": similar, "counts": {"hits": 0},
+                "hint": ("slug 写全（可带/不带 `<库名>/` 前缀）；或从 similar 里挑一个"
+                         "（**不要猜** ✗）")}
 
     def _rank(r: dict) -> tuple:
         slug = str(r.get("slug") or "")
@@ -489,6 +512,7 @@ def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int
                 "candidates": hits[:10], "counts": {"hits": len(hits)},
                 "hint": "多条同名/相近页 ⇒ 用**完整 slug** 重试（列表见 candidates），不猜 ✗"}
     r0 = picked[0]
+    content = str(r0.get("content") or "")
     try:
         attrs = json.loads(r0.get("attrs") or "{}")
     except Exception:  # noqa: BLE001
@@ -496,22 +520,25 @@ def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int
     page = {"slug": r0.get("slug"), "title": r0.get("title"), "page_type": r0.get("page_type"),
             "version": r0.get("version"), "kb_id": r0.get("kb_id"),
             "attributes": attrs, "note": attrs.get("skos:note") or "",
-            "content_md": r0.get("content") or "",
-            "content_chars": len(r0.get("content") or "")}
+            "content_md": content[:PAGE_MD_BUDGET], "content_chars": len(content),
+            "content_truncated": len(content) > PAGE_MD_BUDGET}
     return {**base, "ok": True, "mode": "page", "query": q,
             "matched_by": ("slug" if best_rank == 0 else
                            "slug_suffix" if best_rank == 1 else
                            "title" if best_rank == 2 else "fuzzy"),
             "counts": {"hits": len(hits)}, "hits": hits, "page": page,
             "next": ("本页内容已给全 ⇒ **不要再调内置 wiki 阅读工具**；"
-                     "缺口径就问用户或看该页的引用（DataObject/模板）")}
+                     "缺口径就问用户或看该页的引用（DataObject/模板）"
+                     + ("；正文超长已截断（%d 字）⇒ 用 mode=keyword 定位具体片段"
+                        % len(content) if len(content) > PAGE_MD_BUDGET else ""))}
 
 
 def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                  spec: str = "", start: str = "", depth: int = 2,
                  limit: int = 20, cls: str = "", page_type: str = "",
                  kb_ids: list | None = None, auto_widen: bool = False,
-                 question: str = "") -> dict:
+                 question: str = "", session_no: str = "",
+                 scope: dict | None = None) -> dict:
     import ke_db as _db
     import ke_review as _rv
 
@@ -520,10 +547,51 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
     except Exception:                             # noqa: BLE001
         kb, kb_name, note = "", "", ""
     m = (mode or "rules").strip().lower()
+
+    # 2026-11-02（内网）：**会话库范围**——权威 = 会话绑定智能体的配置（见 ke_scope）
+    #   · 有 scope：默认用**领域库**；智能体传了范围外的库 ⇒ out_of_scope（不照它查 ✗）
+    #   · 无 scope 且没给库（page 除外）⇒ 直接报 scope 错误，**不再回退到"清单第一个库"**
+    sc: dict = {}
+    if isinstance(scope, dict) and scope:
+        sc = scope
+    elif session_no:
+        try:
+            import ke_scope as _sm      # noqa: PLC0415
+            sc = _sm.agent_scope(session_no)
+        except Exception:               # noqa: BLE001  scope 不可用 ⇒ 退回旧行为（不炸）
+            sc = {}
+    if sc.get("ok"):
+        dom, wrk = sc.get("domain_kb") or {}, sc.get("work_kb") or {}
+        allowed = {str((x or {}).get("id")) for x in (dom, wrk) if x}
+        if kb and allowed and kb not in allowed:
+            return {"ok": False, "error": "out_of_scope", "mode": m,
+                    "expected": dom, "scope": {"domain_kb": dom, "work_kb": wrk},
+                    "hint": ("本会话的领域库是「%s」；请用它或省略 kb_id（工具会自动取），"
+                             "不要传别的库 ✗" % (dom.get("name") or dom.get("id") or "-"))}
+        if not kb and dom:
+            kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
+    elif m != "page" and not kb:
+        return {"ok": False, "mode": m, "error": sc.get("error") or "kb_scope_required",
+                "hint": sc.get("hint") or ("没给 kb_id，且解析不出会话库范围 ⇒ 请传 session_no"
+                                           "（库由会话绑定的智能体配置决定）"),
+                "scope": {k: sc.get(k) for k in ("session_no", "agent_name", "error")} if sc else {}}
+
     base = {"ok": True, "mode": m, "kb": {"id": kb, "name": kb_name}}
+    if sc.get("ok"):
+        base["kb_scope"] = {"domain_kb": sc.get("domain_kb"), "work_kb": sc.get("work_kb"),
+                            "method_kb": sc.get("method_kb"),
+                            "agent_name": sc.get("agent_name"), "source": sc.get("source")}
 
     # ── ⓪ page：按 slug 取整页（正文 + 属性；`<库名>/` 前缀容错）────────────
     if m == "page":
+        # 2026-11-02：任务页/步骤在**方法层库**（只读）⇒ page 允许「领域库 + 方法库 + 工作库」；
+        #   否则评审智能体永远读不到 `bpmn/task/*`（内网实测踩到）。
+        extra = []
+        for k in (sc.get("domain_kb"), sc.get("method_kb"), sc.get("work_kb")):
+            if isinstance(k, dict) and k.get("id"):
+                extra.append(str(k["id"]))
+        if extra:
+            kb_ids = list(dict.fromkeys(list(kb_ids or []) + extra))
         return _page_lookup(base, kb, kb_id, query, kb_ids, int(limit) or 20)
 
     # ── ① rules：按步骤解析规则（唯一规则入口 ✓）────────────────────────
@@ -980,13 +1048,22 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     `session_no` / `question` / `turn_id` / `first_step` / `turn_first` **只进遥测**，不参与检索。
     """
     t0 = time.time()
-    # 2026-10-26：`kb_id` 归一化（b1/b2、带"库"字、带引号 ⇒ 唯一近似则纠正；否则给候选/retry_args）
+    # 2026-10-26：`kb_id` 归一化（b1/b2、带"库"字、带引号 ⇒ 唯一近似则纠正；否则给候选）
     kb_id, _kb_fix = _normalize_kb_id(kb_id)
-    if _kb_fix and not _kb_fix.get("to") and str(mode or "").lower() != "page":
-        # 库解析不了 ⇒ 直接回**可读纠错回执**（不抛异常，避免智能体反复试错 ✗）
+    # 2026-11-02（内网实测）：**会话库范围优先** —— 智能体传 `b1`/空值不再决定查哪个库；
+    #   范围可用 ⇒ 由 scope 的领域库兜底（见 _lookup_impl），这里只在**scope 也没有**时提前报错。
+    sc: dict = {}
+    if session_no:
+        try:
+            import ke_scope as _sm      # noqa: PLC0415
+            sc = _sm.agent_scope(session_no)
+        except Exception:               # noqa: BLE001  scope 不可用 ⇒ 退回旧行为
+            sc = {}
+    if _kb_fix and not _kb_fix.get("to") and str(mode or "").lower() != "page" \
+            and not (sc.get("ok") and sc.get("domain_kb")):
+        # 库解析不了 ⇒ 回**可读纠错回执**（不抛异常）；**不给 retry_args**（模型会照抄第一个 ✗）
         return {"ok": False, "error": "kb_unresolved", "kb_id_corrected": _kb_fix,
-                "hint": _kb_fix.get("hint") or "kb_id 用库清单里的原名或 id 原样传",
-                "retry_args": _kb_fix.get("retry_args") or {}}
+                "hint": _kb_fix.get("hint") or "kb_id 用库清单里的原名或 id 原样传"}
     # 2026-10-25（P2）：三态开关 —— 显式布尔 > env(on|off|abtest)；abtest 按 50% 分臂并**记进遥测**。
     hint, assignment, ab = _resolve_arm(ontology_hint, question or query or spec, session_no)
     # 2026-10-25（A/B 口径 v2）：**真实 IO 统计** —— 打了库/图几次、几次空手而归。
@@ -997,7 +1074,8 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
         ke_stats.begin()
     try:
         r = _lookup_impl(kb_id, mode, query, spec, start, depth, limit, cls, page_type,
-                         kb_ids, auto_widen, question=question)
+                         kb_ids, auto_widen, question=question,
+                         session_no=session_no, scope=sc)
     finally:
         snap = ke_stats.snapshot() or {}
         if own_bucket:

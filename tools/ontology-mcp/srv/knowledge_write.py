@@ -83,6 +83,21 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 "error": ("本体模型库（%s…）**只读**：不能用 `save_knowledge` 直接改它的内容 —— "
                           "请改 `ontology/*.ttl` 后走**加载编译**（前端「上传本体文件」或 `load_model`）。"
                           % str(kb_id)[:8])}
+    # 2026-11-02（内网实测）：**写路径只认会话的工作库**（权威=智能体配置，见 ke_scope）。
+    #   · 固定工作库的智能体（评审类）：写别的库 ⇒ out_of_scope（不静默换库、也不照它写 ✗）
+    #   · 多工作库的智能体（建模类，work=所有领域库）：本批跳过（"本轮目标库"由用户指定）
+    try:
+        import ke_scope as _scope_mod  # noqa: PLC0415
+        _sc = _scope_mod.agent_scope(_pick_session_no(session_no, session, nodes, report))
+        _work = (_sc.get("work_kb") or {}) if _sc.get("ok") else {}
+        if _work.get("id") and not _sc.get("work_multi") and str(kb_id) != str(_work["id"]):
+            return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
+                    "expected": _work, "scope": {"domain_kb": _sc.get("domain_kb"),
+                                                 "work_kb": _work},
+                    "hint": ("本会话的工作库是「%s」；写库请用它 —— 不要写别的库 ✗"
+                             % (_work.get("name") or _work.get("id")))}
+    except Exception:  # noqa: BLE001  scope 不可用 ⇒ 不改变既有行为（身份门禁仍在）
+        pass
     ctx = context_meta(context)
     engine = load_engine()
     model_obj = engine.pick_model(engine.load_index(engine.DEFAULT_INDEX), model)

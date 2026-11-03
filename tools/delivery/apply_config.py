@@ -267,6 +267,15 @@ def main() -> int:
             bad += 1
             continue
         d = _diff(a, cur)
+        # 2026-11-02（内网）：提示词必须能解析出**库范围**（ke_scope 的权威来源）——
+        # 漏配 ⇒ 智能体只能瞎猜库（b1/b2）⇒ 会话里查不到任何领域知识。发布前就拦住 ✓
+        _pf = os.path.join(CONF, a.get("prompt_file") or "")
+        _ptext = _prompt_text(_pf) if os.path.isfile(_pf) else ""
+        if _ptext and "【库范围】" not in _ptext:
+            print("   ✗ 提示词缺 `【库范围】domain_kb: <领域库> | work_kb: <工作库>` "
+                  "⇒ lookup/save 拿不到库范围（会被拒）")
+            bad += 1
+            continue
         print("== %s（%s）" % (aid, a.get("name") or ""))
         print("   内置工具：%d → %d  增=%s 删=%s%s"
               % (d["tools"]["n_from"], d["tools"]["n_to"],
