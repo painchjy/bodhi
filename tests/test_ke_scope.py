@@ -24,29 +24,26 @@ def test_parse_tag_preferred():
                    "work": "技术方案评审任务知识库", "source": "tag"}, got
 
 
-def test_parse_cn_fallback():
-    """没标记时用中文行兜底，并去掉 `—— 说明` / `（只读）`。"""
+def test_parse_cn_fallback_removed():
+    """中文行**不再**兜底（2026-11-03 用户口径：只认 `domain_kb`/`work_kb`）。"""
     text = ("- 领域库（**只读**）：技术方案评审领域模型 —— 流程 / 活动 / 任务 / 规则\n"
             "- 工作库（**读写**）：技术方案评审任务知识库 —— 源文档 / 报告\n")
     got = S.parse_scope_text(text)
-    assert got["domain"] == "技术方案评审领域模型", got
-    assert got["work"] == "技术方案评审任务知识库", got
-    assert got["source"] == "cn", got
+    assert got == {"domain": "", "work": "", "source": ""}, got
 
 
 def test_keep_test_suffix_in_name():
     """名字里的 `（测试）` 是名字成分，**不能**当说明去掉（内网测试库就叫这个）。"""
-    got = S.parse_scope_text("- 领域库（只读）：技术方案评审领域模型（测试）\n"
-                             "- 工作库（读写）：技术方案评审任务知识库（测试）\n")
+    got = S.parse_scope_text(
+        "【库范围】domain_kb: 技术方案评审领域模型（测试） | work_kb: 技术方案评审任务知识库（测试）\n")
     assert got["domain"] == "技术方案评审领域模型（测试）", got
     assert got["work"] == "技术方案评审任务知识库（测试）", got
 
 
 def test_multi_work_kb():
     """建模智能体：工作库=所有领域库 ⇒ work 解析为多库词（不是某个具体库）。"""
-    text = ("- **方法层领域库（只读）**：企业知识管理领域 —— 任务页\n"
-            "- **工作库（读写）**：**所有领域库**（含企业知识管理领域自己）\n")
-    got = S.parse_scope_text(text)
+    got = S.parse_scope_text(
+        "【库范围】domain_kb: 企业知识管理领域 | work_kb: 本轮目标库\n")
     assert got["domain"] == "企业知识管理领域", got
     assert got["work"] in S._MULTI, got
 
@@ -62,7 +59,8 @@ def test_check_kb_without_session():
 
 
 if __name__ == "__main__":
-    for fn in (test_parse_tag_preferred, test_parse_cn_fallback, test_keep_test_suffix_in_name,
-               test_multi_work_kb, test_empty_and_garbage, test_check_kb_without_session):
+    for fn in (test_parse_tag_preferred, test_parse_cn_fallback_removed,
+               test_keep_test_suffix_in_name, test_multi_work_kb, test_empty_and_garbage,
+               test_check_kb_without_session):
         fn()
         print("✓ %s" % fn.__name__)

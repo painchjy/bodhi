@@ -538,7 +538,7 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                  limit: int = 20, cls: str = "", page_type: str = "",
                  kb_ids: list | None = None, auto_widen: bool = False,
                  question: str = "", session_no: str = "",
-                 scope: dict | None = None) -> dict:
+                 scope: dict | None = None, allow_unscoped: bool = False) -> dict:
     import ke_db as _db
     import ke_review as _rv
 
@@ -570,17 +570,26 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                              "不要传别的库 ✗" % (dom.get("name") or dom.get("id") or "-"))}
         if not kb and dom:
             kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
-    elif m != "page" and not kb:
+    elif not allow_unscoped:
+        # 2026-11-03（用户口径）：**scope 不可用一律 fail-closed** —— 任何模式都不拿智能体
+        # 自报的 kb_id 去查（本次内网事故：提示词=正式库、调用方传测试库、却静默查了测试库）
         return {"ok": False, "mode": m, "error": sc.get("error") or "kb_scope_required",
-                "hint": sc.get("hint") or ("没给 kb_id，且解析不出会话库范围 ⇒ 请传 session_no"
-                                           "（库由会话绑定的智能体配置决定）"),
-                "scope": {k: sc.get(k) for k in ("session_no", "agent_name", "error")} if sc else {}}
+                "hint": sc.get("hint") or ("没给 session_no / 智能体配置里没有可用的库范围 ⇒ "
+                                           "先让管理员配置 `【库范围】domain_kb: … | work_kb: …`"),
+                "kb_scope": {k: sc.get(k) for k in
+                             ("session_no", "agent_name", "domain_kb", "work_kb", "error")
+                             if sc.get(k)}}
 
     base = {"ok": True, "mode": m, "kb": {"id": kb, "name": kb_name}}
     if sc.get("ok"):
         base["kb_scope"] = {"domain_kb": sc.get("domain_kb"), "work_kb": sc.get("work_kb"),
                             "method_kb": sc.get("method_kb"),
                             "agent_name": sc.get("agent_name"), "source": sc.get("source")}
+        if sc.get("work_missing"):
+            base["kb_scope"]["work_missing"] = True
+        if sc.get("scope_changed"):
+            base["kb_scope"]["scope_changed"] = True
+            base["next"] = sc.get("hint") or base.get("next", "")
 
     # ── ⓪ page：按 slug 取整页（正文 + 属性；`<库名>/` 前缀容错）────────────
     if m == "page":
@@ -1041,7 +1050,7 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
                      kb_ids: list | None = None, auto_widen: bool = False,
                      ontology_hint: bool | None = None, session_no: str = "",
                      question: str = "", turn_id: str = "", first_step: bool | None = None,
-                     turn_first: str = "") -> dict:
+                     turn_first: str = "", allow_unscoped: bool = False) -> dict:
     """**统一检索入口**（原实现 + 本体提示开关 + 遥测 + A/B 轮次口径）。
 
     向后兼容：前 14 个参数与旧签名完全一致 ✓（旧调用方无需改动）。
@@ -1059,11 +1068,15 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
             sc = _sm.agent_scope(session_no)
         except Exception:               # noqa: BLE001  scope 不可用 ⇒ 退回旧行为
             sc = {}
-    if _kb_fix and not _kb_fix.get("to") and str(mode or "").lower() != "page" \
-            and not (sc.get("ok") and sc.get("domain_kb")):
-        # 库解析不了 ⇒ 回**可读纠错回执**（不抛异常）；**不给 retry_args**（模型会照抄第一个 ✗）
-        return {"ok": False, "error": "kb_unresolved", "kb_id_corrected": _kb_fix,
-                "hint": _kb_fix.get("hint") or "kb_id 用库清单里的原名或 id 原样传"}
+    if _kb_fix and not _kb_fix.get("to") and not (sc.get("ok") and sc.get("domain_kb")):
+        # scope 不可用 ⇒ 先报 scope（**不列库清单**：客户环境库名各不相同，列出来只会拿错库）
+        if sc and not sc.get("ok"):
+            return {"ok": False, "error": sc.get("error") or "kb_scope_required",
+                    "hint": sc.get("hint") or "库范围不可用：请让管理员配置 `【库范围】domain_kb: … | work_kb: …`",
+                    "kb_scope": {k: sc.get(k) for k in ("session_no", "agent_name", "domain_kb",
+                                                        "work_kb", "error") if sc.get(k)}}
+        return {"ok": False, "error": "kb_unresolved",
+                "hint": "kb_id 解析不到；请用**智能体提示词里的库名/uuid**（不再列全库清单，避免拿错库）"}
     # 2026-10-25（P2）：三态开关 —— 显式布尔 > env(on|off|abtest)；abtest 按 50% 分臂并**记进遥测**。
     hint, assignment, ab = _resolve_arm(ontology_hint, question or query or spec, session_no)
     # 2026-10-25（A/B 口径 v2）：**真实 IO 统计** —— 打了库/图几次、几次空手而归。
@@ -1075,7 +1088,7 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     try:
         r = _lookup_impl(kb_id, mode, query, spec, start, depth, limit, cls, page_type,
                          kb_ids, auto_widen, question=question,
-                         session_no=session_no, scope=sc)
+                         session_no=session_no, scope=sc, allow_unscoped=allow_unscoped)
     finally:
         snap = ke_stats.snapshot() or {}
         if own_bucket:

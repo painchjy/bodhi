@@ -44,10 +44,8 @@ _TTL = 60.0
 _CACHE: dict = {}          # session_no -> (ts, scope)
 
 _TAG_RE = re.compile(r"【库范围】\s*([^\n]*)")
-_DOMAIN_TAG = re.compile(r"(?:domain_kb|领域库)\s*(?:（只读）|\(只读\))?\s*[:：=]\s*([^|｜;\n]+)")
-_WORK_TAG = re.compile(r"(?:work_kb|工作库)\s*(?:（读写）|\(读写\))?\s*[:：=]\s*([^|｜;\n]+)")
-_DOMAIN_CN = re.compile(r"领域库\s*(?:[（(][^）)]*[）)])?\s*\*{0,2}\s*[:：]\s*([^\n]+)")
-_WORK_CN = re.compile(r"工作库\s*(?:[（(][^）)]*[）)])?\s*\*{0,2}\s*[:：]\s*([^\n]+)")
+_DOMAIN_TAG = re.compile(r"(?:domain_kb)\s*[:：=]\s*([^|｜;\n]+)")
+_WORK_TAG = re.compile(r"(?:work_kb)\s*[:：=]\s*([^|｜;\n]+)")
 _MULTI = ("所有领域库", "全部领域库", "各领域库", "按目标库", "本轮目标库")
 _ROLE_WORDS = re.compile(r"[（(](?:只读|读写|可选|说明|含[^）)]*)[）)]\s*$")
 
@@ -61,19 +59,21 @@ def _clean(name: str) -> str:
 
 
 def parse_scope_text(text: str) -> dict:
-    """提示词 → `{domain, work, source}`（机器标记优先，中文兜底；空 = 解析不到）。"""
+    """提示词 → `{domain, work, source}`。**只认机器标记**（2026-11-03 用户口径）：
+
+        【库范围】domain_kb: <库名或uuid> | work_kb: <库名或uuid>
+
+    不再支持中文兜底（`领域库（只读）：X`）—— 两套格式只会互相干扰，缺标记就是配置错误。
+    """
     s = str(text or "")
     m = _TAG_RE.search(s)
-    if m:
-        line = m.group(1)
-        d, w = _DOMAIN_TAG.search(line), _WORK_TAG.search(line)
-        if d or w:
-            return {"domain": _clean(d.group(1)) if d else "",
-                    "work": _clean(w.group(1)) if w else "", "source": "tag"}
-    d, w = _DOMAIN_CN.search(s), _WORK_CN.search(s)
+    if not m:
+        return {"domain": "", "work": "", "source": ""}
+    line = m.group(1)
+    d, w = _DOMAIN_TAG.search(line), _WORK_TAG.search(line)
     return {"domain": _clean(d.group(1)) if d else "",
             "work": _clean(w.group(1)) if w else "",
-            "source": "cn" if (d or w) else ""}
+            "source": "tag" if (d or w) else ""}
 
 
 def _kb_of(name: str) -> dict:
@@ -178,15 +178,13 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
     work_multi = bool(parsed.get("work") in _MULTI)
     work = _kb_of(parsed.get("work")) if parsed.get("work") and not work_multi else {}
     if parsed.get("domain") and not dom:
+        # 用户口径（2026-11-03）：**domain_kb 不存在 ⇒ 不能用用户指定的库**（fail-closed）
         return {"ok": False, "session_no": sid, "agent_id": agent_id, "agent_name": agent_name,
                 "domain_kb": {}, "work_kb": {}, "parsed": parsed, "error": "scope_invalid",
-                "hint": "提示词写的领域库「%s」在系统里找不到 ⇒ 让管理员核对库名或改成库 id"
-                        % parsed.get("domain")}
-    if parsed.get("work") and not work_multi and not work:
-        return {"ok": False, "session_no": sid, "agent_id": agent_id, "agent_name": agent_name,
-                "domain_kb": dom, "work_kb": {}, "parsed": parsed, "error": "scope_invalid",
-                "hint": "提示词写的工作库「%s」在系统里找不到 ⇒ 让管理员核对库名或改成库 id"
-                        % parsed.get("work")}
+                "hint": ("提示词写的领域库「%s」在系统里不存在 ⇒ 让管理员核对库名/uuid；"
+                         "**不允许**用调用方传的 kb_id 顶替领域库" % parsed.get("domain"))}
+    # work_kb 不存在：**允许用户指定**（写路径），标 work_missing 由调用方决定
+    work_missing = bool(parsed.get("work") and not work_multi and not work)
     if not dom and work:
         dom = work                                    # 只挂一个库的智能体：它就是领域库
     method = {}
@@ -209,22 +207,25 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
 
     scope = {"ok": True, "session_no": sid, "agent_id": agent_id, "agent_name": agent_name,
              "domain_kb": dom, "work_kb": work, "method_kb": method, "work_multi": work_multi,
+             "work_missing": work_missing,
              "source": parsed.get("source") or "knowledge_bases", "error": "", "hint": ""}
-    snap = _read_snapshot(sid)                        # 锁库：沿用首次快照，只报变更
+    # 2026-11-03：**配置改了立即生效**（不再沿用旧快照锁库）；快照只用于提示"变更过"
+    snap = _read_snapshot(sid)
     if snap.get("ok"):
-        same = (snap.get("domain_kb", {}).get("id") == dom.get("id")
-                and snap.get("work_kb", {}).get("id") == work.get("id"))
-        if same:
+        _old_dom = (snap.get("domain_kb") or {}).get("id") or ""
+        _old_work = (snap.get("work_kb") or {}).get("id") or ""
+        if _old_dom != (dom.get("id") or "") or _old_work != (work.get("id") or ""):
+            scope["scope_changed"] = True
+            scope["hint"] = ("智能体「%s」的库范围已变更（旧：领域库 %s／工作库 %s）⇒ **已按新配置生效**；"
+                             "建议新开会话避免上下文混淆"
+                             % (agent_name,
+                                (snap.get("domain_kb") or {}).get("name") or "-",
+                                (snap.get("work_kb") or {}).get("name") or "-"))
+            scope["snapshot_at"] = ke_db.now_text()
+            _write_snapshot(sid, scope)
+        else:
             scope["snapshot_at"] = snap.get("snapshot_at")
             scope["method_kb"] = method or snap.get("method_kb") or {}
-        else:
-            scope = dict(snap)
-            scope.update({"error": "scope_changed",
-                          "hint": "智能体「%s」的库范围已变更（快照：领域库 %s／工作库 %s）；"
-                                  "本会话沿用旧范围，**请新开会话**再按新配置工作"
-                                  % (agent_name,
-                                     (snap.get("domain_kb") or {}).get("name") or "-",
-                                     (snap.get("work_kb") or {}).get("name") or "-")})
     else:
         scope["snapshot_at"] = ke_db.now_text()
         _write_snapshot(sid, scope)
