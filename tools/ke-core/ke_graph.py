@@ -926,48 +926,90 @@ def instance_count(kb_id: str) -> int:
     return int((rows[0].get("n") if rows else 0) or 0)
 
 
+def diff_orphans(graph_slugs, live_slugs) -> tuple:
+    """图节点 slug ↔ PG 活页 slug 对账（**纯函数**，便于单测）。
+
+    返回 `(orphans, missing)`：
+    - `orphans` = 图有、页无（**要删的孤儿节点**；含"页已软删""从未建过"）
+    - `missing` = 页有、图无（只读提示；`rebuild_kb_graph()` 能重投影补上）
+    空/纯空白 slug 不参与差集（历史脏节点由调用方用 `no_slug_nodes` 单独统计）。
+    """
+    g = {str(s).strip() for s in (graph_slugs or []) if str(s or "").strip()}
+    l = {str(s).strip() for s in (live_slugs or []) if str(s or "").strip()}
+    return sorted(g - l), sorted(l - g)
+
+
 def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = True,
                           kb_id: str = "") -> dict:
-    """**清理"没有对应知识库"的图节点**（用户 2026-10-10 口径）。
+    """**清理"没有对应 wiki 页"的图节点**（2026-11-02 改为**节点级对账**）。
 
-    `kb_id`（2026-11-02）：**只处理这个库**的节点（单库口径；`audit_purge` 只走这条）。
-    不传 = 全库核对（仅运维 CLI 手动用，MCP 工具不再触发全库动作）。
+    `kb_id` 非空（**`audit_purge` 的唯一入口**）：只看**这个库**——
+      该库图上 slug 不在该库活页（`wiki_pages.deleted_at IS NULL`）里的节点 ⇒ 孤儿，
+      连同其边 `DETACH DELETE`；另清该库 `slug` 为空的历史脏节点。
+      **不再判"库是否软删"**（单库操作判库状态没有意义，内网实测回执恒为 0）。
+      回执给：`graph_nodes / pg_live_pages / orphan_nodes / orphan_slugs / missing_nodes / kb_deleted`。
 
-    背景：知识库在 WeKnora 侧删除时**只删 PG 记录**，图上的 `BodhiInstance` 留着 →
-    库没了、图还在（前端图谱/巡检都会看到幽灵节点）。`ke_audit._hard_delete_graph()` 本是
-    KB 级清理，但它查的是 **`n.kb`**（旧属性名）—— 现网节点用的是 **`n.kb_id`** ⇒ 一直没匹配上，
-    所以删库后图里仍有残留；巡检里那几条**裸 DELETE** 也只删 PG、不删图。
-
-    本函数**以 PG 的 `knowledge_bases` 为准**做全集核对：图上出现、PG 里没有的 kb_id →
-    该库节点（连同其边）整批 `DETACH DELETE`；另清 **没有 kb_id 的历史脏节点**。
-    `dry_run=True` 只报清单（不改图），便于先看影响面。
-    `include_soft_deleted=True`（默认）把 **`knowledge_bases.deleted_at IS NOT NULL`（软删库）**
-    也当孤儿 —— WeKnora 删库是**软删**，用户视角"库已删"，可图节点还在（实测 186/378 就是这类）。
-    传 `False` 只清"PG 里连行都没有"的库。**可恢复**：库里页还在时 `rebuild_kb_graph()` 能重投影。
+    `kb_id` 为空（仅运维 CLI 手动用）：保留旧的**库级**核对（图上有、PG `knowledge_bases` 里没有/软删的库
+    整批删）——`audit_purge` 不再走这条，避免跨库误伤。
     """
     import ke_db  # noqa: PLC0415
     kb = str(kb_id or "").strip()
-    rows = _run("MATCH (n:BodhiInstance) WHERE ($kb = '' OR n.kb_id = $kb) "
-                "RETURN n.kb_id AS kb, count(*) AS n ORDER BY n DESC", {"kb": kb})
+    if kb:
+        live_slugs = [str(r["slug"]) for r in ke_db.psql_csv(
+            "SELECT slug FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL"
+            % ke_db.sql_str(kb))]
+        grows = _run("MATCH (n:BodhiInstance {kb_id:$kb}) RETURN n.slug AS slug", {"kb": kb}) or []
+        graph_slugs = [str(r.get("slug") or "") for r in grows]
+        no_slug = sum(1 for s in graph_slugs if not s.strip())
+        orphans, missing = diff_orphans(graph_slugs, live_slugs)
+        kbd = ke_db.psql_csv(
+            "SELECT COALESCE(deleted_at::text,'') AS d FROM knowledge_bases WHERE id = %s"
+            % ke_db.sql_str(kb))
+        out = {"ok": True, "dry_run": bool(dry_run), "applies_to": "kb:" + kb,
+               "mode": "node_level", "kb_id": kb,
+               "kb_deleted": bool(kbd and kbd[0].get("d")),
+               "graph_nodes": len([s for s in graph_slugs if s.strip()]),
+               "pg_live_pages": len(live_slugs),
+               "orphan_nodes": len(orphans) + no_slug,
+               "orphan_slugs": orphans[:50],
+               "missing_nodes": len(missing), "missing_slugs": missing[:50],
+               "no_slug_nodes": no_slug,
+               "note": ("按 slug 对账：图上节点不在该库活页里 ⇒ 孤儿（含页已软删/从未建过）；"
+                        "删除含其边；`missing_nodes` 只提示（用 rebuild_kb_graph 补）")}
+        if dry_run or (not orphans and not no_slug):
+            return out
+        deleted = 0
+        if orphans:
+            res = _run("UNWIND $slugs AS s MATCH (n:BodhiInstance {kb_id:$kb, slug:s}) "
+                       "DETACH DELETE n RETURN count(n) AS n", {"kb": kb, "slugs": orphans})
+            deleted += int((res[0].get("n") if res else 0) or 0)
+        if no_slug:
+            res = _run("MATCH (n:BodhiInstance {kb_id:$kb}) "
+                       "WHERE n.slug IS NULL OR n.slug = '' "
+                       "DETACH DELETE n RETURN count(n) AS n", {"kb": kb})
+            deleted += int((res[0].get("n") if res else 0) or 0)
+        out["deleted_nodes"] = deleted
+        return out
+    rows = _run("MATCH (n:BodhiInstance) RETURN n.kb_id AS kb, count(*) AS n ORDER BY n DESC", {})
     in_graph = {str(r.get("kb") or ""): int(r.get("n") or 0) for r in (rows or [])}
-    _where = (" AND id = " + ke_db.sql_str(kb)) if kb else ""
     live = {str(r["id"]) for r in ke_db.psql_csv(
-        "SELECT id FROM knowledge_bases WHERE deleted_at IS NULL" + _where)}
+        "SELECT id FROM knowledge_bases WHERE deleted_at IS NULL")}
     soft = {str(r["id"]) for r in ke_db.psql_csv(
-        "SELECT id FROM knowledge_bases WHERE deleted_at IS NOT NULL" + _where)}
+        "SELECT id FROM knowledge_bases WHERE deleted_at IS NOT NULL")}
     # 判定口径：PG 里不存在 → 孤儿；**软删库**是否算孤儿由 `include_soft_deleted` 决定
     # （默认算：WeKnora 删库是软删，用户视角"库已删"）
     orphan = {k: v for k, v in in_graph.items()
               if k and (k not in live if include_soft_deleted else k not in (live | soft))}
-    # 单库口径：没有 kb_id 的历史脏节点**不属于任何库** ⇒ 不处理（避免误删别人的）
-    no_kb = 0 if kb else int(in_graph.get("", 0) or 0)
-    out = {"ok": True, "dry_run": bool(dry_run), "applies_to": kb or "all_kbs_graph",
+    no_kb = int(in_graph.get("", 0) or 0)
+    out = {"ok": True, "dry_run": bool(dry_run), "applies_to": "all_kbs_graph",
+           "mode": "kb_level",
            "graph_kbs": len([k for k in in_graph if k]), "pg_kbs_live": len(live),
            "pg_kbs_soft_deleted": sorted(soft),
            "orphan_kbs": {k: v for k, v in sorted(orphan.items())},
            "orphan_nodes": sum(orphan.values()), "no_kb_id_nodes": no_kb,
            "total_nodes": sum(in_graph.values()),
-           "live_counts": {k: v for k, v in in_graph.items() if k in live}}
+           "live_counts": {k: v for k, v in in_graph.items() if k in live},
+           "note": "全库库级核对（CLI 专用）；`audit_purge` 不走这条，避免跨库误伤"}
     if dry_run or (not orphan and not no_kb):
         return out
     deleted = 0

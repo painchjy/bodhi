@@ -1610,8 +1610,12 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
             " AND deleted_at IS NULL" % _q(kb_id))[0]["n"] or 0)
         # 用户口径：初始化后**只保留文档和索引页** → `slug='index'` 永不删
         index_kept = "index" in live
+        _kbd = ke_db.psql_csv(
+            "SELECT COALESCE(deleted_at::text,'') AS d FROM knowledge_bases WHERE id = %s"
+            % _q(kb_id))
         actions["init"] = {
             "kb_id": kb_id,
+            "kb_deleted": bool(_kbd and _kbd[0].get("d")),
             "wiki": {"pages_live": live_pages, "pages_all": counts["wiki_pages"],
                      "pages_to_delete": counts["wiki_pages"] - (1 if index_kept else 0),
                      "index_kept": index_kept,
@@ -1697,10 +1701,19 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
         try:
             import ke_graph as _kg  # noqa: PLC0415
             _g = _kg.purge_orphan_kb_nodes(dry_run=True, kb_id=kb_id)
-            actions["graph"] = {"kb_id": kb_id, "orphan_nodes": _g.get("orphan_nodes", 0),
-                               "count": _g.get("orphan_nodes", 0),
-                               "orphan_kbs": _g.get("orphan_kbs") or {},
-                               "note": "只清该库在图上的孤儿节点（PG 里该库已软删/不存在）"}
+            actions["graph"] = {
+                "kb_id": kb_id, "mode": _g.get("mode"),
+                "graph_nodes": _g.get("graph_nodes", 0),
+                "pg_live_pages": _g.get("pg_live_pages", 0),
+                "orphan_nodes": _g.get("orphan_nodes", 0),
+                "orphan_slugs": _g.get("orphan_slugs") or [],
+                "missing_nodes": _g.get("missing_nodes", 0),
+                "no_slug_nodes": _g.get("no_slug_nodes", 0),
+                "kb_deleted": _g.get("kb_deleted", False),
+                "count": _g.get("orphan_nodes", 0),
+                "note": ("按 slug 对账：图上节点不在该库活页里 ⇒ 孤儿（含页已软删/从未建过）；"
+                         "`missing_nodes` 只提示（rebuild_kb_graph 可补）"),
+            }
         except Exception as exc:  # noqa: BLE001  图不可用不影响本库其它清理
             actions["graph"] = {"kb_id": kb_id, "orphan_nodes": 0, "count": 0,
                                "error": str(exc)[:160]}
@@ -2239,7 +2252,7 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     if scope in ("all", "graph"):
         try:
             import ke_graph as _kg  # noqa: PLC0415
-            graph_orphans = _kg.purge_orphan_kb_nodes(dry_run=True)
+            graph_orphans = _kg.purge_orphan_kb_nodes(dry_run=True, kb_id=kb_id)
         except Exception as exc:  # noqa: BLE001  图不可用不影响巡检
             graph_orphans = {"ok": False, "error": str(exc)[:160]}
     return {
@@ -2304,6 +2317,7 @@ def purge(kb_id: str, kinds: str = "all", scope: str = "all", page_limit: int = 
         if dry_run:
             return {"ok": True, "dry_run": True, "kb": {"id": kb, "name": kname}, "mode": "slugs",
                     "will_delete": len(existing), "not_found": [s for s in targets if s not in existing],
+                    "note": "`slugs` 只匹配**活页**；软删旧行/孤儿快照请用 `kinds=rows`",
                     "permission": acl.get("mode")}
         out = _ke_pages.delete_pages(kb, existing) if existing else {"deleted": 0}
         return {"ok": True, "mode": "slugs", "kb": {"id": kb, "name": kname},

@@ -522,6 +522,9 @@ def cmd_purge(kb_ids: list[str], dry_run: bool = True, drop_kb_row: bool = False
     """**硬删**这些知识库的内容（PG 页/目录/版本/问题 + Neo4j 节点）；可选连 `knowledge_bases` 行一起删。
 
     安全约束：**只处理已软删的库**（`deleted_at IS NOT NULL`）；活库一律拒（除非先软删）。
+
+    2026-11-02：本函数**只服务跨库/CLI 运维场景**；`audit_purge` 已改为**单库**
+    （`pages/rows/edges/graph/init`），不再调用这里 —— 单库清理不要用本函数。
     `dry_run=True` 只列影响面（默认）。`drop_kb_row=True` 时连库行一起删（默认 False=保留库行）。
     """
     plan = purge_scan(kb_ids)
