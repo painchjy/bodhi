@@ -8,6 +8,65 @@
 from __future__ import annotations
 
 
+def _sections_from_text(text: str, title: str) -> list:
+    """**纯文本**按标题切节（PDF / TXT 用；docx 走 `sections()`）。
+
+    与 `sections()` 的分工：那个读 docx 段落 + 样式；这个只认行首编号 / markdown 标题，
+    用于**已经拿到纯文本**的场景。签名与 04 侧 `ke_domain_docs._sections_from_text` 一致
+    （两份纯函数副本，互不 import ✓）。
+    """
+    import re as _re
+
+    lines = (text or "").splitlines()
+    heads = []
+    for i, ln in enumerate(lines):
+        if _re.match(r"^\s*(?:\*\*)?(\d+(?:\.\d+){0,3})(?:\*\*)?\s+\S", ln):
+            heads.append(i)
+    if not heads:
+        return [{"path": "全文", "title": title, "text": text or ""}]
+    out = []
+    for k, idx in enumerate(heads):
+        end = heads[k + 1] if k + 1 < len(heads) else len(lines)
+        num = _re.match(r"^\s*(?:\*\*)?(\d+(?:\.\d+){0,3})", lines[idx]).group(1)
+        body = "\n".join(lines[idx + 1:end]).strip()
+        tail = lines[idx].strip().lstrip("*# ").split(" ", 1)
+        out.append({"path": "%s %s" % (num, (tail[1] if len(tail) > 1 else "")[:30]),
+                    "title": lines[idx].strip()[:80], "text": body})
+    return out
+
+
+def _docx_images(raw: bytes, doc_id: str, root: str = "") -> list:
+    """docx 的 `word/media/*` → 落 `<root>/files`，返回 `[{name,path}]`。
+
+    021（02 知识侧）落盘根与 `ke_doc_parse.doc_root()` 同口径：`BODHI_DOC_ROOT` 或
+    `state/doc_parse`（**不是** 04 的 `BODHI_EXT_ROOT` ✗）。
+    """
+    import io
+    import os
+    import zipfile
+
+    if not raw.startswith(b"PK"):
+        return []
+    base = root or os.environ.get("BODHI_DOC_ROOT") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "state", "doc_parse")
+    sub = os.path.join(base, "files")
+    out = []
+    try:
+        os.makedirs(sub, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            media = sorted(n for n in z.namelist() if n.startswith("word/media/"))
+            for i, n in enumerate(media, 1):
+                ext = os.path.splitext(n)[1].lower() or ".png"
+                fn = "%s_img%d%s" % (doc_id, i, ext)
+                with open(os.path.join(sub, fn), "wb") as fh:
+                    fh.write(z.read(n))
+                out.append({"name": "图片%d%s" % (i, ext), "path": "files/" + fn})
+    except Exception:  # noqa: BLE001  图取不到不影响正文（不阻断解析 ✓）
+        return []
+    return out
+
+
 def sections(path: str) -> list:
     """docx → `[{path,title,text}]`（标题 = `2.1 xxx` 行首编号，样式仅辅助）。"""
     import re as _re
