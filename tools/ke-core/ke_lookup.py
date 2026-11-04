@@ -382,7 +382,7 @@ def _rules_guide(base: dict, kb: str, text: str) -> dict:
                      "确需全量策略清单才用 ask")}
 
 
-def _normalize_kb_id(kb_id: str) -> tuple:
+def _normalize_kb_id(kb_id: str, session_kbs: list | None = None) -> tuple:
     """`kb_id` 归一化（2026-10-26）：模型爱传 `b1/b2`、`XX库`、带引号 ⇒ 纠正或给可复制的候选。
 
     返回 `(值, info)`；`info` 非空时回执带 `kb_id_corrected` / `one_of` / `retry_args`。
@@ -390,6 +390,17 @@ def _normalize_kb_id(kb_id: str) -> tuple:
     raw = str(kb_id or "").strip().strip('"').strip("'")
     if not raw:
         return raw, {}
+    # 2026-11-04（用户口径）：`b1/b2` **只做映射**（→ 会话绑定库），**不参与权限判断**：
+    #   映射成真实库名/uuid 后，再由 allowed 决定能不能用。
+    import re as _re
+    _m = _re.fullmatch(r"[bB](\d{1,2})", raw)
+    if _m and session_kbs:
+        _idx = int(_m.group(1)) - 1
+        if 0 <= _idx < len(session_kbs):
+            _mapped = str(session_kbs[_idx] or "").strip()
+            if _mapped:
+                return _mapped, {"mapped_from": raw, "to": _mapped,
+                                 "why": "%s → 会话绑定库[%d]" % (raw, _idx)}
     import ke_db as _db
 
     try:                                          # resolve 在未知库上会 raise（历史口径 ✓）
@@ -538,7 +549,7 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                  limit: int = 20, cls: str = "", page_type: str = "",
                  kb_ids: list | None = None, auto_widen: bool = False,
                  question: str = "", session_no: str = "",
-                 scope: dict | None = None, allow_unscoped: bool = False) -> dict:
+                 scope: dict | None = None) -> dict:
     import ke_db as _db
     import ke_review as _rv
 
@@ -562,28 +573,41 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
             sc = {}
     if sc.get("ok"):
         dom, wrk = sc.get("domain_kb") or {}, sc.get("work_kb") or {}
-        allowed = {str((x or {}).get("id")) for x in (dom, wrk) if x}
-        if kb and allowed and kb not in allowed:
+        # 2026-11-04：**权限上界 = scope.allowed**（all/工作库多库=全量；selected=(domain∪work)∩挂载库）
+        allowed = {str(x).lower() for x in (sc.get("allowed") or [])}
+        if kb and allowed and kb.lower() not in allowed:
             return {"ok": False, "error": "out_of_scope", "mode": m,
-                    "expected": dom, "scope": {"domain_kb": dom, "work_kb": wrk},
-                    "hint": ("本会话的领域库是「%s」；请用它或省略 kb_id（工具会自动取），"
-                             "不要传别的库 ✗" % (dom.get("name") or dom.get("id") or "-"))}
-        if not kb and dom:
-            kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
-    elif not allow_unscoped:
+                    "expected": dom or {"id": next(iter(allowed)) if allowed else "", "name": ""},
+                    "kb_scope": {"kb_mode": sc.get("kb_mode"), "domain_kb": dom, "work_kb": wrk,
+                                 "allowed_count": len(allowed)},
+                    "hint": ("这个库不在本智能体的知识库范围内（%s）；请用领域库或省略 kb_id"
+                             % ("、".join((k or {}).get("name") or (k or {}).get("id") or ""
+                                          for k in (sc.get("agent_kbs") or [])[:5]) or "-"))}
+        if not kb:
+            if dom and (not allowed or str(dom.get("id") or "").lower() in allowed):
+                kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
+            elif allowed:
+                _first = next(iter(allowed))
+                kb = _first
+                kb_name = next((str(k.get("name") or "") for k in (sc.get("agent_kbs") or [])
+                                if str(k.get("id") or "").lower() == _first), "")
+    else:
         # 2026-11-03（用户口径）：**scope 不可用一律 fail-closed** —— 任何模式都不拿智能体
         # 自报的 kb_id 去查（本次内网事故：提示词=正式库、调用方传测试库、却静默查了测试库）
         return {"ok": False, "mode": m, "error": sc.get("error") or "kb_scope_required",
                 "hint": sc.get("hint") or ("没给 session_no / 智能体配置里没有可用的库范围 ⇒ "
                                            "先让管理员配置 `【库范围】domain_kb: … | work_kb: …`"),
                 "kb_scope": {k: sc.get(k) for k in
-                             ("session_no", "agent_name", "domain_kb", "work_kb", "error")
-                             if sc.get(k)}}
+                             ("session_no", "agent_name", "domain_kb", "work_kb",
+                              "kb_mode", "error") if sc.get(k)}}
 
     base = {"ok": True, "mode": m, "kb": {"id": kb, "name": kb_name}}
     if sc.get("ok"):
         base["kb_scope"] = {"domain_kb": sc.get("domain_kb"), "work_kb": sc.get("work_kb"),
-                            "method_kb": sc.get("method_kb"),
+                            "method_kb": sc.get("method_kb"), "kb_mode": sc.get("kb_mode"),
+                            "allowed_count": len(sc.get("allowed") or []),
+                            "allowed_sample": [k.get("name") or k.get("id")
+                                               for k in (sc.get("agent_kbs") or [])[:5]],
                             "agent_name": sc.get("agent_name"), "source": sc.get("source")}
         if sc.get("work_missing"):
             base["kb_scope"]["work_missing"] = True
@@ -1050,7 +1074,7 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
                      kb_ids: list | None = None, auto_widen: bool = False,
                      ontology_hint: bool | None = None, session_no: str = "",
                      question: str = "", turn_id: str = "", first_step: bool | None = None,
-                     turn_first: str = "", allow_unscoped: bool = False) -> dict:
+                     turn_first: str = "") -> dict:
     """**统一检索入口**（原实现 + 本体提示开关 + 遥测 + A/B 轮次口径）。
 
     向后兼容：前 14 个参数与旧签名完全一致 ✓（旧调用方无需改动）。
@@ -1058,7 +1082,7 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     """
     t0 = time.time()
     # 2026-10-26：`kb_id` 归一化（b1/b2、带"库"字、带引号 ⇒ 唯一近似则纠正；否则给候选）
-    kb_id, _kb_fix = _normalize_kb_id(kb_id)
+    kb_id, _kb_fix = _normalize_kb_id(kb_id, kb_ids)
     # 2026-11-02（内网实测）：**会话库范围优先** —— 智能体传 `b1`/空值不再决定查哪个库；
     #   范围可用 ⇒ 由 scope 的领域库兜底（见 _lookup_impl），这里只在**scope 也没有**时提前报错。
     sc: dict = {}
@@ -1068,7 +1092,8 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
             sc = _sm.agent_scope(session_no)
         except Exception:               # noqa: BLE001  scope 不可用 ⇒ 退回旧行为
             sc = {}
-    if _kb_fix and not _kb_fix.get("to") and not (sc.get("ok") and sc.get("domain_kb")):
+    if _kb_fix and not _kb_fix.get("to") \
+            and not (sc.get("ok") and (sc.get("domain_kb") or sc.get("allowed"))):
         # scope 不可用 ⇒ 先报 scope（**不列库清单**：客户环境库名各不相同，列出来只会拿错库）
         if sc and not sc.get("ok"):
             return {"ok": False, "error": sc.get("error") or "kb_scope_required",
@@ -1088,7 +1113,7 @@ def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
     try:
         r = _lookup_impl(kb_id, mode, query, spec, start, depth, limit, cls, page_type,
                          kb_ids, auto_widen, question=question,
-                         session_no=session_no, scope=sc, allow_unscoped=allow_unscoped)
+                         session_no=session_no, scope=sc)
     finally:
         snap = ke_stats.snapshot() or {}
         if own_bucket:

@@ -68,8 +68,7 @@ def knowledge_lookup(args: dict) -> dict:
         # 2026-10-24（需求 2）：本体提示开关 + 遥测字段（会话号/原问题仅入日志）
         args.get("ontology_hint"), str(args.get("session_no", "") or ""),
         str(args.get("question", "") or ""),
-        _turn, _as_bool(args.get("first_step")), _first,
-        _as_bool(args.get("allow_unscoped")))
+        _turn, _as_bool(args.get("first_step")), _first)
 
 
 @handle("rules_resolve")

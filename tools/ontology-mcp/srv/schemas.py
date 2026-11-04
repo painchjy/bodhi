@@ -473,12 +473,6 @@ TOOL_SCHEMAS = [
                 "first_step": {"type": "boolean",
                                "description": ("自报\"本工具是本轮第一个检索动作\"（true/false）；"
                                                "与门禁判定不一致会计入数据质量 ⚠️")},
-                "allow_unscoped": {"type": "boolean",
-                                   "description": ("**运维逃生阀**（默认 false）：true 时才允许不看"
-                                                   "会话库范围（`session_no`→智能体配置的"
-                                                   "`【库范围】domain_kb/work_kb`）。"
-                                                   "生产/智能体**不要用**：库一律由智能体配置决定，"
-                                                   "传错库会被 `out_of_scope` 拒绝")},
                 "limit": {"type": "integer"}},
                 "required": []},
         },

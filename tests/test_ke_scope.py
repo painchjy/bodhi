@@ -53,6 +53,24 @@ def test_empty_and_garbage():
     assert S.parse_scope_text("随便一段话，没有库范围")["domain"] == ""
 
 
+def test_compute_allowed_modes():
+    """allowed 口径（2026-11-04）：all/wor​k_multi=全量；selected=交集；空=[]。"""
+    dom = {"id": "D", "name": "领域库"}
+    wrk = {"id": "W", "name": "工作库"}
+    kbs = [{"id": "d", "name": "领域库"}, {"id": "w", "name": "工作库"},
+           {"id": "x", "name": "别的库"}]
+    # all（UI 选“全部知识库”）：全量
+    assert S.compute_allowed(dom, wrk, False, kbs, "all") == ["d", "w", "x"]
+    # work_multi（建模：工作库=所有领域库）：全量
+    assert S.compute_allowed(dom, wrk, True, kbs, "selected") == ["d", "w", "x"]
+    # selected：严格交集
+    assert S.compute_allowed(dom, wrk, False, kbs, "selected") == ["d", "w"]
+    # selected 且领域库不在挂载库 → 只剩工作库
+    assert S.compute_allowed({"id": "Z"}, wrk, False, kbs, "selected") == ["w"]
+    # 无库 / none
+    assert S.compute_allowed(dom, wrk, False, [], "selected") == []
+
+
 def test_check_kb_without_session():
     err, scope = S.check_kb("abc", "")
     assert err is None and scope["error"] == "need_session", (err, scope)
@@ -61,6 +79,6 @@ def test_check_kb_without_session():
 if __name__ == "__main__":
     for fn in (test_parse_tag_preferred, test_parse_cn_fallback_removed,
                test_keep_test_suffix_in_name, test_multi_work_kb, test_empty_and_garbage,
-               test_check_kb_without_session):
+               test_compute_allowed_modes, test_check_kb_without_session):
         fn()
         print("✓ %s" % fn.__name__)

@@ -118,6 +118,26 @@ def _unresolved(sid: str, agent_name: str, parsed: dict, why: str) -> dict:
                      "（或在智能体配置的 knowledge_bases 里挂好两个库）" % (agent_name or "?", why))}
 
 
+def compute_allowed(domain_kb: dict, work_kb: dict, work_multi: bool,
+                    agent_kbs: list, kb_mode: str = "selected") -> list:
+    """**权限上界**（纯函数，便于单测）：返回 allowed 的库 id 列表。
+
+    2026-11-04 用户口径：
+    - `kb_selection_mode=all`（UI 选“全部知识库”，`knowledge_bases=[]`）⇒ allowed = 全部挂载库；
+    - `work_multi`（建模：工作库=所有领域库）⇒ allowed = agent_kbs；
+    - `selected` ⇒ allowed = `(domain ∪ work) ∩ agent_kbs`（**严格交集**）；
+    - `none` / `selected+[]` ⇒ `agent_kbs` 为空 ⇒ allowed = []（调用方报 `no_kb_configured`）。
+    """
+    ids = [str((k or {}).get("id") or "").strip().lower() for k in (agent_kbs or [])]
+    ids = [x for x in dict.fromkeys(ids) if x]
+    if str(kb_mode or "").strip().lower() == "all" or work_multi:
+        return ids
+    want = [str((domain_kb or {}).get("id") or "").strip().lower(),
+            str((work_kb or {}).get("id") or "").strip().lower()]
+    want = [x for x in dict.fromkeys(want) if x]
+    return [x for x in want if x in ids]
+
+
 def agent_scope(session_no: str, use_cache: bool = True) -> dict:
     """会话 → 智能体配置 → 库范围（60s 缓存 + 会话快照防漂移）。"""
     sid = str(session_no or "").strip()
@@ -170,8 +190,26 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
         cfg = {}
     cfg = cfg if isinstance(cfg, dict) else {}
     parsed = parse_scope_text(cfg.get("system_prompt") or "")
-    kbs = [str(x) for x in (cfg.get("knowledge_bases") or []) if str(x).strip()]
-    if not parsed.get("domain") and not parsed.get("work") and not kbs:
+    kb_mode = str(cfg.get("kb_selection_mode") or "selected").strip().lower()
+    kbs_cfg = [str(x) for x in (cfg.get("knowledge_bases") or []) if str(x).strip()]
+
+    # 2026-11-04（内网实测）：UI 的「全部知识库」= `kb_selection_mode=all` + `knowledge_bases=[]`
+    #   —— **空数组不代表没有库**；`none` / selected+[] 才是“无库”。
+    if kb_mode == "all":
+        agent_kbs = [{"id": str(r.get("id") or "").lower(), "name": str(r.get("name") or "")}
+                     for r in ke_db.psql_csv(
+                         "SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY name")]
+    else:
+        _names = {str(r["id"]).lower(): str(r.get("name") or "") for r in ke_db.psql_csv(
+            "SELECT id, name FROM knowledge_bases WHERE deleted_at IS NULL")}
+        agent_kbs = [{"id": k.lower(), "name": _names.get(k.lower(), "")} for k in kbs_cfg]
+    if not agent_kbs:
+        return {"ok": False, "session_no": sid, "agent_id": agent_id, "agent_name": agent_name,
+                "domain_kb": {}, "work_kb": {}, "agent_kbs": [], "kb_mode": kb_mode,
+                "error": "no_kb_configured",
+                "hint": ("智能体「%s」没有可用知识库（kb_selection_mode=%s，knowledge_bases=%d 个）⇒ "
+                         "让管理员在 UI 选「全部知识库」或勾选具体库" % (agent_name, kb_mode, len(kbs_cfg)))}
+    if not parsed.get("domain") and not parsed.get("work") and kb_mode != "all":
         return _unresolved(sid, agent_name, parsed, "没有【库范围】标记，也没有 knowledge_bases")
 
     dom = _kb_of(parsed.get("domain")) if parsed.get("domain") else {}
@@ -195,19 +233,29 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
         method = _kb_of(mn) if mn else {}
     except Exception:  # noqa: BLE001
         method = {}
-    if kbs:                                           # 交叉校验（名字 vs 挂载 uuid）
-        allowed = {k.lower() for k in kbs}
+    if kb_mode != "all":                              # all 模式=全部库，不需要在名单里
+        idset = {k["id"] for k in agent_kbs}
         for label, kb in (("领域库", dom), ("工作库", work)):
-            if kb and kb["id"].lower() not in allowed:
+            if kb and kb["id"].lower() not in idset:
                 return {"ok": False, "session_no": sid, "agent_id": agent_id,
                         "agent_name": agent_name, "domain_kb": dom, "work_kb": work,
-                        "parsed": parsed, "error": "scope_conflict",
-                        "hint": "%s「%s」不在智能体配置的 knowledge_bases 里（%s）⇒ 让管理员统一配置"
-                                % (label, kb["name"], "、".join(kbs))}
+                        "parsed": parsed, "kb_mode": kb_mode, "agent_kbs": agent_kbs,
+                        "error": "scope_conflict",
+                        "hint": "%s「%s」不在智能体挂载的知识库里（%s）⇒ 让管理员统一配置"
+                                % (label, kb["name"],
+                                   "、".join(k["name"] or k["id"] for k in agent_kbs))}
+    allowed = compute_allowed(dom, work, work_multi, agent_kbs, kb_mode)
+    if not allowed:
+        return {"ok": False, "session_no": sid, "agent_id": agent_id, "agent_name": agent_name,
+                "domain_kb": dom, "work_kb": work, "parsed": parsed, "kb_mode": kb_mode,
+                "agent_kbs": agent_kbs, "error": "no_allowed_kb",
+                "hint": ("allowed 为空：领域库/工作库与智能体挂载库没有交集 ⇒ "
+                         "让管理员统一【库范围】与 UI 挂载库")}
 
     scope = {"ok": True, "session_no": sid, "agent_id": agent_id, "agent_name": agent_name,
              "domain_kb": dom, "work_kb": work, "method_kb": method, "work_multi": work_multi,
-             "work_missing": work_missing,
+             "work_missing": work_missing, "kb_mode": kb_mode,
+             "agent_kbs": agent_kbs, "allowed": allowed,
              "source": parsed.get("source") or "knowledge_bases", "error": "", "hint": ""}
     # 2026-11-03：**配置改了立即生效**（不再沿用旧快照锁库）；快照只用于提示"变更过"
     snap = _read_snapshot(sid)

@@ -89,6 +89,17 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
     try:
         import ke_scope as _scope_mod  # noqa: PLC0415
         _sc = _scope_mod.agent_scope(_pick_session_no(session_no, session, nodes, report))
+        if not _sc.get("ok") and _sc.get("error") == "no_kb_configured":
+            return {"ok": False, "kb_id": kb_id, "refused": "no_kb_configured",
+                    "hint": _sc.get("hint") or "该智能体未配置任何知识库，不能写"}
+        if _sc.get("ok"):
+            _allowed = {str(x).lower() for x in (_sc.get("allowed") or [])}
+            if _allowed and str(kb_id).lower() not in _allowed:
+                return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
+                        "scope": {"kb_mode": _sc.get("kb_mode"),
+                                  "allowed_count": len(_allowed)},
+                        "hint": "目标库不在本智能体的知识库范围内（kb_selection_mode=%s）"
+                                % _sc.get("kb_mode")}
         _work = (_sc.get("work_kb") or {}) if _sc.get("ok") else {}
         if _work.get("id") and not _sc.get("work_multi") and str(kb_id) != str(_work["id"]):
             return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
