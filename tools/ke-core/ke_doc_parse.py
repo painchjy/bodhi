@@ -27,12 +27,57 @@ import sys, json, io, base64
 
 with_images = "--with-images" in sys.argv
 max_img_pages = 0
+max_side = 1600
+inline_kb = 128
 for a in sys.argv:
     if a.startswith("--max-img-pages="):
         try:
             max_img_pages = int(a.split("=", 1)[1] or 0)
         except Exception:
             max_img_pages = 0
+    elif a.startswith("--max-side="):
+        try:
+            max_side = int(a.split("=", 1)[1] or 1600)
+        except Exception:
+            max_side = 1600
+    elif a.startswith("--inline-kb="):
+        try:
+            inline_kb = int(a.split("=", 1)[1] or 128)
+        except Exception:
+            inline_kb = 128
+
+try:
+    from PIL import Image
+except Exception:
+    Image = None
+
+
+def _shrink(b, cap):
+    """超过 cap 的图用 Pillow 压缩（长边 max_side，JPEG q80→65→50），返回 (bytes, 是否压缩)。"""
+    if not Image or len(b) <= cap:
+        return b, False
+    try:
+        im = Image.open(io.BytesIO(b))
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        w, h = im.size
+        best = b
+        for side in (max_side, int(max_side * 0.75), int(max_side * 0.6)):
+            scale = min(1.0, float(side) / max(w, h))
+            cur = im if scale >= 1.0 else im.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))))
+            for q in (80, 65, 50):
+                buf = io.BytesIO()
+                cur.convert("RGB").save(buf, format="JPEG", quality=q, optimize=True)
+                got = buf.getvalue()
+                if len(got) < len(best):
+                    best = got
+                if len(got) <= cap:
+                    return got, True
+        return best, True
+    except Exception:
+        return b, False
+
 
 data = sys.stdin.buffer.read()
 out = {"pages": [], "images": [], "engine": "pypdf", "with_images": with_images}
@@ -67,14 +112,20 @@ for i, pg in enumerate(rd.pages, 1):
             b = img.data
         except Exception:
             continue
-        if not b or len(b) > 3 * 1024 * 1024:
+        if not b or len(b) > 8 * 1024 * 1024:
             continue
         nm = str(getattr(img, "name", "") or "")
         ext = (nm.rsplit(".", 1)[-1].lower() if "." in nm else "png") or "png"
         if ext not in ("png", "jpg", "jpeg", "gif", "bmp", "emf", "wmf"):
             ext = "png"
+        orig = len(b)
+        b, compressed = _shrink(b, inline_kb * 1024)   # 超限 ⇒ Pillow 压缩后再内联
+        if compressed:
+            ext = "jpg"
         out["images"].append({"page": i, "index": j, "ext": ext,
-                              "b64": base64.b64encode(b).decode()})
+                              "b64": base64.b64encode(b).decode(),
+                              "bytes": len(b), "orig_bytes": orig,
+                              "compressed": bool(compressed)})
         n += 1
 print(json.dumps(out))
 '''
@@ -139,7 +190,10 @@ def _pdf_extract(raw: bytes, with_images: bool = False) -> dict:
         args = ["docker", "exec", "-i", cname, "python3", helper]
         if with_images:
             max_pages = int(os.environ.get("BODHI_PDF_MAX_IMAGE_PAGES", "20") or 0)
-            args += ["--with-images", "--max-img-pages=%d" % max_pages]
+            max_side = int(os.environ.get("BODHI_IMG_MAX_SIDE", "1600") or 1600)
+            inline_kb = int(os.environ.get("BODHI_IMG_MAX_KB", "128") or 128)
+            args += ["--with-images", "--max-img-pages=%d" % max_pages,
+                     "--max-side=%d" % max_side, "--inline-kb=%d" % inline_kb]
         timeout = int(os.environ.get("BODHI_PDF_TIMEOUT", "90") or 90)
         r = subprocess.run(args, input=raw, capture_output=True, timeout=timeout)
     except FileNotFoundError:
@@ -401,13 +455,24 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                 pass
             kept.append(item)
         out = kept
-        total_b64 = 0
-        try:
-            cap = int(os.environ.get("BODHI_IMG_INLINE_KB", "64") or 64) * 1024
-        except ValueError:
-            cap = 64 * 1024
-        for item in out:
+        # 2026-11-05（用户口径）：图内联按 **token 预算** 控制（base64 约 4 字符/token）：
+        #   单图 128KB（≈32K token）／总 192KB（≈48K token）／最多 2 张；
+        #   按字节**降序**挑最关键的正文图（部署图/拓扑图通常最大），其余标 `inline_skipped`。
+        def _kb(name, dflt):
+            try:
+                return int(os.environ.get(name, str(dflt)) or dflt)
+            except ValueError:
+                return dflt
+
+        cap = _kb("BODHI_IMG_MAX_KB", 128) * 1024
+        total_cap = _kb("BODHI_IMG_INLINE_TOTAL_KB", 192) * 1024
+        max_n = _kb("BODHI_IMG_INLINE_MAX", 2)
+        total_b64, selected = 0, []
+        for idx, item in enumerate(sorted(out, key=lambda x: -int(x.get("bytes") or 0))):
             if not inline_media:
+                break
+            if max_n > 0 and idx >= max_n:
+                item["inline_skipped"] = "count_cap"
                 continue
             if int(item.get("bytes") or 0) > cap:
                 item["inline_skipped"] = "too_large"
@@ -417,12 +482,16 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                 enc = base64.b64encode(open(p, "rb").read()).decode()
             except Exception:  # noqa: BLE001
                 continue
-            if total_b64 + len(enc) > 131072:
+            if total_b64 + len(enc) > total_cap:
                 item["inline_skipped"] = "payload_cap"
                 continue
             total_b64 += len(enc)
             item["data_url"] = "data:%s;base64,%s" % (item.get("content_type"), enc)
+            selected.append({"page": item.get("page"), "name": item.get("name"),
+                             "bytes": item.get("bytes"), "compressed": item.get("compressed")})
         return {**base, "images": out, "counts": {"sections": len(secs), "images": len(out)},
+                "inline_selected": selected, "inline_bytes_total": total_b64,
+                "inline_budget_kb": total_cap // 1024, "inline_max": max_n,
                 "images_skipped_detail": skipped_detail[:40],
                 "images_skipped_total": len(skipped_detail),
                 "images_total_bytes": sum(int(i.get("bytes") or 0) for i in out)}
