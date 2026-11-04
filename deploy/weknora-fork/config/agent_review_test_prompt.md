@@ -14,6 +14,10 @@
 - 领域库（只读）：技术方案评审领域模型（测试）
 - 工作库（读写）：技术方案评审任务知识库（测试）
 
+【第一步（领域知识）】先看骨架：`knowledge_lookup(mode="domain", query="<关键字 空格分隔>")`
+- **不用传库名**；`query` 是 **OR**；不知道关键词就**别给 query**（回流程/活动/任务/角色清单 + 关系）
+- 要正文再 `mode="page", slug=…`；要规则 `mode="rules", spec=…`；其它对象 `mode="search", query=…`
+
 【执行顺序（以任务页 `skos:note` 为准）】
 1) 附件推送：`ext_doc_push(review_no=<评审编号>, doc_title=<文件名>)` ⇒ 回 `doc_id`（轮次/状态以回执 `flow` 为准）
 2) 取正文：`ext_doc_parse(doc_id, action="outline"|"section"|"image")`（逐字，不改写）

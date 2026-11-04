@@ -348,7 +348,8 @@ TOOL_SCHEMAS = [
         {
             "name": "rules_resolve",
 
-            "description": ("**按步骤解析规则（只读；= `knowledge_lookup(mode=\"rules\")` 的实现）**："
+            "description": ("**兼容入口（智能体请统一用 `knowledge_lookup(mode=\"rules\", spec=…)`）**："
+                            "**按步骤解析规则（只读；与 `knowledge_lookup(mode=\"rules\")` 同一实现）**："
                             "`direct:<slug>[,<slug>…]` 直接指定；`policy:<策略名/slug片段>` 经策略**递归解析**"
                             "（`includesBusinessPolicy` 出边，支持策略包含策略；规则边**双向**取："
                             "规则→策略 `isDerivedFrom` + 策略→规则 `isBasisFor`）；"
@@ -424,21 +425,20 @@ TOOL_SCHEMAS = [
         },
         {
             "name": "knowledge_lookup",
-            "description": ("**统一检索入口（只读）**：`rules` 取规则契约（`spec`：direct:/policy:/influencer:/ask，"
-                            "按步骤解析；回执带 `plan.route/plan.args/plan.expect`，链路口径另带 `chain`）；"
-                            "`keyword` **类范围 + 多词**检索（先认本体类再定范围；`query` 支持 `a b`=AND、"
-                            "`a|b`=OR、`\"短语\"`、`-排除`；命中片段来自**图里的 articleBody**，PG 只补属性）；"
-                            "`instances` 列某类全部实例（`cls`）；`route` 把\"流程 活动 任务\"解析成**类型路径**"
-                            "（不做 AND ✗）；`path` 沿关系多跳（`start`+`depth`）；`semantic` 向量（未配置时结构化说明）。"
-                            "回执固定带 `plan`（scope_classes / text_terms / relaxed_by）、`strategy`、"
-                            "`suggestions`（**每条都带可直接调用的 args**）与 `next`；AND 过窄会**自动降级 OR** 并标注。"),
+            "description": ("**统一检索入口（只读）**：**默认 `mode=\"domain\"`（领域知识，第一步就用它）** —— "
+                            "不用传库名，`query` 空格分隔 = OR；不给 query ⇒ 返回流程/活动/任务/角色清单 + 关系；"
+                            "要正文用 `mode=\"page\"`，规则用 `mode=\"rules\"`，其它对象用 `mode=\"search\"`。"
+                            "库范围由**会话绑定的智能体配置**决定（`【库范围】` + UI 挂载库/全部库），"
+                            "传了范围外的库会被 `out_of_scope` 拒绝（domain 模式只提示不一致、不返回空）。"
+                            "`keyword/instances/route/path/semantic` 为**兼容保留**，新写请用 domain/page/search/rules。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
                 "mode": {"type": "string",
-                         "description": ("rules | keyword | **page** | instances | route | path | semantic"
-                                         "（默认 rules）。**page = 按 slug 取整页**（正文 + 属性，"
-                                         "`<库名>/` 前缀自动容错、`kb_id` 可省）⇒ 任务页/DataObject/模板"
-                                         "用它一次取全，**不要**再用内置 wiki 阅读工具")},
+                         "description": ("**domain（默认，领域知识）** | page | search | rules"
+                                         "（`keyword/instances/route/path/semantic` 兼容保留，不建议）。"
+                                         "domain：不用库名，query 空格=OR；无 query ⇒ 流程/活动/任务/角色清单+关系；"
+                                         "page：按 slug/标题取整页（可用标题关键词）；search：类范围+多词；"
+                                         "rules：规则契约（spec=direct:/policy:/influencer:/ask）")},
                 "query": {"type": "string",
                           "description": ("keyword/instances/route 的查询：`a b`=AND、`a|b`=OR、\"短语\"、-排除；"
                                           "**page 模式**：slug（可带/不带库名前缀）或标题关键词")},

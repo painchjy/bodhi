@@ -104,7 +104,7 @@ def _q_category(mode: str, query: str = "", spec: str = "") -> str:
         return "规则"
     if m == "semantic":
         return "语义"
-    if m == "keyword":
+    if m in ("keyword", "search"):
         p = _parse_query(query)
         n = len(p.get("words") or []) + len(p.get("phrases") or []) + len(p.get("ors") or [])
         if n <= 0:
@@ -544,7 +544,7 @@ def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int
                         % len(content) if len(content) > PAGE_MD_BUDGET else ""))}
 
 
-def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
+def _lookup_impl(kb_id: str = "", mode: str = "domain", query: str = "",
                  spec: str = "", start: str = "", depth: int = 2,
                  limit: int = 20, cls: str = "", page_type: str = "",
                  kb_ids: list | None = None, auto_widen: bool = False,
@@ -557,12 +557,13 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
         kb, kb_name, note = _db.resolve_kb_id(kb_id)
     except Exception:                             # noqa: BLE001
         kb, kb_name, note = "", "", ""
-    m = (mode or "rules").strip().lower()
+    m = (mode or "domain").strip().lower()
 
     # 2026-11-02（内网）：**会话库范围**——权威 = 会话绑定智能体的配置（见 ke_scope）
     #   · 有 scope：默认用**领域库**；智能体传了范围外的库 ⇒ out_of_scope（不照它查 ✗）
     #   · 无 scope 且没给库（page 除外）⇒ 直接报 scope 错误，**不再回退到"清单第一个库"**
     sc: dict = {}
+    _kb_check = None
     if isinstance(scope, dict) and scope:
         sc = scope
     elif session_no:
@@ -575,14 +576,21 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
         dom, wrk = sc.get("domain_kb") or {}, sc.get("work_kb") or {}
         # 2026-11-04：**权限上界 = scope.allowed**（all/工作库多库=全量；selected=(domain∪work)∩挂载库）
         allowed = {str(x).lower() for x in (sc.get("allowed") or [])}
+        _kb_check = None
         if kb and allowed and kb.lower() not in allowed:
-            return {"ok": False, "error": "out_of_scope", "mode": m,
-                    "expected": dom or {"id": next(iter(allowed)) if allowed else "", "name": ""},
-                    "kb_scope": {"kb_mode": sc.get("kb_mode"), "domain_kb": dom, "work_kb": wrk,
-                                 "allowed_count": len(allowed)},
-                    "hint": ("这个库不在本智能体的知识库范围内（%s）；请用领域库或省略 kb_id"
-                             % ("、".join((k or {}).get("name") or (k or {}).get("id") or ""
-                                          for k in (sc.get("agent_kbs") or [])[:5]) or "-"))}
+            if m in ("domain", "领域知识", "domain_knowledge"):
+                # 用户口径：domain 模式传了别的库**不返回空**，只强调一致性并回退默认库
+                _kb_check = {"gave": str(kb_id or ""), "match": False,
+                             "expected": dom or {"id": next(iter(allowed)), "name": ""}}
+                kb, kb_name = "", ""
+            else:
+                return {"ok": False, "error": "out_of_scope", "mode": m,
+                        "expected": dom or {"id": next(iter(allowed)) if allowed else "", "name": ""},
+                        "kb_scope": {"kb_mode": sc.get("kb_mode"), "domain_kb": dom, "work_kb": wrk,
+                                     "allowed_count": len(allowed)},
+                        "hint": ("这个库不在本智能体的知识库范围内（%s）；请用领域库或省略 kb_id"
+                                 % ("、".join((k or {}).get("name") or (k or {}).get("id") or ""
+                                              for k in (sc.get("agent_kbs") or [])[:5]) or "-"))}
         if not kb:
             if dom and (not allowed or str(dom.get("id") or "").lower() in allowed):
                 kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
@@ -602,6 +610,8 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
                               "kb_mode", "error") if sc.get(k)}}
 
     base = {"ok": True, "mode": m, "kb": {"id": kb, "name": kb_name}}
+    if _kb_check:
+        base["kb_check"] = _kb_check
     if sc.get("ok"):
         base["kb_scope"] = {"domain_kb": sc.get("domain_kb"), "work_kb": sc.get("work_kb"),
                             "method_kb": sc.get("method_kb"), "kb_mode": sc.get("kb_mode"),
@@ -614,6 +624,61 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
         if sc.get("scope_changed"):
             base["kb_scope"]["scope_changed"] = True
             base["next"] = sc.get("hint") or base.get("next", "")
+
+    # ── ⓪ domain：**领域知识清单/检索（默认入口）** —— 不需要库名 ─────────
+    #   2026-11-04 用户口径：query 空格分隔 = **OR**；无 query ⇒ 流程/活动/任务/角色清单 + 关系。
+    if m in ("domain", "领域知识", "domain_knowledge"):
+        if not kb:
+            return {**base, "ok": False, "error": "need_kb",
+                    "hint": "domain 模式需要先确定领域库（由会话/智能体配置决定，不要自己编库名）"}
+        classes = ("bmm:BusinessProcess", "bpmn:Activity", "bpmn:Task", "bpmn:Role")
+        q = str(query or "").strip()
+        kws = [x for x in re.split(r"[\s,，、]+", q) if x][:10]
+        where = ["deleted_at IS NULL", "knowledge_base_id = %s" % _db.sql_str(kb),
+                 "page_type IN (%s)" % ", ".join(_db.sql_str(c) for c in classes)]
+        if kws:                                   # OR：任一词命中即可（不是 AND）
+            likes = []
+            for w in kws:
+                likes.append("(slug ILIKE %s OR title ILIKE %s OR aliases::text ILIKE %s)"
+                             % (_db.sql_str("%" + w + "%"), _db.sql_str("%" + w + "%"),
+                                _db.sql_str("%" + w + "%")))
+            where.append("(" + " OR ".join(likes) + ")")
+        rows = _db.psql_csv(
+            "SELECT slug, title, page_type, COALESCE(aliases::text,'[]') AS aliases "
+            "  FROM wiki_pages WHERE %s ORDER BY page_type, slug LIMIT %d"
+            % (" AND ".join(where), max(1, int(limit or 200))))
+
+        def _als(v):
+            try:
+                got = json.loads(v or "[]")
+                return got if isinstance(got, list) else []
+            except Exception:  # noqa: BLE001
+                return []
+
+        items = [{"type": r.get("page_type"), "slug": r.get("slug"),
+                  "title": r.get("title"), "aliases": _als(r.get("aliases"))} for r in rows]
+        relations = []
+        slugs = [i["slug"] for i in items if i.get("slug")]
+        if slugs:
+            try:
+                import ke_graph as _kg  # noqa: PLC0415
+                rel = _kg._run(
+                    "MATCH (n:BodhiInstance {kb_id:$kb})-[r]->(m:BodhiInstance {kb_id:$kb}) "
+                    "WHERE n.slug IN $slugs RETURN n.slug AS s, type(r) AS t, m.slug AS o LIMIT 200",
+                    {"kb": kb, "slugs": slugs[:200]}) or []
+                relations = [{"from": x.get("s"), "type": x.get("t"), "to": x.get("o")}
+                             for x in rel]
+            except Exception:  # noqa: BLE001  图不可用不影响清单
+                relations = []
+        return {**base, "mode": "domain", "items": items, "relations": relations,
+                "counts": {"items": len(items), "relations": len(relations)},
+                "next": ("要正文用 `mode=page, slug=…`；规则用 `mode=rules`；"
+                         "其他领域知识（策略/数据对象/子系统/工具…）用 `mode=search`"),
+                "relation_paths": [
+                    "bmm:BusinessProcess → bpmn:processHasActivity → bpmn:Activity",
+                    "bpmn:Activity → bpmn:activityContainsTask → bpmn:Task",
+                    "bpmn:Task → bpmn:taskExecutesRule / taskExecutesPolicy → 规则 / 策略",
+                    "bpmn:Task → bpmn:taskHasRole → bpmn:Role"]}
 
     # ── ⓪ page：按 slug 取整页（正文 + 属性；`<库名>/` 前缀容错）────────────
     if m == "page":
@@ -673,8 +738,8 @@ def _lookup_impl(kb_id: str = "", mode: str = "rules", query: str = "",
         out["next"] = nxt
         return out
 
-    # ── ② keyword：**类范围 + 多词**，图优先（`articleBody` 全文）→ PG 补字段 ─────
-    if m == "keyword":
+    # ── ② keyword/search：**类范围 + 多词**，图优先（`articleBody` 全文）→ PG 补字段 ─────
+    if m in ("keyword", "search"):
         q = (query or "").strip()
         parsed = _parse_query(q)
         lim = max(1, int(limit or 20))
@@ -1068,7 +1133,7 @@ def _question_core(text: str) -> str:
     return _question_key(t)
 
 
-def knowledge_lookup(kb_id: str = "", mode: str = "rules", query: str = "",
+def knowledge_lookup(kb_id: str = "", mode: str = "domain", query: str = "",
                      spec: str = "", start: str = "", depth: int = 2,
                      limit: int = 20, cls: str = "", page_type: str = "",
                      kb_ids: list | None = None, auto_widen: bool = False,

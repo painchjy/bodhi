@@ -223,6 +223,11 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
                          "**不允许**用调用方传的 kb_id 顶替领域库" % parsed.get("domain"))}
     # work_kb 不存在：**允许用户指定**（写路径），标 work_missing 由调用方决定
     work_missing = bool(parsed.get("work") and not work_multi and not work)
+    if work_multi:                                # 已锁定 ⇒ 用锁定值（写入一致性）
+        _s0 = _read_snapshot(sid)
+        _lk = (_s0.get("work_kb") or {}) if _s0.get("ok") else {}
+        if _lk.get("id"):
+            work = _lk
     if not dom and work:
         dom = work                                    # 只挂一个库的智能体：它就是领域库
     method = {}
@@ -279,6 +284,32 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
         _write_snapshot(sid, scope)
     _CACHE[sid] = (now, scope)
     return scope
+
+
+def lock_work_kb(session_no: str, kb: dict) -> dict:
+    """`work_multi` 智能体：**首次写入锁定**工作库（写进会话快照）。
+
+    之后同一会话再写**别的库** ⇒ 调用方应拒绝（`refused=work_locked`）。
+    解锁只有两条路：新开会话，或运维显式重置快照。
+    """
+    import ke_db  # noqa: PLC0415
+
+    sid = str(session_no or "").strip()
+    kid = str((kb or {}).get("id") or "").strip()
+    if not (sid and kid):
+        return {}
+    snap = _read_snapshot(sid)
+    if not snap.get("ok"):
+        snap = {"ok": True, "session_no": sid, "domain_kb": {}, "work_kb": {},
+                "snapshot_at": ke_db.now_text()}
+    cur = snap.get("work_kb") or {}
+    if not cur.get("id"):
+        snap["work_kb"] = {"id": kid, "name": str((kb or {}).get("name") or ""),
+                           "locked_by": "first_write", "locked_at": ke_db.now_text()}
+        snap["locked_at"] = snap["work_kb"]["locked_at"]
+        _write_snapshot(sid, snap)
+        _CACHE.pop(sid, None)                   # 下一次 agent_scope 重新读（含锁定值）
+    return snap.get("work_kb") or {}
 
 
 def work_multi(scope: dict) -> bool:

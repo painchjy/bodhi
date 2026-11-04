@@ -88,7 +88,8 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
     #   · 多工作库的智能体（建模类，work=所有领域库）：本批跳过（"本轮目标库"由用户指定）
     try:
         import ke_scope as _scope_mod  # noqa: PLC0415
-        _sc = _scope_mod.agent_scope(_pick_session_no(session_no, session, nodes, report))
+        _sid = _pick_session_no(session_no, session, nodes, report)
+        _sc = _scope_mod.agent_scope(_sid)
         if not _sc.get("ok") and _sc.get("error") == "no_kb_configured":
             return {"ok": False, "kb_id": kb_id, "refused": "no_kb_configured",
                     "hint": _sc.get("hint") or "该智能体未配置任何知识库，不能写"}
@@ -101,7 +102,16 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                         "hint": "目标库不在本智能体的知识库范围内（kb_selection_mode=%s）"
                                 % _sc.get("kb_mode")}
         _work = (_sc.get("work_kb") or {}) if _sc.get("ok") else {}
-        if _work.get("id") and not _sc.get("work_multi") and str(kb_id) != str(_work["id"]):
+        if _sc.get("ok") and _sc.get("work_multi"):
+            # 建模类（工作库=所有领域库）：**首次写入锁定**，之后只许写这一个库
+            if _work.get("id") and str(kb_id) != str(_work["id"]):
+                return {"ok": False, "kb_id": kb_id, "refused": "work_locked",
+                        "locked": _work,
+                        "hint": ("本会话的工作库已锁定为「%s」（首次写入）⇒ 换库请新开会话"
+                                 % (_work.get("name") or _work.get("id")))}
+            if not _work.get("id") and str(mode or "").strip().lower() == "apply":
+                _scope_mod.lock_work_kb(_sid, {"id": kb_id, "name": ""})
+        elif _work.get("id") and str(kb_id) != str(_work["id"]):
             return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
                     "expected": _work, "scope": {"domain_kb": _sc.get("domain_kb"),
                                                  "work_kb": _work},

@@ -26,6 +26,60 @@ from typing import Callable, Dict, Optional
 
 REGISTRY: Dict[str, Callable[[dict], dict]] = {}
 
+# 2026-11-04（用户口径）：**按知识库范围统一校验** —— 只校验「目标库 ∈ allowed」，
+# **不套 domain/work**（否则运维智能体没领域库会被全拒）。跨库/概念类（context_*）与
+# 不依赖库的（skills / ontology_types / lookup_turn_begin …）**不在名单里**。
+KB_SCOPED_READ = {
+    "audit_scan", "doc_outline", "doc_parse", "grep_chunks", "image_extract",
+    "ext_doc_parse", "kb_export",
+}
+KB_SCOPED_WRITE = {
+    "audit_plan", "audit_purge", "kb_import", "retag_preview", "retag_apply",
+    "retag_rollback", "import_probe", "import_plan", "import_apply", "import_state",
+    "import_refresh", "page_attributes_set", "clean_alias_noise", "ext_doc_push",
+}
+KB_SCOPED_TOOLS = KB_SCOPED_READ | KB_SCOPED_WRITE
+
+
+def _kb_scope_guard(name: str, args: dict):
+    """返回 dict = 拒绝；None = 放行。
+
+    **只在「有 session_no + 给了 kb_id + scope 可用」时校验**：无会话的内部调用/CLI 不受影响
+    （用户口径：不要造成无法使用）。只读工具额外允许**方法层库**（任务页在那里）。
+    """
+    if name not in KB_SCOPED_TOOLS:
+        return None
+    sid = str(args.get("session_no") or "").strip()
+    raw_kb = str(args.get("kb_id") or "").strip()
+    if not (sid and raw_kb):
+        return None
+    try:                                    # noqa: PLC0415
+        import ke_db  # noqa: PLC0415
+        import ke_scope  # noqa: PLC0415
+        kb_id, kb_name, _note = ke_db.resolve_kb_id(raw_kb)
+        sc = ke_scope.agent_scope(sid)
+    except Exception:  # noqa: BLE001  解析不了/scope 不可用 ⇒ 交给工具自己报错
+        return None
+    if not sc.get("ok"):
+        return None
+    allowed = {str(x).lower() for x in (sc.get("allowed") or [])}
+    if not allowed:
+        return None
+    ok_ids = set(allowed)
+    if name in KB_SCOPED_READ:              # 只读：方法层库（任务页/步骤）也允许
+        _m = str((sc.get("method_kb") or {}).get("id") or "").lower()
+        if _m:
+            ok_ids.add(_m)
+    if str(kb_id).lower() not in ok_ids:
+        return {"ok": False, "error": "out_of_scope", "tool": name,
+                "kb": {"id": kb_id, "name": kb_name},
+                "kb_scope": {"kb_mode": sc.get("kb_mode"), "allowed_count": len(allowed),
+                             "allowed_sample": [k.get("name") or k.get("id")
+                                                for k in (sc.get("agent_kbs") or [])[:5]]},
+                "hint": ("目标库「%s」不在本智能体的知识库范围（kb_selection_mode=%s）"
+                         % (kb_name or kb_id, sc.get("kb_mode")))}
+    return None
+
 
 def handle(name: str):
     """把处理函数登记为某工具的实现（同名重复登记直接报错，避免静默覆盖 ✗）。"""
@@ -42,7 +96,11 @@ def dispatch(name: str, args: dict) -> Optional[dict]:
     fn = REGISTRY.get(name)
     if fn is None:
         return None
-    return fn(args or {})
+    args = args or {}
+    blocked = _kb_scope_guard(name, args)      # 2026-11-04：统一库范围校验（只读含方法层库）
+    if blocked:
+        return blocked
+    return fn(args)
 
 
 def names() -> list:
