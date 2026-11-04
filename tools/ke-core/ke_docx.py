@@ -8,31 +8,104 @@
 from __future__ import annotations
 
 
+_MAX_SECTION_CHARS = 6000          # 单段上限：超出按句子边界二次切（PDF 常出现 5 万字巨段）
+_HEAD_NUM = r"^\s*(?:\*\*)?(\d+(?:\.\d+){0,3})(?:\*\*)?\s+\S"
+_HEAD_CN = (
+    r"^\s*第[一二三四五六七八九十百\d]+[章节部分篇]\s*",
+    r"^\s*[一二三四五六七八九十]+、\s*\S",
+    r"^\s*（[一二三四五六七八九十]+）\s*\S",
+)
+_SENT_END = ("。", "，", "；", "：", "！", "？", ".", ",", ";", ":")
+
+
+def _is_heading(line: str, nxt: str = "") -> bool:
+    """标题判定（PDF 常丢编号 ⇒ 除编号外还认中文编号 + "短行 + 下一行明显更长"）。"""
+    import re as _re
+
+    s = str(line or "").strip()
+    if not s or len(s) > 40 or s.endswith(_SENT_END):
+        return False
+    if _re.match(_HEAD_NUM, s):
+        return True
+    if any(_re.match(p, s) for p in _HEAD_CN):
+        return True
+    n = str(nxt or "").strip()
+    return len(s) <= 20 and len(n) >= 40          # 短行后接长正文 ⇒ 当标题（保守）
+
+
+def _split_long(text: str, limit: int = _MAX_SECTION_CHARS) -> list:
+    """超长正文按句末/换行二次切，保证单段 ≤ limit（不丢字、不改写）。"""
+    import re as _re
+
+    body = str(text or "")
+    if len(body) <= limit:
+        return [body]
+    out, buf = [], ""
+    for seg in _re.split(r"(?<=[。！？；\n])", body):
+        if not seg:
+            continue
+        if buf and len(buf) + len(seg) > limit:
+            out.append(buf)
+            buf = seg
+        else:
+            buf += seg
+    if buf:
+        out.append(buf)
+    return out or [body]
+
+
 def _sections_from_text(text: str, title: str) -> list:
     """**纯文本**按标题切节（PDF / TXT 用；docx 走 `sections()`）。
 
-    与 `sections()` 的分工：那个读 docx 段落 + 样式；这个只认行首编号 / markdown 标题，
-    用于**已经拿到纯文本**的场景。签名与 04 侧 `ke_domain_docs._sections_from_text` 一致
-    （两份纯函数副本，互不 import ✓）。
+    2026-11-03（内网 PDF 实测：49 页只切出 7 段、出现 5 万字巨段/空段/重复段）：
+    - 标题判定扩展：编号 / 中文编号（第X章、一、、（一））/ 短行后接长正文；
+    - **丢弃空段**（页码/页眉遗留）与**相邻重复段**；
+    - 任何段 > `_MAX_SECTION_CHARS` 按句末二次切（不丢字）。
     """
     import re as _re
 
     lines = (text or "").splitlines()
     heads = []
     for i, ln in enumerate(lines):
-        if _re.match(r"^\s*(?:\*\*)?(\d+(?:\.\d+){0,3})(?:\*\*)?\s+\S", ln):
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if _is_heading(ln, nxt):
             heads.append(i)
+
+    def _emit(sec_title: str, num: str, body: str) -> list:
+        chunks = _split_long(body)
+        out = []
+        for j, part in enumerate(chunks):
+            label = sec_title.strip()[:80]
+            base = ("%s %s" % (num, label[:30])).strip() if num else label[:36]
+            out.append({"path": base + ("" if j == 0 else "-%d" % (j + 1)),
+                        "title": label, "text": part})
+        return out
+
     if not heads:
-        return [{"path": "全文", "title": title, "text": text or ""}]
-    out = []
+        body = (text or "").strip()
+        if not body:
+            return [{"path": "全文", "title": title, "text": ""}]
+        return [{"path": "全文-%d" % (i + 1) if i else "全文", "title": title, "text": part}
+                for i, part in enumerate(_split_long(body))]
+
+    out: list = []
     for k, idx in enumerate(heads):
         end = heads[k + 1] if k + 1 < len(heads) else len(lines)
-        num = _re.match(r"^\s*(?:\*\*)?(\d+(?:\.\d+){0,3})", lines[idx]).group(1)
         body = "\n".join(lines[idx + 1:end]).strip()
-        tail = lines[idx].strip().lstrip("*# ").split(" ", 1)
-        out.append({"path": "%s %s" % (num, (tail[1] if len(tail) > 1 else "")[:30]),
-                    "title": lines[idx].strip()[:80], "text": body})
-    return out
+        if not body:                          # 空段丢弃（PDF 页码/页眉造成的空节）
+            continue
+        m = _re.match(_HEAD_NUM, lines[idx])
+        out += _emit(lines[idx], (m.group(1) if m else ""), body)
+    if not out:
+        body = (text or "").strip()
+        return [{"path": "全文", "title": title, "text": part} for part in _split_long(body)]
+    dedup: list = []                          # 相邻重复段去重（页眉/页脚被当标题时会出现）
+    for s in out:
+        # 只对**短段**去重：长段可能是 `_split_long` 切出的等长块（文本相同但内容不能丢）
+        if dedup and len(s["text"]) <= 500 and s["text"] == dedup[-1]["text"]:
+            continue
+        dedup.append(s)
+    return dedup
 
 
 def _docx_images(raw: bytes, doc_id: str, root: str = "") -> list:

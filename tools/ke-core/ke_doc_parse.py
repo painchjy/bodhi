@@ -182,6 +182,39 @@ def fetch(doc_id: str) -> tuple:
         return b"", {"error": "ext_unreachable", "url": url, "detail": repr(exc)[:200]}
 
 
+def _strip_running_headers(pages: list, ratio: float = 0.3) -> tuple:
+    """剔除**跨页重复**的页眉/页脚（公司名 / logo 文字 / 页码）。纯函数，便于单测。
+
+    内网实测（49 页 PDF）：每页页眉都带公司名，pypdf 提取后这些行混进正文，
+    既浪费上下文，又会被误判成标题（产生"空段/重复段")。
+    返回 `(每页清洗后文本列表, 被剔除的行数)`。
+    """
+    from collections import Counter
+
+    texts = [str(p.get("text") or "") for p in (pages or [])]
+    if len(texts) < 3:
+        return texts, 0
+    cnt: Counter = Counter()
+    for t in texts:
+        lines = [x.strip() for x in t.splitlines()]
+        for ln in {x for x in (lines[:2] + lines[-2:]) if x and len(x) <= 60}:
+            cnt[ln] += 1
+    thr = max(2, int(len(texts) * ratio))
+    bad = {ln for ln, n in cnt.items() if n >= thr}
+    if not bad:
+        return texts, 0
+    out, dropped = [], 0
+    for t in texts:
+        keep = []
+        for x in t.splitlines():
+            if x.strip() in bad:
+                dropped += 1
+                continue
+            keep.append(x)
+        out.append("\n".join(keep))
+    return out, dropped
+
+
 def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
                          with_images: bool = False) -> tuple:
     """按类型选解析器 → `(sections, images, quality)`。
@@ -197,7 +230,8 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
                             "error": got.get("error"), "detail": got.get("detail", "")}
 
         pages = got.get("pages") or []
-        text = "\n".join((p.get("text") or "").strip() for p in pages).strip()
+        clean, _dropped = _strip_running_headers(pages)
+        text = "\n".join(s.strip() for s in clean).strip()
         secs = D._sections_from_text(text, title) if text else [
             {"path": "全文", "title": title, "text": ""}]
         sub = os.path.join(doc_root(), "files")
@@ -217,6 +251,7 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
         return secs, images, {"text_source": "pdf_pypdf", "pages": len(pages),
                               "with_images": bool(with_images),
                               "images_skipped": (not with_images),
+                              "headers_stripped": _dropped,
                               "images_available": bool(images), "tables_text_only": True}
     if ext == ".docx" or raw[:2] == b"PK":
         import tempfile
@@ -265,16 +300,18 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
     # 大文件仍延后到 action="image"，避免把"读正文"拖慢。
     if not need_images and action == "outline" and raw[:5] == b"%PDF-":
         try:
-            mb = float(os.environ.get("BODHI_PDF_AUTO_IMAGES_MB", "2") or 2)
+            mb = float(os.environ.get("BODHI_PDF_AUTO_IMAGES_MB", "10") or 10)
         except ValueError:
             mb = 2.0
         if mb > 0 and len(raw) <= mb * 1024 * 1024:
             need_images = True
     sig = _sig(raw)
 
-    ckey = (did, need_images)
-    hit = _DOC_CACHE.get(ckey) if _cache_on() else None
-    cache_hit = bool(hit and hit.get("sig") == sig)
+    # 2026-11-03：缓存键**只按 doc_id**（原来 `(doc_id, need_images)` ⇒ outline 取图后
+    # section 又要重解析一遍，内网 3MB PDF 直接翻倍耗时）。`with_images` 只记"这份缓存有没有图"。
+    hit = _DOC_CACHE.get(did) if _cache_on() else None
+    cache_hit = bool(hit and hit.get("sig") == sig
+                     and (hit.get("with_images") or not need_images))
     if cache_hit:
         secs, images, quality = hit["secs"], hit["images"], hit["quality"]
         t_parse = 0
@@ -287,7 +324,8 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
         if _cache_on() and not quality.get("error"):
             if len(_DOC_CACHE) >= _CACHE_MAX:
                 _DOC_CACHE.pop(next(iter(_DOC_CACHE)), None)
-            _DOC_CACHE[ckey] = {"sig": sig, "secs": secs, "images": images, "quality": quality}
+            _DOC_CACHE[did] = {"sig": sig, "secs": secs, "images": images,
+                               "quality": quality, "with_images": bool(need_images)}
     timing = {"fetch": t_fetch, "parse": t_parse, "total": int((time.time() - t0) * 1000),
               "cache_hit": cache_hit, "with_images": need_images,
               "pages": int(quality.get("pages") or 0)}
@@ -309,6 +347,10 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
     if action == "outline":
         return {**base, "outline": [{"path": s.get("path") or "", "title": s.get("title") or "",
                                      "chars": len(s.get("text") or "")} for s in secs],
+                "sections_total": len(secs),
+                "next": ("取正文用 action=section（section_path 或 cursor 定位）；"
+                         "**需要图证据请直接调 action=image**（下面的 next_args 可直接用）"),
+                "next_args": {"doc_id": did, "action": "image"},
                 "hint": "取正文用 action=section（section_path 或 cursor 定位）"}
     if action == "image":
         # 4) 只取正文图：重复 logo / 过小图 过滤（2026-10-31）
@@ -397,14 +439,23 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
         i = hit[0]
     if not secs:
         return {**base, "text": "", "note": "该文档没有可读章节"}
-    i = max(0, min(i, len(secs) - 1))
+    if i < 0 or i >= len(secs):
+        return {**base, "ok": False, "error": "cursor_out_of_range", "cursor": i,
+                "total_sections": len(secs),
+                "available": [s.get("path") for s in secs][:20],
+                "hint": "cursor 从 0 开始；用回执的 next_cursor 续读（空段已被丢弃，序号会变）"}
     s = secs[i]
     text = str(s.get("text") or "")
     cut = text[:max(200, int(limit_chars or 6000))]
     out = {**base, "path": s.get("path") or "", "title": s.get("title") or "",
-           "text": cut, "chars": len(text), "truncated": len(cut) < len(text), "cursor": i}
+           "text": cut, "chars": len(text), "truncated": len(cut) < len(text),
+           "cursor": i, "total_sections": len(secs)}
     if i + 1 < len(secs):
         out["next_cursor"] = i + 1
         out["next_path"] = secs[i + 1].get("path") or ""
+        out["next"] = "继续请传 cursor=%d（或 section_path=%s）" % (i + 1, out["next_path"])
+    else:
+        out["next_cursor"] = None
+        out["next"] = "已是最后一节；需要图证据请调 action=image"
     return out
 
