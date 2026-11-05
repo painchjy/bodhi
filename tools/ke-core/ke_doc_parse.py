@@ -27,7 +27,7 @@ import sys, json, io, base64
 
 with_images = "--with-images" in sys.argv
 max_img_pages = 0
-max_side = 1600
+max_side = 1400
 inline_kb = 128
 for a in sys.argv:
     if a.startswith("--max-img-pages="):
@@ -37,9 +37,9 @@ for a in sys.argv:
             max_img_pages = 0
     elif a.startswith("--max-side="):
         try:
-            max_side = int(a.split("=", 1)[1] or 1600)
+            max_side = int(a.split("=", 1)[1] or 1400)
         except Exception:
-            max_side = 1600
+            max_side = 1400
     elif a.startswith("--inline-kb="):
         try:
             inline_kb = int(a.split("=", 1)[1] or 128)
@@ -62,11 +62,11 @@ def _shrink(b, cap):
             im = im.convert("RGB")
         w, h = im.size
         best = b
-        for side in (max_side, int(max_side * 0.75), int(max_side * 0.6)):
+        for side in (max_side, int(max_side * 0.85), int(max_side * 0.7)):
             scale = min(1.0, float(side) / max(w, h))
             cur = im if scale >= 1.0 else im.resize(
                 (max(1, int(w * scale)), max(1, int(h * scale))))
-            for q in (80, 65, 50):
+            for q in (70, 60, 50):
                 buf = io.BytesIO()
                 cur.convert("RGB").save(buf, format="JPEG", quality=q, optimize=True)
                 got = buf.getvalue()
@@ -190,8 +190,8 @@ def _pdf_extract(raw: bytes, with_images: bool = False) -> dict:
         args = ["docker", "exec", "-i", cname, "python3", helper]
         if with_images:
             max_pages = int(os.environ.get("BODHI_PDF_MAX_IMAGE_PAGES", "20") or 0)
-            max_side = int(os.environ.get("BODHI_IMG_MAX_SIDE", "1600") or 1600)
-            inline_kb = int(os.environ.get("BODHI_IMG_MAX_KB", "128") or 128)
+            max_side = int(os.environ.get("BODHI_IMG_MAX_SIDE", "1400") or 1400)
+            inline_kb = int(os.environ.get("BODHI_IMG_MAX_KB", "96") or 96)
             args += ["--with-images", "--max-img-pages=%d" % max_pages,
                      "--max-side=%d" % max_side, "--inline-kb=%d" % inline_kb]
         timeout = int(os.environ.get("BODHI_PDF_TIMEOUT", "90") or 90)
@@ -301,11 +301,25 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
             with open(os.path.join(sub, fn), "wb") as fh:
                 fh.write(data)
             images.append({"name": "图片%d.%s" % (k, im.get("ext") or "png"),
-                           "path": "files/" + fn, "page": im.get("page")})
+                           "path": "files/" + fn, "page": im.get("page"),
+                           "bytes": len(data),
+                           "orig_bytes": int(im.get("orig_bytes") or len(data)),
+                           "compressed": bool(im.get("compressed"))})
+        # 2026-11-05：每页**首个编号标题**（供 image 的 context 用；不再按页码比例猜章节）
+        import re as _re2
+        page_titles = []
+        for t in clean:
+            hit = ""
+            for ln in str(t or "").splitlines():
+                if len(ln) <= 60 and _re2.match(
+                        r"^\s*(?:\*\*)?(\d+(?:\.\d+){0,3})(?:\*\*)?\s+\S", ln):
+                    hit = ln.strip()[:60]
+                    break
+            page_titles.append(hit)
         return secs, images, {"text_source": "pdf_pypdf", "pages": len(pages),
                               "with_images": bool(with_images),
                               "images_skipped": (not with_images),
-                              "headers_stripped": _dropped,
+                              "headers_stripped": _dropped, "page_titles": page_titles,
                               "images_available": bool(images), "tables_text_only": True}
     if ext == ".docx" or raw[:2] == b"PK":
         import tempfile
@@ -442,15 +456,28 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
             item["content_type"] = ("image/jpeg" if ext in ("jpg", "jpeg")
                                     else ("image/png" if ext == "png" else "application/octet-stream"))
             item["url"] = "/bodhi/ext/doc-image?doc_id=%s&name=%s" % (did, x.get("name") or "")
-            # 5) 上下文标注（按页码近似定位章节 + 前后文）
+            # 5) 上下文标注：**用该页的首个编号标题**（没有则向前找最近的非空标题）；
+            #    不按页码比例猜章节、也不塞表格正文（2026-11-05：第 3 页部署图被误标成"设备申请清单"）
             try:
-                if secs:
-                    idx = min(len(secs) - 1, max(0, int((int(x.get("page") or 1) - 1)
-                                                         * len(secs) / float(_pages_n))))
-                    s0 = secs[idx]
-                    t0 = str(s0.get("text") or "")
-                    item["context"] = {"section": s0.get("title") or s0.get("path") or "",
-                                       "prev_text": t0[-160:], "next_text": t0[:160]}
+                titles = quality.get("page_titles") or []
+                pg = int(x.get("page") or 1)
+                hit_t = ""
+                for k in range(min(pg, len(titles)) - 1, -1, -1):
+                    if str(titles[k] or "").strip():
+                        hit_t = str(titles[k]).strip()
+                        break
+                if hit_t:
+                    # 版式词（清单/表格/附表/目录…）说明这页标题是**表格节**，图通常画在它之前
+                    # ⇒ 改用上一页的标题（2026-11-05：第 3 页"3 设备申请清单"把部署图误标成表格）
+                    import re as _re3
+                    _tbl = _re3.compile(r"(清单|表格|附表|目录|明细|统计表)")
+                    if _tbl.search(hit_t):
+                        for k in range(min(pg, len(titles)) - 2, -1, -1):
+                            t_k = str(titles[k] or "").strip()
+                            if t_k and not _tbl.search(t_k):
+                                hit_t = t_k
+                                break
+                    item["context"] = {"section": hit_t, "page": pg}
             except Exception:  # noqa: BLE001
                 pass
             kept.append(item)
@@ -464,8 +491,8 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
             except ValueError:
                 return dflt
 
-        cap = _kb("BODHI_IMG_MAX_KB", 128) * 1024
-        total_cap = _kb("BODHI_IMG_INLINE_TOTAL_KB", 192) * 1024
+        cap = _kb("BODHI_IMG_MAX_KB", 96) * 1024
+        total_cap = _kb("BODHI_IMG_INLINE_TOTAL_KB", 256) * 1024
         max_n = _kb("BODHI_IMG_INLINE_MAX", 2)
         total_b64, selected = 0, []
         for idx, item in enumerate(sorted(out, key=lambda x: -int(x.get("bytes") or 0))):
