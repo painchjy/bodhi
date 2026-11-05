@@ -559,7 +559,8 @@ def _vlm_clean(v: str) -> str:
 
 
 def _vlm_chat(img: bytes, question: str) -> dict:
-    """调 OpenAI 兼容 VLM（默认 OVH Qwen2.5-VL-72B，`.env` 可覆盖）。"""
+    """调 OpenAI 兼容 VLM（`.env` 配 base_url/model/key；DeepSeek 需关 thinking）。"""
+    import urllib.error
     import urllib.request
 
     base = (_vlm_clean(os.environ.get("BODHI_VLM_BASE_URL"))
@@ -567,18 +568,41 @@ def _vlm_chat(img: bytes, question: str) -> dict:
     model = _vlm_clean(os.environ.get("BODHI_VLM_MODEL")) or "Qwen2.5-VL-72B-Instruct"
     key = _vlm_clean(os.environ.get("BODHI_VLM_API_KEY"))
     body = {"model": model, "temperature": 0,
-            "max_tokens": _vlm_env_int("BODHI_VLM_MAX_TOKENS", 8192),
+            "max_tokens": _vlm_env_int("BODHI_VLM_MAX_TOKENS", 6144),
             "messages": [{"role": "user", "content": [
                 {"type": "text", "text": _VLM_PROMPT.format(question=question or "无")},
                 {"type": "image_url",
                  "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(img).decode()}}]}]}
+    # 2026-11-05 实测（DeepSeek）：默认开 thinking 时 reasoning 会把 max_tokens 吃光、
+    # content 为空（finish_reason=length）。关掉后 completion≈2200 就能出完整 JSON。
+    # 非 DeepSeek 端点不认这个字段 ⇒ 400 时自动摘掉重试一次（见下）。
+    think = _vlm_clean(os.environ.get("BODHI_VLM_THINKING")) or "disabled"
+    if think not in ("default", "off", "0"):
+        body["thinking"] = {"type": think}
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = "Bearer " + key
-    req = urllib.request.Request(base + "/chat/completions",
-                                 data=json.dumps(body).encode(), headers=headers)
-    with urllib.request.urlopen(req, timeout=_vlm_env_int("BODHI_VLM_TIMEOUT", 300)) as r:
-        data = json.loads(r.read().decode("utf-8", "replace"))
+    timeout = _vlm_env_int("BODHI_VLM_TIMEOUT", 300)
+
+    def _post(payload: dict) -> dict:
+        req = urllib.request.Request(base + "/chat/completions",
+                                     data=json.dumps(payload).encode(), headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+
+    try:
+        data = _post(body)
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read()[:400].decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            pass
+        if "thinking" in body and exc.code in (400, 422):
+            body.pop("thinking", None)          # 端点不认 ⇒ 去掉再试一次
+            data = _post(body)
+        else:
+            raise RuntimeError("vlm_http_%s: %s" % (exc.code, detail)) from exc
     ch = (data.get("choices") or [{}])[0] or {}
     msg = ch.get("message") or {}
     # DeepSeek 推理模型：`reasoning_content` 是思考、`content` 才是答案
