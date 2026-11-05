@@ -528,20 +528,22 @@ def _vlm_shrink(raw: bytes, target_kb: int) -> bytes:
 _VLM_PROMPT = """你是**部署架构图**的结构化识别器。只输出一个 JSON 对象，不要解释、不要 Markdown 代码块。
 
 输出结构：
-{{"watermark_text":"","texts":[{{"text":"","location":"","bbox":[0,0,0,0],"color":""}}],
-"lines":[{{"from":"","to":"","style":"solid|dashed|arc","arrow":"single|double|none","label":"","color":""}}],
+{{"watermark_text":"","texts":[{{"text":"","location":"","bbox":[0,0,0,0]}}],
+"lines":[{{"from":"","to":"","style":"solid|dashed|arc|box","arrow":"single|double|none","label":""}}],
 "legend":[{{"text":"","means":""}}],
 "uncertain":[{{"what":"","location":"","why":""}}]}}
 
 硬要求：
-1) `texts` 逐字抄写图上**全部**文字（地区/云/AZ/机房/单元/分片数字/组件/图例/注释），保持原语言；
-   `location` 取 左上/上中/右上/左中/中/右中/左下/下中/右下；`bbox` 为归一化 [x1,y1,x2,y2]（0-1，x1<x2、y1<y2）；
-   `color` 写文字或色块主色（red/blue/green/purple/black/gray/orange），无则空串。
-2) `lines` 写**结构关系**：`style` 必须区分 solid（实线）/dashed（虚线）/arc（跨区弧线）；
-   `arrow` 取 single/double/none；`label` 抄线上的字（如「同步」「数据同步」）。
-   **跨云、跨大区的连线也要写**，不要只写机房内部。
-3) `legend` 把图例**逐项**抄出来并写含义（如 红块=应用故障）。
-4) 图上若有斜向重复水印（人名+编号）：只在 `watermark_text` 写**一次**，**绝不**混入 texts/lines。
+1) `texts` —— **先把文字抄全**：逐字抄图上所有文字（地区/云/AZ/机房/单元/分片区间/组件/图例/注释），保持原语言不改写；
+   `location` 取 左上/上中/右上/左中/中/右中/左下/下中/右下；
+   `bbox` 归一化 [x1,y1,x2,y2]，**必须落在 0~1 且 x1<x2、y1<y2**（越界就夹紧到边界）。
+2) `lines` —— **框线与关系线都要写**：
+   · 矩形框/分组外框 ⇒ `style` 填 `box`，`from` 写框内主要文字（或 `box:<框名>`），`to` 填 `inside`；
+   · 连线 ⇒ `style` 取 `solid`（实线）/`dashed`（虚线）/`arc`（跨区弧线）；`arrow` 取 `single`/`double`/`none`；
+   · `label` 抄线上的字（如「同步」「数据同步」）；**跨云、跨大区的连线必须写**，不要只写机房内部。
+3) `legend` —— 图例逐项抄出来并写含义（如 红块=应用故障）。
+4) **排除无效数据**：图上斜向重复的水印（人名+编号）只在 `watermark_text` 写**一次**，
+   **绝不允许**出现在 `texts`/`lines`/`legend` 里；装饰性背景、页码也不要抄。
 5) 看不清的放 `uncertain`（位置+原因），**不要猜**；宁可少写不可编。
 
 本次关注点：{question}
@@ -565,7 +567,7 @@ def _vlm_chat(img: bytes, question: str) -> dict:
     model = _vlm_clean(os.environ.get("BODHI_VLM_MODEL")) or "Qwen2.5-VL-72B-Instruct"
     key = _vlm_clean(os.environ.get("BODHI_VLM_API_KEY"))
     body = {"model": model, "temperature": 0,
-            "max_tokens": _vlm_env_int("BODHI_VLM_MAX_TOKENS", 4096),
+            "max_tokens": _vlm_env_int("BODHI_VLM_MAX_TOKENS", 8192),
             "messages": [{"role": "user", "content": [
                 {"type": "text", "text": _VLM_PROMPT.format(question=question or "无")},
                 {"type": "image_url",
@@ -577,8 +579,15 @@ def _vlm_chat(img: bytes, question: str) -> dict:
                                  data=json.dumps(body).encode(), headers=headers)
     with urllib.request.urlopen(req, timeout=_vlm_env_int("BODHI_VLM_TIMEOUT", 300)) as r:
         data = json.loads(r.read().decode("utf-8", "replace"))
-    content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-    return {"model": model, "content": content, "usage": data.get("usage") or {}}
+    ch = (data.get("choices") or [{}])[0] or {}
+    msg = ch.get("message") or {}
+    # DeepSeek 推理模型：`reasoning_content` 是思考、`content` 才是答案
+    # 2026-11-05 实测：纯文本模型（supports_vision=false）会把 max_tokens 全烧在 reasoning 上、content 为空
+    return {"model": model,
+            "content": str(msg.get("content") or "").strip(),
+            "reasoning_head": str(msg.get("reasoning_content") or "").strip()[:400],
+            "finish_reason": str(ch.get("finish_reason") or ""),
+            "usage": data.get("usage") or {}}
 
 
 def _vlm_parse_json(text: str) -> dict:
@@ -674,6 +683,19 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
                 "error": "vlm_failed", "detail": repr(exc)[:200],
                 "hint": ("VLM 不可达/超时 ⇒ 该图**判不了**（不是「图上没有」）；"
                          "正文与其他 action 不受影响"),
+                "duration_ms": {**((base.get("duration_ms") or {})),
+                                "vlm": int((time.time() - t1) * 1000),
+                                "total": int((time.time() - t0) * 1000)}}
+    if not got.get("content"):
+        # 模型没产出答案（多半是：推理模型把 max_tokens 烧光，或该模型不支持视觉）
+        return {**base, "ok": False, "action": "image_read", "figure": fmeta,
+                "error": "vlm_empty_content",
+                "finish_reason": got.get("finish_reason"),
+                "reasoning_head": got.get("reasoning_head") or "",
+                "usage": got.get("usage") or {},
+                "hint": ("模型没有产出 JSON：检查 ① 该模型是否**支持视觉**（`supports_vision`）；"
+                         "② `BODHI_VLM_MAX_TOKENS` 是否被推理吃光（finish_reason=length）⇒ 调大或换模型。"
+                         "**这不是「图上没有信息」**，不得据此判「文档未提供」"),
                 "duration_ms": {**((base.get("duration_ms") or {})),
                                 "vlm": int((time.time() - t1) * 1000),
                                 "total": int((time.time() - t0) * 1000)}}
