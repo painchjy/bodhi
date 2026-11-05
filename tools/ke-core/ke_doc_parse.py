@@ -528,21 +528,25 @@ def _vlm_shrink(raw: bytes, target_kb: int) -> bytes:
 _VLM_PROMPT = """你是**部署架构图**的结构化识别器。只输出一个 JSON 对象，不要解释、不要 Markdown 代码块。
 
 输出结构：
-{{"watermark_text":"","texts":[{{"text":"","location":"","bbox":[0,0,0,0]}}],
-"lines":[{{"from":"","to":"","style":"solid|dashed|arc|box","arrow":"single|double|none","label":""}}],
+{{"watermark_text":"",
+"texts":[{{"id":"n1","text":"","location":"","bbox":[0,0,0,0]}}],
+"lines":[{{"from":"n1","to":"n2","from_label":"","to_label":"","style":"solid|dashed|arc|box","arrow":"single|double|none","label":""}}],
 "legend":[{{"text":"","means":""}}],
 "uncertain":[{{"what":"","location":"","why":""}}]}}
 
 硬要求：
-1) `texts` —— **先把文字抄全**：逐字抄图上所有文字（地区/云/AZ/机房/单元/分片区间/组件/图例/注释），保持原语言不改写；
-   `location` 取 左上/上中/右上/左中/中/右中/左下/下中/右下；
-   `bbox` 归一化 [x1,y1,x2,y2]，**必须落在 0~1 且 x1<x2、y1<y2**（越界就夹紧到边界）。
-2) `lines` —— **框线与关系线都要写**：
-   · 矩形框/分组外框 ⇒ `style` 填 `box`，`from` 写框内主要文字（或 `box:<框名>`），`to` 填 `inside`；
-   · 连线 ⇒ `style` 取 `solid`（实线）/`dashed`（虚线）/`arc`（跨区弧线）；`arrow` 取 `single`/`double`/`none`；
-   · `label` 抄线上的字（如「同步」「数据同步」）；**跨云、跨大区的连线必须写**，不要只写机房内部。
+1) `texts` —— **每个文字块一个唯一 `id`**（n1、n2、n3…，按从上到下、从左到右编号）。
+   **同名但不同位置的必须分开编号**（图里常有多个「网关」「OSS」「联机应用」「OB数据库主集群」，绝不能合并）。
+   `text` 逐字抄原文（地区/云/AZ/机房/单元/分片区间/组件/图例/注释），保持原语言；
+   `location` 取 左上/上中/右上/左中/中/右中/左下/下中/右下，同名项要写清所属（如「浦江云第2个机房」）；
+   `bbox` 归一化 [x1,y1,x2,y2]，必须 0~1 且 x1<x2、y1<y2（越界夹紧）。
+2) `lines` —— **必须用 `id` 精确引用，禁止只写文字**（同名节点只能靠 id 区分）：
+   · `from`/`to` 填第 1 步的 id；同时填 `from_label`/`to_label` 供人读（如「浦江云OSS」「浦江云OB主集群」）；
+   · 框线（矩形框/分组外框）⇒ `style`=`box`，`from`=该框的 id，`to`=`inside`；
+   · 连线 ⇒ `style`=`solid`/`dashed`/`arc`；`arrow`=`single`/`double`/`none`；
+   · `label` 抄线上的字（如「同步」「数据同步」）；**跨云、跨大区的连线必须写**。
 3) `legend` —— 图例逐项抄出来并写含义（如 红块=应用故障）。
-4) **排除无效数据**：图上斜向重复的水印（人名+编号）只在 `watermark_text` 写**一次**，
+4) **排除无效数据**：斜向重复水印（人名+编号）只写进 `watermark_text` **一次**，
    **绝不允许**出现在 `texts`/`lines`/`legend` 里；装饰性背景、页码也不要抄。
 5) 看不清的放 `uncertain`（位置+原因），**不要猜**；宁可少写不可编。
 
@@ -729,12 +733,17 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
     else:
         extraction = {k: parsed.get(k) for k in
                       ("texts", "lines", "legend", "uncertain", "watermark_text")}
-    nodes = [{"label": t.get("text"), "location": t.get("location"),
-              "bbox": t.get("bbox"), "color": t.get("color")}
+    nodes = [{"id": t.get("id"), "label": t.get("text"), "location": t.get("location"),
+              "bbox": t.get("bbox")}
              for t in (parsed.get("texts") or []) if isinstance(t, dict)]
-    edges = [{"from": e.get("from"), "to": e.get("to"), "style": e.get("style"),
-              "arrow": e.get("arrow"), "label": e.get("label"), "color": e.get("color")}
+    edges = [{"from": e.get("from"), "to": e.get("to"),
+              "from_label": e.get("from_label"), "to_label": e.get("to_label"),
+              "style": e.get("style"), "arrow": e.get("arrow"), "label": e.get("label")}
              for e in (parsed.get("lines") or []) if isinstance(e, dict)]
+    _ids = {str(n.get("id")) for n in nodes if n.get("id")}
+    _dangling = sorted({str(e.get(k)) for e in edges for k in ("from", "to")
+                        if e.get(k) and str(e.get(k)) not in _ids
+                        and str(e.get(k)) not in ("inside", "")})
     anns = [{"key": "legend", "value": l.get("means"), "evidence": l.get("text"),
              "confidence": 0.9}
             for l in (parsed.get("legend") or []) if isinstance(l, dict)]
@@ -743,7 +752,9 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
                 "watermark": parsed.get("watermark_text") or "",
                 "todo": [] if nodes else [{"action": "人工看图", "assignee": "human"}],
                 "gate": {"nodes": len(nodes), "edges": len(edges),
-                         "missing_bbox": len([n for n in nodes if not n.get("bbox")])}}
+                         "missing_bbox": len([n for n in nodes if not n.get("bbox")]),
+                         "dangling_ids": _dangling[:10],
+                         "dangling_total": len(_dangling)}}
     out = {**base, "ok": True, "action": "image_read", "figure": fmeta, "cache": "miss",
            "channel": "vlm:" + str(got.get("model")), "extraction": extraction,
            "contract": contract, "usage": got.get("usage") or {},
