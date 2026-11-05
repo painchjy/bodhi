@@ -80,6 +80,19 @@ def _shrink(b, cap):
 
 
 data = sys.stdin.buffer.read()
+# 2026-11-05：**只压缩**模式（VLM 送图用）——stdin 进图，stdout 出 JPEG，不解析 PDF。
+# 02 宿主机没有 Pillow，压缩只能在容器里做，所以复用这条 stdin 通道。
+if "--shrink-only" in sys.argv:
+    _target = 400
+    for a in sys.argv:
+        if a.startswith("--target-kb="):
+            try:
+                _target = int(a.split("=", 1)[1] or 400)
+            except Exception:
+                _target = 400
+    _cb, _ = _shrink(data, _target * 1024)
+    sys.stdout.buffer.write(_cb)
+    sys.exit(0)
 out = {"pages": [], "images": [], "engine": "pypdf", "with_images": with_images}
 try:
     from pypdf import PdfReader
@@ -119,12 +132,14 @@ for i, pg in enumerate(rd.pages, 1):
         if ext not in ("png", "jpg", "jpeg", "gif", "bmp", "emf", "wmf"):
             ext = "png"
         orig = len(b)
-        b, compressed = _shrink(b, inline_kb * 1024)   # 超限 ⇒ Pillow 压缩后再内联
-        if compressed:
-            ext = "jpg"
+        # 2026-11-05（用户口径）：**落盘存原图**（VLM 识图/人工复核要看清小字），
+        # 压缩版只用于「内联进模型上下文」⇒ 两份分开，互不覆盖 ✓
+        cb, compressed = _shrink(b, inline_kb * 1024)
         out["images"].append({"page": i, "index": j, "ext": ext,
                               "b64": base64.b64encode(b).decode(),
+                              "b64c": base64.b64encode(cb).decode() if compressed else "",
                               "bytes": len(b), "orig_bytes": orig,
+                              "inline_bytes": len(cb),
                               "compressed": bool(compressed)})
         n += 1
 print(json.dumps(out))
@@ -269,6 +284,50 @@ def _strip_running_headers(pages: list, ratio: float = 0.3) -> tuple:
     return out, dropped
 
 
+def _page_section(quality: dict, page: int) -> str:
+    """**图所属章节**：该页首个编号标题；命中表格类版式词则回退到上一页标题。
+
+    2026-11-05 实测：第 3 页标题是「3 设备申请清单」，但该页顶部的部署图属上一节
+    「2.3 部署架构」⇒ 表格节里的图一律按上一节归属（图通常画在表格之前）。
+    """
+    import re as _re
+
+    titles = (quality or {}).get("page_titles") or []
+    pg = int(page or 1)
+    hit = ""
+    for k in range(min(pg, len(titles)) - 1, -1, -1):
+        if str(titles[k] or "").strip():
+            hit = str(titles[k]).strip()
+            break
+    if not hit:
+        return ""
+    tbl = _re.compile(r"(清单|表格|附表|目录|明细|统计表)")
+    if tbl.search(hit):
+        for k in range(min(pg, len(titles)) - 2, -1, -1):
+            t_k = str(titles[k] or "").strip()
+            if t_k and not tbl.search(t_k):
+                return t_k
+    return hit
+
+
+_FIG_CAP_RE = None
+
+
+def _page_captions(texts: list) -> list:
+    """抽每页的**图注**（`（图 1：…）` / `图2: …`）→ `[[{no,text}, …], …]`（与页号对齐）。"""
+    global _FIG_CAP_RE
+    if _FIG_CAP_RE is None:
+        import re as _re
+
+        _FIG_CAP_RE = _re.compile(r"[（(]?\s*图\s*(\d{1,2})\s*[：:]\s*([^）)\n]{4,140})")
+    out = []
+    for t in texts or []:
+        caps = [{"no": int(m.group(1)), "text": m.group(2).strip()}
+                for m in _FIG_CAP_RE.finditer(str(t or ""))]
+        out.append(caps)
+    return out
+
+
 def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
                          with_images: bool = False) -> tuple:
     """按类型选解析器 → `(sections, images, quality)`。
@@ -288,6 +347,7 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
         text = "\n".join(s.strip() for s in clean).strip()
         secs = D._sections_from_text(text, title) if text else [
             {"path": "全文", "title": title, "text": ""}]
+        captions = _page_captions(clean)          # 每页图注（与页号对齐）
         sub = os.path.join(doc_root(), "files")
         images = []
         for k, im in enumerate(got.get("images") or [], 1):
@@ -297,14 +357,35 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
                 continue
             if not data:
                 continue
-            fn = "%s_img%d.%s" % (doc_id, k, im.get("ext") or "png")
+            ext = im.get("ext") or "png"
+            fn = "%s_img%d.%s" % (doc_id, k, ext)
             with open(os.path.join(sub, fn), "wb") as fh:
-                fh.write(data)
-            images.append({"name": "图片%d.%s" % (k, im.get("ext") or "png"),
-                           "path": "files/" + fn, "page": im.get("page"),
-                           "bytes": len(data),
-                           "orig_bytes": int(im.get("orig_bytes") or len(data)),
-                           "compressed": bool(im.get("compressed"))})
+                fh.write(data)                       # **原图**（VLM 识图 / 人工复核）
+            item = {"name": "图片%d.%s" % (k, ext),
+                    "path": "files/" + fn, "page": im.get("page"),
+                    "bytes": len(data),
+                    "orig_bytes": int(im.get("orig_bytes") or len(data)),
+                    "compressed": bool(im.get("compressed"))}
+            # 内联用的压缩版：原图另存后单独落一份，`action=image` 的内联预算按它算
+            cin = im.get("b64c") or ""
+            if cin:
+                try:
+                    cdata = base64.b64decode(cin)
+                except Exception:  # noqa: BLE001
+                    cdata = b""
+                if cdata:
+                    cfn = "%s_img%d_inline.jpg" % (doc_id, k)
+                    with open(os.path.join(sub, cfn), "wb") as fh:
+                        fh.write(cdata)
+                    item["inline_path"] = "files/" + cfn
+                    item["inline_bytes"] = len(cdata)
+            # 图注（该页文本里的「图 N：…」）→ 不调 VLM 也能引用图的语义
+            _pg = int(im.get("page") or 0)
+            _caps = captions[_pg - 1] if 0 < _pg <= len(captions) else []
+            if _caps:
+                _same = [c for c in _caps if int(c.get("no") or 0) == k]
+                item["caption"] = (_same[0]["text"] if _same else _caps[0]["text"])
+            images.append(item)
         # 2026-11-05：每页**首个编号标题**（供 image 的 context 用；不再按页码比例猜章节）
         import re as _re2
         page_titles = []
@@ -320,6 +401,7 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
                               "with_images": bool(with_images),
                               "images_skipped": (not with_images),
                               "headers_stripped": _dropped, "page_titles": page_titles,
+                              "captions": captions,
                               "images_available": bool(images), "tables_text_only": True}
     if ext == ".docx" or raw[:2] == b"PK":
         import tempfile
@@ -346,10 +428,300 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
     return secs, [], {"text_source": "text", "chars": len(text), "images_available": False}
 
 
-def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: int = 0,
-          limit_chars: int = 6000, inline_media: bool = False, doc_title: str = "") -> dict:
-    """取原件 + 解析 → `outline` / `section` / `image` / `full`（逐字，不改写 ✓）。
+# ---------------------------------------------------------------------------
+# VLM 识图（2026-11-05）：`action="image_read"`
+#   · 图 → 容器内压缩（02 无 Pillow）→ OpenAI 兼容 `/chat/completions`
+#   · **额度闸门** `BODHI_VLM_RPM`（默认 2 次/分钟；0=不限）
+#   · 结果按 (图, 问题) 缓存；命中**不占额度**；失败绝不影响正文读取
+# ---------------------------------------------------------------------------
+def _vlm_env_int(name: str, dflt: int) -> int:
+    try:                        # 同样剥掉 `.env` 行尾注释（`# …`）
+        return int(str(os.environ.get(name, str(dflt)) or dflt).split("#", 1)[0].strip())
+    except ValueError:
+        return dflt
 
+
+def _vlm_dir() -> str:
+    d = os.path.join(doc_root(), "vlm")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _vlm_gate() -> dict:
+    """**频度闸门**：`BODHI_VLM_RPM` 次/分钟（默认 2，0=不限）。
+
+    跨进程安全：`state/doc_parse/vlm/.rate.json` + `flock`。
+    额度不足时**等待**至多 `BODHI_VLM_WAIT_MAX`（默认 120s）；仍不足则回
+    `{ok:False, rate_limited:True, retry_after}` —— 调用方**不得**把这种情况
+    当作「图上没有该信息」（这是"没看到"，不是"不存在"）。
+    """
+    rpm = _vlm_env_int("BODHI_VLM_RPM", 2)
+    if rpm <= 0:
+        return {"ok": True, "rpm": 0}
+    import time
+
+    wait_max = _vlm_env_int("BODHI_VLM_WAIT_MAX", 120)
+    path = os.path.join(_vlm_dir(), ".rate.json")
+    deadline = time.time() + max(0, wait_max)
+    while True:
+        fh = None
+        try:
+            import fcntl
+        except ImportError:                    # 非 POSIX：退化为不加锁
+            fcntl = None
+        try:
+            fh = open(path, "a+")
+        except OSError:
+            return {"ok": True, "rpm": rpm, "degraded": "rate_file_unavailable"}
+        retry = 1
+        try:
+            if fcntl:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            fh.seek(0)
+            try:
+                slots = [float(x) for x in (json.loads(fh.read() or "[]") or [])]
+            except Exception:  # noqa: BLE001
+                slots = []
+            now = time.time()
+            slots = [t for t in slots if now - t < 60]
+            if len(slots) < rpm:
+                slots.append(now)
+                fh.seek(0)
+                fh.truncate()
+                fh.write(json.dumps(slots))
+                fh.flush()
+                return {"ok": True, "rpm": rpm, "used": len(slots)}
+            retry = max(1, int(60 - (now - slots[0])) + 1)
+        finally:
+            try:
+                if fh:
+                    fh.close()
+            except Exception:  # noqa: BLE001
+                pass
+        if time.time() + retry > deadline:
+            return {"ok": False, "rate_limited": True, "rpm": rpm, "retry_after": retry,
+                    "hint": ("VLM 额度已用尽（%d 次/分钟）⇒ 约 %ds 后再试；"
+                             "**不要**把「本次没调到」写成「图上没有该信息」" % (rpm, retry))}
+        time.sleep(min(retry, 5))
+
+
+def _vlm_shrink(raw: bytes, target_kb: int) -> bytes:
+    """原图 → 送 VLM 的压缩版（容器内 Pillow；任何失败都原样返回，不抛）。"""
+    if not raw:
+        return b""
+    try:
+        cname = _docreader_container()
+        helper = _ensure_helper(cname)
+        r = subprocess.run(
+            ["docker", "exec", "-i", cname, "python3", helper, "--shrink-only",
+             "--max-side=%d" % _vlm_env_int("BODHI_VLM_MAX_SIDE", 1400),
+             "--target-kb=%d" % max(64, int(target_kb))],
+            input=raw, capture_output=True,
+            timeout=_vlm_env_int("BODHI_VLM_SHRINK_TIMEOUT", 60))
+        if r.returncode == 0 and r.stdout:
+            return r.stdout
+    except Exception:  # noqa: BLE001
+        pass
+    return raw
+
+
+_VLM_PROMPT = """你是**部署架构图**的结构化识别器。只输出一个 JSON 对象，不要解释、不要 Markdown 代码块。
+
+输出结构：
+{{"watermark_text":"","texts":[{{"text":"","location":"","bbox":[0,0,0,0],"color":""}}],
+"lines":[{{"from":"","to":"","style":"solid|dashed|arc","arrow":"single|double|none","label":"","color":""}}],
+"legend":[{{"text":"","means":""}}],
+"uncertain":[{{"what":"","location":"","why":""}}]}}
+
+硬要求：
+1) `texts` 逐字抄写图上**全部**文字（地区/云/AZ/机房/单元/分片数字/组件/图例/注释），保持原语言；
+   `location` 取 左上/上中/右上/左中/中/右中/左下/下中/右下；`bbox` 为归一化 [x1,y1,x2,y2]（0-1，x1<x2、y1<y2）；
+   `color` 写文字或色块主色（red/blue/green/purple/black/gray/orange），无则空串。
+2) `lines` 写**结构关系**：`style` 必须区分 solid（实线）/dashed（虚线）/arc（跨区弧线）；
+   `arrow` 取 single/double/none；`label` 抄线上的字（如「同步」「数据同步」）。
+   **跨云、跨大区的连线也要写**，不要只写机房内部。
+3) `legend` 把图例**逐项**抄出来并写含义（如 红块=应用故障）。
+4) 图上若有斜向重复水印（人名+编号）：只在 `watermark_text` 写**一次**，**绝不**混入 texts/lines。
+5) 看不清的放 `uncertain`（位置+原因），**不要猜**；宁可少写不可编。
+
+本次关注点：{question}
+"""
+
+
+def _vlm_clean(v: str) -> str:
+    """`.env` 的值可能带行尾注释（systemd `EnvironmentFile` **不剥** `#…`）⇒ 这里清掉。
+
+    2026-11-05 实测：`BODHI_VLM_BASE_URL=…/v1   # 默认` ⇒ URL 含空格 ⇒ `InvalidURL`。
+    """
+    return str(v or "").split("#", 1)[0].strip()
+
+
+def _vlm_chat(img: bytes, question: str) -> dict:
+    """调 OpenAI 兼容 VLM（默认 OVH Qwen2.5-VL-72B，`.env` 可覆盖）。"""
+    import urllib.request
+
+    base = (_vlm_clean(os.environ.get("BODHI_VLM_BASE_URL"))
+            or "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1").rstrip("/")
+    model = _vlm_clean(os.environ.get("BODHI_VLM_MODEL")) or "Qwen2.5-VL-72B-Instruct"
+    key = _vlm_clean(os.environ.get("BODHI_VLM_API_KEY"))
+    body = {"model": model, "temperature": 0,
+            "max_tokens": _vlm_env_int("BODHI_VLM_MAX_TOKENS", 4096),
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": _VLM_PROMPT.format(question=question or "无")},
+                {"type": "image_url",
+                 "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(img).decode()}}]}]}
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(base + "/chat/completions",
+                                 data=json.dumps(body).encode(), headers=headers)
+    with urllib.request.urlopen(req, timeout=_vlm_env_int("BODHI_VLM_TIMEOUT", 300)) as r:
+        data = json.loads(r.read().decode("utf-8", "replace"))
+    content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    return {"model": model, "content": content, "usage": data.get("usage") or {}}
+
+
+def _vlm_parse_json(text: str) -> dict:
+    """从模型输出抠 JSON（容忍 ```json 包裹、前后废话）。"""
+    import re as _re
+
+    s = str(text or "").strip()
+    m = _re.search(r"```(?:json)?\s*(\{.*\})\s*```", s, _re.S)
+    s = m.group(1) if m else s
+    if not m:
+        i, j = s.find("{"), s.rfind("}")
+        if i >= 0 and j > i:
+            s = s[i:j + 1]
+    try:
+        got = json.loads(s)
+    except Exception:  # noqa: BLE001
+        return {"_error": "bad_json", "_raw_head": str(text or "")[:500]}
+    return got if isinstance(got, dict) else {"_error": "not_object"}
+
+
+def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "", base: dict = None) -> dict:
+    """读**一张图** → 契约 v0（nodes/edges/annotations/ambiguity/todo）。
+
+    缓存 `state/doc_parse/vlm/<doc_id>_img<N>_<sha>.json`（同图同问题不重复调、不占额度）；
+    任何失败都回 `{ok:False, error…}`，**绝不抛**（正文链路不受影响）。
+    """
+    import hashlib
+    import time
+
+    t0 = time.time()
+    base = dict(base or {})
+    figs = list(base.pop("_figures", []) or [])
+    if not figs:
+        return {**base, "ok": False, "tool": "ext_doc_parse", "action": "image_read",
+                "error": "no_images",
+                "hint": "该文档没有可读的正文图（先用 action=image 看 images 数量）"}
+    pick = [f for f in figs if int(f.get("fig_no") or 0) == int(figure_no)] if figure_no else figs[:1]
+    if not pick:
+        return {**base, "ok": False, "action": "image_read", "error": "figure_not_found",
+                "figure_no": figure_no,
+                "available": [{"figure_no": f.get("fig_no"), "page": f.get("page"),
+                               "name": f.get("name"), "caption": f.get("caption")}
+                              for f in figs[:20]]}
+    fig = pick[0]
+    path = os.path.join(doc_root(), str(fig.get("path") or ""))
+    if not os.path.isfile(path):
+        return {**base, "ok": False, "action": "image_read", "error": "image_unreadable",
+                "figure": {"figure_no": fig.get("fig_no"), "name": fig.get("name")}}
+    try:
+        raw = open(path, "rb").read()
+    except OSError as exc:
+        return {**base, "ok": False, "action": "image_read", "error": "read_failed",
+                "detail": repr(exc)[:120]}
+
+    q = str(question or "").strip()
+    ck = hashlib.sha256(("%s|%s|%s" % (doc_id, fig.get("fig_no"), q)).encode()).hexdigest()[:16]
+    cache_fp = os.path.join(_vlm_dir(), "%s_img%s_%s.json" % (doc_id, fig.get("fig_no"), ck))
+    fmeta = {"figure_no": fig.get("fig_no"), "page": fig.get("page"),
+             "name": fig.get("name"), "caption": fig.get("caption") or "",
+             "url": fig.get("url") or "", "orig_bytes": len(raw)}
+    if os.path.isfile(cache_fp):
+        try:
+            got0 = json.load(open(cache_fp, encoding="utf-8"))
+            return {**base, "ok": True, "action": "image_read", "figure": fmeta,
+                    "cache": "hit", "extraction": got0.get("extraction") or {},
+                    "contract": got0.get("contract") or {}, "usage": got0.get("usage") or {},
+                    "duration_ms": {**((base.get("duration_ms") or {})), "vlm": 0,
+                                    "total": int((time.time() - t0) * 1000)},
+                    "hint": "命中缓存（未消耗 VLM 额度）；引用请带 bbox/evidence + confidence"}
+        except Exception:  # noqa: BLE001
+            pass
+
+    gate = _vlm_gate()
+    if not gate.get("ok"):
+        return {**base, "ok": False, "action": "image_read", "figure": fmeta,
+                "error": "rate_limited", **gate,
+                "duration_ms": {**((base.get("duration_ms") or {})), "vlm": 0,
+                                "total": int((time.time() - t0) * 1000)}}
+    return _vlm_run(raw, fig, fmeta, cache_fp, q, base, t0)
+
+
+def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
+              base: dict, t0: float) -> dict:
+    """真正发一次 VLM 并把输出规整成契约 v0（失败**只**影响本图）。"""
+    import time
+
+    img = _vlm_shrink(raw, _vlm_env_int("BODHI_VLM_MAX_KB", 400))
+    t1 = time.time()
+    try:
+        got = _vlm_chat(img, q)
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "action": "image_read", "figure": fmeta,
+                "error": "vlm_failed", "detail": repr(exc)[:200],
+                "hint": ("VLM 不可达/超时 ⇒ 该图**判不了**（不是「图上没有」）；"
+                         "正文与其他 action 不受影响"),
+                "duration_ms": {**((base.get("duration_ms") or {})),
+                                "vlm": int((time.time() - t1) * 1000),
+                                "total": int((time.time() - t0) * 1000)}}
+    parsed = _vlm_parse_json(got.get("content") or "")
+    if "_error" in parsed:
+        extraction = parsed
+    else:
+        extraction = {k: parsed.get(k) for k in
+                      ("texts", "lines", "legend", "uncertain", "watermark_text")}
+    nodes = [{"label": t.get("text"), "location": t.get("location"),
+              "bbox": t.get("bbox"), "color": t.get("color")}
+             for t in (parsed.get("texts") or []) if isinstance(t, dict)]
+    edges = [{"from": e.get("from"), "to": e.get("to"), "style": e.get("style"),
+              "arrow": e.get("arrow"), "label": e.get("label"), "color": e.get("color")}
+             for e in (parsed.get("lines") or []) if isinstance(e, dict)]
+    anns = [{"key": "legend", "value": l.get("means"), "evidence": l.get("text"),
+             "confidence": 0.9}
+            for l in (parsed.get("legend") or []) if isinstance(l, dict)]
+    contract = {"nodes": nodes, "edges": edges, "annotations": anns,
+                "ambiguity": parsed.get("uncertain") or [],
+                "watermark": parsed.get("watermark_text") or "",
+                "todo": [] if nodes else [{"action": "人工看图", "assignee": "human"}],
+                "gate": {"nodes": len(nodes), "edges": len(edges),
+                         "missing_bbox": len([n for n in nodes if not n.get("bbox")])}}
+    out = {**base, "ok": True, "action": "image_read", "figure": fmeta, "cache": "miss",
+           "channel": "vlm:" + str(got.get("model")), "extraction": extraction,
+           "contract": contract, "usage": got.get("usage") or {},
+           "duration_ms": {**((base.get("duration_ms") or {})),
+                           "vlm": int((time.time() - t1) * 1000),
+                           "total": int((time.time() - t0) * 1000)},
+           "hint": ("识别结果是**图上读到的**，不是正文；引用时写 location/bbox + confidence；"
+                    "`uncertain` 里的条目**不得**当结论用")}
+    try:
+        with open(cache_fp, "w", encoding="utf-8") as fh:
+            json.dump({"extraction": extraction, "contract": contract,
+                       "usage": got.get("usage") or {}}, fh, ensure_ascii=False)
+    except OSError:
+        pass
+    return out
+
+
+def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: int = 0,
+          limit_chars: int = 6000, inline_media: bool = False, doc_title: str = "",
+          figure_no: int = 0, question: str = "") -> dict:
+    """取原件 + 解析 → `outline` / `section` / `image` / `image_read` / `full`（逐字，不改写 ✓）。
+
+    - `image`      ：取图 + 按预算内联 base64（受 WeKnora 24000 字符回执上限约束）
+    - `image_read` ：**VLM 识图**（一次只读一张；受 `BODHI_VLM_RPM` 限流）→ 契约 v0 文本
     回执带 `duration_ms{fetch,parse,total}` 与 `bytes`（2026-10-28：超时排查用，只量不改语义）。
     """
     import time
@@ -363,7 +735,7 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                 "duration_ms": {"fetch": t_fetch, "parse": 0, "total": t_fetch}, **meta}
     did = str(doc_id or "").strip()
     title = str(doc_title or "").strip() or did
-    need_images = action == "image"
+    need_images = action in ("image", "image_read", "section")
     # C（2026-10-29）：**小 PDF 在 outline 时顺手取图**（一次解析、成本低）；
     # 大文件仍延后到 action="image"，避免把"读正文"拖慢。
     if not need_images and action == "outline" and raw[:5] == b"%PDF-":
@@ -412,6 +784,18 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                         "（首次解析较慢，之后命中缓存；涉及图的规则必须用图判定）")
 
 
+    if action == "image_read":
+        figs = [{"fig_no": n, "page": x.get("page"), "name": x.get("name"),
+                 "path": x.get("path"), "caption": x.get("caption") or "",
+                 "url": ("/bodhi/ext/doc-image?doc_id=%s&name=%s"
+                         % (did, x.get("name") or "")),
+                 "bytes": x.get("bytes"),
+                 "context": {"section": _page_section(quality, int(x.get("page") or 1)),
+                             "page": x.get("page")}}
+                for n, x in enumerate(images, 1)]
+        return _vlm_read(did, figure_no=figure_no, question=question,
+                         base={**base, "_figures": figs})
+
     if action == "outline":
         return {**base, "outline": [{"path": s.get("path") or "", "title": s.get("title") or "",
                                      "chars": len(s.get("text") or "")} for s in secs],
@@ -456,28 +840,11 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
             item["content_type"] = ("image/jpeg" if ext in ("jpg", "jpeg")
                                     else ("image/png" if ext == "png" else "application/octet-stream"))
             item["url"] = "/bodhi/ext/doc-image?doc_id=%s&name=%s" % (did, x.get("name") or "")
-            # 5) 上下文标注：**用该页的首个编号标题**（没有则向前找最近的非空标题）；
-            #    不按页码比例猜章节、也不塞表格正文（2026-11-05：第 3 页部署图被误标成"设备申请清单"）
+            # 5) 上下文标注：`_page_section()` 统一口径（页内标题 + 表格节回退）
             try:
-                titles = quality.get("page_titles") or []
-                pg = int(x.get("page") or 1)
-                hit_t = ""
-                for k in range(min(pg, len(titles)) - 1, -1, -1):
-                    if str(titles[k] or "").strip():
-                        hit_t = str(titles[k]).strip()
-                        break
-                if hit_t:
-                    # 版式词（清单/表格/附表/目录…）说明这页标题是**表格节**，图通常画在它之前
-                    # ⇒ 改用上一页的标题（2026-11-05：第 3 页"3 设备申请清单"把部署图误标成表格）
-                    import re as _re3
-                    _tbl = _re3.compile(r"(清单|表格|附表|目录|明细|统计表)")
-                    if _tbl.search(hit_t):
-                        for k in range(min(pg, len(titles)) - 2, -1, -1):
-                            t_k = str(titles[k] or "").strip()
-                            if t_k and not _tbl.search(t_k):
-                                hit_t = t_k
-                                break
-                    item["context"] = {"section": hit_t, "page": pg}
+                sec = _page_section(quality, int(x.get("page") or 1))
+                if sec:
+                    item["context"] = {"section": sec, "page": int(x.get("page") or 1)}
             except Exception:  # noqa: BLE001
                 pass
             kept.append(item)
@@ -495,27 +862,39 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
         total_cap = _kb("BODHI_IMG_INLINE_TOTAL_KB", 256) * 1024
         max_n = _kb("BODHI_IMG_INLINE_MAX", 2)
         total_b64, selected = 0, []
-        for idx, item in enumerate(sorted(out, key=lambda x: -int(x.get("bytes") or 0))):
+
+        def _inline_file(it):
+            """内联用**压缩版**（`_inline.jpg`）；该图没压缩过则用原图 ✓"""
+            rel = it.get("inline_path") or it.get("path") or ""
+            return (os.path.join(doc_root(), str(rel)),
+                    int(it.get("inline_bytes") or it.get("bytes") or 0))
+
+        order = sorted(out, key=lambda x: -_inline_file(x)[1])
+        for idx, item in enumerate(order):
             if not inline_media:
                 break
             if max_n > 0 and idx >= max_n:
                 item["inline_skipped"] = "count_cap"
                 continue
-            if int(item.get("bytes") or 0) > cap:
+            ipath, isize = _inline_file(item)
+            if isize > cap:
                 item["inline_skipped"] = "too_large"
                 continue
-            p = os.path.join(doc_root(), str(item.get("path") or ""))
             try:
-                enc = base64.b64encode(open(p, "rb").read()).decode()
+                enc = base64.b64encode(open(ipath, "rb").read()).decode()
             except Exception:  # noqa: BLE001
                 continue
             if total_b64 + len(enc) > total_cap:
                 item["inline_skipped"] = "payload_cap"
                 continue
             total_b64 += len(enc)
-            item["data_url"] = "data:%s;base64,%s" % (item.get("content_type"), enc)
+            ctype = ("image/jpeg" if ipath.lower().endswith((".jpg", ".jpeg"))
+                     else (item.get("content_type") or "image/png"))
+            item["data_url"] = "data:%s;base64,%s" % (ctype, enc)
+            item["inline_type"] = ctype
             selected.append({"page": item.get("page"), "name": item.get("name"),
-                             "bytes": item.get("bytes"), "compressed": item.get("compressed")})
+                             "bytes": isize, "orig_bytes": item.get("bytes"),
+                             "compressed": bool(item.get("inline_path"))})
         return {**base, "images": out, "counts": {"sections": len(secs), "images": len(out)},
                 "inline_selected": selected, "inline_bytes_total": total_b64,
                 "inline_budget_kb": total_cap // 1024, "inline_max": max_n,
@@ -546,12 +925,40 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
     out = {**base, "path": s.get("path") or "", "title": s.get("title") or "",
            "text": cut, "chars": len(text), "truncated": len(cut) < len(text),
            "cursor": i, "total_sections": len(secs)}
+    # 本节相关的图（`_page_section` 归属）+ 图注 ⇒ 给**占位符**；需要图内信息再 image_read
+    # 匹配用**章节编号**（`2.3`）：切节器的 path 可能是「2.3 2.3 部署架构」，与页内标题字面不等
+    import re as _re_sec
+
+    def _sec_no(s) -> str:
+        m = _re_sec.match(r"\s*(\d+(?:\.\d+){0,3})", str(s or ""))
+        return m.group(1) if m else ""
+
+    figs = []
+    for n, x in enumerate(images, 1):
+        sec_t = _page_section(quality, int(x.get("page") or 1))
+        path_t = str(s.get("path") or "")
+        same = bool(sec_t) and bool(path_t) and (
+            sec_t.startswith(path_t) or path_t.startswith(sec_t)
+            or (_sec_no(sec_t) and _sec_no(sec_t) == _sec_no(path_t)))
+        if same:
+            figs.append({"figure_no": n, "page": x.get("page"), "name": x.get("name"),
+                         "caption": x.get("caption") or "",
+                         "url": ("/bodhi/ext/doc-image?doc_id=%s&name=%s"
+                                 % (did, x.get("name") or "")),
+                         "placeholder": "[[图%d｜p%s｜%s]]" % (
+                             n, x.get("page"), x.get("caption") or x.get("name") or "")})
     if i + 1 < len(secs):
         out["next_cursor"] = i + 1
         out["next_path"] = secs[i + 1].get("path") or ""
         out["next"] = "继续请传 cursor=%d（或 section_path=%s）" % (i + 1, out["next_path"])
     else:
         out["next_cursor"] = None
-        out["next"] = "已是最后一节；需要图证据请调 action=image"
+        out["next"] = "已是最后一节"
+    if figs:
+        out["figures"] = figs
+        out["figure_placeholders"] = [f["placeholder"] for f in figs]
+        out["next"] = (out["next"] +
+                       "；本节含图 %d 张 ⇒ 需要图内信息调 "
+                       "`action=image_read, figure_no=N`（受 VLM 限流）" % len(figs))
     return out
 

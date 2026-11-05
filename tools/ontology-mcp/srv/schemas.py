@@ -786,12 +786,22 @@ TOOL_SCHEMAS = [
             "name": "ext_doc_parse",
             "description": ("**解析外部文档正文（本地解析，不共享磁盘）**：`GET /files/<doc_id>` 取原件 → "
                             "PDF 走 docreader（bytes 从 stdin 进容器）/ DOCX 标准库 / 文本直读 → "
-                            "`action=outline|section|image|full`。正文**逐字**返回（不改写 ✗）。"),
+                            "`action=outline|section|image|image_read|full`。正文**逐字**返回（不改写 ✗）。\n"
+                            "- `image`：取正文图 + 预算内联（图注/章节随图返回；base64 受回执长度上限约束）\n"
+                            "- `image_read`：**VLM 识图**（一次一张，默认 OVH Qwen2.5-VL-72B；"
+                            "受 `BODHI_VLM_RPM` 限流、结果按图缓存）→ 契约 v0（texts/lines/legend/"
+                            "uncertain + nodes/edges/annotations，每条带 bbox/evidence）。"
+                            "**图内信息不得凭正文臆断**；限流失败是「没调到」≠「图上没有」"),
             "inputSchema": {"type": "object", "properties": {
                 "doc_id": {"type": "string", "description": "it_platform 的 doc_id（ext_doc_push 回执里给）"},
-                "action": {"type": "string", "enum": ["outline", "section", "image", "full"]},
+                "action": {"type": "string",
+                           "enum": ["outline", "section", "image", "image_read", "full"]},
                 "section_path": {"type": "string"}, "cursor": {"type": "integer"},
                 "limit_chars": {"type": "integer"}, "inline_media": {"type": "boolean"},
+                "figure_no": {"type": "integer",
+                              "description": "image_read 用：第几张图（1 起；缺省取第 1 张）"},
+                "question": {"type": "string",
+                             "description": "image_read 用：本次关注点（如「部署方式与灾备方式」）"},
                 "doc_title": {"type": "string"}},
                 "required": ["doc_id"]},
         },

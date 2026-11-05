@@ -46,4 +46,6 @@ def ext_doc_parse(args: dict) -> dict:
                    cursor=int(args.get("cursor") or 0),
                    limit_chars=int(args.get("limit_chars") or 6000),
                    inline_media=bool(args.get("inline_media", True)),
-                   doc_title=str(args.get("doc_title", "")))
+                   doc_title=str(args.get("doc_title", "")),
+                   figure_no=int(args.get("figure_no") or 0),
+                   question=str(args.get("question") or ""))

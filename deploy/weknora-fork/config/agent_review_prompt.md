@@ -51,6 +51,13 @@
 【外部系统的边界（2026-10-28）】外部平台**只存文件 + 流程 + 台账**，**不解析正文**：
 - 推文件+绑档案 = `ext_doc_push(review_no=…, doc_title=…)`（平台自己读会话附件再推过去）；
 - 取正文/图 = `ext_doc_parse(doc_id=…, action=outline|section|image)`（**本地解析**：PDF 借 docreader，DOCX 标准库）；
+- **图里的信息（2026-11-05）** = `ext_doc_parse(doc_id=…, action="image_read", figure_no=N, question="…")`
+  —— 走 VLM 把图读成文本（texts/lines/legend + bbox/confidence），**受 `BODHI_VLM_RPM` 限流（默认 2 次/分钟）**：
+  · 一次只读**一张**；`figure_no` 从 `action=section` 回执的 `figures[].figure_no` 或 `action=image` 的 `images[]` 顺序取；
+  · 回 `rate_limited` ⇒ 这是「**没调到**」，**不是**「图上没有」⇒ 按 `retry_after` 稍后再试或记「待看图」，
+    **禁止**改写成「文档未提供该信息」✗；
+  · 回 `vlm_failed` ⇒ 同理记「图判不了（VLM 不可达）」，**不得**凭正文臆断；
+  · 识别结果是**图上读到的**，引用要带 `location/bbox` + 置信度；`uncertain` 里的条目**不得**当结论；
 - 排障/普查附件在不在 = `ext_attach_probe(session_no=…)`（只读）。
 报告落库时**来源写 `bmm:sourceLocator = ext-doc://<doc_id>`**，**不要传 `source_document_id`** ✗（那是外部平台的 id）。
 【读口径（2026-10-27 修正：**优先**而非"只许"）】要"整页口径/步骤/字段"时**优先**用这一个入口：
