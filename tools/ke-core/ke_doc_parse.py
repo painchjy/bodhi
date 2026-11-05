@@ -28,7 +28,6 @@ import sys, json, io, base64
 with_images = "--with-images" in sys.argv
 max_img_pages = 0
 max_side = 1400
-inline_kb = 128
 for a in sys.argv:
     if a.startswith("--max-img-pages="):
         try:
@@ -40,11 +39,6 @@ for a in sys.argv:
             max_side = int(a.split("=", 1)[1] or 1400)
         except Exception:
             max_side = 1400
-    elif a.startswith("--inline-kb="):
-        try:
-            inline_kb = int(a.split("=", 1)[1] or 128)
-        except Exception:
-            inline_kb = 128
 
 try:
     from PIL import Image
@@ -132,15 +126,11 @@ for i, pg in enumerate(rd.pages, 1):
         if ext not in ("png", "jpg", "jpeg", "gif", "bmp", "emf", "wmf"):
             ext = "png"
         orig = len(b)
-        # 2026-11-05（用户口径）：**落盘存原图**（VLM 识图/人工复核要看清小字），
-        # 压缩版只用于「内联进模型上下文」⇒ 两份分开，互不覆盖 ✓
-        cb, compressed = _shrink(b, inline_kb * 1024)
+        # 2026-11-05（用户口径）：**落盘只存原图**；不再产出「内联压缩版」
+        # （`action=image` 已下线：模型侧走「section.figures 清单 + image_read 识图」）
         out["images"].append({"page": i, "index": j, "ext": ext,
                               "b64": base64.b64encode(b).decode(),
-                              "b64c": base64.b64encode(cb).decode() if compressed else "",
-                              "bytes": len(b), "orig_bytes": orig,
-                              "inline_bytes": len(cb),
-                              "compressed": bool(compressed)})
+                              "bytes": len(b), "orig_bytes": orig})
         n += 1
 print(json.dumps(out))
 '''
@@ -206,9 +196,8 @@ def _pdf_extract(raw: bytes, with_images: bool = False) -> dict:
         if with_images:
             max_pages = int(os.environ.get("BODHI_PDF_MAX_IMAGE_PAGES", "20") or 0)
             max_side = int(os.environ.get("BODHI_IMG_MAX_SIDE", "1400") or 1400)
-            inline_kb = int(os.environ.get("BODHI_IMG_MAX_KB", "96") or 96)
             args += ["--with-images", "--max-img-pages=%d" % max_pages,
-                     "--max-side=%d" % max_side, "--inline-kb=%d" % inline_kb]
+                     "--max-side=%d" % max_side]
         timeout = int(os.environ.get("BODHI_PDF_TIMEOUT", "90") or 90)
         r = subprocess.run(args, input=raw, capture_output=True, timeout=timeout)
     except FileNotFoundError:
@@ -328,6 +317,47 @@ def _page_captions(texts: list) -> list:
     return out
 
 
+def _content_images(images: list, quality: dict) -> tuple:
+    """**正文图**（去掉重复 logo / 过小图）→ `(kept, skipped)`。
+
+    `figure_no` 按**全量顺序**编号，保证 `section.figures[].figure_no` 与
+    `image_read(figure_no=N)` 指向同一张图（2026-11-05）。
+    """
+    import hashlib as _hl
+
+    pages_n = int((quality or {}).get("pages") or 0) or 1
+    sig_cnt = {}
+    for x in images or []:
+        p = os.path.join(doc_root(), str(x.get("path") or ""))
+        if os.path.isfile(p):
+            try:
+                h = _hl.md5(open(p, "rb").read()).hexdigest()
+                sig_cnt[h] = sig_cnt.get(h, 0) + 1
+            except Exception:  # noqa: BLE001
+                pass
+    kept, skipped = [], []
+    for n, x in enumerate(images or [], 1):
+        p = os.path.join(doc_root(), str(x.get("path") or ""))
+        if not os.path.isfile(p):
+            skipped.append({"page": x.get("page"), "reason": "unreadable"})
+            continue
+        size = os.path.getsize(p)
+        try:
+            h = _hl.md5(open(p, "rb").read()).hexdigest()
+        except Exception:  # noqa: BLE001
+            h = ""
+        if h and pages_n >= 3 and sig_cnt.get(h, 0) * 2 >= pages_n:
+            skipped.append({"page": x.get("page"), "reason": "repeated_logo", "bytes": size})
+            continue
+        if size < 6000:
+            skipped.append({"page": x.get("page"), "reason": "tiny", "bytes": size})
+            continue
+        kept.append({"figure_no": n, "page": x.get("page"), "name": x.get("name"),
+                     "path": x.get("path"), "bytes": size,
+                     "caption": x.get("caption") or ""})
+    return kept, skipped
+
+
 def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
                          with_images: bool = False) -> tuple:
     """按类型选解析器 → `(sections, images, quality)`。
@@ -364,21 +394,7 @@ def _sections_and_images(raw: bytes, doc_id: str, title: str, name: str,
             item = {"name": "图片%d.%s" % (k, ext),
                     "path": "files/" + fn, "page": im.get("page"),
                     "bytes": len(data),
-                    "orig_bytes": int(im.get("orig_bytes") or len(data)),
-                    "compressed": bool(im.get("compressed"))}
-            # 内联用的压缩版：原图另存后单独落一份，`action=image` 的内联预算按它算
-            cin = im.get("b64c") or ""
-            if cin:
-                try:
-                    cdata = base64.b64decode(cin)
-                except Exception:  # noqa: BLE001
-                    cdata = b""
-                if cdata:
-                    cfn = "%s_img%d_inline.jpg" % (doc_id, k)
-                    with open(os.path.join(sub, cfn), "wb") as fh:
-                        fh.write(cdata)
-                    item["inline_path"] = "files/" + cfn
-                    item["inline_bytes"] = len(cdata)
+                    "orig_bytes": int(im.get("orig_bytes") or len(data))}
             # 图注（该页文本里的「图 N：…」）→ 不调 VLM 也能引用图的语义
             _pg = int(im.get("page") or 0)
             _caps = captions[_pg - 1] if 0 < _pg <= len(captions) else []
@@ -636,9 +652,14 @@ def _vlm_parse_json(text: str) -> dict:
     return got if isinstance(got, dict) else {"_error": "not_object"}
 
 
-def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "", base: dict = None) -> dict:
-    """读**一张图** → 契约 v0（nodes/edges/annotations/ambiguity/todo）。
+def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "",
+              figure_name: str = "", detail: str = "compact",
+              base: dict = None) -> dict:
+    """读**一张图** → 契约 v0（nodes/edges/annotations/ambiguity）。
 
+    - `figure_no` 或 `figure_name` 定位（都来自 `section.figures[]`）
+    - `detail=compact`（默认）只回 label/location/线条（**不带 bbox**，控制回执体积）；
+      `detail=full` 带 bbox（可做像素级复核）
     缓存 `state/doc_parse/vlm/<doc_id>_img<N>_<sha>.json`（同图同问题不重复调、不占额度）；
     任何失败都回 `{ok:False, error…}`，**绝不抛**（正文链路不受影响）。
     """
@@ -651,19 +672,26 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "", base: dict = 
     if not figs:
         return {**base, "ok": False, "tool": "ext_doc_parse", "action": "image_read",
                 "error": "no_images",
-                "hint": "该文档没有可读的正文图（先用 action=image 看 images 数量）"}
-    pick = [f for f in figs if int(f.get("fig_no") or 0) == int(figure_no)] if figure_no else figs[:1]
+                "hint": "该文档没有可读的正文图（先 action=section 看 figures[] 是否为空）"}
+    if figure_no:
+        pick = [f for f in figs if int(f.get("figure_no") or 0) == int(figure_no)]
+    elif str(figure_name or "").strip():
+        nm = str(figure_name).strip()
+        pick = ([f for f in figs if str(f.get("name") or "").strip() == nm]
+                or [f for f in figs if nm and nm in str(f.get("name") or "")])
+    else:
+        pick = figs[:1]
     if not pick:
         return {**base, "ok": False, "action": "image_read", "error": "figure_not_found",
-                "figure_no": figure_no,
-                "available": [{"figure_no": f.get("fig_no"), "page": f.get("page"),
+                "figure_no": figure_no, "figure_name": figure_name,
+                "available": [{"figure_no": f.get("figure_no"), "page": f.get("page"),
                                "name": f.get("name"), "caption": f.get("caption")}
                               for f in figs[:20]]}
     fig = pick[0]
     path = os.path.join(doc_root(), str(fig.get("path") or ""))
     if not os.path.isfile(path):
         return {**base, "ok": False, "action": "image_read", "error": "image_unreadable",
-                "figure": {"figure_no": fig.get("fig_no"), "name": fig.get("name")}}
+                "figure": {"figure_no": fig.get("figure_no"), "name": fig.get("name")}}
     try:
         raw = open(path, "rb").read()
     except OSError as exc:
@@ -671,17 +699,28 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "", base: dict = 
                 "detail": repr(exc)[:120]}
 
     q = str(question or "").strip()
-    ck = hashlib.sha256(("%s|%s|%s" % (doc_id, fig.get("fig_no"), q)).encode()).hexdigest()[:16]
-    cache_fp = os.path.join(_vlm_dir(), "%s_img%s_%s.json" % (doc_id, fig.get("fig_no"), ck))
-    fmeta = {"figure_no": fig.get("fig_no"), "page": fig.get("page"),
+    ck = hashlib.sha256(("%s|%s|%s" % (doc_id, fig.get("figure_no"), q)).encode()).hexdigest()[:16]
+    cache_fp = os.path.join(_vlm_dir(), "%s_img%s_%s.json" % (doc_id, fig.get("figure_no"), ck))
+    fmeta = {"figure_no": fig.get("figure_no"), "page": fig.get("page"),
              "name": fig.get("name"), "caption": fig.get("caption") or "",
-             "url": fig.get("url") or "", "orig_bytes": len(raw)}
+             "url": (fig.get("url") or ("/bodhi/ext/doc-image?doc_id=%s&name=%s"
+                                        % (doc_id, fig.get("name") or ""))),
+             "orig_bytes": len(raw)}
     if os.path.isfile(cache_fp):
         try:
             got0 = json.load(open(cache_fp, encoding="utf-8"))
+            c0 = got0.get("contract") or {}
+            _mb0 = len([n for n in (c0.get("nodes") or []) if not n.get("bbox")])
+            if str(detail or "").strip().lower() != "full":
+                for n in (c0.get("nodes") or []):
+                    n.pop("bbox", None)
+            if isinstance(c0.get("gate"), dict):
+                c0["gate"]["missing_bbox"] = _mb0
             return {**base, "ok": True, "action": "image_read", "figure": fmeta,
-                    "cache": "hit", "extraction": got0.get("extraction") or {},
-                    "contract": got0.get("contract") or {}, "usage": got0.get("usage") or {},
+                    "cache": "hit",
+                    "detail": "compact" if str(detail or "").strip().lower() != "full" else "full",
+                    "extraction": got0.get("extraction") or {},
+                    "contract": c0, "usage": got0.get("usage") or {},
                     "duration_ms": {**((base.get("duration_ms") or {})), "vlm": 0,
                                     "total": int((time.time() - t0) * 1000)},
                     "hint": "命中缓存（未消耗 VLM 额度）；引用请带 bbox/evidence + confidence"}
@@ -694,11 +733,11 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "", base: dict = 
                 "error": "rate_limited", **gate,
                 "duration_ms": {**((base.get("duration_ms") or {})), "vlm": 0,
                                 "total": int((time.time() - t0) * 1000)}}
-    return _vlm_run(raw, fig, fmeta, cache_fp, q, base, t0)
+    return _vlm_run(raw, fig, fmeta, cache_fp, q, base, t0, detail)
 
 
 def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
-              base: dict, t0: float) -> dict:
+              base: dict, t0: float, detail: str = "compact") -> dict:
     """真正发一次 VLM 并把输出规整成契约 v0（失败**只**影响本图）。"""
     import time
 
@@ -747,39 +786,55 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
     anns = [{"key": "legend", "value": l.get("means"), "evidence": l.get("text"),
              "confidence": 0.9}
             for l in (parsed.get("legend") or []) if isinstance(l, dict)]
-    contract = {"nodes": nodes, "edges": edges, "annotations": anns,
+    _missing_bbox = len([n for n in nodes if not n.get("bbox")])   # **pop 之前**统计
+
+    def _mk_contract(ns: list) -> dict:
+        return {"nodes": ns, "edges": edges, "annotations": anns,
                 "ambiguity": parsed.get("uncertain") or [],
                 "watermark": parsed.get("watermark_text") or "",
-                "todo": [] if nodes else [{"action": "人工看图", "assignee": "human"}],
-                "gate": {"nodes": len(nodes), "edges": len(edges),
-                         "missing_bbox": len([n for n in nodes if not n.get("bbox")]),
+                "todo": [] if ns else [{"action": "人工看图", "assignee": "human"}],
+                "gate": {"nodes": len(ns), "edges": len(edges),
+                         "missing_bbox": _missing_bbox,
                          "dangling_ids": _dangling[:10],
                          "dangling_total": len(_dangling)}}
+
+    # 缓存存 **full**（带 bbox），回执按 detail 裁剪 ⇒ 之后 `detail=full` 能直接命中缓存
+    full_contract = _mk_contract([dict(n) for n in nodes])
+    compact = str(detail or "").strip().lower() != "full"
+    if compact:                      # 默认只回 label/location/线条，控制回执体积（bbox 可要 full）
+        for n in nodes:
+            n.pop("bbox", None)
+    contract = _mk_contract(nodes)
     out = {**base, "ok": True, "action": "image_read", "figure": fmeta, "cache": "miss",
+           "detail": "compact" if compact else "full",
            "channel": "vlm:" + str(got.get("model")), "extraction": extraction,
            "contract": contract, "usage": got.get("usage") or {},
            "duration_ms": {**((base.get("duration_ms") or {})),
                            "vlm": int((time.time() - t1) * 1000),
                            "total": int((time.time() - t0) * 1000)},
-           "hint": ("识别结果是**图上读到的**，不是正文；引用时写 location/bbox + confidence；"
-                    "`uncertain` 里的条目**不得**当结论用")}
+           "hint": (("识别结果是**图上读到的**，不是正文；`uncertain` 条目**不得**当结论。"
+                     + ("" if compact else " bbox 为归一化 [x1,y1,x2,y2]。")))}
     try:
-        with open(cache_fp, "w", encoding="utf-8") as fh:
-            json.dump({"extraction": extraction, "contract": contract,
-                       "usage": got.get("usage") or {}}, fh, ensure_ascii=False)
+        if "_error" not in parsed:       # **失败结果不写缓存**（否则会一直命中坏缓存）
+            with open(cache_fp, "w", encoding="utf-8") as fh:
+                json.dump({"extraction": extraction, "contract": full_contract,
+                           "usage": got.get("usage") or {}}, fh, ensure_ascii=False)
     except OSError:
         pass
     return out
 
 
 def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: int = 0,
-          limit_chars: int = 6000, inline_media: bool = False, doc_title: str = "",
-          figure_no: int = 0, question: str = "") -> dict:
-    """取原件 + 解析 → `outline` / `section` / `image` / `image_read` / `full`（逐字，不改写 ✓）。
+          limit_chars: int = 6000, doc_title: str = "",
+          figure_no: int = 0, question: str = "", figure_name: str = "",
+          detail: str = "compact") -> dict:
+    """取原件 + 解析 → `outline` / `section` / `image_read` / `full`（逐字，不改写 ✓）。
 
-    - `image`      ：取图 + 按预算内联 base64（受 WeKnora 24000 字符回执上限约束）
-    - `image_read` ：**VLM 识图**（一次只读一张；受 `BODHI_VLM_RPM` 限流）→ 契约 v0 文本
-    回执带 `duration_ms{fetch,parse,total}` 与 `bytes`（2026-10-28：超时排查用，只量不改语义）。
+    - `section`    ：逐字正文 + `figures[]`（figure_no/page/name/bytes/caption/url/section）
+                     + `figure_placeholders[]`（`[[图N｜pX｜文件名｜url｜图注]]`）
+    - `image_read` ：**识图**（一次一张，`figure_no` 或 `figure_name` 定位；受 `BODHI_VLM_RPM` 限流）
+                     → 契约 v0 文本（`detail=compact` 默认只回 label/location/线条，`full` 带 bbox）
+    - `image`      ：**已下线**（不再回 base64）⇒ 回 `action_removed` + 指引，不静默
     """
     import time
 
@@ -792,9 +847,10 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                 "duration_ms": {"fetch": t_fetch, "parse": 0, "total": t_fetch}, **meta}
     did = str(doc_id or "").strip()
     title = str(doc_title or "").strip() or did
-    need_images = action in ("image", "image_read", "section")
+    # `image` 虽已下线，但仍需取图才能在下线回执里给清单（不含 base64）
+    need_images = action in ("image", "image_read", "section", "outline")
     # C（2026-10-29）：**小 PDF 在 outline 时顺手取图**（一次解析、成本低）；
-    # 大文件仍延后到 action="image"，避免把"读正文"拖慢。
+    # 大文件仍延后到 action="section"/"image_read"，避免把"读正文"拖慢。
     if not need_images and action == "outline" and raw[:5] == b"%PDF-":
         try:
             mb = float(os.environ.get("BODHI_PDF_AUTO_IMAGES_MB", "10") or 10)
@@ -841,123 +897,80 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
                         "（首次解析较慢，之后命中缓存；涉及图的规则必须用图判定）")
 
 
+    # 正文图（去 logo/过小图）；`figure_no` **全局一致** ⇒ section 里看到的号 = image_read 能用的号
+    figs_all, figs_skipped = _content_images(images, quality)
+    base["counts"] = {"sections": len(secs), "images": len(figs_all)}
+    if figs_skipped:
+        base["images_skipped_detail"] = figs_skipped[:40]
+        base["images_skipped_total"] = len(figs_skipped)
+
+    import re as _re_fig
+
+    def _sec_no(x) -> str:
+        m = _re_fig.match(r"\s*(\d+(?:\.\d+){0,3})", str(x or ""))
+        return m.group(1) if m else ""
+
+    def _figs_of(path_t: str) -> list:
+        """某章节的图（用**章节编号**匹配：切节器 path 可能是「2.3 2.3 部署架构」）。"""
+        no = _sec_no(path_t)
+        out = []
+        for f in figs_all:
+            sec_t = _page_section(quality, int(f.get("page") or 1))
+            same = bool(sec_t) and bool(path_t) and (
+                sec_t.startswith(path_t) or path_t.startswith(sec_t)
+                or (no and _sec_no(sec_t) == no))
+            if same:
+                out.append(f)
+        return out
+
+    def _fig_brief(f: dict) -> dict:
+        """给模型看的图元数据（**不含 base64**）。"""
+        return {"figure_no": f.get("figure_no"), "page": f.get("page"),
+                "name": f.get("name"), "bytes": f.get("bytes"),
+                "caption": f.get("caption") or "",
+                "section": _page_section(quality, int(f.get("page") or 1)),
+                "url": ("/bodhi/ext/doc-image?doc_id=%s&name=%s"
+                        % (did, f.get("name") or ""))}
+
+    def _fig_placeholder(f: dict) -> str:
+        """正文占位符：图号｜页码｜文件名｜url｜图注 —— 自带定位信息，可直接引用或拿去 image_read。"""
+        b = _fig_brief(f)
+        return "[[图%s｜p%s｜%s｜%s｜%s]]" % (
+            b["figure_no"], b["page"], b["name"] or "", b["url"] or "",
+            b["caption"] or b["name"] or "")
+
     if action == "image_read":
-        figs = [{"fig_no": n, "page": x.get("page"), "name": x.get("name"),
-                 "path": x.get("path"), "caption": x.get("caption") or "",
-                 "url": ("/bodhi/ext/doc-image?doc_id=%s&name=%s"
-                         % (did, x.get("name") or "")),
-                 "bytes": x.get("bytes"),
-                 "context": {"section": _page_section(quality, int(x.get("page") or 1)),
-                             "page": x.get("page")}}
-                for n, x in enumerate(images, 1)]
-        return _vlm_read(did, figure_no=figure_no, question=question,
-                         base={**base, "_figures": figs})
+        return _vlm_read(did, figure_no=figure_no, figure_name=figure_name,
+                         question=question, detail=detail,
+                         base={**base, "_figures": figs_all})
 
     if action == "outline":
-        return {**base, "outline": [{"path": s.get("path") or "", "title": s.get("title") or "",
-                                     "chars": len(s.get("text") or "")} for s in secs],
-                "sections_total": len(secs),
-                "next": ("取正文用 action=section（section_path 或 cursor 定位）；"
-                         "**需要图证据请直接调 action=image**（下面的 next_args 可直接用）"),
-                "next_args": {"doc_id": did, "action": "image"},
-                "hint": "取正文用 action=section（section_path 或 cursor 定位）"}
+        return {**base,
+                "outline": [{"path": s.get("path") or "", "title": s.get("title") or "",
+                             "chars": len(s.get("text") or ""),
+                             "figures": len(_figs_of(str(s.get("path") or "")))}
+                            for s in secs],
+                "sections_total": len(secs), "figures_total": len(figs_all),
+                "next": ("取正文用 action=section（section_path 或 cursor 定位）——"
+                         "回执带该节 `figures[]` 与 `figure_placeholders[]`（含 url 与图注）；"
+                         "**图内信息调 action=image_read(figure_no=N)**"),
+                "hint": "取正文用 action=section；图内信息用 action=image_read"}
     if action == "image":
-        # 4) 只取正文图：重复 logo / 过小图 过滤（2026-10-31）
-        import hashlib as _hl  # noqa: PLC0415
-        _sig_cnt = {}
-        for x in images:
-            p0 = os.path.join(doc_root(), str(x.get("path") or ""))
-            if os.path.isfile(p0):
-                try:
-                    _sig_cnt[_hl.md5(open(p0, "rb").read()).hexdigest()] = \
-                        _sig_cnt.get(_hl.md5(open(p0, "rb").read()).hexdigest(), 0) + 1
-                except Exception:  # noqa: BLE001
-                    pass
-        _pages_n = int(quality.get("pages") or 0) or 1
-        kept, skipped_detail = [], []
-        for x in images:
-            p = os.path.join(doc_root(), str(x.get("path") or ""))
-            item = dict(x, readable=os.path.isfile(p))
-            if not item["readable"]:
-                skipped_detail.append({"page": x.get("page"), "reason": "unreadable"})
-                continue
-            size = os.path.getsize(p)
-            try:
-                _md5 = _hl.md5(open(p, "rb").read()).hexdigest()
-            except Exception:  # noqa: BLE001
-                _md5 = ""
-            if _md5 and _pages_n >= 3 and _sig_cnt.get(_md5, 0) * 2 >= _pages_n:
-                skipped_detail.append({"page": x.get("page"), "reason": "repeated_logo", "bytes": size})
-                continue
-            if size < 6000:
-                skipped_detail.append({"page": x.get("page"), "reason": "tiny", "bytes": size})
-                continue
-            item["bytes"] = size
-            ext = str(x.get("name") or "").rsplit(".", 1)[-1].lower()
-            item["content_type"] = ("image/jpeg" if ext in ("jpg", "jpeg")
-                                    else ("image/png" if ext == "png" else "application/octet-stream"))
-            item["url"] = "/bodhi/ext/doc-image?doc_id=%s&name=%s" % (did, x.get("name") or "")
-            # 5) 上下文标注：`_page_section()` 统一口径（页内标题 + 表格节回退）
-            try:
-                sec = _page_section(quality, int(x.get("page") or 1))
-                if sec:
-                    item["context"] = {"section": sec, "page": int(x.get("page") or 1)}
-            except Exception:  # noqa: BLE001
-                pass
-            kept.append(item)
-        out = kept
-        # 2026-11-05（用户口径）：图内联按 **token 预算** 控制（base64 约 4 字符/token）：
-        #   单图 128KB（≈32K token）／总 192KB（≈48K token）／最多 2 张；
-        #   按字节**降序**挑最关键的正文图（部署图/拓扑图通常最大），其余标 `inline_skipped`。
-        def _kb(name, dflt):
-            try:
-                return int(os.environ.get(name, str(dflt)) or dflt)
-            except ValueError:
-                return dflt
-
-        cap = _kb("BODHI_IMG_MAX_KB", 96) * 1024
-        total_cap = _kb("BODHI_IMG_INLINE_TOTAL_KB", 256) * 1024
-        max_n = _kb("BODHI_IMG_INLINE_MAX", 2)
-        total_b64, selected = 0, []
-
-        def _inline_file(it):
-            """内联用**压缩版**（`_inline.jpg`）；该图没压缩过则用原图 ✓"""
-            rel = it.get("inline_path") or it.get("path") or ""
-            return (os.path.join(doc_root(), str(rel)),
-                    int(it.get("inline_bytes") or it.get("bytes") or 0))
-
-        order = sorted(out, key=lambda x: -_inline_file(x)[1])
-        for idx, item in enumerate(order):
-            if not inline_media:
-                break
-            if max_n > 0 and idx >= max_n:
-                item["inline_skipped"] = "count_cap"
-                continue
-            ipath, isize = _inline_file(item)
-            if isize > cap:
-                item["inline_skipped"] = "too_large"
-                continue
-            try:
-                enc = base64.b64encode(open(ipath, "rb").read()).decode()
-            except Exception:  # noqa: BLE001
-                continue
-            if total_b64 + len(enc) > total_cap:
-                item["inline_skipped"] = "payload_cap"
-                continue
-            total_b64 += len(enc)
-            ctype = ("image/jpeg" if ipath.lower().endswith((".jpg", ".jpeg"))
-                     else (item.get("content_type") or "image/png"))
-            item["data_url"] = "data:%s;base64,%s" % (ctype, enc)
-            item["inline_type"] = ctype
-            selected.append({"page": item.get("page"), "name": item.get("name"),
-                             "bytes": isize, "orig_bytes": item.get("bytes"),
-                             "compressed": bool(item.get("inline_path"))})
-        return {**base, "images": out, "counts": {"sections": len(secs), "images": len(out)},
-                "inline_selected": selected, "inline_bytes_total": total_b64,
-                "inline_budget_kb": total_cap // 1024, "inline_max": max_n,
-                "images_skipped_detail": skipped_detail[:40],
-                "images_skipped_total": len(skipped_detail),
-                "images_total_bytes": sum(int(i.get("bytes") or 0) for i in out)}
+        # 2026-11-05（用户口径）：**action=image 已下线** —— 不再回 base64（不与 image_read 并存）。
+        # 取图清单 = `action=section` 的 `figures[]`（含 url/图注）；识图 = `action=image_read`。
+        kept, _skipped = _content_images(images, quality)
+        return {**base, "ok": False, "action": "image", "error": "action_removed",
+                "counts": {"sections": len(secs), "images": len(kept)},
+                "images": [{"figure_no": f["figure_no"], "page": f["page"],
+                            "name": f["name"], "bytes": f["bytes"],
+                            "caption": f["caption"],
+                            "section": _page_section(quality, int(f["page"] or 1)),
+                            "url": ("/bodhi/ext/doc-image?doc_id=%s&name=%s"
+                                    % (did, f["name"] or ""))}
+                           for f in kept],
+                "hint": ("action=image 已下线（不再回 base64）。取图清单请用 `action=section` "
+                         "回执的 `figures[]`；需要图内信息调 `action=image_read, figure_no=N`"),
+                "next_args": {"doc_id": did, "action": "image_read", "figure_no": 1}}
     if action == "full":
         return {**base, "sections": secs, "images": images}
     i = int(cursor or 0)
@@ -982,28 +995,12 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
     out = {**base, "path": s.get("path") or "", "title": s.get("title") or "",
            "text": cut, "chars": len(text), "truncated": len(cut) < len(text),
            "cursor": i, "total_sections": len(secs)}
-    # 本节相关的图（`_page_section` 归属）+ 图注 ⇒ 给**占位符**；需要图内信息再 image_read
-    # 匹配用**章节编号**（`2.3`）：切节器的 path 可能是「2.3 2.3 部署架构」，与页内标题字面不等
-    import re as _re_sec
-
-    def _sec_no(s) -> str:
-        m = _re_sec.match(r"\s*(\d+(?:\.\d+){0,3})", str(s or ""))
-        return m.group(1) if m else ""
-
+    # 本节相关的图 ⇒ `figures[]`（结构化元数据）+ `figure_placeholders[]`（含 url/图注，可直接引用）
     figs = []
-    for n, x in enumerate(images, 1):
-        sec_t = _page_section(quality, int(x.get("page") or 1))
-        path_t = str(s.get("path") or "")
-        same = bool(sec_t) and bool(path_t) and (
-            sec_t.startswith(path_t) or path_t.startswith(sec_t)
-            or (_sec_no(sec_t) and _sec_no(sec_t) == _sec_no(path_t)))
-        if same:
-            figs.append({"figure_no": n, "page": x.get("page"), "name": x.get("name"),
-                         "caption": x.get("caption") or "",
-                         "url": ("/bodhi/ext/doc-image?doc_id=%s&name=%s"
-                                 % (did, x.get("name") or "")),
-                         "placeholder": "[[图%d｜p%s｜%s]]" % (
-                             n, x.get("page"), x.get("caption") or x.get("name") or "")})
+    for f in _figs_of(str(s.get("path") or "")):
+        item = _fig_brief(f)
+        item["placeholder"] = _fig_placeholder(f)
+        figs.append(item)
     if i + 1 < len(secs):
         out["next_cursor"] = i + 1
         out["next_path"] = secs[i + 1].get("path") or ""

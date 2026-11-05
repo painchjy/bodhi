@@ -57,6 +57,10 @@ def image_extract(kb_id: str = "", knowledge_id: str = "", figure_no: int = 0,
                   inline: bool = True, max_bytes: int = 1_500_000) -> dict:
     """**取文档内嵌图（只读）**（2026-10-08）。
 
+    **DEPRECATED（2026-11-05）**：**外部文档**请走 `ext_doc_parse(action="image_read")`
+    —— 直接把图读成结构化文本，不经过 base64（本工具回的 `data_url` 会被 WeKnora 24000 字符截断）。
+    本工具仅保留给「WeKnora 知识库内嵌图（`resource://`）」这条旧链路。
+
     WeKnora 把 docx/pptx 的**内嵌图**抽成正文里的 markdown 引用 `![alt](resource://<id>)`
     （存于 `chunks.content`，`chunk_type` 没有 `image`）。本工具把图引用取出来交给
     **会话多模态模型**看；识别按技能 `multimodal_extraction` 的**契约 v0 + 门禁 1–4** 输出。

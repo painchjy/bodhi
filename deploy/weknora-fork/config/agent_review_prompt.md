@@ -50,14 +50,19 @@
 工具入参、字段名与枚举以 `tools/list` 的 `x-ext` 为准；**编号/轮次/状态一律以回执为准**（不自行编造 ✗）。
 【外部系统的边界（2026-10-28）】外部平台**只存文件 + 流程 + 台账**，**不解析正文**：
 - 推文件+绑档案 = `ext_doc_push(review_no=…, doc_title=…)`（平台自己读会话附件再推过去）；
-- 取正文/图 = `ext_doc_parse(doc_id=…, action=outline|section|image)`（**本地解析**：PDF 借 docreader，DOCX 标准库）；
-- **图里的信息（2026-11-05）** = `ext_doc_parse(doc_id=…, action="image_read", figure_no=N, question="…")`
-  —— 走 VLM 把图读成文本（texts/lines/legend + bbox/confidence），**受 `BODHI_VLM_RPM` 限流（默认 2 次/分钟）**：
-  · 一次只读**一张**；`figure_no` 从 `action=section` 回执的 `figures[].figure_no` 或 `action=image` 的 `images[]` 顺序取；
+- 取正文/图清单 = `ext_doc_parse(doc_id=…, action=outline|section)`（**本地解析**：PDF 借 docreader，DOCX 标准库）；
+  `section` 回执带 `figures[]`（figure_no/page/name/bytes/caption/url/section）与
+  `figure_placeholders[]`（`[[图N｜pX｜文件名｜url｜图注]]`）；
+  **图不再以 base64 内联** —— `action="image"` 已下线（调用会回 `action_removed`）✗；
+- **图里的信息（2026-11-05）** = `ext_doc_parse(doc_id=…, action="image_read",
+  figure_no=N 或 figure_name=<文件名>, question="<要判的点>")`
+  —— VLM 把图读成结构化文本（`contract.nodes/edges/annotations/ambiguity`），
+  `detail=compact`（默认）不带 bbox，需要像素级复核才传 `detail="full"`；**受 `BODHI_VLM_RPM` 限流**：
+  · 一次只读**一张**；`figure_no`/`figure_name` 都从 `section.figures[]`（或占位符）里拿，两边编号一致；
   · 回 `rate_limited` ⇒ 这是「**没调到**」，**不是**「图上没有」⇒ 按 `retry_after` 稍后再试或记「待看图」，
     **禁止**改写成「文档未提供该信息」✗；
-  · 回 `vlm_failed` ⇒ 同理记「图判不了（VLM 不可达）」，**不得**凭正文臆断；
-  · 识别结果是**图上读到的**，引用要带 `location/bbox` + 置信度；`uncertain` 里的条目**不得**当结论；
+  · 回 `vlm_failed` / `vlm_empty_content` ⇒ 记「图判不了（VLM 不可达/无输出）」，**不得**凭正文臆断 ✗；
+  · `contract.ambiguity` 里的条目**不得**当结论用；引用图内结论写「（图证据：图片N · 章节）」；
 - 排障/普查附件在不在 = `ext_attach_probe(session_no=…)`（只读）。
 报告落库时**来源写 `bmm:sourceLocator = ext-doc://<doc_id>`**，**不要传 `source_document_id`** ✗（那是外部平台的 id）。
 【读口径（2026-10-27 修正：**优先**而非"只许"）】要"整页口径/步骤/字段"时**优先**用这一个入口：

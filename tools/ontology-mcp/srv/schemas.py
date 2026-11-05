@@ -534,7 +534,10 @@ TOOL_SCHEMAS = [
                             "markdown 引用 `![alt](resource://id)`（存于 `chunks.content`）。本工具把它取出来交给"
                             "**会话多模态模型**识别；识别按技能 `multimodal_extraction` 的**契约 v0 + 门禁 1–4** 输出"
                             "（nodes/edges/annotations/ambiguity/knowledgeGaps/todo，每条带 bbox/evidence+confidence），"
-                            "再经 `save_knowledge` 落库（务必带 session_no）。"),
+                            "再经 `save_knowledge` 落库（务必带 session_no）。\n"
+                            "**DEPRECATED（2026-11-05）**：**外部文档（04 的 doc_id）请改用 "
+                            "`ext_doc_parse(action=\"image_read\")`** —— 直接出结构化文本，"
+                            "不回 base64（本工具的 `data_url` 会被 WeKnora 24000 字符截断）。"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string"},
                 "knowledge_id": {"type": "string", "description": "文档 id 或标题（含匹配）"},
@@ -784,24 +787,33 @@ TOOL_SCHEMAS = [
         },
         {
             "name": "ext_doc_parse",
-            "description": ("**解析外部文档正文（本地解析，不共享磁盘）**：`GET /files/<doc_id>` 取原件 → "
-                            "PDF 走 docreader（bytes 从 stdin 进容器）/ DOCX 标准库 / 文本直读 → "
-                            "`action=outline|section|image|image_read|full`。正文**逐字**返回（不改写 ✗）。\n"
-                            "- `image`：取正文图 + 预算内联（图注/章节随图返回；base64 受回执长度上限约束）\n"
-                            "- `image_read`：**VLM 识图**（一次一张，默认 OVH Qwen2.5-VL-72B；"
-                            "受 `BODHI_VLM_RPM` 限流、结果按图缓存）→ 契约 v0（texts/lines/legend/"
-                            "uncertain + nodes/edges/annotations，每条带 bbox/evidence）。"
-                            "**图内信息不得凭正文臆断**；限流失败是「没调到」≠「图上没有」"),
+            "description": ("**解析外部文档（本地解析，不共享磁盘）**：`GET /files/<doc_id>` 取原件 → "
+                            "PDF 走 docreader（bytes 从 stdin 进容器）/ DOCX 标准库 / 文本直读。"
+                            "正文**逐字**返回（不改写 ✗）。\n"
+                            "- `outline`：章节树（每节 `figures` 数量 + `figures_total`）\n"
+                            "- `section`：逐字正文 + `figures[]`（figure_no/page/name/bytes/caption/url/section）"
+                            "+ `figure_placeholders[]`（`[[图N｜pX｜文件名｜url｜图注]]`，自带定位信息）\n"
+                            "- `image_read`：**识图**（一次一张，`figure_no` 或 `figure_name` 定位；"
+                            "受 `BODHI_VLM_RPM` 限流、同图同问题命中缓存不占额度）→ "
+                            "`contract{nodes,edges,annotations,ambiguity,watermark,gate}`；"
+                            "`detail=compact`（默认）不带 bbox，`full` 带归一化 bbox。"
+                            "**图内信息不得凭正文臆断**；`rate_limited`/`vlm_failed` 是「没调到」≠「图上没有」\n"
+                            "- `image`：**已下线**（不再回 base64）⇒ 回 `action_removed` + 指引\n"
+                            "- `full`：全部章节 + 图清单（元数据）"),
             "inputSchema": {"type": "object", "properties": {
                 "doc_id": {"type": "string", "description": "it_platform 的 doc_id（ext_doc_push 回执里给）"},
                 "action": {"type": "string",
-                           "enum": ["outline", "section", "image", "image_read", "full"]},
+                           "enum": ["outline", "section", "image_read", "full"]},
                 "section_path": {"type": "string"}, "cursor": {"type": "integer"},
-                "limit_chars": {"type": "integer"}, "inline_media": {"type": "boolean"},
+                "limit_chars": {"type": "integer"},
                 "figure_no": {"type": "integer",
-                              "description": "image_read 用：第几张图（1 起；缺省取第 1 张）"},
+                              "description": "image_read 用：第几张图（取 section.figures[].figure_no）"},
+                "figure_name": {"type": "string",
+                                "description": "image_read 用：文件名（占位符里的名字；与 figure_no 二选一）"},
                 "question": {"type": "string",
                              "description": "image_read 用：本次关注点（如「部署方式与灾备方式」）"},
+                "detail": {"type": "string", "enum": ["compact", "full"],
+                           "description": "image_read 用：compact（默认，无 bbox）/ full（带 bbox）"},
                 "doc_title": {"type": "string"}},
                 "required": ["doc_id"]},
         },
