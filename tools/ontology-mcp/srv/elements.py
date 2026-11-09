@@ -96,7 +96,7 @@ def element_page_slug(model: dict, element: dict) -> str:
 _SOURCE_META_KEYS = ("status", "locator", "kind", "section", "source_title",
                      "chars", "truncated", "matched_by", "sha256", "code",
                      "detail", "resolver", "available", "doc_id", "kb_id",
-                     "slug", "session_no", "message_id")
+                     "resolved_kb_id", "kb_name", "slug", "session_no", "message_id")
 
 
 def _source_payload(node: dict, locator: str) -> tuple[str, dict]:
@@ -190,6 +190,9 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         lines.append("")
     _cat = element.get("category_path") or class_category_path(
         element["type"], model["key"], model["label"], element["type_label"])
+    # 来源文档 id：优先取 sourceLocator 解析出的 doc_id（graph 路径通常没有 doc_meta.id），
+    # 再退回报告/文档级 doc_meta；这样 `source_refs` 与 `provenance.locator` 同源。
+    _source_ref = str(_source_meta.get("doc_id") or doc_meta.get("id") or "").strip()
     return {
         "slug": slug, "title": element["name"], "page_type": element["type"],
         "summary": (element.get("definition") or "")[:500],
@@ -200,7 +203,7 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         # `ke_import` 一致）。**不能写 slug** —— 2026-10-03 用户实测：写成 slug 时前端目录能列出目录名
         # 但**展开取不到页**（与知识库既有排障结论 TROUBLESHOOTING §「wiki_path 写成 slug」同因）。
         "wiki_path": "/".join([str(x) for x in _cat] + [element["name"]]),
-        "source_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
+        "source_refs": [_source_ref] if _source_ref else [],
         "chunk_refs": [chunk_id] if chunk_id else [],
         "out_links": sorted({r.get("target_slug") for r in rels if r.get("target_slug")}),
         "aliases": element.get("aliases") or [element["name"]],

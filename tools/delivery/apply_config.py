@@ -59,7 +59,8 @@ def _prompt_text(path: str) -> str:
 def _current(agent_id: str) -> dict:
     rows = ke_db.psql_csv(
         "SELECT config->>'system_prompt' AS prompt, config->'allowed_tools' AS tools, "
-        "       config->'mcp_services' AS svcs, config->'knowledge_bases' AS kbs "
+        "       config->'mcp_services' AS svcs, config->'knowledge_bases' AS kbs, "
+        "       config->>'max_completion_tokens' AS max_completion "
         "  FROM custom_agents WHERE id = %s" % ke_db.sql_str(agent_id))
     if not rows:
         return {}
@@ -91,7 +92,8 @@ def _create_agent(name: str, want_prompt: str, svcs: list) -> str:
     import uuid  # noqa: PLC0415
     aid = str(uuid.uuid4())
     cfg = {"name": name, "system_prompt": want_prompt,
-           "mcp_services": list(svcs or []), "allowed_tools": []}
+           "mcp_services": list(svcs or []), "allowed_tools": [],
+           "max_completion_tokens": 8192}
     ke_db.psql(
         "INSERT INTO custom_agents (id, name, config, tenant_id, created_at, updated_at) "
         "VALUES (%s, %s, %s::jsonb, 10000, now(), now());"
@@ -179,6 +181,15 @@ def _diff(agent: dict, cur: dict) -> dict:
     want_kbs = _resolve_kbs(agent) if managed_kbs else []
     kbs = list(cur.get("kbs") or [])
     svcs = list(cur.get("svcs") or [])
+    want_max = agent.get("max_completion_tokens")
+    try:
+        want_max = int(want_max) if want_max is not None else None
+    except (TypeError, ValueError):
+        want_max = None
+    try:
+        have_max = int(cur.get("max_completion")) if cur.get("max_completion") not in (None, "") else None
+    except (TypeError, ValueError):
+        have_max = None
     return {
         "tools": {"add": sorted(set(want_tools) - set(have_tools)),
                   "del": sorted(set(have_tools) - set(want_tools)),
@@ -192,8 +203,11 @@ def _diff(agent: dict, cur: dict) -> dict:
                  "n_from": len(svcs), "n_to": len(want_svcs or svcs)},
         "kbs": {"changed": managed_kbs and sorted(want_kbs) != sorted(kbs),
                 "n_from": len(kbs), "n_to": len(want_kbs or kbs), "managed": managed_kbs},
+        "max_completion": {"changed": want_max is not None and want_max != have_max,
+                           "from": have_max, "to": want_max},
         "_want": {"tools": want_list, "prompt": want_prompt, "svcs": want_svcs,
-                  "kbs": want_kbs if managed_kbs else None},
+                  "kbs": want_kbs if managed_kbs else None,
+                  "max_completion": want_max},
     }
 
 
@@ -222,6 +236,9 @@ def _nest(want: dict) -> str:
     if want.get("kbs") is not None:
         expr = ("jsonb_set(%s, '{knowledge_bases}', %s::jsonb, true)"
                 % (expr, ke_db.sql_str(json.dumps(want["kbs"], ensure_ascii=False))))
+    if want.get("max_completion") is not None:
+        expr = ("jsonb_set(%s, '{max_completion_tokens}', to_jsonb(%d), true)"
+                % (expr, int(want["max_completion"])))
     return expr
 
 
@@ -300,8 +317,14 @@ def main() -> int:
                      "有变化" if d["kbs"]["changed"] else "一致"))
         else:
             print("   知识库：保持 UI 现值（本文件未指定）")
+        if d["max_completion"]["to"] is not None:
+            print("   单轮输出上限：%s → %s  %s"
+                  % (d["max_completion"]["from"], d["max_completion"]["to"],
+                     "有变化" if d["max_completion"]["changed"] else "一致"))
+        else:
+            print("   单轮输出上限：保持 UI 现值（本文件未指定）")
         if not (d["tools"]["changed"] or d["prompt"]["changed"] or d["svcs"]["changed"]
-                or d["kbs"]["changed"]):
+                or d["kbs"]["changed"] or d["max_completion"]["changed"]):
             print("   ✓ 无漂移")
             continue
         drift += 1

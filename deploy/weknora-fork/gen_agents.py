@@ -214,7 +214,7 @@ def build_sql(templates: dict[str, str]) -> str:
             # 轮数与单轮预算：0 会回落到 4096（写页 JSON 必被截断）；12 轮足够走完
             # 「读一次片段 → 逐个写页 → 汇报」，实测 40 轮会空转到超时。
             "max_iterations": 12,
-            "max_completion_tokens": 16384,
+            "max_completion_tokens": 8192,
             "thinking": False,
             "enable_rewrite": False,
             "allowed_tools": TOOLS_BY_AGENT.get(key, ALLOWED_TOOLS),

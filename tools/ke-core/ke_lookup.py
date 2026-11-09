@@ -468,6 +468,8 @@ def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int
     rows = _db.psql_csv(
         "SELECT knowledge_base_id AS kb_id, slug, title, page_type, version, "
         "       COALESCE(content,'') AS content, "
+        "       COALESCE(source_refs::text,'[]') AS source_refs, "
+        "       COALESCE(page_metadata->'provenance','{}'::jsonb)::text AS provenance, "
         "       COALESCE(page_metadata->'ontology'->'attributes','{}'::jsonb)::text AS attrs "
         "  FROM wiki_pages WHERE %s AND (slug = %s OR slug ILIKE %s OR title ILIKE %s"
         "        OR slug IN (%s)) "
@@ -528,9 +530,18 @@ def _page_lookup(base: dict, kb: str, kb_id: str, query: str, kb_ids, limit: int
         attrs = json.loads(r0.get("attrs") or "{}")
     except Exception:  # noqa: BLE001
         attrs = {}
+    try:
+        source_refs = json.loads(r0.get("source_refs") or "[]")
+    except Exception:  # noqa: BLE001
+        source_refs = []
+    try:
+        provenance = json.loads(r0.get("provenance") or "{}")
+    except Exception:  # noqa: BLE001
+        provenance = {}
     page = {"slug": r0.get("slug"), "title": r0.get("title"), "page_type": r0.get("page_type"),
             "version": r0.get("version"), "kb_id": r0.get("kb_id"),
             "attributes": attrs, "note": attrs.get("skos:note") or "",
+            "source_refs": source_refs, "provenance": provenance,
             "content_md": content[:PAGE_MD_BUDGET], "content_chars": len(content),
             "content_truncated": len(content) > PAGE_MD_BUDGET}
     return {**base, "ok": True, "mode": "page", "query": q,

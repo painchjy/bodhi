@@ -152,15 +152,17 @@ def test_build_new_page_renders_verbatim_excerpt_not_placeholder():
          "definition": "定义", "source_text": "提高评审效率，降低评审周期。",
          "source_locator": "kb:K/doc:D#section:业务目标",
          "source_meta": {"status": "resolved", "source_title": "需求.docx",
-                         "section": "业务目标", "truncated": True, "chars": 150},
+                         "section": "业务目标", "truncated": True, "chars": 150,
+                         "doc_id": "D"},
          "category_path": ["测试"]},
-        "", -1, {"id": "D", "title": "需求.docx", "context": "rule_engineering"})
+        "", -1, {"id": "", "title": "需求.docx", "context": "rule_engineering"})
     content = page["content"]
     assert "## 原文依据" in content
     assert "提高评审效率" in content
     assert "无原文片段" not in content
     assert page["page_metadata"]["provenance"]["status"] == "resolved"
     assert page["page_metadata"]["provenance"]["source_title"] == "需求.docx"
+    assert page["source_refs"] == ["D"]
 
 
 def test_source_excerpt_smoke_from_kb_document():
@@ -180,9 +182,14 @@ def test_source_excerpt_smoke_from_kb_document():
     m = re.search(r"^#{1,6}\s+(.+?)\s*$", row.get("content") or "", re.M)
     if not m:
         pytest.skip("文档片段没有 Markdown 标题")
-    loc = P.build_locator(P.KB_DOCUMENT, kb_id=row["knowledge_base_id"],
+    kb_rows = ke_db.psql_csv(
+        "SELECT name FROM knowledge_bases WHERE id = %s"
+        % ke_db.sql_str(row["knowledge_base_id"]))
+    kb_ref = (kb_rows[0].get("name") if kb_rows else "") or row["knowledge_base_id"]
+    loc = P.build_locator(P.KB_DOCUMENT, kb_id=kb_ref,
                           doc_id=row["knowledge_id"], section=m.group(1).strip())
     got = ST.excerpt(loc)
     assert got.get("ok") is True, got
     assert got.get("text")
+    assert got.get("resolved_kb_id") == row["knowledge_base_id"], got
     assert "无原文片段" not in got["text"]

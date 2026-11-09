@@ -152,14 +152,33 @@ def _ok(locator: str, kind: str, parsed: dict, text: str, section: str = "",
     r["source_title"] = source_title
     r["sha256"] = hashlib.sha256(_clean(text).encode("utf-8")).hexdigest()[:16]
     r.update({k: v for k, v in parsed.items()
-              if k in ("doc_id", "kb_id", "slug", "session_no", "message_id")})
+              if k in ("doc_id", "kb_id", "slug", "session_no", "message_id",
+                        "resolved_kb_id", "kb_name")})
     r.update(kw)
     return r
 
 
 
+def _resolve_kb(raw: str) -> tuple[str, str, str]:
+    """locator 里的 kb_id 允许是名称/UUID；统一解析成 UUID 再查库。"""
+    value = str(raw or "").strip()
+    if not value:
+        return "", "", "kb_id 为空"
+    try:
+        kb_id, kb_name, note = ke_db.resolve_kb_id(value)
+        return str(kb_id or ""), str(kb_name or ""), str(note or "")
+    except Exception as exc:  # noqa: BLE001
+        return "", "", str(exc)[:240]
+
+
 def _read_kb_document(parsed: dict, locator: str, max_chars: int) -> dict:
-    kb_id, doc_id = parsed.get("kb_id", ""), parsed.get("doc_id", "")
+    raw_kb, doc_id = parsed.get("kb_id", ""), parsed.get("doc_id", "")
+    kb_id, kb_name, kb_note = _resolve_kb(raw_kb)
+    if not kb_id:
+        return _fail("kb_unresolved", locator, kind=P.KB_DOCUMENT,
+                     kb_id=raw_kb, doc_id=doc_id,
+                     detail=kb_note or "知识库名称无法解析为 UUID",
+                     resolver=P.resolver_for(P.KB_DOCUMENT))
     rows = ke_db.psql_csv(
         "SELECT id, title, file_name FROM knowledges "
         "WHERE knowledge_base_id = %s AND id = %s AND deleted_at IS NULL LIMIT 1"
@@ -190,12 +209,18 @@ def _read_kb_document(parsed: dict, locator: str, max_chars: int) -> dict:
                      kb_id=kb_id, doc_id=doc_id,
                      resolver=P.resolver_for(P.KB_DOCUMENT))
     title = str(doc.get("title") or doc.get("file_name") or doc_id)
-    return _ok(locator, P.KB_DOCUMENT, parsed, text, parsed.get("section", ""),
+    meta = dict(parsed, resolved_kb_id=kb_id, kb_name=kb_name)
+    return _ok(locator, P.KB_DOCUMENT, meta, text, parsed.get("section", ""),
                title, max_chars)
 
 
 def _read_wiki_page(parsed: dict, locator: str, max_chars: int) -> dict:
-    kb_id, slug = parsed.get("kb_id", ""), parsed.get("slug", "")
+    raw_kb, slug = parsed.get("kb_id", ""), parsed.get("slug", "")
+    kb_id, kb_name, kb_note = _resolve_kb(raw_kb)
+    if not kb_id:
+        return _fail("kb_unresolved", locator, kind=P.WIKI_PAGE,
+                     kb_id=raw_kb, slug=slug, detail=kb_note,
+                     resolver=P.resolver_for(P.WIKI_PAGE))
     rows = ke_db.psql_csv(
         "SELECT title, content FROM wiki_pages "
         "WHERE knowledge_base_id = %s AND slug = %s AND deleted_at IS NULL LIMIT 1"
@@ -204,7 +229,8 @@ def _read_wiki_page(parsed: dict, locator: str, max_chars: int) -> dict:
         return _fail("source_not_found", locator, kind=P.WIKI_PAGE,
                      kb_id=kb_id, slug=slug, resolver=P.resolver_for(P.WIKI_PAGE))
     title = str(rows[0].get("title") or slug)
-    return _ok(locator, P.WIKI_PAGE, parsed, rows[0].get("content") or "",
+    meta = dict(parsed, resolved_kb_id=kb_id, kb_name=kb_name)
+    return _ok(locator, P.WIKI_PAGE, meta, rows[0].get("content") or "",
                parsed.get("section", ""), title, max_chars)
 
 

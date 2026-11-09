@@ -19,6 +19,7 @@ agents:
   - id: 09e54ee1-6d0b-452f-8160-a26990bc71e6
     name: 技术方案评审智能体
     prompt_file: agent_review_prompt.md
+    max_completion_tokens: 8192
     # 2026-10-27（用户实证 + 库表核对，见 CONFIG-MATRIX.md §1）：
     #   `allowed_tools` **只作用于 WeKnora 内置工具**；往里写 `mcp_*` 是**无效配置** ✗
     #   （MCP 工具由 `config.mcp_services` 挂载决定，且工具清单不落库、会话时实时 tools/list）。
@@ -36,6 +37,7 @@ agents:
   - id: ""
     name: 企业知识管理建模智能体
     prompt_file: agent_modeling_prompt.md
+    max_completion_tokens: 8192
     builtin_tools:
       - data_schema
       - data_analysis
@@ -51,6 +53,7 @@ agents:
   - id: ""
     name: 技术方案评审智能体（测试）
     prompt_file: agent_review_test_prompt.md
+    max_completion_tokens: 8192
     builtin_tools:
       - data_schema
       - data_analysis
