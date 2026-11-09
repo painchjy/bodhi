@@ -658,8 +658,9 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "",
     """读**一张图** → 契约 v0（nodes/edges/annotations/ambiguity）。
 
     - `figure_no` 或 `figure_name` 定位（都来自 `section.figures[]`）
-    - `detail=compact`（默认）只回 label/location/线条（**不带 bbox**，控制回执体积）；
-      `detail=full` 带 bbox（可做像素级复核）
+    - `detail=compact`（默认）只回归一化 `contract`（nodes/edges/annotations/gate）+
+      `extraction_counts`，不再回原始 `extraction`（**不带 bbox**，控制回执体积）；
+      需要原始 texts/lines/bbox 时用 `detail=full`（同图命中缓存，证据不丢）
     缓存 `state/doc_parse/vlm/<doc_id>_img<N>_<sha>.json`（同图同问题不重复调、不占额度）；
     任何失败都回 `{ok:False, error…}`，**绝不抛**（正文链路不受影响）。
     """
@@ -716,14 +717,27 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "",
                     n.pop("bbox", None)
             if isinstance(c0.get("gate"), dict):
                 c0["gate"]["missing_bbox"] = _mb0
-            return {**base, "ok": True, "action": "image_read", "figure": fmeta,
+            _compact = str(detail or "").strip().lower() != "full"
+            _ex = got0.get("extraction") or {}
+            _out = {**base, "ok": True, "action": "image_read", "figure": fmeta,
                     "cache": "hit",
-                    "detail": "compact" if str(detail or "").strip().lower() != "full" else "full",
-                    "extraction": got0.get("extraction") or {},
+                    "detail": "compact" if _compact else "full",
                     "contract": c0, "usage": got0.get("usage") or {},
-                    "duration_ms": {**((base.get("duration_ms") or {})), "vlm": 0,
-                                    "total": int((time.time() - t0) * 1000)},
-                    "hint": "命中缓存（未消耗 VLM 额度）；引用请带 bbox/evidence + confidence"}
+                    "extraction_counts": {
+                        "texts": len(_ex.get("texts") or []),
+                        "lines": len(_ex.get("lines") or []),
+                        "legend": len(_ex.get("legend") or []),
+                        "uncertain": len(_ex.get("uncertain") or []),
+                    }}
+            if _compact:
+                _out["extraction_omitted"] = True
+                _out["next"] = "需要原始 texts/bbox 时用 detail=\"full\"（同图命中缓存）"
+            else:
+                _out["extraction"] = _ex
+            _out["duration_ms"] = {**((base.get("duration_ms") or {})), "vlm": 0,
+                                   "total": int((time.time() - t0) * 1000)}
+            _out["hint"] = "命中缓存（未消耗 VLM 额度）；引用请带 bbox/evidence + confidence"
+            return _out
         except Exception:  # noqa: BLE001
             pass
 
@@ -805,15 +819,27 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
         for n in nodes:
             n.pop("bbox", None)
     contract = _mk_contract(nodes)
+    _ex_counts = {
+        "texts": len(extraction.get("texts") or []),
+        "lines": len(extraction.get("lines") or []),
+        "legend": len(extraction.get("legend") or []),
+        "uncertain": len(extraction.get("uncertain") or []),
+    }
     out = {**base, "ok": True, "action": "image_read", "figure": fmeta, "cache": "miss",
            "detail": "compact" if compact else "full",
-           "channel": "vlm:" + str(got.get("model")), "extraction": extraction,
+           "channel": "vlm:" + str(got.get("model")),
+           "extraction_counts": _ex_counts,
            "contract": contract, "usage": got.get("usage") or {},
            "duration_ms": {**((base.get("duration_ms") or {})),
                            "vlm": int((time.time() - t1) * 1000),
                            "total": int((time.time() - t0) * 1000)},
            "hint": (("识别结果是**图上读到的**，不是正文；`uncertain` 条目**不得**当结论。"
                      + ("" if compact else " bbox 为归一化 [x1,y1,x2,y2]。")))}
+    if compact:
+        out["extraction_omitted"] = True
+        out["next"] = "需要原始 texts/bbox 时用 detail=\"full\"（同图命中缓存）"
+    else:
+        out["extraction"] = extraction
     try:
         if "_error" not in parsed:       # **失败结果不写缓存**（否则会一直命中坏缓存）
             with open(cache_fp, "w", encoding="utf-8") as fh:
