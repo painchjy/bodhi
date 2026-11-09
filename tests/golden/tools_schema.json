@@ -1087,7 +1087,7 @@
     "type": "string"
    },
    "skill": {
-    "description": "技能 id（domain_modeling / ea_overview_design / service_detailed_design …）；留空 = 只看目录",
+    "description": "技能 id（如 domain_modeling / knowledge_extract / report_compose …）；留空 = 只看目录",
     "type": "string"
    }
   },

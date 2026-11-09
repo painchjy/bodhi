@@ -48,8 +48,8 @@ TOOL_SCHEMAS = [
                             "用法：先看目录判断用哪个技能，再取全文照做 —— **不要凭记忆猜步骤**。"),
             "inputSchema": {"type": "object", "properties": {
                 "skill": {"type": "string",
-                          "description": "技能 id（domain_modeling / ea_overview_design / "
-                                         "service_detailed_design …）；留空 = 只看目录"},
+                          "description": "技能 id（如 domain_modeling / knowledge_extract / "
+                                         "report_compose …）；留空 = 只看目录"},
                 "model": {"type": "string",
                           "description": "可选：本次想用的本体模型（覆盖技能默认值，如 bmm）"},
             }},

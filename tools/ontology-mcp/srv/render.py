@@ -93,12 +93,11 @@ def _design_sections(element: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# 技能上下文（2026-09-22）：同一套落库代码被三个技能复用，**文案必须跟着技能走**
-#   domain_modeling          领域建模（从文档抽 → 节点应当有原文引用）
-#   ea_overview_design       企架概要设计（设计生成 → 无原文片段）
-#   service_detailed_design  服务详细设计（设计生成 → 无原文片段）
-# 旧实现把"概要设计"写死 → 领域建模的页面上也写"概要设计…/无原文片段"（用户实测报过）。
-# `context` 是**可选**参数：不传时保持旧口径（design = 概要设计），向后兼容。
+# 技能上下文（2026-11-09 收敛）
+#   domain_modeling     领域建模（当前主流程）
+#   knowledge_modeling  中性上下文（规则/流程/对象/验收等 L1 活动共用）
+# 旧的 ea_overview_design / service_detailed_design / design 已无活跃技能；
+# 不再生成「概要设计 / 无原文片段 / 请补 source_text」占位。
 # ---------------------------------------------------------------------------
 SKILL_CONTEXTS = {
     "domain_modeling": {
@@ -106,38 +105,26 @@ SKILL_CONTEXTS = {
         "report_label": "领域建模报告",
         "report_category": "领域建模报告",
         "report_source": "领域建模报告（由领域建模智能体按文档分批生成、人工确认后落库）",
-        "no_quote": "（领域建模：未提供原文引用 —— 请在该节点的 source_text 里给出原文片段）",
-        "generated_by": "领域建模智能体（未指定来源文档）",
-        "evidence_generated": "领域建模：无原文片段（请补 source_text）",
+        "generated_by": "领域建模智能体",
     },
-    "ea_overview_design": {
-        "label": "企架概要设计",
-        "report_label": "概要设计报告",
-        "report_category": "概要设计报告",
-        "report_source": "概要设计报告（由企架概要设计智能体生成、人工确认后落库）",
-        "no_quote": "（概要设计，无原文片段）",
-        "generated_by": "企架概要设计智能体（未指定来源文档）",
-        "evidence_generated": "概要设计生成，无原文片段",
+    "knowledge_modeling": {
+        "label": "知识建模",
+        "report_label": "知识建模报告",
+        "report_category": "知识建模报告",
+        "report_source": "知识建模报告（由知识建模智能体生成、人工确认后落库）",
+        "generated_by": "知识建模智能体",
     },
-    "service_detailed_design": {
-        "label": "服务详细设计",
-        "report_label": "服务详细设计报告",
-        "report_category": "服务详细设计报告",
-        "report_source": "服务详细设计报告（由服务详细设计智能体生成、人工确认后落库）",
-        "no_quote": "（详细设计，无原文片段）",
-        "generated_by": "服务详细设计智能体（未指定来源文档）",
-        "evidence_generated": "详细设计生成，无原文片段",
-    },
-    # 兼容旧调用（不传 context 时的历史口径）
-    "design": {
-        "label": "设计",
-        "report_label": "概要设计报告",
-        "report_category": "概要设计报告",
-        "report_source": "概要设计报告（由设计智能体生成、人工确认后落库）",
-        "no_quote": "（概要设计，无原文片段）",
-        "generated_by": "设计智能体（未指定来源文档）",
-        "evidence_generated": "设计生成，无原文片段",
-    },
+}
+
+# 旧 context / L1 活动的兼容入口：一律落到中性上下文，绝不回落到“概要设计”。
+CONTEXT_ALIASES = {
+    "process_modeling": "knowledge_modeling",
+    "rule_engineering": "knowledge_modeling",
+    "object_modeling": "knowledge_modeling",
+    "acceptance": "knowledge_modeling",
+    "design": "knowledge_modeling",
+    "ea_overview_design": "knowledge_modeling",
+    "service_detailed_design": "knowledge_modeling",
 }
 
 
@@ -157,7 +144,9 @@ def _type_label_of(page_type: str, fallback: str = "") -> str:
 
 
 def context_meta(context: str = "") -> dict:
-    """取技能上下文文案（未知/空 → `design`，保持旧行为）。"""
+    """取技能上下文文案（未知/旧 context → 中性 `knowledge_modeling`）。"""
     key = (context or "").strip().lower()
-    return {"id": key if key in SKILL_CONTEXTS else "design",
-            **SKILL_CONTEXTS.get(key, SKILL_CONTEXTS["design"])}
+    key = CONTEXT_ALIASES.get(key, key)
+    if key not in SKILL_CONTEXTS:
+        key = "knowledge_modeling"
+    return {"id": key, **SKILL_CONTEXTS[key]}

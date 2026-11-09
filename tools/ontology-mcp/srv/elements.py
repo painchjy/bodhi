@@ -25,6 +25,7 @@ if _CORE not in sys.path:
 import ke_db  # noqa: E402
 import ke_ontology  # noqa: E402
 import ke_pages  # noqa: E402
+import ke_source_text as ST  # noqa: E402
 from ke_db import psql_csv, sql_str  # noqa: E402
 from ke_graph_view import class_category_path  # noqa: E402
 from ke_overview import refresh_crud_matrix, service_types  # noqa: E402
@@ -92,6 +93,40 @@ def element_page_slug(model: dict, element: dict) -> str:
     return explicit or element_slug(model["key"], element)
 
 
+_SOURCE_META_KEYS = ("status", "locator", "kind", "section", "source_title",
+                     "chars", "truncated", "matched_by", "sha256", "code",
+                     "detail", "resolver", "available", "doc_id", "kb_id",
+                     "slug", "session_no", "message_id")
+
+
+def _source_payload(node: dict, locator: str) -> tuple[str, dict]:
+    """把节点的 sourceLocator 回读成逐字摘录；失败给状态，不生成占位。
+
+    显式 `source_text` 只在回读失败时作为**调用方提供的原文**保留；
+    回读成功时以来源原文为准（避免页面正文与定位不一致）。
+    """
+    explicit = str(node.get("source_text") or "").replace("\r\n", "\n").strip()
+    if ST.is_placeholder(explicit):
+        explicit = ""
+    loc = str(locator or "").strip()
+    if not loc:
+        return explicit, {"status": "explicit_only" if explicit else "no_source"}
+    # 旧抽取路径的 `片段 #n` 不是 locator，无法回读；保留调用方原文
+    if loc.startswith("片段 #"):
+        return explicit, {"status": "chunk_only", "locator": loc}
+    # 旧会话兜底（session/<id>/pN）不符合新 locator 语法，无法回读；不当作错误刷屏
+    if loc.startswith("session/") and not loc.startswith("session:"):
+        return explicit, {"status": "legacy_session_locator", "locator": loc}
+    r = ST.excerpt(loc)
+    meta = {k: r.get(k) for k in _SOURCE_META_KEYS if r.get(k) not in (None, "", [])}
+    meta["status"] = "resolved" if r.get("ok") else (r.get("code") or "source_unresolved")
+    if r.get("ok"):
+        return str(r.get("text") or "").strip(), meta
+    if explicit:
+        meta["explicit_fallback"] = True
+    return explicit, meta
+
+
 def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_index: int,
                    doc_meta: dict) -> dict:
     """新要素 -> 页面（与 ontology_wiki/weknora_sync 同风格：能被人读，也能被图谱用）。"""
@@ -115,14 +150,22 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
         lines += ["## 判定依据", "", element["description"].strip(), ""]
     lines += _design_sections(element)
     _loc = (element.get("source_locator") or "").strip()
-    lines += ["## 原文依据", "",
-              ("- %s（来源：《%s》%s%s）" % (element.get("source_text", "").strip(), doc_meta["title"],
-                                           (" 片段 #%d" % chunk_index) if chunk_index >= 0 else "",
-                                           ("；定位：%s" % _loc) if _loc else ""))
-              if doc_meta.get("id") else
-              ("- %s（%s%s）" % (element.get("source_text", "").strip(),
-                                context_meta(doc_meta.get("context"))["evidence_generated"],
-                                ("；定位：%s" % _loc) if _loc else "")), ""]
+    _source_text = str(element.get("source_text") or "").replace("\r\n", "\n").strip()
+    _source_meta = element.get("source_meta") or {}
+    if _source_text:
+        notes: list[str] = []
+        _title = str(_source_meta.get("source_title") or doc_meta.get("title") or "").strip()
+        if _title:
+            notes.append("来源：《%s》" % _title)
+        if _loc:
+            notes.append("定位：%s" % _loc)
+        if _source_meta.get("section"):
+            notes.append("章节：%s" % _source_meta["section"])
+        if _source_meta.get("truncated"):
+            notes.append("节选前 %s 字" % (_source_meta.get("chars") or len(_source_text)))
+        lines += ["## 原文依据", "",
+                  "- %s%s" % (_source_text,
+                              ("（%s）" % "；".join(notes)) if notes else ""), ""]
     if rels:
         lines += ["## 本体关系", ""]
         # 同 (类型, 目标) 只写一行：同一操作对同一属性可能有 C 与 R 两条边（crudKind 不同），
@@ -165,7 +208,9 @@ def build_new_page(engine, model: dict, element: dict, chunk_id: str, chunk_inde
             "ontology": {
                 "model": model["key"], "class": element["type"], "class_label": element["type_label"],
                 "name": element["name"], "generator": TOOL_TAG, "created_at": now_text(),
-            }}, **({"design": {"upstream": upstream, "generator": TOOL_TAG}} if upstream else {})),
+            },
+            "provenance": _source_meta or {"status": "no_source"},
+        }, **({"design": {"upstream": upstream, "generator": TOOL_TAG}} if upstream else {})),
     }
 
 
@@ -252,6 +297,7 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
         "elements": len(payloads), "relationships": len(checked.get("edges") or []),
         "created": [], "merged": [],
         "violations": checked["violations"], "unmatched": checked["unmatched"],
+        "source": checked.get("source") or {},
         "dry_run": dry_run, "thresholds": {"high": high, "low": low,
                                            "deprecated": "相似度阈值已无用途（合并永久取消）"},
         "dropped_relations": dropped_relations,
@@ -544,8 +590,8 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
     - `kb_id`（2026-09-22 新增，**必传才能跨页找目标**）：目标解析只认**本库**的页 —— 同名但属于
       别的知识库的页一律不认（旧实现全库按标题找 → 关系写到别的库的 slug，回执成功而本库没记录）；
       这类"只在别库同名"的会在 `cross_kb_same_name` 里回报，便于向用户解释。
-    - `context`（2026-09-22 新增）：技能上下文（`domain_modeling` / `ea_overview_design` /
-      `service_detailed_design`），决定占位文案（如缺 `source_text` 时写哪句）。
+    - `context`（2026-09-22 新增，2026-11-09 收敛）：当前只区分 `domain_modeling` 与中性
+      `knowledge_modeling`；旧 context 自动归一到中性，不再产生“概要设计/无原文片段”占位。
     """
     meta = ke_ontology.class_meta()
     ctx = context_meta(context)
@@ -643,12 +689,31 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
     injected_identity: dict = {}
     accepted = []
     payloads = []
+    source_counts: dict = {}
     for node in nodes:
         name = (node.get("name") or "").strip()
         if name not in slug_by_name:
             continue
         rels = outgoing.get(name, [])
         accepted += [{"source": name, "type": r["type"], "target": r["target"]} for r in rels]
+        # 来源定位（2026-10-01）：显式 `source_locator`/`locator` 优先，其次 `chunk_index` 兜底；
+        # 落到节点属性 `bmm:sourceLocator` + 页面「## 原文依据」的来源行（可查询、可复核）。
+        locator = (str(node.get("source_locator") or node.get("locator")
+                       or (node.get("attributes") or {}).get("bmm:sourceLocator")
+                       or "").strip()
+                   or _chunk_locator(node.get("chunk_index")))
+        source_text, source_meta = _source_payload(node, locator)
+        _status = str(source_meta.get("status") or "no_source")
+        source_counts[_status] = int(source_counts.get(_status) or 0) + 1
+        if locator and source_meta.get("status") not in (
+                "resolved", "explicit_only", "chunk_only", "legacy_session_locator", "no_source"):
+            violations.append({
+                "kind": "source", "name": name, "type": node["type"],
+                "locator": locator, "code": source_meta.get("status"),
+                "blocking": False,
+                "reason": "sourceLocator 无法回读原文：%s（未生成占位；请修正定位或补来源）"
+                          % (source_meta.get("detail") or source_meta.get("status")),
+            })
         payloads.append({
             "name": name, "type": node["type"], "type_label": node["_type_label"],
             "module": node["_module"], "slug": slug_by_name[name],
@@ -663,13 +728,9 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "attributes": _attrs_with_identity(node, kb_id, injected_identity),
             "retag": bool(node.get("retag")),   # true = 合并进既有页时**同时把该页类型改成 element 的类型**
             "incoming": incoming_map.get(name, []),
-            "source_text": node.get("source_text") or ctx["no_quote"],
-            # 来源定位（2026-10-01）：显式 `source_locator`/`locator` 优先，其次 `chunk_index` 兜底；
-            # 落到节点属性 `bmm:sourceLocator` + 页面「## 原文依据」的来源行（可查询、可复核）。
-            "source_locator": (str(node.get("source_locator") or node.get("locator")
-                                   or (node.get("attributes") or {}).get("bmm:sourceLocator")
-                                   or "").strip()
-                               or _chunk_locator(node.get("chunk_index"))),
+            "source_text": source_text,
+            "source_meta": source_meta,
+            "source_locator": locator,
             "chunk_id": str(node.get("chunk_id") or ""),
             "chunk_index": _as_chunk_index(node.get("chunk_index")), "relations": rels,
             "upstream": upstream, "aliases": node.get("aliases") or [], "context": ctx["id"],
@@ -680,6 +741,7 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
 
     cross_kb = _other_kb_same_name(kb_id, unresolved)
     return payloads, {"edges": accepted, "violations": violations, "unmatched": [],
+                      "source": source_counts,
                       "retract_edges": retract_edges,
                       "cross_kb_same_name": cross_kb,
                       # 身份注入回执（2026-10-01）：会话类节点的 tenantName/agentName 由服务端注入，

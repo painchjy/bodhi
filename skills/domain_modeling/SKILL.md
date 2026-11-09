@@ -50,10 +50,12 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
 
 1. **先有会话页**：落库前确认本会话已有 `bmm:KnowledgeSession` 页（起始页 `session/<会话编号>`；上下文过长**且**一组高相关知识已确认更新完成时开分页 `session/<会话编号>/p<序号>`）。没有 → 按 `session_provenance` 建；
 2. **落库带会话身份**：`save_knowledge(..., session_no="<运行时给的会话编号>", session={knowledge_id, round_no, cursor, next_cursor, doc_title})` —— `session_no` **必传**（服务端据此取「会话选择的智能体」注 `agentName`、并把 `bmm:sourceSession` 自动挂到本次所有页）；并**把会话编号/分页序号写进页面「原文依据」小节**；
-3. **每条依据 = `source_text`（原句）+ 会话定位**（分页序号 + 轮次/段落）—— 只写原句不写定位 → `audit_scan` 的 F3 可能仍绿，但**溯源链是断的**（后续核对将追不到出处）。**定位必须落成两个地方**：
-   - **节点属性 `bmm:sourceLocator`**（`nodes[].attributes.sourceLocator`，如 `"session/S-20261003-01/p2#轮3/段5"`）→ 这样**来源是可查询的数据属性**；
-   - 页面「## 原文依据」的来源行（工具会把 locator 渲染进去）。
-   > 示例：`attributes: {"sourceLocator": "session/S-20261003-01/p2#轮3/段5"}`；`source_text` 仍必填（原句）。
+3. **每条依据必须有 `bmm:sourceLocator`**：服务端按 locator 回读原文，页面「## 原文依据」渲染约 150 字**逐字摘录**（不是模型总结，也不再生成占位）。
+   - 知识库文档：`kb:<kb_id>/doc:<doc_id>#section:<章节标题>`；
+   - 知识页：`page:<kb_id>/<slug>#section:<章节标题>`；
+   - 会话：`session:<session_no>/msg:<message_id>#section:<章节标题>`；
+   - `source_text` 只作为**定位提示/兜底**，服务端能回读时以原文为准；回读失败会回 `source_text_unreadable` / `section_not_found`，不写占位。
+   > 示例：`attributes: {"bmm:sourceLocator": "kb:<kb_id>/doc:<doc_id>#section:业务目标"}`。
 4. **同库约束**：会话分页与其产出的知识**必须在同一个知识库**；**换库必须新建分页**（不是复制）；会话起始页各库各一份、**以初始库为权威**。
 
 ## 固定动作（每轮）
@@ -65,9 +67,9 @@ guard: 一轮一批；只抽本批文本支撑的内容；跨批/跨库目标先
    - 回执 `batches[0].text` 就是**本批正文**（父块正文；父块超预算时自动拆成子块，`split_parents` 可见）；
    - `total_units / est_total_tokens / est_total_batches` 让你先告诉用户"这篇大概要做几批"。
 3. **只从本批抽知识**：节点（类）与关系（对象属性）必须能由本批文本支撑；
-   每条节点给 `source_text`（**原句**，用于定位切片）。
+   每条节点给 `attributes.bmm:sourceLocator`（章节级定位）；`source_text` 可给原句作提示，但不是最终正文。
 4. **落库**：`save_knowledge(stage="graph", mode="dry_run",
-- 落库时带 `context="domain_modeling"`（决定页面文案：`## 原文依据` 会写「领域建模：无原文片段」而不是「概要设计…」；报告页标题/分类也按技能走）。
+- 落库时带 `context="domain_modeling"`（只影响报告标签/生成方式文案；`## 原文依据` 由 sourceLocator 回读，不再生成占位）。
    kb_ids=[…会话绑定的库 id…])` 先预览 → 用户确认后 `mode="apply"`，
    并带上 **`session`**：
    ```json

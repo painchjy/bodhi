@@ -36,7 +36,7 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
 ## 2. 落库（沿用 `domain_modeling` 的硬规则）
 1. **写库唯一**：`kb_ids` > 1 且用户没点名 ⇒ 服务端拒写（`need_kb_selection`）✓；`kb_id` 只认**完整 uuid/精确库名**（模糊 ⇒ `need_kb_confirm`）✓；
 2. **会话身份必带**：`save_knowledge(..., session_no=…, session={knowledge_id, round_no, cursor, next_cursor, doc_title})` ✓；
-   每节点给 **`source_text`（原句）** + **`attributes.bmm:sourceLocator`**（如 `session/S-…/p2#轮3/段5`）✓ —— 只写原句不写定位 = **溯源链断** ✗；
+   每节点给 **`attributes.bmm:sourceLocator`**（`kb:` / `page:` / `session:` / `ext-doc:` 五类语法）✓；服务端按定位回读约 150 字逐字摘录。`source_text` 只作提示/兜底，回读失败不写占位；
 3. **先预览后写**：`mode="dry_run"` → 用户确认 → `mode="apply"` ✓；
 4. **未映射的列不要硬塞** ✓（默认聚合进 `description`，无关则关掉 ✓）；
 5. **两侧先存在** ✓：先建/确认类实例与目标页，再建关系；`target_exists=false` 时**不能**确认 ✓；
@@ -55,7 +55,7 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
 6. 所有事实都要能回答："**哪个规则需要它 + 出自哪句原文/哪个接口返回**" ✓。
 
 ## 5. 验收断言
-1. 每条事实都有 `source_text` + `sourceLocator` ✓（抽查 3 条）；
+1. 每条事实都有可回读的 `sourceLocator`；正文「原文依据」是来源逐字摘录 ✓（抽查 3 条）；
 2. 知识项落在**已确认的模型/类**里 ✓（`ontology_types` 可查 ✓，无 `B1` 违规 ✓）；
 3. 表格类抽取**逐行逐格**、覆盖完整（行数 = 表行数 ✓）；
 4. 外部系统数据走挡板/接口 ✓，**没有**为它新建本体类/实例集合 ✗；
