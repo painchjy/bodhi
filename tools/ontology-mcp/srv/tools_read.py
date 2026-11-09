@@ -50,7 +50,8 @@ def context_authority(slug: str, master: str = "") -> dict:
 
 
 def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
-               max_findings: int = 50, template_kb_id: str = "") -> dict:
+               max_findings: int = 50, template_kb_id: str = "",
+               stage: str = "handoff") -> dict:
     """**只读**巡检（`ke_audit.audit` 的入口）。
 
     - 单库：传 `kb_id`；
@@ -68,14 +69,15 @@ def audit_scan(kb_id: str = "", kb_ids: list | None = None, scope: str = "all",
             except ValueError as exc:
                 per.append({"asked": raw, "error": str(exc)[:200]})
                 continue
-            rep = ke_audit.audit(uid, scope, max_findings, template_kb_id=template_kb_id)
+            rep = ke_audit.audit(uid, scope, max_findings, template_kb_id=template_kb_id,
+                                 stage=stage)
             per.append({"kb_id": uid, "kb_name": name, "report": rep})
         return {"multi": True, "count": len(per), "per_kb": per,
                 "note": "多库巡检：每库一份独立报告（findings 不跨库合并）"}
     if not (kb_id or "").strip():
         return {"error": "需要 kb_id（单库）或 kb_ids（多库，会话绑定的库清单）"}
     uid, note = resolve_kb_id(kb_id)
-    rep = ke_audit.audit(uid, scope, max_findings, template_kb_id=template_kb_id)
+    rep = ke_audit.audit(uid, scope, max_findings, template_kb_id=template_kb_id, stage=stage)
     rep["kb_id"] = uid
     if note:
         rep["resolved_note"] = note

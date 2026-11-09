@@ -48,6 +48,22 @@ def page_attributes_set(args: dict) -> dict:
                                         dry_run=bool(_pa_dry))
 
 
+def _compact_result(out: dict, limit: int = 8) -> dict:
+    """MCP 回执限长：大 apply 只回前 N 条明细 + total（防 agent 被 24k 工具输出截断）。
+
+    明细仍完整写入 `logs/args`/版本库；`receipt` 给计数，agent 可据此回执。
+    """
+    if not isinstance(out, dict):
+        return out
+    for key in ("created", "merged", "page_versions"):
+        val = out.get(key)
+        if isinstance(val, list) and len(val) > limit:
+            out[key + "_total"] = len(val)
+            out[key] = val[:limit]
+            out["details_truncated"] = True
+    return out
+
+
 @handle("save_knowledge")
 def save_knowledge_tool(args: dict) -> dict:
     """写库唯一入口（`stage=graph|report`）。**参数解析逐字照搬**原 `if name == "save_knowledge"` 分支 ✓
@@ -58,10 +74,11 @@ def save_knowledge_tool(args: dict) -> dict:
     - 不补块（`auto_ref_block` 已删）、不比对台账/契约（`ke_ext_gate` 已删）、
       不产出 `ext_ref_block` / `ext_gate` / `ext_schema_stale` 之类**领域告警** ✗。
     """
-    return save_knowledge(
+    out = save_knowledge(
         str(args["kb_id"]), stage=str(args.get("stage", "report")),
         model=str(args.get("model", "bmm")), report=args.get("report"),
         nodes=args.get("nodes") or [], edges=args.get("edges") or [],
+        relations_only=bool(args.get("relations_only")),
         mode=str(args.get("mode", "dry_run")),
         confirmed_new_applications=args.get("confirmed_new_applications") or [],
         session=args.get("session") or None, kb_ids=args.get("kb_ids") or None,
@@ -70,4 +87,5 @@ def save_knowledge_tool(args: dict) -> dict:
         session_no=str(args.get("session_no", "")),
         doc_id=str(args.get("doc_id", "")), intent=str(args.get("intent", "")),
         acknowledge_intent_change=bool(args.get("acknowledge_intent_change", False)))
+    return _compact_result(out)
 

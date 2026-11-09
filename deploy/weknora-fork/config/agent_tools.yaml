@@ -39,6 +39,9 @@ agents:
     builtin_tools:
       - data_schema
       - data_analysis
+      - list_documents
+      - read_document
+      - search_knowledge
     mcp_service_names:
       - bodhi_ontology
       - it_platform

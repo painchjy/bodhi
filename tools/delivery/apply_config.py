@@ -8,7 +8,7 @@
 ----
     python3 tools/delivery/apply_config.py --check     # 只比对（默认），有漂移 ⇒ 退出码 1
     python3 tools/delivery/apply_config.py --apply     # 写入（无变化 ⇒ 一条 UPDATE 都不发）
-    python3 tools/delivery/apply_config.py --apply --only <agent_id>
+    python3 tools/delivery/apply_config.py --apply --only <agent_id|name>
 
 约定
 ----
@@ -230,7 +230,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="写入（默认只比对）")
     ap.add_argument("--check", action="store_true", help="只比对（默认行为，保留以便脚本自解释）")
-    ap.add_argument("--only", default="", help="只处理某个 agent id")
+    ap.add_argument("--only", default="", help="只处理某个 agent id 或名字")
     ap.add_argument("--create", action="store_true",
                     help="按 name 找不到时新建智能体（2026-10-30；内网无需 UI 手建）")
     ap.add_argument("--conf", default=os.path.join(CONF, "agent_tools.yaml"))
@@ -240,7 +240,10 @@ def main() -> int:
     # 2026-10-30：`id` 可空 ⇒ 按 `name` 解析（多环境 id 不同）；`--create` 时库里没有就建。
     agents = [a for a in (doc.get("agents") or []) if a.get("id") or a.get("name")]
     if args.only:
-        agents = [a for a in agents if a["id"] == args.only]
+        # 允许按 yaml 里的 id **或名字** 定向（2026-11-08：建模/测试智能体 id 留空 ⇒
+        # 只按 id 过滤会报「没有要处理的智能体」，发布单个智能体时只能全量写、误伤别的智能体）
+        agents = [a for a in agents
+                  if a.get("id") == args.only or (a.get("name") or "") == args.only]
     if not agents:
         print("没有要处理的智能体（检查 --only / agent_tools.yaml）")
         return 2

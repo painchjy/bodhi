@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -93,6 +94,14 @@ def _snapshot_path(sid: str) -> str:
     return os.path.join(SCOPE_DIR, "%s.json" % sid)
 
 
+def _snapshot_mtime(sid: str) -> float:
+    """快照文件 mtime；外部解锁/测试恢复快照后，进程内 60s 缓存必须失效。"""
+    try:
+        return os.path.getmtime(_snapshot_path(sid))
+    except OSError:
+        return 0.0
+
+
 def _read_snapshot(sid: str) -> dict:
     try:
         with open(_snapshot_path(sid), encoding="utf-8") as fh:
@@ -148,7 +157,8 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
                         "请把 WeKnora 会话 uuid 传入"}
     now = time.time()
     hit = _CACHE.get(sid)
-    if use_cache and hit and now - hit[0] < _TTL:
+    _mt = _snapshot_mtime(sid)
+    if use_cache and hit and now - hit[0] < _TTL and (len(hit) < 3 or hit[2] == _mt):
         return hit[1]
 
     import ke_db  # noqa: PLC0415
@@ -282,7 +292,7 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
     else:
         scope["snapshot_at"] = ke_db.now_text()
         _write_snapshot(sid, scope)
-    _CACHE[sid] = (now, scope)
+    _CACHE[sid] = (now, scope, _snapshot_mtime(sid))
     return scope
 
 
@@ -310,6 +320,54 @@ def lock_work_kb(session_no: str, kb: dict) -> dict:
         _write_snapshot(sid, snap)
         _CACHE.pop(sid, None)                   # 下一次 agent_scope 重新读（含锁定值）
     return snap.get("work_kb") or {}
+
+
+def unlock_work_kb(session_no: str, reason: str = "", actor: str = "") -> dict:
+    """受控解除 `work_multi` 的会话工作库锁（运维/测试污染修复）。
+
+    为什么不直接删快照：`domain_kb` / `method_kb` 还要保留；删文件会让会话
+    重新解析配置、丢失快照防漂移价值。这里只清 `work_kb`，并写审计。
+
+    返回 `{ok, unlocked, previous, backup, reason, actor, error}`；没有锁时
+    `unlocked=false`，不报错（幂等）。
+    """
+    import ke_db  # noqa: PLC0415
+
+    sid = str(session_no or "").strip()
+    if not sid:
+        return {"ok": False, "unlocked": False, "error": "need_session"}
+    path = _snapshot_path(sid)
+    snap = _read_snapshot(sid)
+    if not snap:
+        return {"ok": False, "unlocked": False, "error": "no_snapshot", "session_no": sid}
+    cur = snap.get("work_kb") or {}
+    if not cur.get("id"):
+        return {"ok": True, "unlocked": False, "session_no": sid,
+                "reason": "no_work_lock"}
+
+    backup = "%s.bak-%s" % (path, time.strftime("%Y%m%d-%H%M%S"))
+    try:
+        shutil.copy2(path, backup)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "unlocked": False, "session_no": sid,
+                "error": "backup_failed: %s" % str(exc)[:160]}
+
+    snap["work_kb"] = {}
+    snap.pop("locked_at", None)
+    audit = snap.get("unlock_audit")
+    audit = audit if isinstance(audit, list) else []
+    audit.append({"at": ke_db.now_text(), "previous": cur,
+                  "reason": str(reason or "").strip(), "actor": str(actor or "").strip()})
+    snap["unlock_audit"] = audit[-20:]            # 只留最近 20 次，防快照无限增长
+    _write_snapshot(sid, snap)
+    _CACHE.pop(sid, None)
+    after = _read_snapshot(sid)
+    if (after.get("work_kb") or {}).get("id"):
+        return {"ok": False, "unlocked": False, "session_no": sid,
+                "error": "write_failed", "backup": backup}
+    return {"ok": True, "unlocked": True, "session_no": sid, "previous": cur,
+            "backup": backup, "reason": str(reason or "").strip(),
+            "actor": str(actor or "").strip()}
 
 
 def work_multi(scope: dict) -> bool:

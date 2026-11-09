@@ -51,8 +51,10 @@ DB_NAME = os.environ.get("BODHI_DB_NAME", "WeKnora")
 try:
     sys.path.insert(0, str(REPO / "tools" / "ke-core"))
     import ke_db as _ke_db            # noqa: E402
+    import ke_ontology as _ke_onto    # noqa: E402
     DB_PASSWORD = _ke_db.DB_PASSWORD
 except Exception:                      # noqa: BLE001  独立运行时退化为仅 env
+    _ke_onto = None
     DB_PASSWORD = os.environ.get("BODHI_DB_PASSWORD", "")
 
 TYPE_MODULE = "ontology:Module"
@@ -291,12 +293,6 @@ class WikiBuilder:
         name = cls["name"]
         label = cls.get("label") or name
         parents = cls.get("parents") or []
-        as_domain, as_range = [], []
-        for rel in module["relations"]:
-            if name in (rel.get("domain") or []):
-                as_domain.append(rel)
-            if name in (rel.get("range") or []):
-                as_range.append(rel)
         children = [c for c in module["classes"] if name in (c.get("parents") or [])]
 
         lines = ["# %s（`%s`）" % (label, name), "",
@@ -320,28 +316,80 @@ class WikiBuilder:
                 out_slugs.append(slug_class(module["key"], child["name"]))
             lines.append("")
 
-        if as_domain or as_range:
+        view = None
+        if _ke_onto is not None:
+            try:
+                view = _ke_onto.class_view(name)
+            except Exception:  # noqa: BLE001
+                view = None
+        if not view:
+            # 独立运行兜底：没有 ke-core 时只列直接 domain/range（不再是主路径）
+            direct_out, direct_in = [], []
+            for rel in module["relations"]:
+                if name in (rel.get("domain") or []):
+                    direct_out.append({"name": rel.get("name"), "label": rel.get("label"),
+                                       "target_classes": list(rel.get("range") or [])})
+                if name in (rel.get("range") or []):
+                    direct_in.append({"name": rel.get("name"), "label": rel.get("label"),
+                                      "source_classes": list(rel.get("domain") or [])})
+            view = {"out": {"own": direct_out, "inherited": {}},
+                    "in": {"own": direct_in, "inherited": {}}}
+
+        def _emit_rels(rows: list, direction: str) -> list:
+            out = []
+            for rel in rows or []:
+                rel_name = str(rel.get("name") or "").strip()
+                if not rel_name:
+                    continue
+                if direction == "out":
+                    ends = rel.get("target_classes") or rel.get("range") or []
+                    shown = "、".join(self.class_link(str(t)) for t in ends) or "?"
+                    out.append("- %s → %s" % (self.relation_link(rel_name), shown))
+                else:
+                    ends = rel.get("source_classes") or rel.get("domain") or []
+                    shown = "、".join(self.class_link(str(s)) for s in ends) or "?"
+                    out.append("- %s ← %s" % (self.relation_link(rel_name), shown))
+                rel_slug = self.relation_slug_of(rel_name)
+                if rel_slug:
+                    out_slugs.append(rel_slug)
+                for c in ends:
+                    cls_slug = self.class_slug_of(str(c))
+                    if cls_slug:
+                        out_slugs.append(cls_slug)
+            return out
+
+        out_v = view.get("out") or {}
+        in_v = view.get("in") or {}
+        out_own = list(out_v.get("own") or [])
+        out_inh = dict(out_v.get("inherited") or {})
+        in_own = list(in_v.get("own") or [])
+        in_inh = dict(in_v.get("inherited") or {})
+        if out_own or out_inh or in_own or in_inh:
             lines += ["## 相关关系", ""]
-            if as_domain:
+            if out_own or out_inh:
                 lines += ["**作为起点（domain）**", ""]
-                for rel in as_domain:
-                    targets = "、".join(self.class_link(t) for t in (rel.get("range") or [])) or "?"
-                    lines.append("- %s → %s" % (self.relation_link(rel["name"]), targets))
-                    out_slugs.append(self.relation_slug_of(rel["name"]))
-                    for t in (rel.get("range") or []):
-                        out_slugs.append(self.class_slug_of(t))
+                if out_own:
+                    lines += ["### 自身（%d）" % len(out_own), ""] + _emit_rels(out_own, "out") + [""]
+                for a, rows in out_inh.items():
+                    if rows:
+                        lines += ["### 继承自 %s（%d）" % (self.class_link(str(a)), len(rows)), ""] \
+                                 + _emit_rels(rows, "out") + [""]
+                        out_slugs.append(self.class_slug_of(str(a)))
                 lines.append("")
-            if as_range:
+            if in_own or in_inh:
                 lines += ["**作为终点（range）**", ""]
-                for rel in as_range:
-                    sources = "、".join(self.class_link(s) for s in (rel.get("domain") or [])) or "?"
-                    lines.append("- %s ← %s" % (self.relation_link(rel["name"]), sources))
-                    out_slugs.append(self.relation_slug_of(rel["name"]))
-                    for s in (rel.get("domain") or []):
-                        out_slugs.append(self.class_slug_of(s))
+                if in_own:
+                    lines += ["### 自身（%d）" % len(in_own)] + [""] + _emit_rels(in_own, "in") + [""]
+                for a, rows in in_inh.items():
+                    if rows:
+                        lines += ["### 继承自 %s（%d）" % (self.class_link(str(a)), len(rows)), ""] \
+                                 + _emit_rels(rows, "in") + [""]
+                        out_slugs.append(self.class_slug_of(str(a)))
                 lines.append("")
         # 属性定义（2026-10-15 用户口径）：**分「自身 / 继承」×「对象属性 / 数据属性」**；
         # **继承跨模块**（祖先闭包走 `self.class_index`，它覆盖全部模块）。
+        # 2026-11-08：数据属性改读 `class_view.data`（与 ontology_types/save 同源）；
+        # 对象属性仍用本页的 props_flat 明细（含 comment / target 链接）。
         props_all = self.props_flat or self.properties.get(module["key"], [])
 
         def _pick(owner: str) -> list:
@@ -370,6 +418,28 @@ class WikiBuilder:
             if got:
                 inh[a] = got
 
+        _props_by_name = {p.get("prefixed"): p for p in props_all}
+
+        def _data_prop(item: dict) -> dict:
+            """class_view.data 的条目 → 页面渲染所需的属性行（缺明细时最小补齐）。"""
+            nm = str(item.get("name") or "")
+            p = _props_by_name.get(nm)
+            if p:
+                return p
+            return {"prefixed": nm, "name": nm, "label": item.get("label") or nm,
+                    "kind": "DatatypeProperty", "ranges": [],
+                    "_module": module["key"], "comment": ""}
+
+        _dv = (view or {}).get("data") or {}
+        if _dv.get("own") or _dv.get("inherited"):
+            dat_own = [_data_prop(i) for i in (_dv.get("own") or [])]
+            dat_inh = {a: [_data_prop(i) for i in rows]
+                       for a, rows in (_dv.get("inherited") or {}).items()}
+        else:                                         # 独立运行/旧视图兜底
+            dat_own = [p for p in own if p.get("kind") != "ObjectProperty"]
+            dat_inh = {a: [p for p in v if p.get("kind") != "ObjectProperty"]
+                       for a, v in inh.items()}
+
         def _emit(items: list) -> list:
             out = []
             for prop in items:
@@ -391,11 +461,9 @@ class WikiBuilder:
                     out_slugs.append(self.property_slug_of(pmod, prop))
             return out
 
-        dat_own = [p for p in own if p.get("kind") != "ObjectProperty"]
         obj_own = [p for p in own if p.get("kind") == "ObjectProperty"]
-        dat_inh = {a: [p for p in v if p.get("kind") != "ObjectProperty"] for a, v in inh.items()}
         obj_inh = {a: [p for p in v if p.get("kind") == "ObjectProperty"] for a, v in inh.items()}
-        if own or inh:
+        if own or inh or dat_own or dat_inh:
             lines += ["## 数据属性", ""]
             if dat_own:
                 lines += ["### 自身（%d）" % len(dat_own), ""] + _emit(dat_own) + [""]

@@ -370,7 +370,10 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                     # 更新既有页 → **沿用库里记录的"首个版本生成"**（口径：只在新建页写；否则每次
                     # 写库这一行都会变成当前时间，实测 diff 就差在这一行）。
                     _s["created_at"] = _old_created
-                if _loc:
+                _explicit_loc = str(
+                    ((_b["element"].get("attributes") or {}).get("bmm:sourceLocator"))
+                    or _pg.get("source_locator") or "").strip()
+                if _loc and not _explicit_loc:
                     _attrs = dict(_s.get("attributes") or {})
                     _attrs["bmm:sourceLocator"] = _loc
                     _s["attributes"] = _attrs
@@ -588,11 +591,6 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             dst_slug = slug_by_name.get(dst) or _graph_target_slug(kb_id, dst) or dst
             retract_edges.append({"source": src, "type": rel_type, "target": dst, "slug": dst_slug})
             continue
-        closure = ke_ontology.target_closure(rel_type)
-        if not closure:
-            violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
-                               "reason": "本体里没有这个对象属性"})
-            continue
         dst_type = next((n.get("type") for n in nodes if (n.get("name") or "").strip() == dst), "")
         dst_slug = slug_by_name.get(dst, "")
         if not dst_slug:
@@ -602,10 +600,19 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
                                "reason": "目标解析不到页面（既不在本次节点里，也**不在本库**）"})
             continue
-        if dst_type and dst_type not in closure:
-            violations.append({"kind": "edge", "source": src, "type": rel_type, "target": dst,
-                               "reason": "目标页类型 %s 不在 `%s` 的 range 内（%s）"
-                                         % (dst_type, rel_type, "、".join(closure[:6]))})
+        src_type = next((n.get("type") for n in nodes
+                         if (n.get("name") or "").strip() == src), "") or _graph_target_type(kb_id, src)
+        chk = ke_ontology.edge_check(rel_type, src_type, dst_type)
+        if not chk.get("ok"):
+            item = {"kind": "edge", "source": src, "type": rel_type, "target": dst,
+                    "code": chk.get("code"),
+                    "reason": chk.get("hint") or "关系不符合本体 domain/range"}
+            if chk.get("canonical"):
+                item["canonical"] = {
+                    "source": dst_slug or dst, "type": rel_type,
+                    "target": slug_by_name.get(src) or _graph_target_slug(kb_id, src) or src,
+                }
+            violations.append(item)
             continue
         # ---- 关系撤回（retract）见循环开头（已收集进 retract_edges）
         outgoing.setdefault(src, []).append({"type": rel_type, "label": edge.get("label", ""),
@@ -645,7 +652,8 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
         payloads.append({
             "name": name, "type": node["type"], "type_label": node["_type_label"],
             "module": node["_module"], "slug": slug_by_name[name],
-            "definition": node.get("definition") or "",
+            "definition": (node.get("definition")
+                           or (node.get("attributes") or {}).get("skos:definition") or ""),
             "description": node.get("description") or "",
             # 概要设计字段（服务页要自解释：用途/输入输出/ASSERTION 规范/数据属性/被引用入边）
             "purpose": node.get("purpose") or node.get("definition") or "",
@@ -658,7 +666,9 @@ def design_elements(model_key: str, model: dict, nodes: list, edges: list, doc_m
             "source_text": node.get("source_text") or ctx["no_quote"],
             # 来源定位（2026-10-01）：显式 `source_locator`/`locator` 优先，其次 `chunk_index` 兜底；
             # 落到节点属性 `bmm:sourceLocator` + 页面「## 原文依据」的来源行（可查询、可复核）。
-            "source_locator": (str(node.get("source_locator") or node.get("locator") or "").strip()
+            "source_locator": (str(node.get("source_locator") or node.get("locator")
+                                   or (node.get("attributes") or {}).get("bmm:sourceLocator")
+                                   or "").strip()
                                or _chunk_locator(node.get("chunk_index"))),
             "chunk_id": str(node.get("chunk_id") or ""),
             "chunk_index": _as_chunk_index(node.get("chunk_index")), "relations": rels,
@@ -686,8 +696,8 @@ def _attrs_with_identity(node: dict, kb_id: str, injected: dict) -> dict:
     规则（2026-10-04 用户口径）：
       · `bmm:KnowledgeSession` 节点：`sessionNo` / `agentName` **由会话身份覆盖**（客户端值丢弃）、
         `tenantName` = 租户名（服务端查 `tenants.name`）；
-      · **其它节点**：自动补 `bmm:sourceSession`（= `session/<会话编号>`）与
-        `bmm:sourceLocator` 兜底（= `session/<会话编号>/p<分页序号>`）→ 每条知识都能回到会话；
+      · **其它节点**：默认用调用方给的 `bmm:sourceLocator`；没有显式来源时才回退
+        `session/<会话编号>/p<分页序号>`。`bmm:sourceSession` 边只在**会话来源**时补；
       · **无 env 兜底**：会话身份解析不到时，`save_knowledge` 层已经**拒绝写库**（fail-closed）。
     """
     attrs = dict(node.get("attributes") or {})
@@ -710,14 +720,19 @@ def _attrs_with_identity(node: dict, kb_id: str, injected: dict) -> dict:
             injected["bmm:agentName"] = ident["agent_name"]
         return attrs
 
-    # 非会话节点：只自动补「会话片段定位」数据属性 `bmm:sourceLocator`（B1：统一 prefixed）。
-    # `bmm:sourceSession` 是对象属性（关系）⇒ 由 `design_elements`/`link_source_session` 补边。
+    # 非会话节点：`bmm:sourceLocator` 以**显式来源**优先（kb/ext-doc/page/file/session）；
+    # 只有调用方没给来源时，才回退到“本会话片段定位”。
+    explicit = str(attrs.get("bmm:sourceLocator") or attrs.get("sourceLocator")
+                   or node.get("source_locator") or node.get("locator") or "").strip()
     attrs.pop("sourceLocator", None)            # 清无前缀旧键（去重）
-    if ident.get("ok"):
+    if explicit:
+        attrs["bmm:sourceLocator"] = explicit
+        injected["bmm:sourceLocator"] = explicit
+    elif ident.get("ok"):
         part = _session_part_no(kb_id, ident["session_no"])
         loc = ("session/%s/p%s" % (ident["session_no"], part)) if part \
             else ("session/%s" % ident["session_no"])
-        attrs["bmm:sourceLocator"] = loc         # 覆盖抽取可能传的“文档章节”值（B1：sourceLocator=会话片段定位）
+        attrs["bmm:sourceLocator"] = loc         # 无显式来源时的会话兜底
         injected["bmm:sourceLocator"] = loc
     return attrs
 

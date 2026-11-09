@@ -42,9 +42,9 @@ def publish(kb: str, spec: str, apply: bool = False) -> dict:
     if not res["ok"]:
         return {"ok": False, "published": 0, "reason": "门禁未过 ⇒ 不发布 ✗",
                 "check_errors": res["check"].get("errors")}
-    import ke_lookup
+    import ke_review
 
-    lk = ke_lookup.knowledge_lookup(kb, mode="rules", spec=spec)
+    lk = ke_review.rules_resolve(kb, spec)
     # 发布戳：**不再写 rules_hash** ✗（哈希走属性 `bmm:ruleHash` ✓）；戳上带规则语言（口径可追溯）
     date = time.strftime("%Y-%m-%d")
     done, failed = [], []
@@ -95,8 +95,8 @@ if __name__ == "__main__":
 def ruleset_hash(kb: str, spec: str) -> dict:
     """规则集指纹：按 slug 排序后的 ruleHash 连接（sha1）——用于判断"发布是否生效"。"""
     import hashlib
-    import ke_lookup
-    lk = ke_lookup.knowledge_lookup(kb, mode="rules", spec=spec)
+    import ke_review
+    lk = ke_review.rules_resolve(kb, spec)
     rows = [{"slug": r.get("slug"), "ruleHash": r.get("ruleHash") or ""} for r in (lk.get("rules") or [])]
     rows.sort(key=lambda x: str(x.get("slug")))
     blob = json.dumps(rows, ensure_ascii=False, sort_keys=True)

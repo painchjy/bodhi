@@ -391,26 +391,12 @@ def validate_edge(kb_id: str, src: str, rel: str, tgt: str,
     if not st or not tt:
         return {"ok": False, "code": "missing_page", "st": st, "tt": tt,
                 "hint": "源/目标页不存在（图上与 PG 都没有）：先建页再连边"}
-    allowed = ke_ontology.relation_type_map(st) if st else {}
-    closure = ke_ontology.target_closure(rel)
-    row = allowed.get(rel)
-    if not row and not closure:
-        return {"ok": False, "code": "unknown_relation", "st": st, "tt": tt,
-                "hint": "本体没有对象属性 `%s`（先在 TTL 声明 domain/range 再重建投影）" % rel}
-    if not row:
-        cands = sorted(allowed)[:8]
-        return {"ok": False, "code": "domain_mismatch", "st": st, "tt": tt,
-                "hint": ("`%s` 的 domain 不覆盖 %s；该类型可用关系：%s"
-                         "（或把页面 page_type 改成声明 domain 的那个类）"
-                         % (rel, st, "、".join(cands) or "无"))}
-    if closure and tt not in closure:
-        return {"ok": False, "code": "range_mismatch", "st": st, "tt": tt,
-                "hint": "目标页类型 %s 不在 `%s` 的 range 内（%s）"
-                        % (tt, rel, "、".join(closure[:8]))}
-    if not str(row.get("domain") or "").strip():
-        return {"ok": True, "code": "unconstrained", "st": st, "tt": tt,
-                "hint": "该属性未声明 domain（本体放行；建议补 domain）"}
-    return {"ok": True, "code": "", "st": st, "tt": tt}
+    chk = ke_ontology.edge_check(rel, st, tt)
+    out = {"ok": bool(chk.get("ok")), "code": chk.get("code") or "",
+           "st": st, "tt": tt, "hint": chk.get("hint") or ""}
+    if chk.get("canonical"):
+        out["canonical"] = {"source": tgt, "type": rel, "target": src}
+    return out
 
 
 def _check_domain(rel_type: str, source_type: str) -> None:
@@ -619,6 +605,8 @@ def add_edges_batch(kb_id: str, triples: list, ctx: dict | None = None) -> dict:
             item = {"source": src, "type": rel, "target_slug": tgt,
                     "code": v.get("code"), "hint": v.get("hint"),
                     "st": v.get("st"), "tt": v.get("tt")}
+            if v.get("canonical"):
+                item["canonical"] = v["canonical"]
             # 2026-10-30 用户口径：domain/range/unconstrained **只记 violation、不阻断**
             if v.get("code") in ("domain_mismatch", "range_mismatch", "unconstrained") \
                     and not strict:

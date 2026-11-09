@@ -183,8 +183,14 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
 ### 16. 评估 Assessment
 :Assessment rdf:type owl:Class ;
     rdfs:label "评估"@zh ;
-    rdfs:comment "评估实质上是判断影响因素对目标的达成和/或手段的采用产生何种影响。评估可以有多种分类方式，SWOT（优势、劣势、机会、威胁）是评估领域常用的分析方法。"@zh ;
+    rdfs:comment "评估实质上是判断影响因素对目标的达成和/或手段的采用产生何种影响。评估可以有多种分类方式，SWOT（优势、劣势、机会、威胁）是评估领域常用的分析方法。**本类是通用评估**：`assessedBy` 要求至少一个组织单位；`assessmentType`（SWOT 四态）的约束在子类 `:SWOTAssessment`。"@zh ;
     rdfs:subClassOf owl:Thing .
+
+### 16.1 SWOT 评估 SWOTAssessment（2026-11-06 新增）
+:SWOTAssessment rdf:type owl:Class ;
+    rdfs:label "SWOT评估"@zh ;
+    rdfs:comment "SWOT 评估（优势/劣势/机会/威胁）：原 `:Assessment` 上的 `assessmentType` 基数约束移到本类；通用评估（如 `agent:Evaluation`）不再被迫填 SWOT 类型。"@zh ;
+    rdfs:subClassOf :Assessment .
 
 ### 17. 业务流程 BusinessProcess
 :BusinessProcess rdf:type owl:Class ;
@@ -563,11 +569,11 @@ bodhi:expertRole rdf:type owl:AnnotationProperty ;
     rdfs:comment "操作性业务规则必须且只能有一个执行级别"
 ] .
 
-:Assessment rdfs:subClassOf [
+:SWOTAssessment rdfs:subClassOf [
     rdf:type owl:Restriction ;
     owl:onProperty :assessmentType ;
     owl:cardinality 1 ;
-    rdfs:comment "每一项评估必须且只能属于优势、劣势、机会、威胁中的一种"
+    rdfs:comment "每一项 SWOT 评估必须且只能属于优势、劣势、机会、威胁中的一种"
 ] .
 
 # ============================================================
@@ -645,13 +651,13 @@ skos:note rdf:type owl:AnnotationProperty ;
     rdfs:label "知识来源会话"@zh ;
     rdfs:domain owl:Thing ;
     rdfs:range :KnowledgeSession ;
-    rdfs:comment "任何知识页/知识项都应能指回其来源会话（来源都指向会话知识页的相关上下文）"@zh .
+    rdfs:comment "**仅用于会话来源**（session_attachment / session_text）：知识页可指回其来源会话页。知识库文档/外部文档/知识页/文件来源**不写本边**，改用 `bmm:sourceLocator` + `source_refs`/`external_ref`。旧的非会话来源边属 legacy，不再新增。"@zh .
 
 :sourceLocator rdf:type owl:DatatypeProperty ;
     rdfs:label "来源定位"@zh ;
     rdfs:domain owl:Thing ;
     rdfs:range xsd:string ;
-    rdfs:comment "会话内定位：分页序号 + 轮次/消息/段落（或图坐标），用于可复核" .
+    rdfs:comment "统一来源定位（语法见 `bpmn:TextualDataObject`）：ext-doc / kb / session / page / file 五类前缀；值 URL 编码，`#` 段分隔。**只有 ext-doc 允许 object/key**（外部文档有 DataObject 契约与 key）；会话来源才配 `sourceSession`。" .
 
 ### 35. 旧report类正文数据属性，已被schema:articleBody代替
 :wikiContent rdf:type owl:DatatypeProperty ;

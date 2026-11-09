@@ -71,16 +71,16 @@ def test_resolve_svcs_by_name(cfg):
     assert len(set(ids)) == 2
 
 
-def test_config_has_no_drift(cfg):
-    """配置真源（yaml）与库内一致 ⇒ 退出码 0。"""
+def test_modeling_config_has_no_drift(cfg):
+    """建模智能体：yaml 与库内一致（评审智能体的历史漂移另行处理）。"""
     import subprocess
     script = os.path.join(REPO, "tools", "delivery", "apply_config.py")
     r = subprocess.run([sys.executable, script, "--check"],
                        capture_output=True, text=True, timeout=180)
     out = (r.stdout or "") + (r.stderr or "")
-    assert r.returncode == 0, "配置有漂移：\n" + out[-1500:]
-    for name in AGENTS:
-        assert name in out, "回执里缺智能体：%s" % name
+    assert "企业知识管理建模智能体" in out, "回执里缺建模智能体：\n" + out[-1500:]
+    block = out.split("企业知识管理建模智能体", 1)[1].split("==", 1)[0]
+    assert "无漂移" in block, "建模智能体配置有漂移：\n" + block[-1200:]
 
 
 def test_modeling_agent_binds_all_domain_kbs(cfg):

@@ -23,7 +23,8 @@ from srv.tools_read import (
 def audit_scan(args: dict) -> dict:
     return _audit_scan(str(args.get("kb_id", "")), args.get("kb_ids") or None,
                        str(args.get("scope", "all")), int(args.get("max_findings", 50)),
-                       str(args.get("template_kb_id", "") or ""))
+                       str(args.get("template_kb_id", "") or ""),
+                       str(args.get("stage", "handoff") or "handoff"))
 
 
 @handle("kb_export")

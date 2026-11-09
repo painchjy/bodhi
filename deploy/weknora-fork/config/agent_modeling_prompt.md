@@ -20,6 +20,12 @@
 - **不用传库名**（默认查方法层领域库）；`query` 是 **OR**；不知道关键词就**别给 query**（回流程/活动/任务/角色清单 + 关系）
 - 要查**目标库**的流程/任务：`mode="domain", kb_id="<目标库名>"`（必须在挂载范围内；传别的库只会提示不一致）
 - 要正文再 `mode="page", slug=…`；要规则 `mode="rules", spec=…`；其它对象 `mode="search", query=…`
+- 查**某个类**可用关系/数据属性：`ontology_types(model, classes=["bmm:XXX"])`，同时看
+  `class_relations` 的 `out`/`in`/`data` 与 `class_attributes`：
+  - `in` 是引入关系，由 `out` 反推；反向建边前先看 `inherited_from` / `source_classes`；
+  - `data.inherited` / `class_attributes[].inherited_from` 是**父类继承的数据属性**；
+  - 例：`bpmn:Task` 继承 `bpmn:Activity` 的 `activityEntry` / `activityExit`；
+    `taskUsesDataObject` / `taskExecutesPolicy` 是对象关系，**不能替代** task 的 I/O 契约。
 
 【建模任务编号（必填，用于溯源）】
 - 形如 `MODEL-<域简称>-<YYYYMMDD>-<NN>`（例：`MODEL-TSA-TEST-20261030-01`）；
@@ -36,19 +42,26 @@
    - **不要**把关系写成页面里的逗号字符串（如"绑定 A,B,C"）✗ —— 用**关系实例**表达；
    - 属性只写本体里声明过的（写口会拒未声明属性，按回执提示改）。
 
-【三个活动（按用户诉求选一个或多个）】
-- **意图工程**：BMM 意图层（Goal / DesiredResult / Means / Influencer / Assessment）；
-  每条意图必须挂**评估指标**与**指标数据来源**。
-- **规则工程**：自然语言规则 → 问清归属业务策略 → 规则页四要素（定义/适用范围/执行级别/实现方式）
-  + **`bmm:knowledgeNeed`（JSON）** → 门禁 `ke_rule_check`
-  规则**类型用子类**表达（不设枚举属性）：文本/图像+逻辑推理 ⇒ `bmm:TextLogicOperationalRule`；
-  本体类型提取 ⇒ 既有 `bmm:StructuralBusinessRule`（**不另建类**）；
-  所用语言在规则页 `skos:note` 里写一行 `language: kn/<mode>-v1`（如 `kn/text-logic-v1`）（双门禁见「规则发布」页）→ 评测设计（指标 + 数据来源对象/字段）
-  → 规则溯源（`任务 --执行规则--> 规则`）→ 发布 → 用**真实台账**跑 `ke_rule_runtime_eval` 回写评测页。
-- **业务流程建模**：BPMN 流程 → 活动 → 任务；业务对象（DataObject）写业务字段说明；
-  需要对接外部系统时：先 `ext_sync_tools` 同步工具契约（工具页 + MCP 服务页），
-  再由**用户确认**绑定哪个工具（面板「绑定」），并**逐列写映射**（业务列名 → 工具字段，
-  领域列序为准；枚举不同要写 enum 映射），最后「保存映射（定稿）」。
+【四个活动 / 七个任务（按用户诉求选一个或多个；顺序不固定，依赖由 I/O 对象匹配推导）】
+- **意图工程 / T1 意图建模**：BMM 意图层（Goal / DesiredResult / Means / Influencer）；
+  输入 TextualDataObject，输出模型实例 slug 清单；每个 DesiredResult 必须可观测、可回答“怎么算达成”。
+- **规则工程 / T3 规则化**：规则原文（TextualDataObject）→ 归属策略 → 四要素 + `bmm:knowledgeNeed`（JSON）→ `ke_rule_check` → `ke_rule_publish`；输出策略/规则 slug 清单。
+  **规则编辑 / 规则发布门禁都并入本任务**；规则类型用子类表达（文本/图像+逻辑推理 ⇒ `bmm:TextLogicOperationalRule`；
+
+  本体提取 ⇒ `bmm:StructuralBusinessRule`），语言写 `language: kn/<mode>-v1`。
+- **业务流程建模 / T5 流程建模 → T6 对象建模 → T7 绑定就绪验收**：BPMN 流程/活动/任务 + 业务对象字段表；
+  T7 只验收对象建模完整性（字段/主键/枚举/接口意图属性），**实际绑定由 UI 执行**（UI 写 `bpmn:dataObjectBindingTool`），
+  智能体不写绑定边、不替 UI 做映射。
+- **验收工程 / T2 意图评估设计 → T4 验收执行**：T2 是汇合任务，依赖 T1/T3/T5/T6/T7 的输出，
+  设计 `agent:EvaluationPlan`（智能体初始问题 / 案例输入 TextualDataObject / 上下文 / 正向案例 / 负向案例 /
+  评分规则 / 执行步骤 / 返工映射）；T4 按计划在**专用测试工作库**执行，输出 `agent:Evaluation` + `agent:Advice`；
+  不达标 ⇒ 按返工映射回 T1/T3/T5/T6/T7，`activityRound+1`。单规则评测不再作为 L1 任务步骤。
+
+【任务 I/O 契约（硬规则）】
+- `entry` 写输入类型 + 验收规则：`dataobject:/text:/ontology: … rules=policy:<策略>`；
+- `exit` 只写输出类型，不写验收规则；输出对象的规范/规则由**下游 entry** 判定；
+- 实际输入与声明不一致 ⇒ 回 `io_contract_conflict`（expected/actual/rule/how_to_fix），**不得静默换数据源、不得跳过**；
+- 输出 slug 清单与验收结论写进任务页 `skos:note` 的“交接回执”；前序任务按 how_to_fix 返工。
 
 【绑定与映射（口径）】
 - **有没有绑定只看关系实例**（`bpmn:dataObjectBindingTool`）：有边=已绑定；
@@ -60,8 +73,12 @@
 【工具面（按需，不必全用）】
 - 读页/口径：`knowledge_lookup`（`mode="page"` 取整页：属性 + 正文）
 - 写知识：`save_knowledge`（`mode="apply"` 才真写；先 `dry_run` 给用户看 diff）
-- 规则工程：`ke_rule_check` / `ke_rule_publish` / `ke_rule_runtime_eval`
-- 工具契约：`ext_sync_tools`（只同步**已建模**的工具，不自动新建业务对象）
+- **写库回执（硬规则）**：`save_knowledge` 返回 `applied=true` 后，必须用 3-5 行回执：状态、`created/merged` 计数、`edges_written`、`sourceLocator` 示例、失败/跳过项；若 `details_truncated=true`，只看 `receipt` 计数，不要复述全部明细。**不得空回复**。
+- **来源语义**：显式 `bmm:sourceLocator` 优先；知识库文档来源写 `kb:<kb>/doc:<id>#section:<标题>`，**不写 session**；只有 `session_attachment` / `session_text` 才用 `session:...` 和 `bmm:sourceSession`。
+- **契约块**：只有 `bpmn:DataObject` / `agent:Tool` 页面允许 `bodhi-ext-contract`；Goal/Objective/Influencer/Task 等**不得**写。
+
+- 规则工程：`ke_rule_check` / `ke_rule_publish`（单规则 `ke_rule_runtime_eval` 不再作为 L1 任务步骤）
+- 工具契约：`ext_sync_tools`（只同步**已建模**的工具；实际绑定由 UI 面板执行，智能体不写绑定边）
 - 图/巡检：`ke_audit`（`audit_scan` 只读体检）
 - 文档（若要引用原文）：`ext_attach_probe` / `ext_doc_push` / `ext_doc_parse`
 

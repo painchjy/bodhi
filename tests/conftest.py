@@ -4,6 +4,7 @@
 - `test_kb`：`_test_*` 库（**硬删** teardown ✓，避免 context 重复 ✗）
 - `domain_kb` / `work_kb`：领域库 / 工作库 id（DB 不可用 ⇒ skip ✓）
 """
+import json
 import os
 import sys
 
@@ -33,6 +34,56 @@ def _load_dotenv() -> None:
 
 
 _load_dotenv()
+
+
+@pytest.fixture(autouse=True)
+def _restore_session_scope():
+    """测试隔离：测试结束恢复 `state/session_scope/*.json`。
+
+    背景（2026-11-08）：有测试用真实最新会话 + `mode="apply"` 调 `save_knowledge`，
+    `work_multi` 会把该会话的工作库锁到测试库；测试 teardown 只删页/图节点，
+    不删会话快照 ⇒ 污染用户会话（c263 被锁到 c7bc322f）。
+    这里只做快照/恢复，不改测试语义；生产快照文件不在测试中被永久修改。
+    """
+    root = os.path.join(REPO, "state", "session_scope")
+    before = {}
+    try:
+        for name in os.listdir(root):
+            if name.endswith(".json"):
+                with open(os.path.join(root, name), "rb") as fh:
+                    before[name] = fh.read()
+    except OSError:
+        before = {}
+
+    # 测试需要一个“可写任意目标库”的干净会话：先把既有 work_kb 暂时清掉，
+    # 结束再按 before 原样恢复（用户当前的真实锁不会被永久改）。
+    for name, data in list(before.items()):
+        try:
+            snap = json.loads(data.decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if snap.get("work_kb"):
+            snap["work_kb"] = {}
+            snap.pop("locked_at", None)
+            try:
+                with open(os.path.join(root, name), "w", encoding="utf-8") as fh:
+                    json.dump(snap, fh, ensure_ascii=False, indent=1)
+            except OSError:
+                pass
+
+    yield
+
+    if not before and not os.path.isdir(root):
+        return
+    try:
+        for name, data in before.items():
+            with open(os.path.join(root, name), "wb") as fh:
+                fh.write(data)
+        for name in os.listdir(root):
+            if name.endswith(".json") and name not in before:
+                os.remove(os.path.join(root, name))
+    except OSError:
+        pass
 
 
 @pytest.fixture(scope="session")

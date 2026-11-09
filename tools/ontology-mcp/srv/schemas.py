@@ -102,7 +102,10 @@ TOOL_SCHEMAS = [
                     "scope": {"type": "string", "enum": list(ke_audit.SCOPES),
                               "description": "all(默认) / wiki(A) / model(B) / source(C) / dupes(D) / "
                                              "similar(S1/S2) / template(T1/T2 模板章节完整性) / "
-                                             "ext(G4 快照落后台账 + G5 模板·契约·正文三方一致)"},
+                                             "ext(G4 快照落后台账 + G5 模板·契约·正文三方一致) / "
+                                             "taskio(任务 activityEntry/Exit 的 dataobject/text/ontology/rules 语法与引用)"},
+                    "stage": {"type": "string", "enum": ["draft", "handoff"],
+                              "description": "`scope=taskio` 用：draft 只报不阻断；handoff 的 high 项为 blocking（默认）"},
                     "max_findings": {"type": "integer",
                                      "description": "最多返回多少条明细，默认 50（计数始终完整）"},
                     "template_kb_id": {"type": "string",
@@ -188,12 +191,21 @@ TOOL_SCHEMAS = [
                         "description": ("报告页与溯源信息：{title, content_md(报告全文), slug(可选，"
                                         "graph 段要用它挂父页), upstream(上游页 slug 数组), "
                                         "source_document_id(需求文档 id，方案 C 溯源), "
-                                        "source_document_title, page_type(默认 summary)}"),
+                                        "source_document_title, source_kind(source_kind 见 TextualDataObject), "
+                                        "source_locator(统一来源定位，语法见 bpmn:TextualDataObject), "
+                                        "source_text_slug(可选，TextualDataObject 页 slug), page_type(默认 summary)}"),
                         "properties": {"title": {"type": "string"}, "content_md": {"type": "string"},
                                        "slug": {"type": "string"},
                                        "upstream": {"type": "array", "items": {"type": "string"}},
                                        "source_document_id": {"type": "string"},
-                                       "source_document_title": {"type": "string"}},
+                                       "source_document_title": {"type": "string"},
+                                       "source_kind": {"type": "string",
+                                                       "enum": ["external_doc", "kb_document",
+                                                                "session_attachment", "session_text",
+                                                                "wiki_page", "file"]},
+                                       "source_locator": {"type": "string",
+                                                         "description": "ext-doc/kb/session/page/file locator；ext-doc 必须带 object+key"},
+                                       "source_text_slug": {"type": "string"}},
                     },
                     "nodes": {
                         "type": "array",

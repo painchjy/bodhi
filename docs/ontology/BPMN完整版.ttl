@@ -9,16 +9,16 @@
 # =====================================================================
 # BPMN 业务流程模型（**按需子集**）（2026-10-11 新增）
 #
-# 参考 **BPMN 2.0**，但只落**当前需要的概念**：活动 / 任务 / 业务对象 / 角色，
+# 参考 **BPMN 2.0**，但只落**当前需要的概念**：活动 / 任务 / 业务对象 / 文本数据对象 / 角色，
 # 以及关键关联：**活动 ↔ 业务流程**（`processHasActivity` → bmm:BusinessProcess）、
-# **任务 → 业务规则**（`taskExecutesRule` → bmm:BusinessRule**）、
 # **任务 → 角色**（`taskHasRole` → `Role`）、**活动 → 报告**（`activityProducesReport` → bmm:Report）。
 # `agent.ttl` **bpmn**：**智能体协助活动**（`agent:agentAssistsActivity`）。
-# 刻意**不落**：SequenceFlow / Gateway（顺序不固化）、Message / Collaboration / Choreography。
+# 刻意**不落**：SequenceFlow / Gateway（**顺序不固化**，依赖由 DataObject/TextualDataObject 输入输出推导）、
+# Message / Collaboration / Choreography。
 # =====================================================================
 <http://example.org/bpmn> rdf:type owl:Ontology ;
     rdfs:label "BPMN业务流程模型（按需子集）"@zh ;
-    rdfs:comment "BPMN 2.0 的按需子集：活动/任务/业务对象/角色 + 活动↔业务流程、任务→业务规则、任务→角色。imports bmm。"@zh ;
+    rdfs:comment "BPMN 2.0 的按需子集：活动/任务/业务对象/文本数据对象/角色 + 活动↔业务流程、任务→角色。imports bmm。"@zh ;
     bodhi:expertRole "业务流程建模专家，熟悉 BPMN 2.0 与业务规则落地"@zh .
 
 # ============ 1. 活动 Activity（BPMN: Activity） ============
@@ -41,6 +41,43 @@
     rdfs:label "业务对象"@zh ;
     rdfs:comment "活动/任务读写的**业务对象**（BPMN DataObject）：技术方案、系统、设备申请、技术栈、认证清单…。**各领域模型里的「业务对象」类建议继承本类**（`rdfs:subClassOf bpmn:DataObject`），使「数据从哪来、到哪去」可查。"@zh ;
     rdfs:subClassOf owl:Thing .
+
+# ============ 3a. 文本数据对象 TextualDataObject（DataObject 子类） ============
+# 2026-11-06（用户口径）：文本来源/产物统一用本类表达；**不再给每种文本建知识页**。
+#   · kind=wiki_page：有知识页/slug（实例就是 wiki 页）；
+#   · 其他 kind：**不建知识页、没有 slug**，只用符合本规范的 locator 表达式（值对象）。
+# 任务 I/O 写 `text:<locator>`，不要求 TextualDataObject slug。
+:TextualDataObject rdf:type owl:Class ;
+    rdfs:label "文本数据对象"@zh ;
+    rdfs:comment """文本型业务对象（`bpmn:DataObject` 的子类）：统一表示“可获取的文本来源/产物”——
+外部文档、会话附件、知识库文档、会话文字、知识页、上传文件等。
+
+**kind**：external_doc｜session_attachment｜session_text｜kb_document｜wiki_page｜file
+
+**locator 语法**（写入 `bmm:sourceLocator`，也用于知识页溯源；值统一 URL 编码，`#` 为段分隔符）：
+  ext-doc:<doc_id>#object:<DataObject 实例名称>#key:<字段>=<值>#section:<路径>
+  kb:<kb_id>/doc:<doc_id>#section:<路径>
+  session:<session_no>/att:<filename>#sha256:<hash>#section:<路径>
+  session:<session_no>/msg:<message_id|hash>#section:<路径>
+  page:<kb_id>/<slug>#section:<路径>
+  file:<path>#sha256:<hash>#section:<路径>
+
+**object/key 只允许出现在 ext-doc**：只有外部文档有 DataObject 接口契约与 key 确认方式；
+其他 kind 用原生标识（kb_id+doc_id / session+附件+sha256 / page slug / file+sha256），
+出现 object/key ⇒ locator_invalid。
+
+**实例形态**：
+  · kind=wiki_page：有知识页/slug（`bpmn:TextualDataObject` 实例页）；
+  · 其他 kind：不建知识页、没有 slug，只保留 locator 表达式（可机读溯源、可人读核实）。
+
+**access / resolver**（回读原文，闭环验证；失败回 `text_source_unreadable`，不得猜）：
+  · ext-doc：`ext_doc_parse(doc_id, action="section", section_path=…)`
+  · kb：`doc_outline` / `grep_chunks` / `knowledge_lookup`
+  · session：会话页 + 附件读取 / `ext_attach_probe` / `ext_doc_parse`
+  · page：`knowledge_lookup(mode="page", slug=…)`
+  · file：`read_file` / 文档解析
+"""@zh ;
+    rdfs:subClassOf :DataObject .
 
 # ============ 3b. 业务对象 ↔ 外部系统接口（**2026-11-02 已删除**）============
 # 原有的 4 个数据属性 `:dataObjectInterface` / `:dataObjectAccessMode` /
@@ -85,11 +122,10 @@
     rdfs:range :Role ;
     rdfs:comment "任务由**角色**执行（角色是**概念+关系**，不是数据属性）；角色实例在领域知识库里定义。"@zh .
 
-:taskExecutesRule rdf:type owl:ObjectProperty ;
-    rdfs:label "执行规则"@zh ;
-    rdfs:domain :Task ;
-    rdfs:range bmm:BusinessRule ;
-    rdfs:comment "任务执行业务规则（**所以本模块 imports bmm**）：如「评审任务」执行 R1 最低部署与灾备要求 / R2 开源软件适用规则。"@zh .
+# 2026-11-06（用户口径）：`taskExecutesRule` 已取消。
+#   任务与规则的关系改由“输入/输出对象 + 对象上的规则（ruleScope/ruleScopeSpec）”表达：
+#   任务输入对象 = 准入条件；任务输出对象 = 质量条件；下游任务用对象规则约束上游输出。
+#   不再保留 Task --执行规则--> BusinessRule 的直接边（语义不清、跨库解析不到）。
 
 # ============ 数据属性 ============
 :activityId rdf:type owl:DatatypeProperty ;
@@ -102,13 +138,35 @@
     rdfs:label "启动条件"@zh ;
     rdfs:domain :Activity ;
     rdfs:range xsd:string ;
-    rdfs:comment "启动条件（缺一不可）：输入的文档/报告 + **声明的本体模型范围** + 产出物与反馈人。"@zh .
+    rdfs:comment """启动/准入条件（Task 继承 Activity）。**语法**（每行一项，或分号分隔）：
+  dataobject:<DataObject slug> [rules=<rule-expr>]
+  text:<locator> [rules=<rule-expr>]
+  ontology:<Class>[:closure=self|descendants|ancestors] [rules=<rule-expr>]
+
+- `dataobject:` 非文本聚合，按该 DataObject 页既有契约（主键/字段/绑定工具）读写；
+- `text:` 文本引用，locator 见 `bpmn:TextualDataObject` 规范（ext-doc/kb/session/page/file）；
+- `ontology:` 本体类实例，closure 默认 self（descendants 含子类、ancestors 含父类）；
+- `rules=` 支持 `policy:<策略 slug>`（可多个/组合策略，按 isBasisFor 展开）、
+  `rule:<规则 slug>` 或裸规则 slug；省略时取所引用对象/类/文本范围上已声明的规则；
+- 执行规则时若实际输入与声明不一致（kind/ref/closure、缺输入、出现未声明输入）⇒
+  必须回 `io_contract_conflict`（expected/actual/rule/task/how_to_fix），停下问人；
+  **不得静默换数据源、不得跳过规则**。
+"""@zh .
 
 :activityExit rdf:type owl:DatatypeProperty ;
     rdfs:label "结束条件"@zh ;
     rdfs:domain :Activity ;
     rdfs:range xsd:string ;
-    rdfs:comment "结束条件：报告落库 + **对该模型范围质检** + **问题项明确反馈**（现象·证据·处理·责任人·时间）。"@zh .
+    rdfs:comment """完成/质量条件（Task 继承 Activity）。**语法**同 `activityEntry`，方向为输出：
+  dataobject:<DataObject slug> [rules=<rule-expr>]
+  text:<locator> [rules=<rule-expr>]
+  ontology:<Class>[:closure=self|descendants|ancestors] [rules=<rule-expr>]
+
+- 输出必须是声明 kind/ref/closure 的产物；
+- 下游任务的 `activityEntry` 引用该输出 ⇒ 自然形成依赖（**无固定顺序**，可并发/反复）；
+- 实际输出与声明不一致（kind/ref/closure、缺输出、出现未声明输出）⇒
+  回 `io_contract_conflict`，不得静默改输出类型/范围。
+"""@zh .
 
 :activityScopeModel rdf:type owl:DatatypeProperty ;
     rdfs:label "模型范围"@zh ;
@@ -145,7 +203,7 @@
     rdfs:label "活动包含任务"@zh ;
     rdfs:domain :Activity ;
     rdfs:range :Task ;
-    rdfs:comment "活动下的任务（活动=一组任务；任务的规则绑定见 taskExecutesRule）"@zh .
+    rdfs:comment "活动下的任务（活动=一组任务；任务与规则的关系由输入/输出对象上的规则表达，不再用 taskExecutesRule）"@zh .
 
 :taskUsesDataObject a owl:ObjectProperty ;
     rdfs:label "任务读写业务对象"@zh ;

@@ -27,8 +27,9 @@ def _mk_page(mcp, kb, slug, title, sno):
     return r
 
 
-def _page(mcp, kb, slug):
-    r = mcp.call("knowledge_lookup", {"kb_id": kb, "mode": "keyword", "query": slug})
+def _page(mcp, kb, slug, sno):
+    r = mcp.call("knowledge_lookup", {"kb_id": kb, "mode": "keyword", "query": slug,
+                                     "session_no": sno})
     return next((h for h in (r.get("hits") or []) if h.get("slug") == slug), None)
 
 
@@ -44,7 +45,7 @@ def test_save_knowledge_document_idempotent(mcp, test_kb, session_no):
                        "content_md": "# 回归测试报告\n\n## ① 范围与依据\n- x\n"}}
     r1 = mcp.call("save_knowledge", args)
     assert r1.get("applied") is True, json.dumps(r1, ensure_ascii=False)[:300]
-    seen = _page(mcp, test_kb, "review/_t-report")
+    seen = _page(mcp, test_kb, "review/_t-report", _sess(session_no))
     import ke_db
     probe = ke_db.psql_csv(
         "SELECT knowledge_base_id, version, deleted_at IS NOT NULL AS del, page_type "
@@ -83,12 +84,32 @@ def test_relations_add_and_delete(mcp, test_kb, session_no):
     sno = _sess(session_no)
     _mk_page(mcp, test_kb, "review/_t-a", "A 页", sno)
     _mk_page(mcp, test_kb, "review/_t-b", "B 页", sno)
-    assert _page(mcp, test_kb, "review/_t-a"), "A 页未落库 ✗"
-    assert _page(mcp, test_kb, "review/_t-b"), "B 页未落库 ✗"
+    assert _page(mcp, test_kb, "review/_t-a", sno), "A 页未落库 ✗"
+    assert _page(mcp, test_kb, "review/_t-b", sno), "B 页未落库 ✗"
     # 关系增删走 HTTP 契约（MCP 无 relations_* 工具 ✓）——本用例只保证「两页都可检索」✓
 
 
-def test_kb_export_contains_graph(mcp, kbs):
+def test_apply_locks_work_kb_after_success(mcp, test_kb, session_no):
+    """apply 成功后才落工作库锁；锁里带库名，回执可核对。"""
+    r = _mk_page(mcp, test_kb, "review/_t-lock", "锁回归页", _sess(session_no))
+    assert r.get("applied") is True, json.dumps(r, ensure_ascii=False)[:400]
+    locked = r.get("work_kb_locked") or {}
+    assert locked.get("id") == test_kb, r
+    assert locked.get("name"), "锁里没有库名：%s" % json.dumps(r, ensure_ascii=False)[:400]
+
+
+def test_dry_run_allowed_when_work_locked(mcp, test_kb, kbs, session_no):
+    """会话已锁到测试库后，dry_run 其他库仍放行（只提示，不拒绝）。"""
+    sno = _sess(session_no)
+    _mk_page(mcp, test_kb, "review/_t-lock2", "锁回归页2", sno)
+    r = mcp.call("save_knowledge", {
+        "kb_id": kbs["domain"], "stage": "graph", "mode": "dry_run",
+        "session_no": sno, "relations_only": True,
+        "edges": [{"source": "x", "type": "bmm:realizes", "target_slug": "y"}]})
+    assert r.get("refused") != "work_locked", json.dumps(r, ensure_ascii=False)[:400]
+    assert (r.get("scope_warning") or {}).get("code") == "work_kb_locked", \
+        json.dumps(r, ensure_ascii=False)[:400]
+    assert r.get("applied") in (None, False), r
     r = mcp.call("kb_export", {"kb_id": kbs["domain"]})
     assert r.get("ok") is True, json.dumps(r, ensure_ascii=False)[:300]
     # 2026-10-21 实测：回执键不是 out_dir/saved ✗ ⇒ 用"任一含 dir/export/path 的字符串值"定位 ✓

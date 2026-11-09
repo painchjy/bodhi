@@ -13,13 +13,16 @@ def test_ontology_types(mcp):
     assert "TechnicalReviewReport" in txt or "技术方案评审报告" in txt, "未见报告类 ✗"
 
 
-def test_knowledge_lookup_keyword_returns_definition(mcp, kbs):
-    r = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword", "query": "问题清单"})
+def test_knowledge_lookup_keyword_returns_definition(mcp, kbs, session_no):
+    r = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
+                                      "query": "问题清单", "session_no": session_no})
     assert r.get("ok") is True, r
     hits = r.get("hits") or []
     assert hits, "无命中 ✗"
-    h = hits[0]
-    assert "definition" in h and "attributes" in h, "缺 definition/attributes ✗（summary 仅展示）"
+    # 首条命中可能是**没有 definition 的智能体页**（排序会变）；找第一条带属性的命中，
+    # 断言的是「definition/attributes 契约」，不是「首条必须是长定义」（2026-11-08 修）
+    h = next((x for x in hits if "definition" in x and "attributes" in x), None)
+    assert h, "命中里没有带 definition/attributes 的页 ✗（summary 仅展示）"
     # 不变量（2026-10-22 收紧）：`definition` 必须等于**属性里的全量**，且**不与截断的 summary 同源**。
     # 旧断言 `len>200` 依赖"首条命中恰是某条长定义"，检索排序一变就假红 ✗
     attrs = h.get("attributes") or {}
@@ -28,16 +31,17 @@ def test_knowledge_lookup_keyword_returns_definition(mcp, kbs):
     assert h.get("summary_truncated") in (True, False), "缺 summary_truncated 标记 ✗"
 
 
-def test_knowledge_lookup_rules_has_rule_hash(mcp, kbs):
+def test_knowledge_lookup_rules_has_rule_hash(mcp, kbs, session_no):
     r = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "rules",
-                                      "spec": "policy:技术方案逐项评审策略"})
+                                      "spec": "policy:技术方案逐项评审策略",
+                                      "session_no": session_no})
     assert r.get("ok") is True, r
     rules = r.get("rules") or []
     assert rules, "无规则 ✗"
     assert all("slug" in x for x in rules), "规则缺 slug ✗"
 
 
-def test_knowledge_lookup_path(mcp, kbs):
+def test_knowledge_lookup_path(mcp, kbs, session_no):
     """`mode="path"` 必须能走出边 —— **起点从图里动态取**（不写死 slug ✓ 无域词 ✓）
 
     2026-10-21 实测：库里活动换过（原写死的 slug 已不存在 ⇒ `paths=0` 是**测试口径错** ✗，
@@ -52,7 +56,8 @@ def test_knowledge_lookup_path(mcp, kbs):
         pytest.xfail("领域库没有「活动→任务」出边（数据缺口，见 tests/TODO.md A1）")
     start = rows[0]["s"]
     r = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "path",
-                                      "start": start, "depth": 2})
+                                      "start": start, "depth": 2,
+                                      "session_no": session_no})
     assert r.get("ok") is True, json.dumps(r, ensure_ascii=False)[:300]
     assert (r.get("counts") or {}).get("paths", 0) >= 1, "起点 %s 无路径 ✗" % start
 

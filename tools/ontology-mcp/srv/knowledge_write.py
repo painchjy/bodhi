@@ -35,6 +35,42 @@ from srv.session_link import (  # noqa: E402
 )
 
 
+def _work_scope_decision(scope: dict, kb_id: str, mode: str,
+                         kb_name: str = "") -> tuple[dict, dict, dict]:
+    """纯函数：根据会话库范围决定 (拒绝, dry_run 提示, 待落锁)。
+
+    2026-11-08 修：`work_locked` 原来在 mode 判断之前对所有调用生效，
+    dry_run 也被挡住。现在**只有 apply 才拒绝**；dry_run 只给提示。
+    待落锁也移到写成功后（见 `_finalize_scope`），避免失败/空 apply 留锁。
+    """
+    sc = scope or {}
+    if not sc.get("ok"):
+        return {}, {}, {}
+    work = sc.get("work_kb") or {}
+    locked = str(work.get("id") or "")
+    is_apply = str(mode or "").strip().lower() == "apply"
+    if sc.get("work_multi"):
+        if locked and str(kb_id) != locked:
+            hint = "本会话的工作库已锁定为「%s」（首次写入）⇒ 换库请新开会话" \
+                   % (work.get("name") or locked)
+            if is_apply:
+                return {"ok": False, "kb_id": kb_id, "refused": "work_locked",
+                        "locked": work, "hint": hint}, {}, {}
+            return {}, {"code": "work_kb_locked", "locked": work, "mode": "dry_run",
+                        "hint": "dry_run 只读、未按工作库锁定拒绝；apply 到其他库会被拒绝。"
+                                "（%s）" % hint}, {}
+        if not locked and is_apply:
+            return {}, {}, {"id": str(kb_id), "name": str(kb_name or "")}
+        return {}, {}, {}
+    if locked and str(kb_id) != locked:
+        return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
+                "expected": work,
+                "scope": {"domain_kb": sc.get("domain_kb"), "work_kb": work},
+                "hint": ("本会话的工作库是「%s」；写库请用它 —— 不要写别的库 ✗"
+                         % (work.get("name") or locked))}, {}, {}
+    return {}, {}, {}
+
+
 def _page_ref_to_slug(kb_id: str, ref: str) -> str:
     """把「slug 或页面标题」解析成本库 slug（2026-10-30：顶层 edges 允许写标题）。"""
     ref = str(ref or "").strip()
@@ -85,7 +121,12 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                           % str(kb_id)[:8])}
     # 2026-11-02（内网实测）：**写路径只认会话的工作库**（权威=智能体配置，见 ke_scope）。
     #   · 固定工作库的智能体（评审类）：写别的库 ⇒ out_of_scope（不静默换库、也不照它写 ✗）
-    #   · 多工作库的智能体（建模类，work=所有领域库）：本批跳过（"本轮目标库"由用户指定）
+    #   · 多工作库的智能体（建模类，work=所有领域库）：首次**成功写入**后锁定目标库；
+    #     dry_run 只读 ⇒ 不受 work_locked 限制（2026-11-08 修：原先 dry_run 也被挡）
+    _scope_mod = None
+    _sid = ""
+    _scope_warn = {}
+    _pending_work_lock = {}
     try:
         import ke_scope as _scope_mod  # noqa: PLC0415
         _sid = _pick_session_no(session_no, session, nodes, report)
@@ -95,28 +136,35 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                     "hint": _sc.get("hint") or "该智能体未配置任何知识库，不能写"}
         if _sc.get("ok"):
             _allowed = {str(x).lower() for x in (_sc.get("allowed") or [])}
+            # kb_selection_mode=all：`agent_kbs` 是动态全量。新建库/另一个进程刚建的库
+            # 可能落在 60s 缓存之外 ⇒ 目标不在名单时**强制重算一次**再判 out_of_scope。
+            if (_allowed and str(kb_id).lower() not in _allowed
+                    and str(_sc.get("kb_mode") or "").lower() == "all"):
+                try:
+                    _sc2 = _scope_mod.agent_scope(_sid, use_cache=False)
+                    if _sc2.get("ok"):
+                        _sc = _sc2
+                        _allowed = {str(x).lower() for x in (_sc.get("allowed") or [])}
+                except Exception:  # noqa: BLE001
+                    pass
             if _allowed and str(kb_id).lower() not in _allowed:
                 return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
                         "scope": {"kb_mode": _sc.get("kb_mode"),
                                   "allowed_count": len(_allowed)},
                         "hint": "目标库不在本智能体的知识库范围内（kb_selection_mode=%s）"
                                 % _sc.get("kb_mode")}
-        _work = (_sc.get("work_kb") or {}) if _sc.get("ok") else {}
-        if _sc.get("ok") and _sc.get("work_multi"):
-            # 建模类（工作库=所有领域库）：**首次写入锁定**，之后只许写这一个库
-            if _work.get("id") and str(kb_id) != str(_work["id"]):
-                return {"ok": False, "kb_id": kb_id, "refused": "work_locked",
-                        "locked": _work,
-                        "hint": ("本会话的工作库已锁定为「%s」（首次写入）⇒ 换库请新开会话"
-                                 % (_work.get("name") or _work.get("id")))}
-            if not _work.get("id") and str(mode or "").strip().lower() == "apply":
-                _scope_mod.lock_work_kb(_sid, {"id": kb_id, "name": ""})
-        elif _work.get("id") and str(kb_id) != str(_work["id"]):
-            return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
-                    "expected": _work, "scope": {"domain_kb": _sc.get("domain_kb"),
-                                                 "work_kb": _work},
-                    "hint": ("本会话的工作库是「%s」；写库请用它 —— 不要写别的库 ✗"
-                             % (_work.get("name") or _work.get("id")))}
+        _kb_name = ""
+        if (_sc.get("ok") and _sc.get("work_multi")
+                and not ((_sc.get("work_kb") or {}).get("id"))
+                and str(mode or "").strip().lower() == "apply"):
+            try:                                    # 锁里带库名，错误信息不再只有空 name
+                _kb_name = str((_scope_mod._kb_of(kb_id) or {}).get("name") or "")
+            except Exception:  # noqa: BLE001
+                _kb_name = ""
+        _refuse, _scope_warn, _pending_work_lock = _work_scope_decision(
+            _sc, kb_id, mode, _kb_name)
+        if _refuse:
+            return _refuse
     except Exception:  # noqa: BLE001  scope 不可用 ⇒ 不改变既有行为（身份门禁仍在）
         pass
     ctx = context_meta(context)
@@ -128,6 +176,22 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         raise ValueError("stage 只能是 report / graph")
     if mode not in ("dry_run", "apply"):
         raise ValueError("mode 只能是 dry_run / apply")
+
+    def _finalize_scope(out):
+        """把 dry_run 的锁提示附上；apply **成功写入后**才落工作库锁。"""
+        if not isinstance(out, dict):
+            return out
+        if _scope_warn:
+            out.setdefault("scope_warning", _scope_warn)
+        if _pending_work_lock and _scope_mod is not None and _sid:
+            _wrote = bool(out.get("applied")) or int(out.get("written") or 0) > 0
+            if _wrote:
+                try:
+                    _scope_mod.lock_work_kb(_sid, _pending_work_lock)
+                    out["work_kb_locked"] = _pending_work_lock
+                except Exception as exc:  # noqa: BLE001  锁失败不应吞掉已完成的写入
+                    out["work_kb_lock_error"] = str(exc)[:160]
+        return out
     # —— 会话身份门禁（2026-10-04 用户口径，fail-closed）——
     # `agentName` **只认会话**：`sessionNo` → `sessions.agent_config->>'agent_id'` → `custom_agents.name`；
     # 不信任客户端自报、**无 env 兜底**；**取不到会话的智能体名称 → 不允许触碰知识库**
@@ -281,7 +345,24 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         except Exception:  # noqa: BLE001
             _report_warns = []
         _attrs = dict((report or {}).get("attributes") or {})
-        if doc_meta.get("external_ref"):
+        # 2026-11-06：来源定位统一走 `bpmn:TextualDataObject` 语法（ke_provenance）。
+        #   · 显式 `attributes["bmm:sourceLocator"]` / `report.source_locator` 优先；
+        #   · KB 文档自动生成 `kb:<kb_id>/doc:<doc_id>`，不再默认建会话页；
+        #   · 外部台账无 object/key 时保持 legacy `ext-doc://<id>`（不冒充新语法）。
+        _src_locator = str(_attrs.get("bmm:sourceLocator")
+                           or (report or {}).get("source_locator") or "").strip()
+        _src_kind = str((report or {}).get("source_kind") or "").strip().lower()
+        try:
+            import ke_provenance as _prov  # noqa: PLC0415
+            if not _src_kind and _src_locator:
+                _src_kind = _prov.locator_kind(_src_locator)
+            if not _src_locator and doc_meta.get("id"):
+                _src_locator = _prov.build_locator(_prov.KB_DOCUMENT, kb_id=kb_id,
+                                                   doc_id=doc_meta["id"])
+                _src_kind = _prov.KB_DOCUMENT
+        except Exception:  # noqa: BLE001
+            pass
+        if doc_meta.get("external_ref") and not _src_locator:
             # 外部台账来源（it_platform 的 doc_id）落到 `bmm:sourceLocator`：**可追溯**，且不伪装成 WeKnora 文档
             _attrs.setdefault("bmm:sourceLocator", "ext-doc://%s" % doc_meta["external_ref"])
         spec = {
@@ -294,6 +375,9 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             "attributes": _attrs,
             "summary": (report or {}).get("summary") or "",
             "source": {
+                "kind": _src_kind,
+                "locator": _src_locator,
+                "text_slug": str((report or {}).get("source_text_slug") or "").strip(),
                 "doc_refs": [doc_meta["id"]] if doc_meta.get("id") else [],
                 "doc_title": doc_meta.get("title", ""),
                 "source_text": ctx["report_source"],
@@ -410,7 +494,13 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             summary["source_session_link"] = dict(_graph["session_page"], ok=True, via="kernel")
         elif mode == "apply" and not ident.get("ok"):
             summary["source_session_link"] = {"ok": False, "reason": session_warn or "无会话身份"}
-        return _attach_session(summary, ident, session_warn)
+        summary["receipt"] = {
+            "applied": mode == "apply",
+            "created": len(summary.get("created") or []),
+            "merged": len(summary.get("merged") or []),
+            "page_versions": len(summary.get("page_versions") or []),
+        }
+        return _finalize_scope(_attach_session(summary, ident, session_warn))
 
     # ── 纯关系模式（2026-10-30 用户口径）：**只补边、不写页、不动版本** ──────────────
     #   场景：报告/评测页必须单独建（`stage="report"`，document 类要有正文），
@@ -439,18 +529,21 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 checks.append({"source": src, "type": rel, "target_slug": tgt,
                                "code": v.get("code"), "hint": v.get("hint"),
                                "st": v.get("st"), "tt": v.get("tt"),
+                               "canonical": v.get("canonical") or None,
                                "would_write": bool(v.get("ok")) or v.get("code") in
                                ("domain_mismatch", "range_mismatch", "unconstrained")})
-            return {"ok": True, "stage": "graph", "relations_only": True, "dry_run": True,
-                    "kb_id": kb_id, "total": len(rows), "checks": checks,
-                    "write_note": "未写库（dry_run）：确认后用 mode=\"apply\" 同一份 edges 重跑"}
+            return _finalize_scope({
+                "ok": True, "stage": "graph", "relations_only": True, "dry_run": True,
+                "kb_id": kb_id, "total": len(rows), "checks": checks,
+                "write_note": "未写库（dry_run）：确认后用 mode=\"apply\" 同一份 edges 重跑"})
         out = _kp.write_relations_batch(kb_id, [{"source": s, "type": r, "target_slug": t}
                                                 for s, r, t in rows])
-        return {"ok": bool(out.get("ok")), "stage": "graph", "relations_only": True,
-                "kb_id": kb_id, "total": out.get("total"), "written": out.get("written"),
-                "violations": out.get("violations") or [],
-                "errors": out.get("errors") or [],
-                "note": ("violation 只记录不阻断（BODHI_STRICT_RELATIONS=1 可改为拦截）")}
+        return _finalize_scope({
+            "ok": bool(out.get("ok")), "stage": "graph", "relations_only": True,
+            "kb_id": kb_id, "total": out.get("total"), "written": out.get("written"),
+            "violations": out.get("violations") or [],
+            "errors": out.get("errors") or [],
+            "note": "violation 只记录不阻断（BODHI_STRICT_RELATIONS=1 可改为拦截）"})
     payloads, checked = design_elements(
         model, model_obj, nodes or [], edges or [], doc_meta,
         upstream=[s for s in ((report or {}).get("upstream") or []) if s],
@@ -481,7 +574,7 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             _blk = []
             for _e in (summary.get("created") or []) + (summary.get("merged") or []):
                 _s = _e.get("slug") or _e.get("into")
-                if _s:
+                if _s and _ET._is_contract_page(str(_e.get("type") or "")):
                     _blk.append(_ET.ensure_contract_block(kb_id, _s))
             summary["panel_blocks"] = [b for b in _blk if isinstance(b, dict) and b.get("changed")]
         except Exception as exc:  # noqa: BLE001
@@ -519,12 +612,21 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
         _se = _session_ident()
         _slugs = [e.get("slug") for e in (summary.get("created") or []) if e.get("slug")]
         _slugs += [e.get("into") for e in (summary.get("merged") or []) if e.get("into")]
-        if _se.get("ok") and _slugs:
+        # 2026-11-08：`bmm:sourceSession` 只用于**会话来源**（session_attachment/session_text）。
+        # 本批若有显式 kb/ext-doc/page/file 来源 ⇒ 不补会话边（否则页面会“既指文档又指会话”）。
+        _has_external_source = any(
+            str((p.get("attributes") or {}).get("bmm:sourceLocator")
+                or p.get("source_locator") or "").strip().startswith(
+                    ("kb:", "ext-doc:", "page:", "file:"))
+            for p in payloads)
+        if _se.get("ok") and _slugs and not _has_external_source:
             try:
                 summary["source_session_link"] = link_source_session(
                     kb_id, _se["session_no"], slugs=_slugs, dry_run=False)
             except Exception as exc:  # noqa: BLE001  补挂失败不影响落库，但要在回执里说清
                 summary["source_session_link"] = {"ok": False, "reason": str(exc)[:200]}
+        elif _has_external_source:
+            summary["source_session_link"] = {"ok": True, "skipped": "non_session_source"}
     summary["source_session_edges"] = [e for e in (checked.get("edges") or [])
                                        if e.get("type") == "bmm:sourceSession"]
     # **实例图投影（2026-10-05 全量重构：Neo4j 为主存储）**：落库后按 PG 全量重建该库实例层
@@ -663,5 +765,15 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             summary["session"] = adopted
     except Exception as exc:  # noqa: BLE001
         summary["session"] = {"error": str(exc)[:200]}
+    _g = summary.get("graph") or {}
+    summary["receipt"] = {
+        "applied": mode == "apply",
+        "created": len(summary.get("created") or []),
+        "merged": len(summary.get("merged") or []),
+        "page_versions": len(summary.get("page_versions") or []),
+        "edges_written": _g.get("edges_written"),
+        "source_session_skipped": bool(
+            (summary.get("source_session_link") or {}).get("skipped")),
+    }
     # 会话身份回执（2026-10-04）：说明本次落库用的**会话事实**（agentName 来自会话而非自报）
-    return _attach_session(summary, ident, session_warn)
+    return _finalize_scope(_attach_session(summary, ident, session_warn))

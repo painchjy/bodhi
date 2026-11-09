@@ -42,6 +42,7 @@ def pages(env):
     kb = env["kb"]
     tag = uuid.uuid4().hex[:6]
     rule = "bmm/operativebusinessrule/reltest-%s" % tag
+    obj = "bpmn/dataobject/reltest-%s" % tag
     ev = "agent/ruleevaluation/reltest-%s" % tag
     ke_pages.write_knowledge(kb, {"slug": rule, "title": "reltest-%s" % tag,
                                   "page_type": "bmm:OperativeBusinessRule", "mode": "entity",
@@ -49,15 +50,23 @@ def pages(env):
                                   "attributes": {"skos:definition": "关系测试规则"},
                                   "source": {"doc_refs": [], "source_text": "pytest"}},
                              strict_source=False, sync_folders=False)
+    ke_pages.write_knowledge(kb, {"slug": obj, "title": "对象 reltest-%s" % tag,
+                                  "page_type": "bpmn:DataObject", "mode": "entity",
+                                  "wiki_content": "", "summary": "对象测试",
+                                  "attributes": {"skos:definition": "契约块测试对象"},
+                                  "source": {"doc_refs": [], "source_text": "pytest"}},
+                             strict_source=False, sync_folders=False)
     ke_pages.write_knowledge(kb, {"slug": ev, "title": "评测 reltest-%s" % tag,
                                   "page_type": "agent:RuleEvaluation", "mode": "document",
                                   "wiki_content": "# 评测\n\n| 字段 | 值 |\n|---|---|\n| r | 1 |\n",
                                   "summary": "评测", "source": {"doc_refs": [], "source_text": "pytest"}},
                              strict_source=False, sync_folders=False)
-    yield {"rule": rule, "eval": ev}
+    yield {"rule": rule, "eval": ev, "obj": obj}
     env["db"].psql("UPDATE wiki_pages SET deleted_at = now() WHERE knowledge_base_id = %s "
-                   "AND slug IN (%s, %s);" % (env["db"].sql_str(kb),
-                                              env["db"].sql_str(rule), env["db"].sql_str(ev)))
+                   "AND slug IN (%s, %s, %s);" % (env["db"].sql_str(kb),
+                                                  env["db"].sql_str(rule),
+                                                  env["db"].sql_str(obj),
+                                                  env["db"].sql_str(ev)))
 
 
 def test_validate_edge_codes(env, pages):
@@ -94,7 +103,7 @@ def test_relations_only_dry_run_and_apply(env, pages):
 def test_binding_adds_contract_block(env, pages):
     import ke_ext_binding as S
     kb = env["kb"]
-    out = S.set_binding(kb, pages["rule"], "ext_issue_list", status="draft")
+    out = S.set_binding(kb, pages["obj"], "ext_issue_list", status="draft")
     assert out["ok"], out
     blk = out.get("contract_block") or {}
     if not blk.get("ok"):
@@ -102,7 +111,7 @@ def test_binding_adds_contract_block(env, pages):
     row = env["db"].psql_csv(
         "SELECT left(coalesce(content,''),120) AS h FROM wiki_pages "
         "WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL"
-        % (env["db"].sql_str(kb), env["db"].sql_str(pages["rule"])))[0]
+        % (env["db"].sql_str(kb), env["db"].sql_str(pages["obj"])))[0]
     assert "```bodhi-ext-contract" in row["h"], row
-    again = S.set_binding(kb, pages["rule"], "ext_issue_list", status="draft")
+    again = S.set_binding(kb, pages["obj"], "ext_issue_list", status="draft")
     assert (again.get("contract_block") or {}).get("reason") == "has_block", again

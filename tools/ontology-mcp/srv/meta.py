@@ -212,16 +212,47 @@ def ontology_types(model_key: str, focus: str = "", classes: list | None = None,
                 out["narrowed"] = {"focus": focus or "", "classes": len(cls_list),
                                    "relations": len(rel_list)}
             if with_attributes:
-                # 「通用保存」的 schema：每个类允许哪些数据属性（类 + 祖先声明）
+                # 「通用保存」的 schema：每个类允许哪些数据属性（类 + 祖先声明）。
+                # 2026-11-08：与 `class_view().data` 同源，并显式给 inherited_from/scope，
+                # 否则 Agent 只看 class_relations 时会误以为 Task 没有 Activity 的 entry/exit。
                 attrs = {}
                 for cls in out["classes"]:
                     allowed = ke_ontology.data_properties_for(cls["name"])
-                    if allowed:
-                        attrs[cls["name"]] = [
-                            {"name": a["prefixed"], "label": a.get("label") or "",
-                             "range": ke_ontology.short_iri(a.get("range_literal") or "")}
-                            for a in sorted(allowed.values(), key=lambda x: x["prefixed"])]
+                    if not allowed:
+                        continue
+                    try:
+                        _anc = ke_ontology.ancestors(cls["name"])
+                    except Exception:  # noqa: BLE001
+                        _anc = [cls["name"]]
+                    _idx = {n: i for i, n in enumerate(_anc)}
+                    rows = []
+                    for a in sorted(allowed.values(), key=lambda x: x["prefixed"]):
+                        domains = [d for d in (a.get("domains") or []) if d]
+                        _matched = [d for d in domains if d in _idx]
+                        _owner = min(_matched, key=lambda d: _idx[d]) if _matched else ""
+                        rows.append({
+                            "name": a["prefixed"], "label": a.get("label") or "",
+                            "range": ke_ontology.short_iri(a.get("range_literal") or ""),
+                            "inherited_from": ("" if (not _owner or _owner == cls["name"]) else _owner),
+                            "scope": ("global" if not domains
+                                      else ("own" if _owner == cls["name"] else "inherited")),
+                        })
+                    attrs[cls["name"]] = rows
                 out["class_attributes"] = attrs
+            if (classes or focus) and out.get("classes"):
+                # 2026-11-08：统一类视图（out/in，含 inherited_from/source_classes）；
+                # 只在 `classes`/`focus` 收窄时返回，避免全模型响应过大。
+                cviews = {}
+                for _c in out["classes"]:
+                    _cv = ke_ontology.class_view(_c["name"])
+                    cviews[_c["name"]] = {
+                        "out": _cv.get("out") or {"own": [], "inherited": {}},
+                        "in": _cv.get("in") or {"own": [], "inherited": {}},
+                        "data": _cv.get("data") or {"own": [], "inherited": {}},
+                        "ancestors": _cv.get("ancestors") or [],
+                        "descendants": _cv.get("descendants") or [],
+                    }
+                out["class_relations"] = cviews
             # 2026-10-22（内网问题 4.4）：**让智能体看到类层级** ——
             # `parents` / `children` 直接给出，省掉"临时 lookup 后猜"的来回 ✓
             try:

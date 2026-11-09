@@ -58,6 +58,7 @@ import ke_db  # noqa: E402
 import ke_neo4j  # noqa: E402
 import ke_ontology  # noqa: E402
 import ke_pages  # noqa: E402
+import ke_provenance  # noqa: E402
 
 REPO = HERE.parents[1]
 # 领域建模会话状态（`state/domain_sessions/<kb>/<knowledge>.json`）：C5 检查读它
@@ -72,7 +73,7 @@ SEV = {"high": 0, "medium": 1, "low": 2}
 # 企业标准定义「待复核」天数阈值（附录 A：draft 超过它 → G9 low）
 STANDARD_REVIEW_DAYS = 14
 SCOPES = ("all", "wiki", "model", "source", "dupes", "governance", "context", "coupling",
-          "similar", "template", "ext")
+          "similar", "template", "ext", "taskio")
 # 本体模型库 id（与 ke_admin.ONTOLOGY_KB 同源；这里不 import ke_admin，避免连带依赖）
 ONTOLOGY_KB = os.environ.get("ONTOLOGY_KB_ID", "08810cbd-af86-48d1-bd25-3b2c338e3d68")
 # B5（本体投影 ↔ 编译产物一致性）用的路径与**可直接执行的修复命令**
@@ -2182,8 +2183,177 @@ def check_ext_reference(ctx: dict, rep: Report) -> None:
                 "抓不到就按 reason 写「不可得（待澄清）」，不要编造" % url)
 
 
+def _audit_task_io(kb_id: str, kb_name: str, kb_note: str, max_findings: int,
+                   stage: str = "handoff") -> dict:
+    """**任务 I/O 语法巡检（只读）**：解析 `bpmn:activityEntry/activityExit` 的
+    `dataobject:` / `text:` / `ontology:` / `rules=` 声明，校验引用是否存在、locator 是否合法、
+    `object/key` 是否只出现在 ext-doc、规则/策略是否可解析。
+
+    `stage=draft` 只返回 findings（不阻断）；`stage=handoff` 把 high findings 列为 blocking。
+    不代替实际回读原文（回读由调用方按 `ke_provenance.resolver_for()` 执行）。
+    """
+    rows = ke_db.psql_csv(
+        "SELECT slug, title, COALESCE(page_type,'') AS page_type, "
+        "       COALESCE(page_metadata->'ontology'->'attributes'->>'bpmn:activityEntry', "
+        "                page_metadata->'ontology'->'attributes'->>'activityEntry','') AS entry, "
+        "       COALESCE(page_metadata->'ontology'->'attributes'->>'bpmn:activityExit', "
+        "                page_metadata->'ontology'->'attributes'->>'activityExit','') AS exit "
+        "  FROM wiki_pages WHERE knowledge_base_id = %s AND deleted_at IS NULL "
+        "   AND (page_type IN ('bpmn:Task','bpmn:Activity') "
+        "        OR slug LIKE 'bpmn/task/%%' OR slug LIKE 'bpmn/activity/%%') "
+        " ORDER BY slug" % ke_db.sql_str(kb_id))
+    classes = set((ke_ontology.class_meta() or {}).keys())
+    # 2026-11-08：TIO6 —— dataobject: 语法必须已投影成图关系
+    #   entry 期望 Task --bpmn:taskUsesDataObject--> DataObject
+    #   exit  期望 DataObject --bpmn:dataObjectBelongsToTask--> Task
+    _task2obj, _obj2task, _graph_ok = set(), set(), False
+    try:
+        _edges = ke_neo4j.query(
+            "MATCH (a:BodhiInstance {kb_id:$kb})-[r]->(b:BodhiInstance {kb_id:$kb}) "
+            "WHERE type(r) IN ['bpmn:taskUsesDataObject','bpmn:dataObjectBelongsToTask'] "
+            "RETURN a.slug AS a, type(r) AS t, b.slug AS b",
+            {"kb": kb_id}, timeout=10) or []
+        for e in _edges:
+            a, t, b = str(e.get("a") or ""), str(e.get("t") or ""), str(e.get("b") or "")
+            if t == "bpmn:taskUsesDataObject":
+                _task2obj.add((a, b))
+            elif t == "bpmn:dataObjectBelongsToTask":
+                _obj2task.add((a, b))
+        _graph_ok = True
+    except Exception:  # noqa: BLE001  图不可用不阻断语法巡检
+        _graph_ok = False
+    findings: list = []
+    totals: dict = {}
+    sev_counts: dict = {"high": 0, "medium": 0, "low": 0}
+    checked = 0
+
+    def _add(check: str, sev: str, subject: str, detail: str, fix: str = "") -> None:
+        totals[check] = totals.get(check, 0) + 1
+        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+        if len(findings) < max(1, int(max_findings)):
+            findings.append({"check": check, "severity": sev, "subject": subject,
+                             "detail": detail[:600], "fix_hint": fix[:300]})
+
+    def _page_exists(slug: str) -> bool:
+        got = ke_db.psql_csv(
+            "SELECT 1 AS ok FROM wiki_pages WHERE knowledge_base_id=%s AND slug=%s "
+            "AND deleted_at IS NULL LIMIT 1" % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+        return bool(got)
+
+    def _rules_ok(subject: str, expr: str) -> None:
+        # 2026-11-06：多策略/组合策略/单条规则统一走 ke_rule_expr（policy 递归 + direct）。
+        try:
+            import ke_rule_expr as _RX  # noqa: PLC0415
+            got = _RX.expand(kb_id, expr, limit=500)
+        except Exception as exc:  # noqa: BLE001
+            _add("TIO5", "medium", subject,
+                 "rules= 解析失败：%s（%s）" % (expr[:120], str(exc)[:160]),
+                 "检查 rules= 语法与策略/规则所在库")
+            return
+        for raw in got.get("unresolved") or []:
+            _add("TIO5", "medium", subject,
+                 "rules= 引用解析不到：%s" % raw,
+                 "先建/复制该策略或规则到本库，或改 rules= 指向本库条目")
+        for err in got.get("errors") or []:
+            _add("TIO5", "medium", subject, "rules= 解析错误：%s" % err,
+                 "检查策略/规则的 isBasisFor/includesBusinessPolicy 边")
+
+
+    for r in rows:
+        subject = str(r.get("slug") or r.get("title") or "")
+        _is_task = (str(r.get("page_type") or "") == "bpmn:Task"
+                    or subject.startswith("bpmn/task/"))
+        for field in ("entry", "exit"):
+            text = str(r.get(field) or "")
+            for line in re.split(r"[;\n]+", text):
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                checked += 1
+                m = re.search(r"(?:^|\s)rules=([^\s]+)", line)
+                expr = m.group(1) if m else ""
+                head = (line[:m.start()] if m else line).strip()
+                if expr:
+                    _rules_ok(subject, expr)
+                if head.startswith("dataobject:"):
+                    slug = head[len("dataobject:"):].strip()
+                    if not slug:
+                        _add("TIO1", "high", subject, "%s 的 dataobject: 缺 slug" % field,
+                             "补 `<DataObject slug>`")
+                    elif not _page_exists(slug):
+                        _add("TIO1", "high", subject,
+                             "%s 引用的 DataObject 不在本库：%s" % (field, slug),
+                             "先建该 DataObject 页，或修正 slug")
+                    elif _graph_ok and _is_task:
+                        if field == "entry" and (subject, slug) not in _task2obj:
+                            _add("TIO6", "medium", subject,
+                                 "entry 的 dataobject:%s 未投影为 bpmn:taskUsesDataObject 边" % slug,
+                                 "补 Task --bpmn:taskUsesDataObject--> DataObject（或改 exit）")
+                        if field == "exit" and (slug, subject) not in _obj2task:
+                            _add("TIO6", "medium", subject,
+                                 "exit 的 dataobject:%s 未投影为 bpmn:dataObjectBelongsToTask 边" % slug,
+                                 "补 DataObject --bpmn:dataObjectBelongsToTask--> Task（或改 entry）")
+                elif head.startswith("text:"):
+                    loc = head[len("text:"):].strip()
+                    parsed = ke_provenance.parse_locator(loc)
+                    if not parsed.get("ok"):
+                        _add("TIO2", "high", subject,
+                             "%s 的 text locator 非法：%s（%s）"
+                             % (field, (loc or "-")[:120],
+                                "; ".join(parsed.get("errors") or [])[:300]),
+                             "按 TextualDataObject 语法修正；ext-doc 必须带 object+key，其他 kind 不得带")
+                    elif not ke_provenance.resolver_for(parsed.get("kind")):
+                        _add("TIO2", "medium", subject,
+                             "%s 的 text kind 无 resolver：%s" % (field, parsed.get("kind")),
+                             "在 TextualDataObject 规范里补 resolver")
+                elif head.startswith("ontology:"):
+                    body = head[len("ontology:"):].strip()
+                    cls, clo = body, "self"
+                    mm = re.match(r"^(?P<c>.+?)(?::closure=(?P<cl>self|descendants|ancestors))?$", body)
+                    if mm:
+                        cls, clo = mm.group("c"), (mm.group("cl") or "self")
+                    if not cls:
+                        _add("TIO3", "high", subject, "%s 的 ontology: 缺类名" % field,
+                             "补 `<Class>`")
+                    elif classes and cls not in classes:
+                        _add("TIO3", "high", subject,
+                             "%s 引用的本体类不在模型里：%s" % (field, cls),
+                             "先补本体类，或修正类名")
+                    if clo not in ("self", "descendants", "ancestors"):
+                        _add("TIO4", "high", subject,
+                             "%s 的 closure 非法：%s" % (field, clo),
+                             "closure 只能是 self|descendants|ancestors")
+                else:
+                    # 旧页把 activityEntry/Exit 写成自然语言（legacy）：不静默，但按迁移提醒处理，
+                    # 不把历史页当成 handoff 阻断（新页/畸形前缀仍是 high）。
+                    if not re.match(r"^[a-z_]+:", head) and len(head) > 12:
+                        _add("TIO9", "medium", subject,
+                             "%s 仍是 legacy 自然语言描述，未结构化：%s" % (field, head[:120]),
+                             "按 TextualDataObject 语法迁移为 dataobject:/text:/ontology: 行")
+                    else:
+                        _add("TIO0", "high", subject,
+                             "%s 行无法识别：%s" % (field, head[:120]),
+                             "只允许 dataobject:/text:/ontology: 前缀（可带 rules=）")
+
+    findings.sort(key=lambda f: (SEV.get(f.get("severity"), 9), f.get("check"), f.get("subject")))
+    blocking = [f for f in findings if f.get("severity") == "high"] if stage == "handoff" else []
+    return {
+        "kb_id": kb_id, "kb_name": kb_name, "scope": "taskio", "stage": stage,
+        "ok": not blocking, "blocking": blocking,
+        "generated_at": ke_db.now_text(), "kb_id_note": kb_note,
+        "summary": {"pages": len(rows), "checked_items": checked,
+                    "findings": sum(totals.values()), "by_severity": dict(sev_counts),
+                    "checks": dict(sorted(totals.items())),
+                    "findings_returned": len(findings), "max_findings": max_findings},
+        "totals": dict(sorted(totals.items())), "findings": findings,
+        "data": {"taskio": {"pages": len(rows), "checked_items": checked}},
+        "note": ("只读语法/引用巡检；文本原文回读由调用方按 ke_provenance.resolver_for(kind) 执行；"
+                 "stage=draft 只报不阻断，stage=handoff 的 high 项为 blocking"),
+    }
+
+
 def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
-          page_limit: int = 5000, template_kb_id: str = "") -> dict:
+          page_limit: int = 5000, template_kb_id: str = "", stage: str = "handoff") -> dict:
     """只读一致性巡检（**不写任何数据**）。
 
     scope：`all` / `wiki`(A) / `model`(B) / `source`(C) / `dupes`(D) / `governance`(F) /
@@ -2201,6 +2371,8 @@ def audit(kb_id: str, scope: str = "all", max_findings: int = 200,
     scope = (scope or "all").strip().lower()
     if scope not in SCOPES:
         raise ValueError("scope 只能是 %s" % " / ".join(SCOPES))
+    if scope == "taskio":
+        return _audit_task_io(kb_id, kb_name, kb_note, max_findings, stage)
 
     pages, truncated = load_pages(kb_id, page_limit)
     rep = Report(kb_id, scope, max_findings)

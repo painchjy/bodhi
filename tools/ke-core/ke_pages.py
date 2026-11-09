@@ -31,6 +31,7 @@ if str(HERE) not in sys.path:
 
 import ke_db  # noqa: E402
 import ke_ontology  # noqa: E402
+import ke_provenance as _prov  # noqa: E402  来源 locator 统一语法/解析
 
 REL_SECTION = "## 本体关系"
 TAG_REL = "bodhi-rel-edit"     # 13 字符
@@ -1163,11 +1164,22 @@ def _contract_head(spec: dict) -> list[str]:
     src = dict(spec.get("source") or {})
     lines = ["# %s（`%s`）" % (title, pt), "",
              "> **本体类型**：%s（`%s`）  " % (spec.get("type_label") or pt, pt)]
-    if src.get("doc_title") or src.get("doc_refs"):
+    _s_kind = str(src.get("kind") or "").strip().lower()
+    _s_loc = str(src.get("locator") or "").strip()
+    if _s_kind in ("session_attachment", "session_text"):
+        lines.append("> **来源会话**：%s  " % (src.get("session_no") or _s_loc or "（会话）"))
+    elif _s_kind == "external_doc":
+        lines.append("> **来源**：外部文档（`%s`）  " % (_s_loc or src.get("doc_title") or "-"))
+    elif _s_kind in ("wiki_page", "file"):
+        lines.append("> **来源**：`%s`  " % (_s_loc or "-"))
+    elif src.get("doc_title") or src.get("doc_refs"):
         lines.append("> **来源**：《%s》  " % (src.get("doc_title") or "（来源文档）"))
     elif spec.get("generated_by"):
         lines.append("> **生成方式**：%s  " % spec["generated_by"])
-    if src.get("session_no"):
+    if _s_kind and _s_kind not in ("session_attachment", "session_text") and src.get("session_no"):
+        # 非会话来源：session_no 只是执行身份，不写成“来源会话”
+        pass
+    elif src.get("session_no") and not _s_kind:
         lines.append("> **来源会话**：%s  " % src["session_no"])
     # P0-c-2（2026-10-10 用户口径）：**「首个版本生成」只在新建页写** —— 有既有值就沿用
     # （`spec["created_at"]`，由调用方/适配器从既有页头或 `page_metadata.ontology.created_at` 带过来），
@@ -1435,15 +1447,23 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
         raise ValueError("mode 只能是 %s（旧别名 %s 也接受）"
                          % ("/".join(CONTRACT_MODES), "/".join(MODE_ALIASES)))
     src = dict(spec.get("source") or {})
-    has_session = bool(src.get("session_slug") or src.get("session_no"))
-    has_doc = bool(src.get("doc_refs") or src.get("source_text") or src.get("chunk_refs"))
+    _kind = str(src.get("kind") or "").strip().lower()
+    _locator = str(src.get("locator") or "").strip()
+    if not _kind and _locator:
+        _kind = _prov.locator_kind(_locator)
+    _is_session_src = _prov.is_session(_kind)
+    _legacy_session = (not _kind) and bool(src.get("session_no"))
+    # `session_no` 是**执行身份**；只有 session 来源才建会话页/写 sourceSession。
+    has_session = bool(src.get("session_slug") or src.get("session_no") or _locator or _kind)
+    has_doc = bool(src.get("doc_refs") or src.get("source_text") or src.get("chunk_refs")
+                   or _locator or _kind)
     if strict_source and not (has_session or has_doc):
-        raise ValueError("严格溯源（契约 §5）：source 需含会话(session_no/session_slug)或"
-                         "文档(doc_refs/source_text/chunk_refs) 其一；否则拒写")
+        raise ValueError("严格溯源（契约 §5）：source 需含来源 kind/locator、会话(session_no/session_slug)"
+                         "或文档(doc_refs/source_text/chunk_refs) 其一；否则拒写")
     # 2026-10-22（4.6）：分页判定**提前**算 —— ① `sourceLocator` 必须精确到 `/pN`；
     # ② 意图变化（弱信号）在未 ack 时拒写（见下方门禁）。
     _part_plan = None
-    if src.get("session_no"):
+    if src.get("session_no") and (not _kind or _is_session_src or _legacy_session):
         try:
             _part_plan = session_part_plan(
                 kb_id, str(src["session_no"]),
@@ -1529,8 +1549,9 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
         metadata["design"] = {"derived_from": [s for s in src["derived_from"] if s],
                               "generator": TAG_CONTRACT}
     warnings: list[str] = []
-    if not has_session:
-        warnings.append("无会话溯源（source.session_no/session_slug 缺）：报告/文档类建议补会话页")
+    if not (has_session or has_doc):
+        warnings.append("无溯源（source.kind/locator、session_no/session_slug、doc_refs 皆缺）："
+                        "报告/文档类建议补来源定位")
     if dry_run:
         return {"applied": False, "kb_id": kb_id, "slug": slug, "title": title, "mode": mode,
                 "graph": {"dry_run": True, "edges_written": 0, "edge_errors": []},
@@ -1629,7 +1650,8 @@ def write_knowledge(kb_id: str, spec: dict, *, dry_run: bool = False,
     # ④ 会话溯源边（L1）—— **核心自动确保会话页**（没有则建；换智能体/角色→新建分页）。
     #    外围只需传 `source.session_no` + 场景（session_name/agent_name/role）。
     session_slug = (src.get("session_slug") or "").strip()
-    if not session_slug and src.get("session_no"):
+    if (not session_slug and src.get("session_no")
+            and (not _kind or _is_session_src or _legacy_session)):
         try:
             _sp = ensure_session_page(kb_id, src["session_no"],
                                       session_name=src.get("session_name", ""),

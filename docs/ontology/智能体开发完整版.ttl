@@ -108,16 +108,21 @@
 # ============================================================
 
 ### 11. 评测 Evaluation
+# 2026-11-06（用户口径）：Evaluation 同时继承 Assessment + Report。
+#   · 继承 Assessment ⇒ 可直接评 DesiredResult / Means / Influencer，并可 `assessedBy`；
+#   · 继承 Report ⇒ 仍是文档类（render_mode=document），正文承载评测报告；
+#   · 评估对象范围与 Assessment 一致，不再需要 `evaluationOfRule` 这类单规则桥。
 :Evaluation rdf:type owl:Class ;
     rdfs:label "评测"@zh ;
-    rdfs:comment "一次效果评测（闭环一的收尾）：固定指标口径、反例、结论与受限项清单，可复现；落「领域知识库」。"@zh ;
-    rdfs:subClassOf bmm:Report .
+    rdfs:comment "一次效果评测：固定指标口径、反例、结论与受限项清单，可复现；落「领域知识库」。**继承 Assessment 与 Report**：可评目标/预期成果、手段（行动方案/智能体/流程）、影响因素；`assessedBy` 必填（组织单位）；指标走 `evaluationMeasures`。"@zh ;
+    rdfs:subClassOf bmm:Report ;
+    rdfs:subClassOf bmm:Assessment .
 
 
-### 11.1 规则评测 RuleEvaluation（2026-10-19 新增 ✓）
+### 11.1 规则评测 RuleEvaluation（2026-10-19 新增；2026-11-06 标 legacy）
 :RuleEvaluation rdf:type owl:Class ;
-    rdfs:label "规则评测"@zh ;
-    rdfs:comment "**一条规则一组**的评测台账（`Evaluation` 的子类）：累积该规则在历次《技术方案评审报告》中的执行结果 + 知识入库情况，用于**持续跟踪**一条规则是否可信、是否可被任务步骤引用；一规则一页。"@zh ;
+    rdfs:label "规则评测（legacy）"@zh ;
+    rdfs:comment "**legacy（2026-11-06）**：原「一条规则一组」的评测台账。单规则评测意义有限，现改为在更高层 Evaluation（目标/行动方案）里用 Metric/分解表体现；本类保留兼容存量页，不再新建。"@zh ;
     rdfs:subClassOf :Evaluation .
 
 ### 12. 指标 Metric
@@ -357,8 +362,9 @@
 # **一条关系**连接两个模块：**智能体协助活动**（智能体的工作由技能/工具支撑，见 :agentUsesSkill / :skillUsesTool）。
 
 :evaluationOfRule rdf:type owl:ObjectProperty ;
-    rdfs:label "评测对象（规则）"@zh ;
-    rdfs:comment "规则 ↔ 评测：一条规则的全部评测台账（持续跟踪 ✓）。跨库：台账在工作库，规则在领域库。"@zh ;
+    rdfs:label "评测对象（规则）【已弃用】"@zh ;
+    rdfs:comment "**DEPRECATED（2026-11-06）**：单规则评测语义有限，且跨库解析不到。评测改为在更高层 Evaluation 上评目标/行动方案（`bmm:assessesDesiredResult` / `bmm:assessesMeans`），规则统计作为 Metric/分解表。存量边保留 legacy，不再新增。"@zh ;
+    owl:deprecated true ;
     rdfs:domain :RuleEvaluation ;
     rdfs:range bmm:BusinessRule .
 

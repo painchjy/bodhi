@@ -36,10 +36,10 @@ def _verdicts() -> tuple:
 
 
 def check_rules(kb: str, spec: str) -> dict:
-    import ke_lookup  # noqa: PLC0415
+    import ke_review  # noqa: PLC0415
     import ke_rule_lang as L  # noqa: PLC0415  机器口径（模式/语言/格式）
 
-    lk = ke_lookup.knowledge_lookup(kb, mode="rules", spec=spec)
+    lk = ke_review.rules_resolve(kb, spec)
     rules = lk.get("rules") or []
     if not rules:
         return {"ok": False, "hash": lk.get("hash"), "rules": 0, "per_rule": [],

@@ -54,3 +54,5 @@ schema:templateSelector rdf:type owl:DatatypeProperty ;
 
 # 模块短名（目录名/列表名；≤16 字符，导入时校验）
 <https://schema.org/> bodhi:shortName "标准参考模型" .
+
+<https://schema.org/> bodhi:expertRole "外部导入模块 schema.org：负责本模块类与关系的抽取、维护与校验" .

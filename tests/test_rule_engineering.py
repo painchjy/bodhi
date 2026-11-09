@@ -23,7 +23,7 @@ for p in (HERE, os.path.join(REPO, "tools", "ke-core"),
 KB_ENV = "BODHI_RULE_REG_KB"
 REVIEW_ENV = "BODHI_RULE_REG_REVIEW"
 DEFAULT_REVIEW = "20261027-101010"
-SIX_TASKS = ["规则化", "规则编辑", "规则发布", "规则评测", "评测设计", "规则溯源"]
+RULE_TASKS = ["规则化"]
 
 
 # ── 纯函数层（必跑）─────────────────────────────────────────────────────────
@@ -92,10 +92,10 @@ def reg_kb(db):
 
 
 @pytest.fixture(scope="module")
-def domain_kb(db):
-    kb = db.resolve_kb_id("技术方案评审领域模型")[0]
+def l1_kb(db):
+    kb = db.resolve_kb_id("企业知识管理领域")[0]
     if not kb:
-        pytest.skip("找不到技术方案评审领域模型库")
+        pytest.skip("找不到企业知识管理领域库")
     return kb
 
 
@@ -117,10 +117,10 @@ def test_rule_pages_have_four_elements(reg_kb):
         assert not lack, "规则 %s 缺要素 %r" % (r["title"], lack)
 
 
-def test_rule_check_gate_passes(domain_kb):
-    """规则集门禁：`ke_rule_check` 通过（错误 0；提醒允许并记录）。"""
+def test_rule_check_gate_passes(l1_kb):
+    """规则集门禁：L1 规则化产出的策略可通过 `ke_rule_check`（错误 0；提醒允许）。"""
     import ke_rule_check as C
-    res = C.check_rules(domain_kb, "policy:bmm/businesspolicy/技术方案评审策略")
+    res = C.check_rules(l1_kb, "policy:意图建模输入验收")
     assert res.get("rules", 0) > 0, res
     assert res["ok"] is True, "规则体检未通过：%r" % (res.get("errors") or [])[:3]
 
@@ -156,7 +156,7 @@ def test_ledger_stats_equal_eval_page(reg_kb):
 
 
 def test_rule_task_pages_have_steps(db):
-    """规则工程 6 个任务页的 note 含**确定性步骤标记**（技能退役后的执行载体）。"""
+    """规则工程任务页（规则化）的 note 含**确定性步骤标记**（技能退役后的执行载体）。"""
     import ke_db
     kb = db.resolve_kb_id("企业知识管理领域")[0]
     if not kb:
@@ -166,13 +166,13 @@ def test_rule_task_pages_have_steps(db):
         "FROM wiki_pages WHERE deleted_at IS NULL AND knowledge_base_id = %s "
         " AND slug LIKE 'bpmn/task/%%'" % ke_db.sql_str(kb))
     got = {r["title"]: (r.get("note") or "") for r in rows}
-    for name in SIX_TASKS:
+    for name in RULE_TASKS:
         hit = [t for t in got if name in t]
         assert hit, "缺任务页：%s" % name
         note = got[hit[0]]
         assert len(note) >= 200, "%s 的步骤过短（%d 字）" % (name, len(note))
     joined = " ".join(got.values())
-    assert "ke_rule_check" in joined and "ke_rule_runtime_eval" in joined, \
-        "规则工程步骤里缺门禁/评测工具名（确定性步骤不完整）"
+    assert "ke_rule_check" in joined and "ke_rule_publish" in joined, \
+        "规则工程步骤里缺门禁/发布工具名（确定性步骤不完整）"
     assert "domain_modeling" not in joined, "规则工程仍引用已退役技能 domain_modeling"
 

@@ -23,6 +23,24 @@ _PROP = {"name": "toolName", "service": "toolService", "modes": "toolModes",
 BLOCK = "```bodhi-ext-contract"
 
 
+def _is_contract_page(page_type: str) -> bool:
+    """契约块只属于 `bpmn:DataObject`（含子类）与 `agent:Tool`。
+
+    2026-11-08 修：原实现不看 page_type，`save_knowledge` 对每个 merged 页
+    都调用 ensure_contract_block ⇒ BMM 的 Goal/Objective/Influencer 全被写入空契约块。
+    """
+    pt = str(page_type or "").strip()
+    if not pt:
+        return False
+    if pt == "agent:Tool":
+        return True
+    try:
+        import ke_ontology  # noqa: PLC0415
+        return "bpmn:DataObject" in ke_ontology.ancestors(pt)
+    except Exception:  # noqa: BLE001  本体不可用 ⇒ 只认最保守的精确类
+        return pt in ("bpmn:DataObject", "bpmn:TextualDataObject")
+
+
 def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
     """给**已绑定**的业务对象页补 ````bodhi-ext-contract```` 块（面板靠它渲染）。
 
@@ -44,6 +62,9 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
         row = rows[0]
         md = row.get("c") or ""
         _pt = str(row.get("page_type") or "")
+        if not _is_contract_page(_pt):
+            return {"ok": True, "changed": False, "reason": "not_data_object_or_tool",
+                    "page_type": _pt, "block": BLOCK}
         # 2026-10-30（用户实测死锁）：**未绑定也要有块** —— 否则面板不出现 ⇒ 永远绑不上。
         # 工具页（agent:Tool）同样要有块，UI 才能"刷新契约"。
         _kind = "tool" if _pt == "agent:Tool" else "contract"
@@ -94,6 +115,65 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
         return {"ok": True, "changed": True, "tool": tool, "service": svc}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": "write_failed", "detail": repr(exc)[:200]}
+
+
+def strip_contract_block(kb_id: str, object_slug: str, dry_run: bool = True) -> dict:
+    """移除**非 DataObject/Tool 页面**上的错误契约块（幂等，默认只预览）。
+
+    2026-11-08：旧 `save_knowledge` 给所有 merged 页写空契约块；修复后需要
+    清理存量。DataObject/Tool 的合法契约块不动。
+    """
+    import re as _re  # noqa: PLC0415
+
+    import ke_db  # noqa: PLC0415
+
+    rows = ke_db.psql_csv(
+        "SELECT title, page_type, coalesce(content,'') AS c, page_metadata::text AS md "
+        "FROM wiki_pages WHERE knowledge_base_id=%s AND slug=%s AND deleted_at IS NULL LIMIT 1"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(object_slug)))
+    if not rows:
+        return {"ok": False, "changed": False, "error": "page_not_found"}
+    row = rows[0]
+    _pt = str(row.get("page_type") or "")
+    if _is_contract_page(_pt):
+        return {"ok": True, "changed": False, "reason": "protected_data_object_or_tool",
+                "page_type": _pt}
+    md = row.get("c") or ""
+    pat = _re.compile(r"(?ms)^```bodhi-ext-contract\s*$.*?^```\s*$")
+    blocks = list(pat.finditer(md))
+    if not blocks:
+        return {"ok": True, "changed": False, "reason": "no_block"}
+    new_md = pat.sub("", md).lstrip("\n")
+    if dry_run:
+        return {"ok": True, "changed": True, "dry_run": True, "blocks": len(blocks),
+                "slug": object_slug, "page_type": _pt, "chars_before": len(md),
+                "chars_after": len(new_md)}
+    meta = json.loads(row.get("md") or "{}")
+    ke_pages.upsert_page(kb_id, object_slug, row.get("title") or object_slug,
+                         row.get("page_type") or "", new_md, metadata=meta,
+                         sync_folders=False)
+    return {"ok": True, "changed": True, "blocks": len(blocks), "slug": object_slug,
+            "page_type": _pt}
+
+
+def strip_contract_blocks(kb_id: str, dry_run: bool = True) -> dict:
+    """扫描本库所有含 `bodhi-ext-contract` 的非 DataObject/Tool 页面并清理。"""
+    import ke_db  # noqa: PLC0415
+
+    rows = ke_db.psql_csv(
+        "SELECT slug, page_type FROM wiki_pages WHERE knowledge_base_id=%s "
+        "AND deleted_at IS NULL AND content LIKE %s ORDER BY slug"
+        % (ke_db.sql_str(kb_id), ke_db.sql_str(BLOCK + "%")))
+    targets = [r for r in rows if not _is_contract_page(r.get("page_type") or "")]
+    if dry_run:
+        return {"ok": True, "dry_run": True, "kb_id": kb_id, "total": len(targets),
+                "targets": [{"slug": r.get("slug"), "page_type": r.get("page_type")}
+                            for r in targets]}
+    results = [strip_contract_block(kb_id, str(r.get("slug") or ""), dry_run=False)
+               for r in targets]
+    return {"ok": True, "dry_run": False, "kb_id": kb_id, "total": len(targets),
+            "changed": sum(1 for r in results if r.get("changed")),
+            "results": results}
 
 
 def _impl_of(service: str, tool: str) -> str:

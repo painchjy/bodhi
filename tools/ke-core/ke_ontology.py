@@ -252,13 +252,18 @@ def _index_classes() -> dict[str, dict]:
 
 
 def _index_relations() -> list[dict]:
-    """[{prefixed, label, module, domain[], range[], inverse_of}]（来自 JSON）。"""
+    """[{prefixed, label, module, domain[], range[], inverse_of}]（来自 JSON，含跨模块桥）。"""
     out: list[dict] = []
+    seen: set[str] = set()
     for model in (index_data().get("models") or []):
-        for rel in model.get("relations") or []:
+        for rel in list(model.get("relations") or []) + list(model.get("cross_module_bridges") or []):
+            name = str(rel.get("name") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
             out.append({
-                "prefixed": rel.get("name") or "",
-                "label": rel.get("label") or rel.get("name") or "",
+                "prefixed": name,
+                "label": rel.get("label") or name,
                 "module": model["key"],
                 "module_label": model.get("label") or model["key"],
                 "domain": list(rel.get("domain") or []),
@@ -266,6 +271,40 @@ def _index_relations() -> list[dict]:
                 "inverse_of": rel.get("inverse_of") or "",
             })
     return out
+
+
+def _object_properties_all() -> list[dict]:
+    """全部对象属性（domain/range 原始声明）；Neo4j 优先，JSON 兜底。
+
+    进程级缓存：类页构建会对 50+ 个类调用 `class_view`，不能每次都重查图库。
+    """
+    hit = _memo_get("object_properties_all")
+    if hit is not None:
+        return hit
+    try:
+        if ke_neo4j.available():
+            rows = ke_neo4j.query(
+                "MATCH (p:BodhiOntProperty {property_kind:'object'}) "
+                "WHERE p.bodhi_projection = 'ontology' AND p.prefixed IS NOT NULL "
+                "OPTIONAL MATCH (p)-[:BODHI_DOMAIN]->(d:BodhiOntClass) "
+                "OPTIONAL MATCH (p)-[:BODHI_RANGE]->(r:BodhiOntClass) "
+                "RETURN p.prefixed AS prefixed, p.label AS label, p.module AS module, "
+                "       collect(DISTINCT d.prefixed) AS domain, "
+                "       collect(DISTINCT r.prefixed) AS range "
+                "ORDER BY prefixed")
+            out = [{
+                "prefixed": r.get("prefixed") or "",
+                "label": r.get("label") or r.get("prefixed") or "",
+                "module": r.get("module") or "",
+                "domain": [x for x in (r.get("domain") or []) if x],
+                "range": [x for x in (r.get("range") or []) if x],
+            } for r in rows if r.get("prefixed")]
+            if out:
+                return _memo_put("object_properties_all", out)
+    except Exception:  # noqa: BLE001
+        pass
+    return _memo_put("object_properties_all", _index_relations())
+
 
 
 def _module_label_map() -> dict[str, str]:
@@ -687,6 +726,134 @@ def relation_types_for(page_type: str) -> dict:
     return {"source": source, "page_type": page_type, "relation_types": rows}
 
 
+def class_view(page_type: str) -> dict:
+    """**统一类视图**：某个类的 out（引出）/ in（引入）/ data。
+
+    - out：domain 精确 = 类（own）或 domain 是祖先（inherited）；直接复用
+      `relation_types_for()`（它已经按 `BODHI_SUBCLASS_OF*0..` 做过 domain 继承）。
+    - in：由对象属性的 range 反推 —— range 精确 = 类（own）或 range 是祖先（inherited）；
+      `source_classes` = domain 闭包（含子类），供“引入关系应从哪个类建边”使用。
+    - data：`data_properties_for()` 的 allowed 集合，按 domain/祖先拆 own/inherited。
+
+    该函数是 ontology_wiki / ontology_types / save 校验 / audit 的共同读视图；
+    所有调用方都只读它，不再各自遍历 relations 或自己算继承。
+    """
+    key = ("class_view", page_type)
+    hit = _memo_get(key)
+    if hit is not None:
+        return hit
+    meta = class_meta()
+    if page_type not in meta:
+        return {"page_type": page_type, "source": "unknown-class",
+                "out": {"own": [], "inherited": {}},
+                "in": {"own": [], "inherited": {}},
+                "data": {"own": [], "inherited": {}},
+                "ancestors": [], "descendants": []}
+    anc = ancestors(page_type, meta)          # 含自身，近→远
+    anc_index = {name: i for i, name in enumerate(anc)}
+
+    def _endpoint_closure(name: str) -> list[str]:
+        return descendants(name, meta)        # 含自身
+
+    # out：relation_types_for 已含 domain 继承（inherited_from=声明 domain 的祖先）
+    out_rows = list((relation_types_for(page_type).get("relation_types") or []))
+    out_rows.sort(key=lambda r: (
+        0 if not r.get("inherited_from") else 1 + anc_index.get(str(r.get("inherited_from")), 99),
+        str(r.get("prefixed") or "")))
+    own_out: list[dict] = []
+    inh_out: dict[str, list[dict]] = {}
+    seen_out: set[str] = set()
+    for row in out_rows:
+        name = str(row.get("prefixed") or "").strip()
+        if not name or name in seen_out:
+            continue
+        seen_out.add(name)
+        inherited_from = str(row.get("inherited_from") or "")
+        item = {
+            "name": name, "label": row.get("label") or name,
+            "module": row.get("module") or "", "direction": "out",
+            "domain": [row.get("domain")] if row.get("domain") else [],
+            "range": list(row.get("range") or []),
+            "range_labels": list(row.get("range_labels") or []),
+            "target_classes": list(dict.fromkeys(
+                c for r in (row.get("range") or []) for c in _endpoint_closure(str(r)))),
+            "inherited_from": inherited_from,
+        }
+        if inherited_from:
+            inh_out.setdefault(inherited_from, []).append(item)
+        else:
+            own_out.append(item)
+
+    # in：由全部对象属性的 range 反推；source_classes = domain + descendants(domain)
+    own_in: list[dict] = []
+    inh_in: dict[str, list[dict]] = {}
+    seen_in: set[str] = set()
+    in_rows: list[dict] = []
+    for prop in _object_properties_all():
+        matched = [r for r in (prop.get("range") or []) if r in anc_index]
+        if not matched:
+            continue
+        owner = min(matched, key=lambda r: anc_index[r])
+        name = str(prop.get("prefixed") or "").strip()
+        if not name or name in seen_in:
+            continue
+        seen_in.add(name)
+        sources: list[str] = []
+        for d in (prop.get("domain") or []):
+            for c in _endpoint_closure(str(d)):
+                if c not in sources:
+                    sources.append(c)
+        inherited_from = "" if owner == page_type else owner
+        in_rows.append({
+            "name": name, "label": prop.get("label") or name,
+            "module": prop.get("module") or "", "direction": "in",
+            "domain": list(prop.get("domain") or []),
+            "range": list(prop.get("range") or []),
+            "source_classes": sources,
+            "inherited_from": inherited_from,
+        })
+    in_rows.sort(key=lambda r: (
+        0 if not r.get("inherited_from") else 1 + anc_index.get(str(r.get("inherited_from")), 99),
+        str(r.get("name") or "")))
+    for item in in_rows:
+        if item["inherited_from"]:
+            inh_in.setdefault(item["inherited_from"], []).append(item)
+        else:
+            own_in.append(item)
+
+    # data：allowed 数据属性；没有 domain 的视为 global（own，scope=global）
+    own_data: list[dict] = []
+    inh_data: dict[str, list[dict]] = {}
+    seen_data: set[str] = set()
+    for name, prop in (data_properties_for(page_type) or {}).items():
+        if name in seen_data:
+            continue
+        seen_data.add(name)
+        domains = list(prop.get("domains") or [])
+        matched = [d for d in domains if d in anc_index]
+        owner = min(matched, key=lambda d: anc_index[d]) if matched else ""
+        item = {
+            "name": name, "label": prop.get("label") or name,
+            "range": [short_iri(prop.get("range_literal") or prop.get("range") or "")],
+            "inherited_from": "" if (not owner or owner == page_type) else owner,
+            "scope": ("global" if not domains
+                      else ("own" if (owner == page_type) else "inherited")),
+        }
+        if item["inherited_from"]:
+            inh_data.setdefault(str(item["inherited_from"]), []).append(item)
+        else:
+            own_data.append(item)
+
+    result = {
+        "page_type": page_type, "source": "class_view",
+        "ancestors": anc, "descendants": descendants(page_type, meta),
+        "out": {"own": own_out, "inherited": inh_out},
+        "in": {"own": own_in, "inherited": inh_in},
+        "data": {"own": own_data, "inherited": inh_data},
+    }
+    return _memo_put(key, result)
+
+
 def relation_type_map(page_type: str) -> dict[str, dict]:
     """某类可用的对象属性（**进程级缓存**，P3-0g：每条边做 domain 校验都会调它）。"""
     hit = _memo_get(("relmap", page_type))
@@ -872,6 +1039,45 @@ def _target_closure_uncached(rel_type: str, meta: dict[str, dict] | None = None)
             if cls not in out:
                 out.append(cls)
     return out
+
+
+def edge_check(rel_type: str, source_type: str, target_type: str) -> dict:
+    """**统一边校验**（save / audit / relation panel / wiki 共用）。
+
+    返回 `{ok, code, hint, canonical?}`：
+      - `unknown_relation`：本体没有这个对象属性
+      - `direction_reversed`：正向 domain 不覆盖，但**反向**（target_type 为 domain）成立；
+        只回 `canonical`，**不自动写边**
+      - `domain_mismatch` / `range_mismatch` / `unconstrained`
+    """
+    allowed = relation_type_map(source_type) if source_type else {}
+    closure = target_closure(rel_type)
+    row = allowed.get(rel_type)
+    if not row and not closure:
+        return {"ok": False, "code": "unknown_relation",
+                "hint": "本体没有对象属性 `%s`（先在 TTL 声明 domain/range 再重建投影）" % rel_type}
+    if not row:
+        rev = (relation_type_map(target_type) if target_type else {}).get(rel_type)
+        if rev and (not closure or source_type in closure):
+            return {
+                "ok": False, "code": "direction_reversed",
+                "canonical": {"source_type": target_type, "type": rel_type,
+                              "target_type": source_type},
+                "hint": ("`%s` 的方向是 %s → %s；请在 %s 页建边，不要在 %s 上反向建"
+                         % (rel_type, target_type, source_type, target_type, source_type)),
+            }
+        cands = sorted(allowed)[:8]
+        return {"ok": False, "code": "domain_mismatch",
+                "hint": ("`%s` 的 domain 不覆盖 %s；该类型可用关系：%s"
+                         % (rel_type, source_type, "、".join(cands) or "无"))}
+    if closure and target_type not in closure:
+        return {"ok": False, "code": "range_mismatch",
+                "hint": "目标页类型 %s 不在 `%s` 的 range 内（%s）"
+                        % (target_type, rel_type, "、".join(closure[:8]))}
+    if not str(row.get("domain") or "").strip():
+        return {"ok": True, "code": "unconstrained",
+                "hint": "该属性未声明 domain（本体放行；建议补 domain）"}
+    return {"ok": True, "code": ""}
 
 
 def target_pages(kb_id: str, rel_type: str, exclude_slug: str = "", q: str = "",

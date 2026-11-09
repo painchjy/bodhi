@@ -11,7 +11,7 @@
     "type": "string"
    },
    "kinds": {
-    "description": "all（默认）或逗号分隔的具体 kind",
+    "description": "all（默认，单库清理 pages/rows/edges/graph）或逗号分隔的具体 kind（pages/rows/edges/graph/init）",
     "type": "string"
    },
    "slugs": {
@@ -292,13 +292,21 @@
     "enum": [
      "outline",
      "section",
-     "image",
+     "image_read",
      "full"
     ],
     "type": "string"
    },
    "cursor": {
     "type": "integer"
+   },
+   "detail": {
+    "description": "image_read 用：compact（默认，无 bbox）/ full（带 bbox）",
+    "enum": [
+     "compact",
+     "full"
+    ],
+    "type": "string"
    },
    "doc_id": {
     "description": "it_platform 的 doc_id（ext_doc_push 回执里给）",
@@ -307,11 +315,20 @@
    "doc_title": {
     "type": "string"
    },
-   "inline_media": {
-    "type": "boolean"
+   "figure_name": {
+    "description": "image_read 用：文件名（占位符里的名字；与 figure_no 二选一）",
+    "type": "string"
+   },
+   "figure_no": {
+    "description": "image_read 用：第几张图（取 section.figures[].figure_no）",
+    "type": "integer"
    },
    "limit_chars": {
     "type": "integer"
+   },
+   "question": {
+    "description": "image_read 用：本次关注点（如「部署方式与灾备方式」）",
+    "type": "string"
    },
    "section_path": {
     "type": "string"
@@ -701,7 +718,7 @@
     "type": "integer"
    },
    "mode": {
-    "description": "rules | keyword | **page** | instances | route | path | semantic（默认 rules）。**page = 按 slug 取整页**（正文 + 属性，`<库名>/` 前缀自动容错、`kb_id` 可省）⇒ 任务页/DataObject/模板用它一次取全，**不要**再用内置 wiki 阅读工具",
+    "description": "**domain（默认，领域知识）** | page | search | rules（`keyword/instances/route/path/semantic` 兼容保留，不建议）。domain：不用库名，query 空格=OR；无 query ⇒ 流程/活动/任务/角色清单+关系；page：按 slug/标题取整页（可用标题关键词）；search：类范围+多词；rules：规则契约（spec=direct:/policy:/influencer:/ask）",
     "type": "string"
    },
    "ontology_hint": {

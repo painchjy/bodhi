@@ -1,0 +1,49 @@
+{
+  "plan_id": "MODEL-TSA-T1-ACCEPT-20261108-01",
+  "title": "建模智能体意图工程验收测试方案",
+  "status": "tool-fixed-agent-pending",
+  "source_case": {
+    "session_no": "c26378c9-2ee7-4992-9019-ad4315045e29",
+    "turns": [
+      "2026-11-08 19:02:17 用最新建模流程检查测试库意图层并逐步整改",
+      "2026-11-08 21:01:24 确认并修正 sourceLocator 口径",
+      "2026-11-08 22:15:44 解锁后重试，写测试库，归属业务策略落总纲"
+    ],
+    "payload_file": "logs/args/20261108-221559-386918-save_knowledge.json"
+  },
+  "environment": {
+    "agent_id": "5af4fe6b-1f31-4e0e-aa5e-582d8702cc13",
+    "method_kb_id": "6effde80-3ad0-46a1-92b2-76d695e0b58f",
+    "target_kb_id": "a7f31b49-3906-4df8-bc46-096370615371",
+    "source_document_id": "2ff3539c-531c-45ea-859a-758e385f3ae6"
+  },
+  "cases": [
+    {"id": "AT-01", "blocking": true, "check": "apply 后 answer_len > 0，含 created/merged/edges_written/sourceLocator"},
+    {"id": "AT-02", "blocking": true, "check": "非 DataObject/Tool 页面不含 bodhi-ext-contract"},
+    {"id": "AT-03", "blocking": true, "check": "bmm:sourceLocator 为 kb:<kb>/doc:<doc>#section:<section>"},
+    {"id": "AT-04", "blocking": false, "check": "正文原文依据的定位与 metadata/graph 一致"},
+    {"id": "AT-05", "blocking": true, "check": "正文显示 skos:definition，不为（暂无定义）"},
+    {"id": "AT-06", "blocking": true, "check": "KB 文档来源页面无 bmm:sourceSession；session 来源保留"},
+    {"id": "AT-07", "blocking": false, "check": "技术方案评审策略（总纲）经 bmm:realizes 指向 Goal，不反向"},
+    {"id": "AT-08", "blocking": true, "check": "T1 类/关系合法；audit_scan(taskio,handoff) 0 findings"},
+    {"id": "AT-09", "blocking": true, "check": "同载荷重跑幂等，无重复页/边/契约块"},
+    {"id": "AT-10", "blocking": false, "check": "DataObject/Tool 契约块、session 来源会话边、非法 locator 反例"},
+    {"id": "TC-TASK-IO-01", "blocking": true, "check": "class_view(Task).data.inherited[Activity] 含 entry/exit"},
+    {"id": "TC-TASK-IO-02", "blocking": true, "check": "ontology_types.class_relations[Task].data 含 entry/exit"},
+    {"id": "TC-TASK-IO-03", "blocking": true, "check": "class_attributes[Task] 的 entry/exit 带 inherited_from=Activity、scope=inherited"},
+    {"id": "TC-TASK-IO-04", "blocking": false, "check": "ontology_wiki 的 ontology/bpmn/task 页显示继承自 Activity 的数据属性"},
+    {"id": "TC-TASK-IO-05", "blocking": true, "check": "Agent 不得建议给 Task 重复加 entry/exit；区分 taskUsesDataObject/taskExecutesPolicy 与 I/O 契约"}
+  ],
+  "scoring": {
+    "blocking_threshold": 1.0,
+    "important_threshold": 0.8
+  },
+  "rework": {
+    "AT-01": "工具回执压缩 + prompt 写库回执硬规则",
+    "AT-02": "ensure_contract_block 类型门禁 + strip_contract_blocks",
+    "AT-03": "显式 sourceLocator 优先",
+    "AT-05": "design_elements definition 回退",
+    "AT-06": "按来源类型决定 link_source_session",
+    "AT-07": "T1 任务页/领域知识补总纲口径"
+  }
+}
