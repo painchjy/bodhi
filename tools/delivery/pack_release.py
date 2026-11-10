@@ -62,7 +62,7 @@ MANUAL_ROOT = ("MANUAL.md",)
 MANUAL_PKG_03 = ("ONTOLOGY-KB.md", "KB-CONFIG.md", "TROUBLESHOOTING.md", "AGENTS-SQL.md")
 MANUALS = MANUAL_ROOT + ("FRONTEND.md", "MCP-SERVER.md") + MANUAL_PKG_03
 MCP_ARTIFACT_SKIP = ("shacl",)          # 与 03 的 ontology/shapes 逐字节相同 → 只留真源
-TOOLS_MANUAL_PKG = ("delivery", "diag")  # tools 下归 03（维护工具）；diag/ 是仓库内诊断脚本，**不进任何交付包**
+TOOLS_MANUAL_PKG = ("delivery",)         # tools/delivery 归 03；tools/diag 依赖 ke-core，随 02 交付
 # 01 包里这三份补丁脚本只放 `frontend/patches/`（源目录里同时存在同名文件 → 必须排除一侧，否则包内重复）
 FRONTEND_PATCH_FILES = ("patch_frontend.py", "gen_frontend_types.py", "ontologyTypes.ts",
                         "bodhi_type_migration.ts")
@@ -322,7 +322,7 @@ def pkg_mcp(stage: pathlib.Path, version: str) -> dict:
           "=====================\n\n"
           "先读 **MCP-SERVER.md**（部署/自检/环境变量）。\n\n"
           "包内就是「仓库根」形状，解包即得：\n"
-          "  tools/        MCP 服务源码 + ke-core + 编译/投影工具（不再套内层 tar）\n"
+          "  tools/        MCP 服务源码 + ke-core + 编译/投影/诊断工具（diag/context_trace.py；不再套内层 tar）\n"
           "  artifacts/    本体编译产物（ontology_index.json 等）——服务运行时要读\n"
           "  skills/       技能全文（`skills()` 工具下发）\n"
           "  logs/         工具调用日志目录（可写）\n"

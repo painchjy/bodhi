@@ -14,7 +14,7 @@
 | 包 | 内容 | 详细手册 |
 |---|---|---|
 | `bodhi2-01-frontend.tar.gz` | 补丁后的 UI 镜像（`weknora-ui:bodhi2`）+ nginx 模板 + compose overlay + 验收脚本 + 打补丁脚本（若你们要自己构建）| `FRONTEND.md` |
-| `bodhi2-02-mcp-server.tar.gz` | MCP 服务**整包（就是仓库根）**：`tools/`（服务 + 编译/投影工具）+ `artifacts/`（编译产物）+ `skills/` + Dockerfile + compose + systemd + 自检 | `MCP-SERVER.md` |
+| `bodhi2-02-mcp-server.tar.gz` | MCP 服务**整包（就是仓库根）**：`tools/`（服务 + 编译/投影/诊断工具，含 `diag/context_trace.py`）+ `artifacts/`（编译产物）+ `skills/` + Dockerfile + compose + systemd + 自检 | `MCP-SERVER.md` |
 | `bodhi2-03-manual.tar.gz` | **文档 + 本体真源**：`docs/` + `ontology/`（TTL/词表/shapes）+ **可直接导入的种子**（254 页本体模型库）+ 登记 SQL + 维护工具 | 本文件 + `ONTOLOGY-KB.md` + `KB-CONFIG.md` + `TROUBLESHOOTING.md` + `AGENTS-SQL.md` |
 | `MANIFEST.json` / `SHA256SUMS` | 版本、文件清单、校验和 | — |
 
