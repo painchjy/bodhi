@@ -290,6 +290,7 @@ from srv.jobs import DETAIL_KEYS, JOBS, JOBS_LOCK, _job_brief, job_status  # noq
 
 
 from srv.schemas import TOOL_SCHEMAS  # noqa: E402  （P2 切片 S8a ✓ schema 单一来源）
+from srv.receipt import compact_receipt  # noqa: E402  （部署级 compact/full 回执）
 
 
 def tool_definitions() -> list[dict]:
@@ -438,6 +439,7 @@ def _call_tool_impl(name: str, args: dict) -> dict:
 
 
 def tool_result(payload: dict, is_error: bool = False) -> dict:
+    payload = compact_receipt(payload)
     return {
         "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, indent=2)}],
         "isError": is_error,

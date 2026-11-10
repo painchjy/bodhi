@@ -39,6 +39,26 @@ def test_no_explicit_source_falls_back_to_session(monkeypatch):
     assert got["bmm:sourceLocator"] == "session/S1/p1", got
 
 
+def test_compact_receipt_keeps_data_and_errors_drops_hints():
+    from srv.receipt import compact_receipt
+    payload = {
+        "ok": True,
+        "hint": "试错提示",
+        "next": "下一步",
+        "why": "解释",
+        "rows": [{"issue_no": "P1", "note": "业务字段保留", "rule_fp": "abc"}],
+        "error": {"code": "need_key", "field": "review_no"},
+    }
+    got = compact_receipt(payload, mode="compact")
+    assert "hint" not in got and "next" not in got and "why" not in got
+    assert got["rows"][0]["note"] == "业务字段保留"
+    assert got["rows"][0]["rule_fp"] == "abc"
+    assert got["error"]["code"] == "need_key"
+    assert got["receipt_mode"] == "compact"
+    full = compact_receipt(payload, mode="full")
+    assert full["hint"] == "试错提示"
+
+
 def test_compact_result_keeps_totals():
     out = {"created": [], "merged": [{"i": i} for i in range(10)],
            "page_versions": [{"i": i} for i in range(10)], "receipt": {"merged": 10}}
