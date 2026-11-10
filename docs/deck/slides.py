@@ -44,11 +44,13 @@ def slide1():
     # 第 1 层 智能体
     e += [rect(80, 215, 1440, 135, fill=EMERALD_SOFT, line=EMERALD, radius=16)]
     e += band_label(100, 232, "第 1 层", "智能体", "决策与编排", EMERALD)
-    agents = ["企业知识管理建模", "技术方案评审", "知识运维"]
+    agents = ["技术方案评审", "知识运维", "企业知识管理建模"]
     for i, name in enumerate(agents):
         x = 380 + i * 360
-        e += [card(x, 250, 330, 64, fill=WHITE, line=EMERALD, radius=12)]
-        e += [text(x, 250, 330, 64, name, size=22, bold=True, color=EMERALD,
+        core = name == "企业知识管理建模"
+        e += [card(x, 250, 330, 64, fill=AMBER_SOFT if core else WHITE,
+                   line=AMBER if core else EMERALD, radius=12)]
+        e += [text(x, 250, 330, 64, name, size=22, bold=True, color=AMBER if core else EMERALD,
                    align="center", valign="middle")]
 
     # 第 2 层 技能 + 工具
@@ -62,14 +64,16 @@ def slide1():
 
     e += [rect(880, 365, 640, 150, fill=BLUE_SOFT, line=BLUE, radius=16)]
     e += band_label(900, 382, "第 2 层", "工具", "确定性功能 · 43 个", BLUE)
-    groups = [("本体技能", "3"), ("建模写入", "6"), ("检索规则", "8"),
-              ("治理审计", "8"), ("跨库迁移", "11"), ("导入执行", "7")]
-    for i, (name, n) in enumerate(groups):
+    groups = [("领域建模", "9", True), ("本体与技能", "3", False), ("检索与规则", "8", False),
+              ("治理审计", "8", False), ("跨库与迁移", "11", False), ("外部连接", "4", False)]
+    for i, (name, n, core) in enumerate(groups):
         x = 1080 + (i % 2) * 220
         y = 384 + (i // 2) * 44
-        e += [card(x, y, 205, 38, fill=WHITE, line=BLUE, radius=9)]
-        e += [text(x + 12, y + 5, 140, 28, name, size=16, bold=True, color=BLUE),
-              text(x + 155, y + 4, 40, 28, n, size=19, bold=True, color=BLUE, font=MONO, align="right")]
+        e += [card(x, y, 205, 38, fill=AMBER_SOFT if core else WHITE,
+                   line=AMBER if core else BLUE, radius=9)]
+        e += [text(x + 12, y + 5, 140, 28, name, size=16, bold=True, color=AMBER if core else BLUE),
+              text(x + 155, y + 4, 40, 28, n, size=19, bold=True, color=AMBER if core else BLUE,
+                   font=MONO, align="right")]
 
     # 第 3 层 领域知识
     e += [rect(80, 530, 1440, 135, fill=CYAN_SOFT, line=CYAN, radius=16)]
@@ -77,8 +81,10 @@ def slide1():
     domains = ["技术方案评审", "重点产品智能问数", "企业知识管理领域"]
     for i, name in enumerate(domains):
         x = 380 + i * 360
-        e += [card(x, 560, 330, 72, fill=WHITE, line=CYAN, radius=12)]
-        e += [text(x, 560, 330, 72, name, size=21, bold=True, color=CYAN,
+        core = name == "企业知识管理领域"
+        e += [card(x, 560, 330, 72, fill=AMBER_SOFT if core else WHITE,
+                   line=AMBER if core else CYAN, radius=12)]
+        e += [text(x, 560, 330, 72, name, size=21, bold=True, color=AMBER if core else CYAN,
                    align="center", valign="middle")]
 
     # 第 4 层 本体模型
@@ -93,9 +99,17 @@ def slide1():
     e += [text(1160, 706, 340, 34, "54 类 · 71 对象属性", size=20, bold=True, color=VIOLET),
           text(1160, 744, 340, 30, "55 数据属性 · 4 条约束", size=18, color=MUTED)]
 
-    e += [text(80, 830, 1460, 28,
-               "上层调用下层 · 下层约束上层　｜　设计开发 / domain_modeling / 需求分析已并入建模智能体 + 企业知识管理领域",
-               size=18, color=INK, bold=True)]
+    # 核心连接：建模智能体 ⇄ 企业知识管理领域
+    e += [line(1430, 282, 1530, 282, color=AMBER, width=2),
+          line(1430, 596, 1530, 596, color=AMBER, width=2),
+          line(1530, 282, 1530, 405, color=AMBER, width=3, arrow=True),
+          line(1530, 596, 1530, 473, color=AMBER, width=3, arrow=True)]
+    e += [text(1540, 390, 26, 120, "核\n心\n连\n接", size=14, color=AMBER, bold=True,
+               align="center", spacing=2)]
+
+    e += [text(80, 826, 1460, 28,
+               "核心连接：企业知识管理领域 + 建模智能体 —— 把本体规范落成领域知识　｜　设计开发 / domain_modeling / 需求分析已并入",
+               size=16, color=INK, bold=True)]
     e += footer("范围：生产链路（测试知识库与已退役能力不计）", "01 / 06")
     return {"bg": PAPER, "elements": e}
 # ===================== P2 四层协作 =====================
@@ -105,20 +119,22 @@ def slide2():
     e += header(
         "01 / 总体架构",
         [{"s": "四层如何协作：", "color": INK}, {"s": "技能/工具是总线", "color": BLUE}],
-        "技能做概率性判断，工具做确定性执行；领域知识定义业务技能，本体给出基础规范。",
+        "技能做概率性判断，工具做确定性执行；企业知识管理领域 + 建模智能体把本体落成领域知识。",
     )
 
     # 1 智能体
     e += [rect(80, 205, 1440, 100, fill=EMERALD_SOFT, line=EMERALD, radius=14)]
     e += [tag(100, 220, 86, 32, "1 智能体", EMERALD, WHITE, size=16),
           text(100, 258, 190, 28, "决策与编排", size=18, color=MUTED)]
-    agents = [("企业知识管理建模", "按 T1–T7 任务页执行"), ("技术方案评审", "规则驱动逐条判定"),
-              ("知识运维", "巡检 · 清理 · 迁移")]
+    agents = [("技术方案评审", "规则驱动逐条判定"), ("知识运维", "巡检 · 清理 · 迁移"),
+              ("企业知识管理建模", "按 T1–T7 任务页执行")]
     for i, (name, note) in enumerate(agents):
         x = 310 + i * 340
-        e += [card(x, 220, 310, 70, fill=WHITE, line=EMERALD, radius=10)]
-        e += [text(x + 14, 228, 280, 28, name, size=21, bold=True),
-              text(x + 14, 258, 280, 24, note, size=17, color=MUTED)]
+        core = name == "企业知识管理建模"
+        e += [card(x, 220, 310, 70, fill=AMBER_SOFT if core else WHITE,
+                   line=AMBER if core else EMERALD, radius=10)]
+        e += [text(x + 14, 228, 280, 28, name, size=21, bold=True, color=AMBER if core else INK),
+              text(x + 14, 258, 280, 24, note, size=17, color=AMBER if core else MUTED)]
 
     # 2 技能 + 工具
     e += [rect(80, 315, 640, 165, fill=ROSE_SOFT, line=ROSE, radius=14)]
@@ -133,14 +149,16 @@ def slide2():
     e += [rect(740, 315, 780, 165, fill=BLUE_SOFT, line=BLUE, radius=14)]
     e += [tag(760, 330, 70, 30, "2 工具", BLUE, WHITE, size=16),
           text(760, 366, 320, 26, "确定性功能 · 43 个", size=18, color=MUTED)]
-    groups = [("本体技能", "3"), ("建模写入", "6"), ("检索规则", "8"),
-              ("治理审计", "8"), ("跨库迁移", "11"), ("导入执行", "7")]
-    for i, (name, n) in enumerate(groups):
+    groups = [("领域建模", "9", True), ("本体与技能", "3", False), ("检索与规则", "8", False),
+              ("治理审计", "8", False), ("跨库与迁移", "11", False), ("外部连接", "4", False)]
+    for i, (name, n, core) in enumerate(groups):
         x = 760 + (i % 3) * 245
         y = 400 + (i // 3) * 40
-        e += [card(x, y, 230, 34, fill=WHITE, line=BLUE, radius=9)]
-        e += [text(x + 12, y + 4, 160, 26, name, size=15, bold=True, color=BLUE),
-              text(x + 178, y + 3, 42, 26, n, size=18, bold=True, color=BLUE, font=MONO, align="right")]
+        e += [card(x, y, 230, 34, fill=AMBER_SOFT if core else WHITE,
+                   line=AMBER if core else BLUE, radius=9)]
+        e += [text(x + 12, y + 4, 160, 26, name, size=15, bold=True, color=AMBER if core else BLUE),
+              text(x + 178, y + 3, 42, 26, n, size=18, bold=True, color=AMBER if core else BLUE,
+                   font=MONO, align="right")]
 
     # 3 领域知识
     e += [rect(80, 490, 1440, 150, fill=CYAN_SOFT, line=CYAN, radius=14)]
@@ -153,9 +171,11 @@ def slide2():
     ]
     for i, (name, obj, skill) in enumerate(domains):
         x = 310 + i * 340
-        e += [card(x, 505, 310, 118, fill=WHITE, line=CYAN, radius=10)]
-        e += [text(x + 14, 514, 280, 28, name, size=21, bold=True, color=CYAN),
-              text(x + 14, 548, 280, 24, obj, size=16, color=MUTED),
+        core = name == "企业知识管理领域"
+        e += [card(x, 505, 310, 118, fill=AMBER_SOFT if core else WHITE,
+                   line=AMBER if core else CYAN, radius=10)]
+        e += [text(x + 14, 514, 280, 28, name, size=21, bold=True, color=AMBER if core else CYAN),
+              text(x + 14, 548, 280, 24, obj, size=16, color=AMBER if core else MUTED),
               text(x + 14, 578, 280, 24, skill, size=16, color=INK, bold=True)]
 
     # 4 本体
@@ -176,6 +196,14 @@ def slide2():
                    align="center", valign="middle")]
     e += [text(1250, 665, 250, 28, "54 类 / 71 对象属性", size=18, bold=True, color=VIOLET),
           text(1250, 700, 250, 26, "55 数据属性 / 4 条约束", size=17, color=MUTED)]
+
+    # 核心连接：建模智能体 ⇄ 企业知识管理领域
+    e += [line(1300, 255, 1530, 255, color=AMBER, width=2),
+          line(1300, 564, 1530, 564, color=AMBER, width=2),
+          line(1530, 255, 1530, 380, color=AMBER, width=3, arrow=True),
+          line(1530, 564, 1530, 440, color=AMBER, width=3, arrow=True)]
+    e += [text(1540, 370, 26, 120, "核\n心\n连\n接", size=14, color=AMBER, bold=True,
+               align="center", spacing=2)]
 
     # 执行系统
     e += [rect(80, 800, 1440, 40, fill=WHITE, line=LINE, radius=10)]
@@ -416,29 +444,49 @@ def slide6():
     e += header(
         "05 / 工具",
         [{"s": "工具提供", "color": INK}, {"s": "确定性执行", "color": BLUE}],
-        "43 个现役 MCP 工具，六组能力；工具只认类型与属性。",
+        "43 个现役 MCP 工具，六组能力；领域建模是核心，ext_* 独立为外部工具连接。",
     )
 
     groups = [
-        ("本体与技能", "3", ["ontology_types", "skills", "job_status"], "先查类型 / 技能 / 任务状态"),
-        ("建模写入", "6", ["save_knowledge", "doc_outline", "extract_state"], "分批建模、落页、写属性"),
-        ("检索与规则", "8", ["knowledge_lookup", "rules_resolve", "ke_rule_check"], "查知识、取规则、判证据"),
-        ("治理审计", "8", ["audit_scan", "retag_preview", "metric_compute"], "巡检、改类型、指标与复制"),
-        ("跨库迁移", "11", ["context_scan", "context_authority", "kb_export"], "同名治理、权威副本、库迁移"),
-        ("导入与执行", "7", ["import_probe", "ext_table", "ext_doc_parse"], "表 → 类关系；按契约取外部数据"),
+        ("领域建模", "9", True,
+         ["save_knowledge", "doc_outline", "extract_state", "extract_candidates",
+          "page_attributes_set", "image_extract", "import_probe", "import_plan", "import_apply"],
+         "核心：分批建模 / 落页 / 写属性 / 结构化导入"),
+        ("本体与技能", "3", False,
+         ["ontology_types", "skills", "job_status"],
+         "先查类型 / 技能 / 任务状态"),
+        ("检索与规则", "8", False,
+         ["knowledge_lookup", "lookup_turn_begin", "evidence_score", "reference_lookup",
+          "rules_resolve", "ke_rule_check", "ke_rule_publish", "rule_publish"],
+         "查知识、取规则、判证据"),
+        ("治理审计", "8", False,
+         ["audit_scan", "audit_plan", "audit_purge", "retag_preview",
+          "retag_apply", "retag_rollback", "metric_compute", "page_copy"],
+         "巡检、改类型、指标与复制"),
+        ("跨库与迁移", "11", False,
+         ["context_scan", "context_lookup", "context_page", "context_concept_apply",
+          "context_concept_rollback", "context_authority", "context_authority_apply",
+          "kb_export", "kb_import", "migrate_article_body", "clean_alias_noise"],
+         "同名治理、权威副本、库迁移"),
+        ("外部工具连接", "4", False,
+         ["ext_attach_probe", "ext_doc_push", "ext_doc_parse", "ext_table"],
+         "连接外部系统 / 文档 / 表单，按契约取数"),
     ]
-    colors = [VIOLET, CYAN, ROSE, EMERALD, BLUE, AMBER]
-    for i, (name, n, tools, note) in enumerate(groups):
+    colors = [AMBER, VIOLET, ROSE, EMERALD, BLUE, CYAN]
+    for i, (name, n, core, tools, note) in enumerate(groups):
         x = 80 + (i % 3) * 490
         y = 200 + (i // 3) * 270
         color = colors[i]
         e += [card(x, y, 460, 250, fill=WHITE, line=color, radius=14)]
         e += [text(x + 18, y + 14, 300, 34, name, size=22, bold=True, color=color),
               text(x + 390, y + 6, 52, 50, n, size=36, bold=True, color=color, font=MONO, align="right")]
+        if core:
+            e += tag(x + 120, y + 16, 58, 22, "核心", AMBER, AMBER_SOFT, size=12)
         for j, t in enumerate(tools):
-            e += [card(x + 18, y + 66 + j * 42, 424, 34, fill=PAPER2, line=LINE, radius=7)]
-            e += [text(x + 28, y + 66 + j * 42, 404, 34, t, size=15, color=INK, font=MONO, valign="middle")]
-        e += [text(x + 18, y + 202, 424, 34, note, size=15, color=MUTED)]
+            col, row = j % 2, j // 2
+            e += [text(x + 18 + col * 212, y + 58 + row * 25, 206, 24, t,
+                       size=13.5, color=INK, font=MONO)]
+        e += [text(x + 18, y + 214, 424, 26, note, size=13.5, color=MUTED)]
 
     e += [rect(80, 740, 1440, 60, fill=INK, line=INK, radius=12)]
     e += [text(100, 740, 220, 60, "执行系统", size=18, bold=True, color="7DE3D8", valign="middle"),
@@ -446,7 +494,7 @@ def slide6():
                "企业 API　·　领域 MCP（it_platform）　·　DB　｜　绑定边 bpmn:dataObjectBindingTool　｜　先预览、后执行",
                size=16, color=WHITE, valign="middle")]
 
-    e += footer("43 个工具全部现役；工具做确定性的事，语义判断归技能与智能体。", "06 / 06")
+    e += footer("43 个工具全部现役；领域建模是核心能力，ext_* 负责外部系统连接。", "06 / 06")
     return {"bg": PAPER, "elements": e}
 
 

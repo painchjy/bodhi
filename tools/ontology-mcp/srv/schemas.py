@@ -475,7 +475,8 @@ TOOL_SCHEMAS = [
                                                   "true ⇒ 回 `plan/strategy/suggestions/next`；"
                                                   "false ⇒ 只回 `hits/counts`（对照组基线，**不猜**）")},
                 "session_no": {"type": "string",
-                               "description": "会话编号（**只进遥测日志**，不参与检索；用于按会话统计成败）"},
+                               "description": ("WeKnora 会话编号（**必填**）：用于 kb_scope / 智能体配置解析；"
+                                               "不要省略、不要自编。")},
                 "question": {"type": "string",
                              "description": "用户**原始问题**（只进遥测日志/同类问题聚类；检索仍用 `query`）"},
                 # 2026-10-24（A/B · C1 口径）：问-轮边界（`lookup_turn_begin` 的 turn_id）
@@ -486,7 +487,7 @@ TOOL_SCHEMAS = [
                                "description": ("自报\"本工具是本轮第一个检索动作\"（true/false）；"
                                                "与门禁判定不一致会计入数据质量 ⚠️")},
                 "limit": {"type": "integer"}},
-                "required": []},
+                "required": ["session_no"]},
         },
         {
             "name": "lookup_turn_begin",
@@ -831,10 +832,10 @@ TOOL_SCHEMAS = [
         },
         {
             "name": "ext_table",
-            "description": ("**按业务对象映射把台账行渲染成 Markdown 表**（报告清单节表体的来源）："
-                            "列名/列序/枚举取 `DataObject` 绑定的 `fieldMap`；未写映射退回契约 labels。"
-                            "只读；同时回 `ref_block`（对象规范 v2，可直接贴表后）。"
-                            "外部服务只提供数据行，**排版在知识侧** ✓"),
+            "description": ("**按业务对象映射返回台账行 / 可选 Markdown 表**："
+                            "默认只回 `rows + columns + ref_block`；报告清单节需要表体时传 "
+                            "`include_markdown=true`。列名/列序/枚举取 `DataObject` 绑定的 `fieldMap`；"
+                            "未写映射退回契约 labels。只读；外部服务只提供数据行，**排版在知识侧** ✓"),
             "inputSchema": {"type": "object", "properties": {
                 "kb_id": {"type": "string", "description": "业务对象所在库（可省 ⇒ 按 object 全库反查）"},
                 "object": {"type": "string", "description": "DataObject 页 slug（列口径与主键从该对象来）"},
@@ -842,6 +843,9 @@ TOOL_SCHEMAS = [
                 "review_no": {"type": "string", "description": "等价简写：外层主键值"},
                 "columns": {"type": "string",
                             "description": "要展示的字段子集（逗号分隔；顺序仍按对象映射）"},
+                "include_markdown": {"type": "boolean",
+                                     "description": ("默认 false：只回 rows + columns/ref_block；"
+                                                     "报告组文需要表体时传 true，回 markdown（不再回 rows）")},
                 "title": {"type": "string", "description": "页面标题（缺 review_no 时按页面上下文解析）"}},
                 "required": ["object"]},
         },

@@ -92,7 +92,7 @@ schema_hash: sha256:fb9b71cd8b67f376
 1. 模板（`schema:DocumentTemplate` 实例）该小节的章节结构里给出**字段子集** —— 表头加一列
    **「数据对象字段（逗号分隔，顺序即展示顺序）」**，`—` = 该节不取外部数据；
    这一格写的是**业务列名**（与正文表头一致），不是字段代码；
-2. 组文时调 `ext_table(object=…, keys={<主键>: "<值>"}, columns="<模板那格>")` ——
+2. 组文时调 `ext_table(object=…, keys={<主键>: "<值>"}, columns="<模板那格>", include_markdown=true)` ——
    **表体直接用回执 `markdown`**，`column_labels` 就是表头逐字（旧法
    `ext_issue_list(view="table", columns=…)` 仍可用，属兼容路径）；
    列名不存在 ⇒ **只跳过该列** + 回 `columns_unknown`/`warnings`（不静默丢列、也不 400 ✓）；

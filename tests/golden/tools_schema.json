@@ -375,6 +375,10 @@
     "description": "要展示的字段子集（逗号分隔；顺序仍按对象映射）",
     "type": "string"
    },
+   "include_markdown": {
+    "description": "默认 false：只回 rows + columns/ref_block；报告组文需要表体时传 true，回 markdown（不再回 rows）",
+    "type": "boolean"
+   },
    "kb_id": {
     "description": "业务对象所在库（可省 ⇒ 按 object 全库反查）",
     "type": "string"
@@ -738,7 +742,7 @@
     "type": "string"
    },
    "session_no": {
-    "description": "会话编号（**只进遥测日志**，不参与检索；用于按会话统计成败）",
+    "description": "WeKnora 会话编号（**必填**）：用于 kb_scope / 智能体配置解析；不要省略、不要自编。",
     "type": "string"
    },
    "slug": {
@@ -758,7 +762,9 @@
     "type": "string"
    }
   },
-  "required": [],
+  "required": [
+   "session_no"
+  ],
   "type": "object"
  },
  "lookup_turn_begin": {

@@ -33,10 +33,16 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.preview:
-        render_pptx(SLIDES, PPTX)
+        target = PPTX
+        try:
+            render_pptx(SLIDES, target)
+        except PermissionError:
+            target = PPTX.with_name("bodhi2-architecture-v2.pptx")
+            render_pptx(SLIDES, target)
+            print(f"[pptx] 原文件被占用，已另存为 {target}")
         info = HERE / "build_info.txt"
-        info.write_text(f"slides={len(SLIDES)}\npptx_bytes={PPTX.stat().st_size}\n", encoding="utf-8")
-        print(f"[pptx] {PPTX} ({PPTX.stat().st_size // 1024} KB, {len(SLIDES)} slides)")
+        info.write_text(f"slides={len(SLIDES)}\npptx={target.name}\nbytes={target.stat().st_size}\n", encoding="utf-8")
+        print(f"[pptx] {target} ({target.stat().st_size // 1024} KB, {len(SLIDES)} slides)")
 
     if not args.no_preview:
         PREVIEW.mkdir(parents=True, exist_ok=True)

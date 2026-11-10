@@ -89,9 +89,11 @@ def ext_table(args: dict) -> dict:
     - 列名 / 列序 / 枚举取 **DataObject 绑定的 `fieldMap`**（业务口径）；没写映射 ⇒ 退回契约 labels；
     - 入参只认「对象 + 键」，**不出现任何领域名词** ✓。
 
-    回执：`{ok, object, review_no, columns, labels, markdown, rows_count, rev,
-            mapping_status, display_source, ref_block, warnings}`；`ref_block` 是对象规范 v2 的块
-    （可直接贴在该表之后，编号/绑定/契约哈希都由对象自身给）。
+    回执：`{ok, object, review_no, columns, labels, rows, rows_count, rev,
+            mapping_status, display_source, ref_block, warnings}`；
+    默认只回**数据行**（`rows`），不回重复的 `markdown`；
+    报告组文需要表体时显式传 `include_markdown=true`，此时回 `markdown`、不回 `rows`。
+    `ref_block` 是对象规范 v2 的块（可直接贴在该表之后，编号/绑定/契约哈希都由对象自身给）。
     """
     import ke_ext_binding as S
     from srv import ext_api as X
@@ -130,23 +132,31 @@ def ext_table(args: dict) -> dict:
     except Exception:                                  # noqa: BLE001  绑定读不到不影响出表
         binds = []
     md = str(got.get("markdown") or "")
-    out = {"ok": bool(md), "tool": TOOL_TABLE, "object": slug, "kb_id": got.get("kb_id") or kb,
-           "review_no": review_no, "rows_count": int((got.get("counts") or {}).get("items") or 0),
+    raw_flag = args.get("include_markdown")
+    include_md = raw_flag is True or str(raw_flag).strip().lower() in ("1", "true", "yes", "on")
+    rows = list(got.get("rows") or [])
+    out = {"ok": bool(got.get("ok")), "tool": TOOL_TABLE, "object": slug,
+           "kb_id": got.get("kb_id") or kb, "review_no": review_no,
+           "rows_count": int((got.get("counts") or {}).get("items") or len(rows)),
            "rev": got.get("rev"),
            "columns": list(schema.get("columns") or []),
            "column_labels": list(got.get("column_labels") or []),
            "columns_unknown": list(got.get("columns_unknown") or []),
            "labels": disp.get("labels") or schema.get("labels") or {},
-           "markdown": md,
            "mapping_status": (disp.get("mapping_status") or
                               ((binds[0].get("status") if binds else "") or "")),
            "display_source": disp.get("source") or "",
            "ref_block": got.get("ref_block") or "",
            "source": got.get("data_source") or "",
            "warnings": got.get("warnings") or []}
-    if not md:
-        out.update({"error": "render_failed",
-                    "hint": "台账读到了但没有表：先确认该对象已写映射（status=confirmed），或直接看 rows"})
+    if include_md:
+        out["markdown"] = md
+        if not md:
+            out.update({"ok": False, "error": "render_failed",
+                        "hint": "请求了 markdown，但对象映射/契约无法渲染表格；检查映射 status 或改回 include_markdown=false 看 rows"})
+    else:
+        out["rows"] = rows
+        out["markdown_omitted"] = True
     return out
 
 

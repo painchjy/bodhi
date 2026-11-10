@@ -587,10 +587,12 @@ def _vlm_chat(img: bytes, question: str) -> dict:
             or "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1").rstrip("/")
     model = _vlm_clean(os.environ.get("BODHI_VLM_MODEL")) or "Qwen2.5-VL-72B-Instruct"
     key = _vlm_clean(os.environ.get("BODHI_VLM_API_KEY"))
+    max_tokens = _vlm_env_int("BODHI_VLM_MAX_TOKENS", 6144)
+    prompt_text = _VLM_PROMPT.format(question=question or "无")
     body = {"model": model, "temperature": 0,
-            "max_tokens": _vlm_env_int("BODHI_VLM_MAX_TOKENS", 6144),
+            "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": [
-                {"type": "text", "text": _VLM_PROMPT.format(question=question or "无")},
+                {"type": "text", "text": prompt_text},
                 {"type": "image_url",
                  "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(img).decode()}}]}]}
     # 2026-11-05 实测（DeepSeek）：默认开 thinking 时 reasoning 会把 max_tokens 吃光、
@@ -599,6 +601,16 @@ def _vlm_chat(img: bytes, question: str) -> dict:
     think = _vlm_clean(os.environ.get("BODHI_VLM_THINKING")) or "disabled"
     if think not in ("default", "off", "0"):
         body["thinking"] = {"type": think}
+    request_meta = {
+        "model": model,
+        "base_url": base,
+        "max_tokens": max_tokens,
+        "thinking": think,
+        "prompt_chars": len(prompt_text),
+        "image_bytes": len(img),
+        "request_bytes": len(json.dumps(body, ensure_ascii=False).encode("utf-8")),
+        "http_status": 200,
+    }
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = "Bearer " + key
@@ -627,10 +639,15 @@ def _vlm_chat(img: bytes, question: str) -> dict:
     msg = ch.get("message") or {}
     # DeepSeek 推理模型：`reasoning_content` 是思考、`content` 才是答案
     # 2026-11-05 实测：纯文本模型（supports_vision=false）会把 max_tokens 全烧在 reasoning 上、content 为空
+    content = str(msg.get("content") or "").strip()
+    reasoning = str(msg.get("reasoning_content") or "").strip()
     return {"model": model,
-            "content": str(msg.get("content") or "").strip(),
-            "reasoning_head": str(msg.get("reasoning_content") or "").strip()[:400],
+            "content": content,
+            "reasoning_head": reasoning[:400],
             "finish_reason": str(ch.get("finish_reason") or ""),
+            "content_chars": len(content),
+            "reasoning_chars": len(reasoning),
+            "request": request_meta,
             "usage": data.get("usage") or {}}
 
 
@@ -723,6 +740,7 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "",
                     "cache": "hit",
                     "detail": "compact" if _compact else "full",
                     "contract": c0, "usage": got0.get("usage") or {},
+                    "vlm": {**(got0.get("vlm") or {}), "cache": "hit"},
                     "extraction_counts": {
                         "texts": len(_ex.get("texts") or []),
                         "lines": len(_ex.get("lines") or []),
@@ -756,23 +774,34 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
     import time
 
     img = _vlm_shrink(raw, _vlm_env_int("BODHI_VLM_MAX_KB", 400))
+    _vlm_meta = {"image_orig_bytes": len(raw), "image_sent_bytes": len(img)}
     t1 = time.time()
     try:
         got = _vlm_chat(img, q)
     except Exception as exc:  # noqa: BLE001
         return {**base, "ok": False, "action": "image_read", "figure": fmeta,
                 "error": "vlm_failed", "detail": repr(exc)[:200],
+                "vlm": {**_vlm_meta, "error": "vlm_failed", "detail": repr(exc)[:200]},
                 "hint": ("VLM 不可达/超时 ⇒ 该图**判不了**（不是「图上没有」）；"
                          "正文与其他 action 不受影响"),
                 "duration_ms": {**((base.get("duration_ms") or {})),
                                 "vlm": int((time.time() - t1) * 1000),
                                 "total": int((time.time() - t0) * 1000)}}
+    _vlm_diag = {
+        **_vlm_meta,
+        **(got.get("request") or {}),
+        "finish_reason": got.get("finish_reason") or "",
+        "content_chars": int(got.get("content_chars") or 0),
+        "reasoning_chars": int(got.get("reasoning_chars") or 0),
+        "usage": got.get("usage") or {},
+    }
     if not got.get("content"):
         # 模型没产出答案（多半是：推理模型把 max_tokens 烧光，或该模型不支持视觉）
         return {**base, "ok": False, "action": "image_read", "figure": fmeta,
                 "error": "vlm_empty_content",
                 "finish_reason": got.get("finish_reason"),
                 "reasoning_head": got.get("reasoning_head") or "",
+                "vlm": _vlm_diag,
                 "usage": got.get("usage") or {},
                 "hint": ("模型没有产出 JSON：检查 ① 该模型是否**支持视觉**（`supports_vision`）；"
                          "② `BODHI_VLM_MAX_TOKENS` 是否被推理吃光（finish_reason=length）⇒ 调大或换模型。"
@@ -829,6 +858,7 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
            "detail": "compact" if compact else "full",
            "channel": "vlm:" + str(got.get("model")),
            "extraction_counts": _ex_counts,
+           "vlm": _vlm_diag,
            "contract": contract, "usage": got.get("usage") or {},
            "duration_ms": {**((base.get("duration_ms") or {})),
                            "vlm": int((time.time() - t1) * 1000),
@@ -844,7 +874,8 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
         if "_error" not in parsed:       # **失败结果不写缓存**（否则会一直命中坏缓存）
             with open(cache_fp, "w", encoding="utf-8") as fh:
                 json.dump({"extraction": extraction, "contract": full_contract,
-                           "usage": got.get("usage") or {}}, fh, ensure_ascii=False)
+                           "usage": got.get("usage") or {}, "vlm": _vlm_diag},
+                          fh, ensure_ascii=False)
     except OSError:
         pass
     return out

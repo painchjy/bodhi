@@ -71,7 +71,7 @@ description: 规则判定——先判**适用性**（规则页 `knowledgeSpec.ap
 | ② 写条目 | `mode=maintain, action=create`；主键取 `bpmn:dataObjectKeyFields`；**必带 `actor`（执行者）+ `session_no`（会话编号，审计用）**；**编号由台账分配，禁止自编号** ✗ | 同上 |
 | ③ 先预览 | 写前 `dry_run=true` 把 `diff` 给用户看；确认后才 `dry_run=false`（`bpmn:dataObjectAccessMode` 含 `maintain` 才可写） | 写库纪律 |
 | ④ 回写反馈 | `action=update` + `fields={…}` + `if_rev=<台账 rev>`（台账级）+ `actor`/`session_no`；回执 `conflict` ⇒ 重新 `list` 再改（**不静默覆盖** ✗） | 乐观并发 |
-| ⑤ 报告呈现 | 报告里那张表**用 `ext_table` 回执的 `markdown`**（列名/列序/枚举＝对象映射，不改列、不加列、不重排 ✓） | 渲染 = 知识侧（对象映射） |
+| ⑤ 报告呈现 | 报告里那张表**用 `ext_table(..., include_markdown=true)` 回执的 `markdown`**（列名/列序/枚举＝对象映射，不改列、不加列、不重排 ✓） | 渲染 = 知识侧（对象映射） |
 | ⑥ 不可用 | 工具不可用 ⇒ 相关判定记「无法判定」并注明「台账不可用（待澄清）」；**不得自造清单** ✗ | 反假断言 |
 
 > 工具名 / 模式 / 主键**一律从对象页读**（`bpmn:dataObjectInterface` / `bpmn:dataObjectAccessMode` /
