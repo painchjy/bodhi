@@ -33,12 +33,25 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.preview:
-        target = PPTX
-        try:
+        candidates = [
+            PPTX,
+            PPTX.with_name("bodhi2-architecture-v2.pptx"),
+            PPTX.with_name("bodhi2-architecture-v3.pptx"),
+            PPTX.with_name("bodhi2-architecture-v4.pptx"),
+        ]
+        target = None
+        for cand in candidates:
+            try:
+                render_pptx(SLIDES, cand)
+                target = cand
+                break
+            except PermissionError:
+                continue
+        if target is None:
+            import time
+            target = PPTX.with_name(f"bodhi2-architecture-{time.strftime('%Y%m%d-%H%M')}.pptx")
             render_pptx(SLIDES, target)
-        except PermissionError:
-            target = PPTX.with_name("bodhi2-architecture-v2.pptx")
-            render_pptx(SLIDES, target)
+        if target != PPTX:
             print(f"[pptx] 原文件被占用，已另存为 {target}")
         info = HERE / "build_info.txt"
         info.write_text(f"slides={len(SLIDES)}\npptx={target.name}\nbytes={target.stat().st_size}\n", encoding="utf-8")
