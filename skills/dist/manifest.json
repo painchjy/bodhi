@@ -8,7 +8,7 @@
     ],
     "bytes": 6543,
     "bundle": "kb_transfer-0.1.0.zip",
-    "sha256": "3f283600b0f2311dc2e106f0440962d44a9ccdb24408a9cb2e8c00b26aab686d",
+    "sha256": "331175a455246f04b02caffdb54270c58b0032d0adc37c13e27b914ea77f9dac",
     "problems": []
   },
   {
@@ -20,7 +20,7 @@
     ],
     "bytes": 9401,
     "bundle": "knowledge_extract-0.1.0.zip",
-    "sha256": "815387f560811b1bfd7487f36bea2c6e3a3653d2003b89f25da277ab19482a87",
+    "sha256": "973237488e1f28429007e6e602802a21a8aef2d9b4fc114ff194658386373719",
     "problems": []
   },
   {
@@ -32,7 +32,7 @@
     ],
     "bytes": 14991,
     "bundle": "rule_judge-0.1.0.zip",
-    "sha256": "8421af7f8c9058c3f83e1f116b312f8a17b77ed85b71ecb8de0616fdbbbe099b",
+    "sha256": "cf013fc718a5a5d17756706fbefb96a4494ea1d7529ec659e802e88547cd5291",
     "problems": []
   }
 ]
