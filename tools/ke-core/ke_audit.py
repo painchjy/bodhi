@@ -1712,7 +1712,7 @@ def _collect(kb_id: str, kinds: list, page_limit: int = 5000) -> dict:
                 "no_slug_nodes": _g.get("no_slug_nodes", 0),
                 "kb_deleted": _g.get("kb_deleted", False),
                 "count": _g.get("orphan_nodes", 0),
-                "note": ("按 slug 对账：图上节点不在该库活页里 ⇒ 孤儿（含页已软删/从未建过）；"
+                "note": ("按 slug 比对：图上节点不在该库活页里 ⇒ 孤儿（含页已软删/从未建过）；"
                          "`missing_nodes` 只提示（rebuild_kb_graph 可补）"),
             }
         except Exception as exc:  # noqa: BLE001  图不可用不影响本库其它清理

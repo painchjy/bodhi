@@ -24,6 +24,29 @@ def _terms() -> list:
             if t.strip() and not t.startswith("#")]
 
 
+def _code_text(txt: str) -> str:
+    """Drop comments, docstrings and explicitly marked examples."""
+    try:
+        import ast
+        tree = ast.parse(txt)
+        skip = set()
+        for n in ast.walk(tree):
+            body = getattr(n, "body", None)
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+                v = body[0].value
+                skip.update(range(v.lineno, (v.end_lineno or v.lineno) + 1))
+    except Exception:
+        skip = set()
+    out = []
+    for no, line in enumerate(txt.splitlines(), 1):
+        if no in skip:
+            continue
+        line = line.split("#", 1)[0]
+        if any(m in line for m in ("如「", "例如", "示例", "例：", "其他领域知识（", "【库范围】")):
+            continue
+        out.append(line)
+    return chr(10).join(out)
+
 def scan() -> dict:
     terms = _terms()
     hits = {}
@@ -33,7 +56,7 @@ def scan() -> dict:
             rel = p.replace(H.REPO, "").replace("\\", "/")
             if any(x in rel for x in EXCLUDE):
                 continue
-            txt = H.read(p)
+            txt = _code_text(H.read(p)) if p.endswith(".py") else H.read(p)
             n = sum(txt.count(t) for t in terms)
             if n:
                 hits[rel] = n

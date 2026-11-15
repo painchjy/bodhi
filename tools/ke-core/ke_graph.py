@@ -915,7 +915,7 @@ def instance_count(kb_id: str) -> int:
 
 
 def diff_orphans(graph_slugs, live_slugs) -> tuple:
-    """图节点 slug ↔ PG 活页 slug 对账（**纯函数**，便于单测）。
+    """图节点 slug ↔ PG 活页 slug 比对（**纯函数**，便于单测）。
 
     返回 `(orphans, missing)`：
     - `orphans` = 图有、页无（**要删的孤儿节点**；含"页已软删""从未建过"）
@@ -929,7 +929,7 @@ def diff_orphans(graph_slugs, live_slugs) -> tuple:
 
 def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = True,
                           kb_id: str = "") -> dict:
-    """**清理"没有对应 wiki 页"的图节点**（2026-11-02 改为**节点级对账**）。
+    """**清理"没有对应 wiki 页"的图节点**（2026-11-02 改为**节点级比对**）。
 
     `kb_id` 非空（**`audit_purge` 的唯一入口**）：只看**这个库**——
       该库图上 slug 不在该库活页（`wiki_pages.deleted_at IS NULL`）里的节点 ⇒ 孤儿，
@@ -962,7 +962,7 @@ def purge_orphan_kb_nodes(dry_run: bool = False, include_soft_deleted: bool = Tr
                "orphan_slugs": orphans[:50],
                "missing_nodes": len(missing), "missing_slugs": missing[:50],
                "no_slug_nodes": no_slug,
-               "note": ("按 slug 对账：图上节点不在该库活页里 ⇒ 孤儿（含页已软删/从未建过）；"
+               "note": ("按 slug 比对：图上节点不在该库活页里 ⇒ 孤儿（含页已软删/从未建过）；"
                         "删除含其边；`missing_nodes` 只提示（用 rebuild_kb_graph 补）")}
         if dry_run or (not orphans and not no_slug):
             return out

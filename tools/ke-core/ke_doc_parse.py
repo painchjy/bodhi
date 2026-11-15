@@ -277,7 +277,7 @@ def _page_section(quality: dict, page: int) -> str:
     """**图所属章节**：该页首个编号标题；命中表格类版式词则回退到上一页标题。
 
     2026-11-05 实测：第 3 页标题是「3 设备申请清单」，但该页顶部的部署图属上一节
-    「2.3 部署架构」⇒ 表格节里的图一律按上一节归属（图通常画在表格之前）。
+    「2.3 章节标题」⇒ 表格节里的图一律按上一节归属（图通常画在表格之前）。
     """
     import re as _re
 
@@ -457,6 +457,53 @@ def _vlm_env_int(name: str, dflt: int) -> int:
         return dflt
 
 
+def _vlm_dump_enabled() -> bool:
+    """是否把发往 VLM 的原始 body 落盘（默认关闭）。"""
+    return str(os.environ.get("BODHI_VLM_DUMP_REQUEST", "")).strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _vlm_dump_body(raw: bytes, dump_base: str, attempt: int) -> str:
+    """把**实际发送**的 JSON body 原样写到 `<dump_base>.attemptN.json`。
+
+    为什么存原始 bytes 而不是重新 json.dumps：重试必须与当时请求逐字节一致，
+    且不能把 Authorization 头写进去（body 本身不含 Key）。
+    """
+    if not dump_base or not raw:
+        return ""
+    path = "%s.attempt%d.json" % (dump_base, int(attempt))
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        try:
+            os.chmod(path, 0o600)      # 含原图，禁止组/其他用户读
+        except OSError:
+            pass
+        return path
+    except OSError:
+        return ""
+
+
+def _vlm_response_diag(data, status: int, content_type: str, raw: bytes,
+                       include_head: bool = False) -> dict:
+    """响应结构诊断：区分 200 空 choices、网关错误体、非 OpenAI 格式。"""
+    obj = data if isinstance(data, dict) else {}
+    choices = obj.get("choices") if isinstance(obj.get("choices"), list) else []
+    first = choices[0] if choices and isinstance(choices[0], dict) else {}
+    out = {
+        "http_status": int(status or 0),
+        "response_content_type": str(content_type or ""),
+        "response_bytes": len(raw or b""),
+        "response_keys": sorted(str(k) for k in obj.keys()),
+        "choices_count": len(choices),
+        "choice0_keys": sorted(str(k) for k in first.keys()),
+    }
+    if include_head:
+        out["response_head"] = (raw or b"").decode("utf-8", "replace")[:500]
+    return out
+
+
 def _vlm_dir() -> str:
     d = os.path.join(doc_root(), "vlm")
     os.makedirs(d, exist_ok=True)
@@ -541,7 +588,7 @@ def _vlm_shrink(raw: bytes, target_kb: int) -> bytes:
     return raw
 
 
-_VLM_PROMPT = """你是**部署架构图**的结构化识别器。只输出一个 JSON 对象，不要解释、不要 Markdown 代码块。
+_VLM_PROMPT = """你是**图像结构化识别器**。只输出一个 JSON 对象，不要解释、不要 Markdown 代码块。
 
 输出结构：
 {{"watermark_text":"",
@@ -552,16 +599,16 @@ _VLM_PROMPT = """你是**部署架构图**的结构化识别器。只输出一�
 
 硬要求：
 1) `texts` —— **每个文字块一个唯一 `id`**（n1、n2、n3…，按从上到下、从左到右编号）。
-   **同名但不同位置的必须分开编号**（图里常有多个「网关」「OSS」「联机应用」「OB数据库主集群」，绝不能合并）。
-   `text` 逐字抄原文（地区/云/AZ/机房/单元/分片区间/组件/图例/注释），保持原语言；
-   `location` 取 左上/上中/右上/左中/中/右中/左下/下中/右下，同名项要写清所属（如「浦江云第2个机房」）；
+   **同名但不同位置的必须分开编号**（同类标签多处出现时绝不能合并）。
+   `text` 逐字抄原文（区域/分组/对象/组件/图例/注释），保持原语言；
+   `location` 取 左上/上中/右上/左中/中/右中/左下/下中/右下，同名项要写清所属；
    `bbox` 归一化 [x1,y1,x2,y2]，必须 0~1 且 x1<x2、y1<y2（越界夹紧）。
 2) `lines` —— **必须用 `id` 精确引用，禁止只写文字**（同名节点只能靠 id 区分）：
-   · `from`/`to` 填第 1 步的 id；同时填 `from_label`/`to_label` 供人读（如「浦江云OSS」「浦江云OB主集群」）；
+   · `from`/`to` 填第 1 步的 id；同时填 `from_label`/`to_label` 供人读；
    · 框线（矩形框/分组外框）⇒ `style`=`box`，`from`=该框的 id，`to`=`inside`；
    · 连线 ⇒ `style`=`solid`/`dashed`/`arc`；`arrow`=`single`/`double`/`none`；
-   · `label` 抄线上的字（如「同步」「数据同步」）；**跨云、跨大区的连线必须写**。
-3) `legend` —— 图例逐项抄出来并写含义（如 红块=应用故障）。
+   · `label` 抄线上的字；跨分组/跨区域的连线必须写。
+3) `legend` —— 图例逐项抄出来并写含义。
 4) **排除无效数据**：斜向重复水印（人名+编号）只写进 `watermark_text` **一次**，
    **绝不允许**出现在 `texts`/`lines`/`legend` 里；装饰性背景、页码也不要抄。
 5) 看不清的放 `uncertain`（位置+原因），**不要猜**；宁可少写不可编。
@@ -578,8 +625,12 @@ def _vlm_clean(v: str) -> str:
     return str(v or "").split("#", 1)[0].strip()
 
 
-def _vlm_chat(img: bytes, question: str) -> dict:
-    """调 OpenAI 兼容 VLM（`.env` 配 base_url/model/key；DeepSeek 需关 thinking）。"""
+def _vlm_chat(img: bytes, question: str, dump_base: str = "") -> dict:
+    """调 OpenAI 兼容 VLM（`.env` 配 base_url/model/key；DeepSeek 需关 thinking）。
+
+    `dump_base` 非空时，把每次实际发送的 body 写到 `<dump_base>.attemptN.json`，
+    用于在内网复现/重试（默认由 `BODHI_VLM_DUMP_REQUEST=1` 打开）。
+    """
     import urllib.error
     import urllib.request
 
@@ -609,21 +660,32 @@ def _vlm_chat(img: bytes, question: str) -> dict:
         "prompt_chars": len(prompt_text),
         "image_bytes": len(img),
         "request_bytes": len(json.dumps(body, ensure_ascii=False).encode("utf-8")),
-        "http_status": 200,
+        "http_status": 0,
+        "request_dump": [],
     }
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = "Bearer " + key
     timeout = _vlm_env_int("BODHI_VLM_TIMEOUT", 300)
 
-    def _post(payload: dict) -> dict:
-        req = urllib.request.Request(base + "/chat/completions",
-                                     data=json.dumps(payload).encode(), headers=headers)
+    def _post(payload: dict, attempt: int) -> tuple:
+        # 用和 request_bytes 相同的 ensure_ascii=False 序列化；实际 bytes 与
+        # 落盘 body 完全一致，重试可直接 curl --data-binary @file。
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request_meta["request_bytes"] = len(raw)
+        dumped = _vlm_dump_body(raw, dump_base, attempt)
+        if dumped:
+            request_meta["request_dump"].append(dumped)
+        req = urllib.request.Request(base + "/chat/completions", data=raw, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
+            status = int(getattr(r, "status", 200) or 200)
+            ctype = str(r.headers.get("Content-Type") or "")
+            raw_resp = r.read()
+        request_meta["http_status"] = status
+        return json.loads(raw_resp.decode("utf-8", "replace")), status, ctype, raw_resp
 
     try:
-        data = _post(body)
+        data, http_status, content_type, raw_resp = _post(body, 1)
     except urllib.error.HTTPError as exc:
         detail = ""
         try:
@@ -632,15 +694,20 @@ def _vlm_chat(img: bytes, question: str) -> dict:
             pass
         if "thinking" in body and exc.code in (400, 422):
             body.pop("thinking", None)          # 端点不认 ⇒ 去掉再试一次
-            data = _post(body)
+            data, http_status, content_type, raw_resp = _post(body, 2)
         else:
             raise RuntimeError("vlm_http_%s: %s" % (exc.code, detail)) from exc
-    ch = (data.get("choices") or [{}])[0] or {}
-    msg = ch.get("message") or {}
+    if not isinstance(data, dict):
+        data = {}
+    choices = data.get("choices") if isinstance(data.get("choices"), list) else []
+    ch = choices[0] if choices and isinstance(choices[0], dict) else {}
+    msg = ch.get("message") if isinstance(ch.get("message"), dict) else {}
     # DeepSeek 推理模型：`reasoning_content` 是思考、`content` 才是答案
     # 2026-11-05 实测：纯文本模型（supports_vision=false）会把 max_tokens 全烧在 reasoning 上、content 为空
     content = str(msg.get("content") or "").strip()
     reasoning = str(msg.get("reasoning_content") or "").strip()
+    response_diag = _vlm_response_diag(
+        data, http_status, content_type, raw_resp, include_head=not bool(content))
     return {"model": model,
             "content": content,
             "reasoning_head": reasoning[:400],
@@ -648,6 +715,7 @@ def _vlm_chat(img: bytes, question: str) -> dict:
             "content_chars": len(content),
             "reasoning_chars": len(reasoning),
             "request": request_meta,
+            "response": response_diag,
             "usage": data.get("usage") or {}}
 
 
@@ -776,8 +844,11 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
     img = _vlm_shrink(raw, _vlm_env_int("BODHI_VLM_MAX_KB", 400))
     _vlm_meta = {"image_orig_bytes": len(raw), "image_sent_bytes": len(img)}
     t1 = time.time()
+    dump_base = ""
+    if _vlm_dump_enabled():
+        dump_base = os.path.splitext(cache_fp)[0] + ".request"
     try:
-        got = _vlm_chat(img, q)
+        got = _vlm_chat(img, q, dump_base=dump_base)
     except Exception as exc:  # noqa: BLE001
         return {**base, "ok": False, "action": "image_read", "figure": fmeta,
                 "error": "vlm_failed", "detail": repr(exc)[:200],
@@ -790,6 +861,7 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
     _vlm_diag = {
         **_vlm_meta,
         **(got.get("request") or {}),
+        **(got.get("response") or {}),
         "finish_reason": got.get("finish_reason") or "",
         "content_chars": int(got.get("content_chars") or 0),
         "reasoning_chars": int(got.get("reasoning_chars") or 0),
@@ -968,7 +1040,7 @@ def parse(doc_id: str, action: str = "outline", section_path: str = "", cursor: 
         return m.group(1) if m else ""
 
     def _figs_of(path_t: str) -> list:
-        """某章节的图（用**章节编号**匹配：切节器 path 可能是「2.3 2.3 部署架构」）。"""
+        """某章节的图（用**章节编号**匹配：切节器 path 可能是「2.3 2.3 章节标题」）。"""
         no = _sec_no(path_t)
         out = []
         for f in figs_all:
