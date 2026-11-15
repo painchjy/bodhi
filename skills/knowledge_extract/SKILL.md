@@ -33,10 +33,12 @@ guard: 先定模型/类型再抽；只抽本批文本支撑的事实；每条事
 3. **外部系统**：查**挡板/接口**（见 0.5）；返回值即"事实"，与文档抽取值同权 ✓；
 4. **图像**：`image_extract`（部署图/架构图/技术栈截图）→ 结构化后再判定（可信度低 ⇒ 待澄清 ✓，不硬判 ✗）。
 
-## 2. 落库（沿用 `domain_modeling` 的硬规则）
+## 2. 落库（本技能自己的硬规则）
 1. **写库唯一**：`kb_ids` > 1 且用户没点名 ⇒ 服务端拒写（`need_kb_selection`）✓；`kb_id` 只认**完整 uuid/精确库名**（模糊 ⇒ `need_kb_confirm`）✓；
-2. **会话身份必带**：`save_knowledge(..., session_no=…, session={knowledge_id, round_no, cursor, next_cursor, doc_title})` ✓；
-   每节点给 **`attributes.bmm:sourceLocator`**（`kb:` / `page:` / `session:` / `ext-doc:` 五类语法）✓；服务端按定位回读约 150 字逐字摘录。`source_text` 只作提示/兜底，回读失败不写占位；
+2. **写库身份与来源分开**：`save_knowledge` 仍带 `session_no` 作为审计身份；**知识来源不再建会话溯源页**，
+   每条事实的来源写 `attributes.bmm:sourceLocator`，优先指向 `TextualDataObject`：
+   `ext-doc://<doc_id>#section:<标题>`、`kb:<kb_id>/doc:<doc_id>#section:<标题>`、`page:<kb_id>/<slug>#section:<标题>`、
+   `file:<path>#sha256:<hash>`；`source_text` 只作提示/兜底，回读失败不写占位；
 3. **先预览后写**：`mode="dry_run"` → 用户确认 → `mode="apply"` ✓；
 4. **未映射的列不要硬塞** ✓（默认聚合进 `description`，无关则关掉 ✓）；
 5. **两侧先存在** ✓：先建/确认类实例与目标页，再建关系；`target_exists=false` 时**不能**确认 ✓；

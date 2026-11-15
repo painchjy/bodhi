@@ -304,8 +304,8 @@ def pkg_mcp(stage: pathlib.Path, version: str) -> dict:
     d = stage / "02-mcp-server"
     d.mkdir(parents=True, exist_ok=True)
     copy_tree(REPO / "tools", d / "tools", skip_top=TOOLS_MANUAL_PKG + (EXT_TOOL_DIR,))
-    copy_tree(REPO / "skills", d / "skills")
-    shutil.rmtree(d / "skills" / "dist", ignore_errors=True)
+    # active 技能源 + 沙箱 bundle；退役技能不进运行时包
+    copy_tree(REPO / "skills", d / "skills", skip_names=("uploads", "_deprecated"))
     copy_tree(REPO / "artifacts", d / "artifacts", skip_top=MCP_ARTIFACT_SKIP)
     # 运行时用得到的两个可写目录（占位文件带一行注释：空文件会与他包占位文件判为重复）
     write(d / "logs" / ".gitkeep", "# 工具调用日志 mcp_calls_YYYYMMDD.log（容器/宿主都必须可写）\n")
@@ -324,7 +324,7 @@ def pkg_mcp(stage: pathlib.Path, version: str) -> dict:
           "包内就是「仓库根」形状，解包即得：\n"
           "  tools/        MCP 服务源码 + ke-core + 编译/投影/诊断工具（diag/context_trace.py；不再套内层 tar）\n"
           "  artifacts/    本体编译产物（ontology_index.json 等）——服务运行时要读\n"
-          "  skills/       技能全文（`skills()` 工具下发）\n"
+          "  skills/       active 技能源 + dist 沙箱 bundle（由 register_native_skills.py 安装）\n"
           "  logs/         工具调用日志目录（可写）\n"
           "  ontology/uploads/  上传暂存目录（TTL 真源在 03-manual 包）\n"
           "  .env.example  配置模板（cp .env.example .env 后改 BODHI_DB_*）\n"

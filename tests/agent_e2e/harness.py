@@ -38,7 +38,9 @@ def parse_scope(prompt: str) -> list:
     parts = [x.strip() for x in scope.split("|")]
     if len(parts) < 2 or "domain_kb:" not in parts[0] or "work_kb:" not in parts[1]:
         raise RuntimeError("bad 【库范围】format: " + scope)
-    return [parts[0].split("domain_kb:", 1)[1].strip(), parts[1].split("work_kb:", 1)[1].strip()]
+    def _name(value: str) -> str:
+        return value.strip().strip("*`").strip()
+    return [_name(parts[0].split("domain_kb:", 1)[1]), _name(parts[1].split("work_kb:", 1)[1])]
 
 
 
@@ -57,15 +59,50 @@ class WeKnoraClient:
         if not token:
             rows = _psql("SELECT token FROM auth_tokens WHERE is_revoked = false AND token_type = " + sql_str("access_token") + " AND expires_at > now() ORDER BY created_at DESC LIMIT 1")
             token = str(rows[0].get("token") or "") if rows else ""
+
         agent_id = os.environ.get("BODHI_REVIEW_AGENT_ID", "").strip()
         if not agent_id:
-            rows = _psql("SELECT id FROM custom_agents WHERE name = " + sql_str(os.environ.get("BODHI_REVIEW_AGENT_NAME", "技术方案评审智能体（测试）")) + " ORDER BY created_at DESC LIMIT 1")
+            agent_name = os.environ.get("BODHI_REVIEW_AGENT_NAME", "技术方案评审智能体").strip()
+            rows = _psql("SELECT id FROM custom_agents WHERE name = " + sql_str(agent_name)
+                         + " AND name NOT LIKE " + sql_str("%停用%")
+                         + " ORDER BY created_at DESC LIMIT 1")
+            agent_id = str(rows[0].get("id") or "") if rows else ""
+        if not agent_id:
+            # Prompt-scoped fallback: survives agent renames and avoids the old “（测试）” name.
+            rows = _psql("SELECT id FROM custom_agents WHERE name NOT LIKE " + sql_str("%停用%")
+                         + " AND config->>" + sql_str("system_prompt") + " LIKE " + sql_str("%【库范围】%")
+                         + " ORDER BY created_at DESC LIMIT 1")
             agent_id = str(rows[0].get("id") or "") if rows else ""
         rows = _psql("SELECT config->>" + sql_str("system_prompt") + " AS prompt FROM custom_agents WHERE id = " + sql_str(agent_id))
         prompt = str(rows[0].get("prompt") or "") if rows else ""
         names = parse_scope(prompt)
-        rows = _psql("SELECT id FROM knowledge_bases WHERE name IN (" + ",".join(sql_str(x) for x in names) + ")")
-        kbs = [str(r.get("id")) for r in rows]
+
+        # Resolve each prompt scope name independently. A stale soft-deleted duplicate
+        # (same display name) must never enter the session's kb_ids.
+        kb_rows = _psql("SELECT id,name,COALESCE(updated_at::text,'') AS updated_at FROM knowledge_bases "
+                        "WHERE deleted_at IS NULL AND name IN (" + ",".join(sql_str(x) for x in names) + ")")
+        by_name = {}
+        for row in kb_rows:
+            by_name.setdefault(str(row.get("name") or ""), []).append(row)
+        page_counts = {}
+        ids = [str(r.get("id")) for r in kb_rows if r.get("id")]
+        if ids:
+            for row in _psql("SELECT knowledge_base_id,count(*) AS n FROM wiki_pages WHERE deleted_at IS NULL "
+                             "AND knowledge_base_id IN (" + ",".join(sql_str(x) for x in ids) + ") GROUP BY 1"):
+                page_counts[str(row.get("knowledge_base_id"))] = int(row.get("n") or 0)
+        kbs = []
+        for name in names:
+            candidates = by_name.get(name) or []
+            if not candidates:
+                raise RuntimeError("scope kb not found: " + name)
+            candidates.sort(key=lambda r: (page_counts.get(str(r.get("id")), 0),
+                                           str(r.get("updated_at") or ""), str(r.get("id"))), reverse=True)
+            chosen = str(candidates[0].get("id") or "")
+            if chosen and chosen not in kbs:
+                kbs.append(chosen)
+        override = [x.strip() for x in os.environ.get("BODHI_REVIEW_KB_IDS", "").split(",") if x.strip()]
+        if override:
+            kbs = override
         client = cls(os.environ.get("BODHI_WEKNORA_BASE_URL", "http://localhost:8080").rstrip("/"), token, agent_id, kbs)
         if not (client.token and client.agent_id and client.kb_ids):
             raise RuntimeError("need token/agent/prompt scope")

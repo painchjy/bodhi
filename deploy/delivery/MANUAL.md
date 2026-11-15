@@ -130,7 +130,7 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 | 看智能体到底调了什么 | `tail -f logs/mcp_calls_YYYYMMDD.log`（时间/工具/耗时/入参/结果摘要）|
 | 一致性巡检 | `curl "<mcp>/bodhi/audit?kb_id=<kb>"`；清理用 `audit_purge`（**有库写权限即可一步硬删**，先 `dry_run=true` 看 `per_kind` 清单再执行）|
 | 本体演进 | 改 TTL（**03 包** `ontology/`）→ `refresh_ontology_kb.sh`（编译+投影；借用 **02 包** `tools/`，解到同一父目录即可）；类清单变了记得重建前端 |
-| 技能演进 | 直接改 `skills/<id>/SKILL.md`（MCP 按 mtime 热读，**不用重启**）|
+| 技能演进 | 改 `skills/<id>/SKILL.md` → `python3 tools/skills/bundle.py` → `register_native_skills.py --upload`（沙箱安装；MCP `skills()` 仅迁移期兼容）|
 | 重建过 app 容器 | `docker restart WeKnora-frontend`（交付模板已含运行期解析，仍建议一把）|
 | 备份 | Postgres 常规备份即可（`wiki_pages` / `knowledges` / `mcp_services` / `custom_agents`）；MCP 服务本身无状态 |
 

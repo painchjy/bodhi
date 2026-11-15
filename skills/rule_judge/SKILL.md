@@ -4,6 +4,7 @@ id: rule_judge
 when: 需要把规则逐条判成 符合/不符合/无法判定/不适用 并留字段级依据时（成批判定、入库前复核、出报告前）
 tools: [knowledge_lookup, evidence_score, ext_table, save_knowledge]
 description: 规则判定——先判**适用性**（规则页 `knowledgeSpec.applies_when`），再读「规则契约」+「知识计划(ke_plan) 的 derived/items」，对每条规则给出 符合/不符合/无法判定/不适用 与依据（字段级），固定输出「结论集合」供报告引用。判定只看规则声明与已提取事实，不做自由发挥。
+version: 0.1.0
 ---
 
 # rule_judge（规则判定）
@@ -80,8 +81,8 @@ description: 规则判定——先判**适用性**（规则页 `knowledgeSpec.ap
 
 ## 与其它技能的关系
 
-- 上游：`rules_resolve`（规则）✓ + `knowledge_plan`/`knowledge_extract`（事实）✓；
-- 下游：`report_compose`（报告「判定结论」与清单类小节都只引这里 ✓）；
+- 上游：`rules_resolve`（规则）✓ + `knowledge_extract`（按规则 `bmm:knowledgeNeed` 取事实）✓；
+- 下游：报告任务步骤负责组装与落库；本技能只提供「判定结论集合」✓；
 - 不做：文章改写 ✗、入库决策 ✗（那是入库任务的 `ask` 环节 ✓）。
 
 ## 工具口径（2026-10-17 统一，`skills/_deprecated.md` §四）

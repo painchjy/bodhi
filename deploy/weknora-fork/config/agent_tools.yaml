@@ -16,7 +16,7 @@
 #   - `mcp_services`：留空表示"不动 UI 上的勾选"；给了就按 id 覆盖（发布包里 id 由 `mcp_services` 表定）。
 version: 2
 agents:
-  - id: 09e54ee1-6d0b-452f-8160-a26990bc71e6
+  - id: e86d7c3b-1dd2-4092-94fa-558b178fad92
     name: 技术方案评审智能体
     prompt_file: agent_review_prompt.md
     max_completion_tokens: 8192
@@ -50,17 +50,3 @@ agents:
     # 2026-10-30 用户口径：建模智能体的**工作库 = 所有领域库（含企业知识管理领域自己）**
     all_domain_kbs: true
 
-  - id: ""
-    name: 技术方案评审智能体（测试）
-    prompt_file: agent_review_test_prompt.md
-    max_completion_tokens: 8192
-    builtin_tools:
-      - data_schema
-      - data_analysis
-    mcp_service_names:
-      - bodhi_ontology
-      - it_platform
-    # P3：测试领域库 + 测试工作库（先建库，再把名字写这里）
-    knowledge_base_names:
-      - 技术方案评审领域模型（测试）
-      - 技术方案评审任务知识库（测试）

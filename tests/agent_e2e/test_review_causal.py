@@ -98,6 +98,6 @@ def test_live_review_cases():
 
 
 def test_scope_from_agent_prompt():
-    prompt = "【库范围】domain_kb: 测试 | work_kb: 技术方案评审任务知识库（测试）"
-    assert parse_scope(prompt) == ["测试", "技术方案评审任务知识库（测试）"]
+    prompt = "【库范围】domain_kb: 技术方案评审领域 | work_kb: 技术方案评审工作库"
+    assert parse_scope(prompt) == ["技术方案评审领域", "技术方案评审工作库"]
 

@@ -101,9 +101,8 @@ OPS_TOOLS = [
     # 取规则统一 `knowledge_lookup(mode="rules", spec="policy:…"|"direct:…"|"ask")` ✓
     "mcp_bodhi_ontology_reference_lookup",
     "mcp_bodhi_ontology_image_extract",     # 文档内嵌图识别（只读，2026-10-08）
-    # 迁移运维（2026-10-12 用户口径 B+C）：**技能目录**（能看到/读出技能指令→按技能做事）
-    #   + 知识库导出/导入（导出落 exports/ 并可经 /bodhi/kb-export 下载；导入默认做 PG+Neo4j 六项比对）
-    "mcp_bodhi_ontology_skills",
+    # 迁移运维（2026-10-12 用户口径 B+C）：知识库导出/导入
+    #   （导出落 exports/ 并可经 /bodhi/kb-export 下载；导入默认做 PG+Neo4j 六项比对）
     "mcp_bodhi_ontology_kb_export", "mcp_bodhi_ontology_kb_import",
     # 维护清理（2026-10-24）：清别名噪音（默认 dry_run 只念清单；执行前写版本快照）
     "mcp_bodhi_ontology_clean_alias_noise",
@@ -121,7 +120,6 @@ DESIGN_TOOLS = [
 MODELER_TOOLS = [
     "grep_chunks", "list_knowledge_chunks", "get_document_info",
     "wiki_search", "wiki_read_page",
-    "mcp_bodhi_ontology_skills",
     "mcp_bodhi_ontology_ontology_types",
     # 领域建模 v2（2026-09-21）：按切片分批、可交互续跑 —— 不再用异步一次性抽取
     # 2026-10-24：`link_candidates` / `list_link_candidates` / `resolve_link_candidate` 已退役

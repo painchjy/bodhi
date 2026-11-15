@@ -87,8 +87,9 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 ```
 
 - MCP 服务**直接读写 Postgres**（`wiki_pages` 等表），不调 WeKnora 私有 API → 对上游版本升级不敏感；
-- 它**不调 LLM**：抽取/设计由 WeKnora 侧的智能体做，MCP 只负责"规范化落库 + 本体校验 + 巡检 + 技能下发"；
-- 技能（`skills/<id>/SKILL.md`）也由它提供：`skills()` 返回目录、`skills(skill="…")` 返回全文 + 本体面。
+- 它**不调 LLM**：抽取/设计由 WeKnora 侧的智能体做，MCP 只负责"规范化落库 + 本体校验 + 巡检"；
+- 技能包源在 `skills/<id>/SKILL.md`，由 `tools/skills/bundle.py` 打成 `skills/dist/*.zip`，
+  再由 `deploy/weknora-fork/register_native_skills.py` 安装到 WeKnora 沙箱；MCP `skills()` 仅为迁移期兼容入口。
 
 ## 1. 目录布局（必须保持这个形状）
 
@@ -99,7 +100,8 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 ├── tools/ontology-mcp/        ← server.py / refresh_design.py / mdview.py / graph_page.py
 ├── tools/ke-core/             ← ke_db / ke_pages / ke_ontology / ke_audit / ke_docs / ke_admin / ke_neo4j
 ├── tools/ontology-extract/    ← ontology_wiki.py（本体知识库投影；server 会 import）
-├── skills/<id>/SKILL.md       ← 技能库（单一来源）
+├── skills/<id>/SKILL.md       ← active 技能包源（沙箱 bundle 的源）
+├── skills/dist/*.zip          ← 可直接安装到 WeKnora sandbox 的技能 bundle
 ├── artifacts/                 ← 编译产物（ontology_index.json / prompts / json_schema / neo4j；**运行时读**）
 ├── ontology/uploads/          ← 仅**上传暂存**目录（本体真源 TTL 在 03-manual 包的 `ontology/`）
 ├── logs/                      ← 工具调用日志 mcp_calls_YYYYMMDD.log（**容器里必须可写**）

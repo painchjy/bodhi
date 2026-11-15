@@ -64,7 +64,7 @@ done
 
 | 智能体 | 提示词 | 内置工具（`allowed_tools`）｜MCP 来自 `mcp_services` 挂载 | 备注 |
 |---|---|---|---|
-| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——先 `skills()` 看目录，再取技能全文照做 | 5 个 wiki 工具 + `mcp_bodhi_ontology_*`（含 `skills`/`ontology_types`/`service_overview`/**`retag_preview`+`retag_apply`**/**`context_scan`+`context_lookup`+`context_page`+`context_concept_apply`/`_rollback`**/**`context_authority`+`context_authority_apply`**/**`import_probe`+`import_plan`+`import_apply`+`import_state`+`import_refresh`**/**`audit_purge`**/**`rules_of_policy`+`graph_query`+`reference_lookup`+`review_apply`**/**`image_extract`（文档内嵌图识别）**；**无**抽取类）—— 不要写进 allowed_tools（写了也不生效） | **不给** `wiki_write_page`：写库只走 MCP；改类型必须两段式（preview → 用户确认 → apply）；跨库引用前先 `context_lookup`；**同义知识先认定权威**（`context_authority` → `context_authority_apply{action:"decide"}`），副本只能 `action:"pull"` 从权威复制；**结构化导入**一次只建一个类/一条关系（`plan` 出 ticket → `apply`）；**巡检清理**先 `audit_purge(dry_run=true)` 念清单再执行 |
+| `bodhi-ea-modeler` | 「本体建模与设计（技能驱动）」——按任务页步骤执行；MCP `skills()` 仅迁移期兼容 | 5 个 wiki 工具 + `mcp_bodhi_ontology_*`（含 `ontology_types`/**`retag_preview`+`retag_apply`**/**`context_scan`+`context_lookup`+`context_page`+`context_concept_apply`/`_rollback`**/**`context_authority`+`context_authority_apply`**/**`import_probe`+`import_plan`+`import_apply`+`import_state`+`import_refresh`**/**`audit_purge`**/**`rules_of_policy`+`graph_query`+`reference_lookup`+`review_apply`**/**`image_extract`（文档内嵌图识别）**；**无**抽取类）—— 不要写进 allowed_tools（写了也不生效） | **不给** `wiki_write_page`：写库只走 MCP；改类型必须两段式（preview → 用户确认 → apply）；跨库引用前先 `context_lookup`；**同义知识先认定权威**（`context_authority` → `context_authority_apply{action:"decide"}`），副本只能 `action:"pull"` 从权威复制；**结构化导入**一次只建一个类/一条关系（`plan` 出 ticket → `apply`）；**巡检清理**先 `audit_purge(dry_run=true)` 念清单再执行 |
 | `bodhi-kb-ops` | 「知识运维」——体检 + 清理（清理**先 dry_run 念清单**） | 5 个 wiki 工具 + `audit_scan`/`audit_plan`/`retag_preview`/`context_scan`/`context_lookup`/`context_page`/**`context_authority`**/**`audit_purge`**/**`rules_of_policy`+`graph_query`+`reference_lookup`**/**`image_extract`** —— 实际能用到哪些由挂载的服务决定 | `audit_purge` 是**一步硬删**（只要对该库有写权限；用户口径 2026-09-30），所以纪律是：**先 `dry_run=true` 把 `per_kind` 清单念给用户 → 再执行**；结构化导入页/评审页在清理计划里**豁免**（来源记在元数据） |
 
 > **2026-10-27 口径修正（库表实测）**：`allowed_tools` **只管 WeKnora 内置工具**；MCP 工具由
@@ -73,9 +73,10 @@ done
 > `jsonb_array_length(config->'allowed_tools')`，**MCP 能不能用看会话 `tools/list`**，不看数组长度。
 > 工具级人工确认只在 `mcp_tool_approvals` 有行且 `require_approval=true` 时才拦（新工具默认不拦，不必补记录）。
 
-技能（**3 个**）由 MCP 下发、**不写进提示词**：`domain_modeling`（领域知识建模）/
-`structured_modeling`（Excel/CSV → 本体类与关系，一次一个目标）/ `document_review`（按策略逐条评文档）
-（源在 `02-mcp-server/skills/<id>/SKILL.md`，改完即生效，无需重启/重新注册智能体）。
+active 技能（**3 个**）是跨领域能力，按沙箱 bundle 安装：`rule_judge`（规则判定）/
+`knowledge_extract`（按 `bmm:knowledgeNeed` 提取本体实例事实）/ `kb_transfer`（导出/导入/比对，运维技能）。
+源在 `02-mcp-server/skills/<id>/SKILL.md`，bundle 见 `skills/dist/`；安装用
+`deploy/weknora-fork/register_native_skills.py --upload`。领域任务步骤负责“做什么”，技能只负责通用算法与输出契约。
 
 > **技能只限「模型」、不限「本体类型」**（用户口径 2026-09-30）：front-matter 只写 `models:`（可加
 > `default_model:`），**不写 `scope.classes/relations`**。每个技能的第 0 步先与用户**明确模型范围**：
