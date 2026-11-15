@@ -61,6 +61,10 @@ def dot(x, y, r, fill=EMERALD):
     return {"type": "dot", "x": x, "y": y, "r": r, "fill": fill}
 
 
+def image(path, x, y, w, h):
+    return {"type": "image", "path": str(path), "x": x, "y": y, "w": w, "h": h}
+
+
 def card(x, y, w, h, fill=WHITE, line=LINE, radius=14, lw=1):
     return rect(x, y, w, h, fill=fill, line=line, radius=radius, lw=lw)
 
@@ -144,6 +148,11 @@ def render_png(slide: dict, path: str | pathlib.Path) -> None:
             r = el["r"]
             draw.ellipse([el["x"] - r, el["y"] - r, el["x"] + r, el["y"] + r],
                          fill="#" + el["fill"])
+        elif t == "image":
+            from PIL import Image
+            im = Image.open(el["path"]).convert("RGBA").resize(
+                (max(1, int(el["w"])), max(1, int(el["h"]))), Image.LANCZOS)
+            img.paste(im, (int(el["x"]), int(el["y"])), im)
         elif t == "text":
             _draw_text(draw, el)
 
@@ -277,6 +286,9 @@ def render_pptx(slides: list[dict], path: str | pathlib.Path) -> None:
                 shp.fill.fore_color.rgb = rgb(el["fill"])
                 shp.line.fill.background()
                 shp.shadow.inherit = False
+            elif t == "image":
+                slide.shapes.add_picture(el["path"], Inches(el["x"] * PX), Inches(el["y"] * PX),
+                                         Inches(el["w"] * PX), Inches(el["h"] * PX))
             elif t == "text":
                 box = slide.shapes.add_textbox(Inches(el["x"] * PX), Inches(el["y"] * PX),
                                                Inches(el["w"] * PX), Inches(el["h"] * PX))
