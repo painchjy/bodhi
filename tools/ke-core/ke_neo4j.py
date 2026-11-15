@@ -56,7 +56,7 @@ except Exception:  # noqa: BLE001
 
 HTTP_URL = _env_value("BODHI_NEO4J_HTTP", "http://127.0.0.1:7474").rstrip("/")
 USER = _env_value("NEO4J_USERNAME", "neo4j")
-PASSWORD = _env_value("NEO4J_PASSWORD", "password")
+PASSWORD = _env_value("NEO4J_PASSWORD", "password")  # 本地 mock 示例默认值
 DATABASE = _env_value("BODHI_NEO4J_DB", "neo4j")
 
 # 探测结果缓存（避免每次请求都打一次探针；服务是长驻进程）
