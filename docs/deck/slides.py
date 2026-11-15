@@ -15,8 +15,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 def header(kicker, title_runs, sub):
     return [
         text(80, 42, 1000, 30, kicker, size=20, color=CYAN, bold=True),
-        text(80, 78, 1500, 74, runs=title_runs, size=54, bold=True, color=INK),
-        text(80, 156, 1460, 40, sub, size=24, color=MUTED, spacing=2),
+        text(80, 72, 1500, 80, runs=title_runs, size=54, bold=True, color=INK),
+        text(80, 154, 1460, 40, sub, size=24, color=MUTED, spacing=2),
     ]
 
 
@@ -42,30 +42,29 @@ def slide1():
     e += header(
         "03 / 分层架构",
         [{"s": "分层架构：", "color": INK}, {"s": "从本体到智能体", "color": VIOLET}],
-        "本体 → 工具/技能 → 领域知识库 → 智能体；企业智能体 + 企业知识管理领域是上两层中的虚拟列。",
+        "本体 → 工具/技能 → 领域知识库 → 智能体；企业知识建模智能体 + 企业知识管理领域是上两层中的虚拟列。",
     )
 
     # 智能体层（顶）
     e += [rect(80, 210, 1080, 120, fill=EMERALD_SOFT, line=EMERALD, radius=14)]
     e += [tag(100, 222, 80, 28, "智能体", EMERALD, WHITE, size=14),
           text(100, 254, 200, 26, "决策与编排", size=16, color=MUTED)]
-    agents = [("建模智能体", True), ("技术方案评审", False), ("知识运维", False), ("领域智能体", False)]
-    for i, (name, core) in enumerate(agents):
-        x = 320 + i * 200
-        e += [card(x, 228, 190, 80, fill=AMBER_SOFT if core else WHITE,
-                   line=AMBER if core else EMERALD, radius=10)]
-        e += [text(x, 228, 190, 80, name, size=16, bold=True,
-                   color=AMBER if core else EMERALD, align="center", valign="middle")]
+    agents = ["技术方案评审智能体", "重点产品知识问答智能体", "其他领域智能体"]
+    for i, name in enumerate(agents):
+        x = 320 + i * 250
+        e += [card(x, 228, 230, 80, fill=WHITE, line=EMERALD, radius=10)]
+        e += [text(x, 228, 230, 80, name, size=15, bold=True,
+                   color=EMERALD, align="center", valign="middle")]
 
     # 领域知识库层
     e += [rect(80, 345, 1080, 105, fill=CYAN_SOFT, line=CYAN, radius=14)]
-    e += [tag(100, 355, 100, 28, "领域知识库", CYAN, WHITE, size=13),
-          text(100, 387, 200, 24, "业务技能", size=15, color=MUTED)]
-    domains = ["技术方案评审", "重点产品智能问数", "其他领域"]
+    e += [tag(100, 355, 150, 28, "领域本体实例知识库", CYAN, WHITE, size=12),
+          text(100, 387, 200, 24, "业务技能、流程、数据", size=14, color=MUTED)]
+    domains = ["技术方案评审领域库", "重点产品知识库", "其他领域"]
     for i, name in enumerate(domains):
         x = 320 + i * 250
         e += [card(x, 358, 230, 70, fill=WHITE, line=CYAN, radius=10)]
-        e += [text(x, 358, 230, 70, name, size=16, bold=True, color=CYAN,
+        e += [text(x, 358, 230, 70, name, size=15, bold=True, color=CYAN,
                    align="center", valign="middle")]
 
     # 工具 + 技能层
@@ -103,22 +102,22 @@ def slide1():
     e += [rect(1180, 210, 340, 240, fill=AMBER_SOFT, line=AMBER, radius=16, dash=True)]
     e += [text(1192, 216, 300, 20, "虚拟列（仅上两层）", size=10, color=AMBER, bold=True)]
     e += [card(1192, 238, 316, 76, fill=WHITE, line=EMERALD, radius=10)]
-    e += [text(1204, 244, 292, 24, "企业智能体", size=16, bold=True, color=EMERALD),
-          text(1204, 270, 292, 38, "区别于其他领域智能体", size=11, color=MUTED)]
+    e += [text(1204, 244, 292, 24, "企业知识建模智能体", size=16, bold=True, color=EMERALD),
+          text(1204, 270, 292, 38, "基于本体，构建企业领域知识（本体实例）", size=11, color=MUTED)]
     e += [line(1350, 314, 1350, 334, color=AMBER, width=2, arrow=True)]
     e += [text(1360, 318, 50, 20, "使用", size=10, color=AMBER)]
     e += [card(1192, 340, 316, 98, fill=WHITE, line=AMBER, radius=10)]
     e += [text(1204, 346, 292, 24, "企业知识管理领域", size=14, bold=True, color=AMBER),
-          text(1204, 374, 292, 54, "T1–T7 任务页 / 规则\nI-O 契约 / 模板", size=11, color=INK, spacing=2)]
+          text(1204, 374, 292, 54, "意图工程、规则工程、流程建模…\nT1–T7 任务页 / 规则 / I-O 契约 / 模板", size=11, color=INK, spacing=2)]
 
     # 全宽层说明
     e += [text(1200, 500, 280, 24, "工具 + 技能：全宽层", size=12, bold=True, color=ROSE),
           text(1200, 528, 280, 44, "不含虚拟列\n43 工具 / 6 技能", size=11, color=MUTED, spacing=2)]
 
     e += [text(80, 790, 1440, 26,
-               "企业智能体 + 企业知识管理领域是智能体/领域知识两层中的虚拟列，区别于其他领域智能体/领域知识；不贯穿工具/本体层。",
+               "企业知识建模智能体 + 企业知识管理领域是智能体/领域知识两层中的虚拟列，区别于其他领域智能体/领域知识；不贯穿工具/本体层。",
                size=12.5, color=INK)]
-    e += footer("企业智能体 + 企业知识管理领域是上两层中的虚拟列；建模智能体用它创建其他领域知识。", "03 / 08")
+    e += footer("企业知识建模智能体 + 企业知识管理领域是上两层中的虚拟列；建模智能体用它创建其他领域知识。", "03 / 08")
     return {"bg": PAPER, "elements": e}
 # ===================== P2 四层协作 =====================
 
@@ -126,64 +125,83 @@ def slide2():
     e = []
     e += header(
         "04 / 两个闭环",
-        [{"s": "两个闭环：", "color": INK}, {"s": "建模与反馈", "color": EMERALD}],
-        "建模闭环只改技能/工具/本体；领域智能体反馈闭环只改领域知识；能力不足回到建模闭环。",
+        [{"s": "两个闭环：", "color": INK}, {"s": "领域知识与能力建设", "color": EMERALD}],
+        "建模智能体在中间串接两个闭环：读取企业知识管理领域、优化领域知识；自身不更新。",
     )
 
-    # 建模闭环（能力建设）
-    e += [card(80, 190, 700, 470, fill=WHITE, line=EMERALD, radius=16)]
-    e += [text(100, 202, 420, 32, "建模闭环（能力建设）", size=22, bold=True, color=EMERALD),
-          text(100, 238, 500, 24, "只改技能、工具、本体", size=15, color=MUTED)]
-    boxes = [
-        ("建模智能体", 120, 280, 160, 50, EMERALD),
-        ("企业知识管理领域", 380, 280, 160, 50, AMBER),
-        ("技能 / 工具 / 本体", 380, 410, 180, 60, ROSE),
-        ("验证", 120, 410, 160, 50, CYAN),
-    ]
-    for name, x, y, w, h, color in boxes:
-        e += [rect(x, y, w, h, fill=PAPER2, line=color, radius=10)]
-        e += [text(x, y, w, h, name, size=14 if len(name) > 8 else 16, bold=True,
-                   color=color, align="center", valign="middle")]
-    e += [line(280, 305, 376, 305, color=EMERALD, width=3, arrow=True),
-          line(460, 330, 460, 406, color=EMERALD, width=3, arrow=True),
-          line(380, 440, 284, 440, color=EMERALD, width=3, arrow=True),
-          line(200, 410, 200, 334, color=EMERALD, width=3, arrow=True)]
-    e += [text(300, 286, 80, 20, "方法", size=11, color=EMERALD),
-          text(470, 350, 80, 20, "提升", size=11, color=EMERALD),
-          text(300, 445, 80, 20, "验证", size=11, color=EMERALD),
-          text(210, 350, 80, 20, "回写", size=11, color=EMERALD)]
-    e += [text(586, 520, 500, 24, "不改变领域知识", size=13, color=MUTED)]
+    # E2E 测试与定位（上层）
+    e += [card(440, 200, 720, 120, fill=CYAN_SOFT, line=CYAN, radius=16)]
+    e += [text(460, 204, 680, 30, "E2E 测试与定位（接受领域 BAD CASE）", size=17, bold=True, color=CYAN),
+          text(460, 232, 680, 22, "输入：现象 / 期望 / 实际 / 证据", size=12, color=INK)]
+    causes = ["领域知识", "工具返回", "技能", "大模型推理"]
+    for i, c in enumerate(causes):
+        x = 460 + i * 170
+        e += [rect(x, 258, 155, 28, fill=WHITE, line=CYAN, radius=7)]
+        e += [text(x, 258, 155, 28, c, size=12, color=CYAN, align="center", valign="middle")]
+    e += [text(460, 292, 680, 22, "输出：根因 + 同一 case 回归验证", size=12, color=INK)]
+    e += [line(800, 320, 800, 396, color=CYAN, width=3, arrow=True)]
 
-    # 领域智能体反馈闭环（领域知识更新）
-    e += [card(820, 190, 700, 470, fill=WHITE, line=ROSE, radius=16)]
-    e += [text(840, 202, 460, 32, "领域智能体反馈闭环", size=22, bold=True, color=ROSE),
-          text(840, 238, 500, 24, "只改领域知识", size=15, color=MUTED)]
-    boxes2 = [
-        ("领域智能体", 860, 280, 160, 50, AMBER),
-        ("BAD CASE", 1120, 280, 160, 50, ROSE),
-        ("建模智能体", 1120, 410, 160, 50, EMERALD),
-        ("更新领域知识", 860, 410, 190, 60, CYAN),
-    ]
-    for name, x, y, w, h, color in boxes2:
-        e += [rect(x, y, w, h, fill=PAPER2, line=color, radius=10)]
-        e += [text(x, y, w, h, name, size=16, bold=True,
-                   color=color, align="center", valign="middle")]
-    e += [line(1020, 305, 1116, 305, color=ROSE, width=3, arrow=True),
-          line(1200, 330, 1200, 406, color=ROSE, width=3, arrow=True),
-          line(1120, 435, 1054, 435, color=ROSE, width=3, arrow=True),
-          line(955, 410, 955, 334, color=ROSE, width=3, arrow=True)]
-    e += [text(1040, 286, 80, 20, "发现", size=11, color=ROSE),
-          text(1210, 350, 80, 20, "诊断", size=11, color=ROSE),
-          text(1050, 440, 80, 20, "更新", size=11, color=ROSE),
-          text(965, 350, 80, 20, "回归", size=11, color=ROSE)]
-    e += [text(840, 520, 500, 24, "不改变本体 / 技能 / 工具", size=13, color=MUTED)]
+    # 中间通道：建模智能体
+    e += [card(580, 330, 440, 340, fill=EMERALD_SOFT, line=EMERALD, radius=16)]
+    e += [text(600, 340, 300, 30, "建模智能体", size=20, bold=True, color=EMERALD),
+          text(600, 372, 300, 22, "中间通道", size=13.5, color=EMERALD)]
+    e += [rect(660, 400, 240, 70, fill=WHITE, line=EMERALD, radius=12)]
+    e += [text(660, 400, 240, 70, "建模智能体", size=18, bold=True, color=EMERALD,
+               align="center", valign="middle")]
+    e += [text(600, 500, 400, 24, "读取：企业知识管理领域", size=14, color=AMBER),
+          text(600, 535, 400, 24, "优化：领域知识", size=14, color=CYAN),
+          text(600, 570, 400, 24, "自身不更新", size=13, bold=True, color=ROSE)]
 
-    e += [rect(80, 680, 1440, 55, fill=INK, line=INK, radius=12)]
-    e += [text(100, 680, 1420, 55,
-               "桥接：建模智能体 → 影响领域建模知识库；领域知识反馈“能力不足” → 回建模闭环提升技能/本体/工具。",
-               size=15, bold=True, color=WHITE, valign="middle")]
+    # 左：领域知识闭环（全自动）
+    e += [card(80, 330, 480, 340, fill=WHITE, line=EMERALD, radius=16)]
+    e += [text(100, 340, 420, 28, "领域知识闭环（全自动）", size=18, bold=True, color=EMERALD),
+          text(100, 370, 420, 22, "只改领域知识", size=12, color=MUTED)]
+    e += [rect(110, 410, 150, 50, fill=PAPER2, line=AMBER, radius=9)]
+    e += [text(110, 410, 150, 50, "领域智能体", size=15, bold=True, color=AMBER, align="center", valign="middle")]
+    e += [rect(300, 410, 120, 50, fill=PAPER2, line=ROSE, radius=9)]
+    e += [text(300, 410, 120, 50, "BAD CASE", size=14, bold=True, color=ROSE, align="center", valign="middle")]
+    e += [rect(110, 540, 150, 50, fill=PAPER2, line=CYAN, radius=9)]
+    e += [text(110, 540, 150, 50, "更新领域知识", size=14, bold=True, color=CYAN, align="center", valign="middle")]
+    e += [line(260, 435, 296, 435, color=EMERALD, width=3, arrow=True),
+          line(420, 435, 656, 435, color=EMERALD, width=3, arrow=True),
+          line(660, 470, 260, 565, color=EMERALD, width=3, arrow=True),
+          line(185, 540, 185, 464, color=EMERALD, width=3, arrow=True)]
+    e += [text(262, 416, 60, 18, "发现", size=12, color=EMERALD),
+          text(430, 416, 80, 18, "输入", size=12, color=EMERALD),
+          text(430, 500, 80, 18, "优化", size=12, color=EMERALD),
+          text(195, 500, 60, 18, "回归", size=12, color=EMERALD)]
+    e += [text(100, 610, 420, 22, "领域智能体不变；harness 入口", size=11, color=MUTED)]
 
-    e += footer("建模闭环只改技能/工具/本体；反馈闭环只改领域知识。", "04 / 08")
+    # 右：能力建设闭环
+    e += [card(1040, 330, 480, 340, fill=WHITE, line=ROSE, radius=16)]
+    e += [text(1060, 340, 420, 28, "能力建设闭环", size=18, bold=True, color=ROSE),
+          text(1060, 370, 440, 22, "开发智能体驱动；改工具/技能/本体/EM 领域", size=11.5, color=MUTED)]
+    e += [rect(1080, 410, 160, 50, fill=PAPER2, line=ROSE, radius=9)]
+    e += [text(1080, 410, 160, 50, "开发智能体", size=15, bold=True, color=ROSE, align="center", valign="middle")]
+    e += [rect(1260, 410, 180, 50, fill=PAPER2, line=VIOLET, radius=9)]
+    e += [text(1260, 410, 180, 50, "更新工具/技能/本体", size=13, bold=True, color=VIOLET, align="center", valign="middle")]
+    e += [rect(1080, 540, 200, 50, fill=PAPER2, line=AMBER, radius=9)]
+    e += [text(1080, 540, 200, 50, "企业知识管理领域", size=14, bold=True, color=AMBER, align="center", valign="middle")]
+    e += [line(920, 435, 1076, 435, color=ROSE, width=3, arrow=True),
+          line(1240, 435, 1256, 435, color=ROSE, width=3, arrow=True),
+          line(1160, 460, 1160, 536, color=ROSE, width=3, arrow=True),
+          line(1280, 565, 1510, 565, color=ROSE, width=3, dash=True),
+          line(1510, 565, 1510, 310, color=ROSE, width=3, dash=True),
+          line(1510, 310, 1164, 310, color=ROSE, width=3, dash=True, arrow=True),
+          line(1080, 565, 1024, 565, color=AMBER, width=3),
+          line(1024, 565, 1024, 455, color=AMBER, width=3),
+          line(1024, 455, 904, 455, color=AMBER, width=3, arrow=True)]
+    e += [text(930, 416, 70, 18, "分派", size=12, color=ROSE),
+          text(1170, 490, 90, 18, "更新", size=12, color=ROSE),
+          text(1370, 286, 120, 18, "回归 E2E", size=11, color=ROSE)]
+    e += [text(1060, 610, 440, 22, "智能体不变；开发智能体驱动能力变更", size=11, color=MUTED)]
+
+    e += [rect(80, 700, 1440, 50, fill=INK, line=INK, radius=12)]
+    e += [text(100, 700, 1420, 50,
+               "建模智能体是中间通道；领域知识闭环只改领域知识，能力建设闭环由开发智能体驱动。",
+               size=14, bold=True, color=WHITE, valign="middle")]
+
+    e += footer("领域知识闭环全自动；能力建设闭环由开发智能体驱动；建模智能体自身不更新。", "04 / 08")
     return {"bg": PAPER, "elements": e}
 
 # ===================== P3 本体 × 领域知识 =====================
@@ -205,8 +223,8 @@ def slide3():
 
     # TBox
     e += [rect(80, 275, 610, 460, fill=PAPER2, line=LINE, radius=14)]
-    e += [tag(100, 290, 90, 32, "TBox 本体", VIOLET, VIOLET_SOFT, size=16),
-          text(200, 294, 300, 26, "只描述类型 · 不写实例", size=17, color=MUTED)]
+    e += [tag(100, 290, 110, 32, "TBox 本体", VIOLET, VIOLET_SOFT, size=16),
+          text(220, 294, 300, 26, "只描述类型 · 不写实例", size=17, color=MUTED)]
     mods = [
         ("SCHEMA", "创作 / 模板 / 正文", "CreativeWork · DocumentTemplate · articleBody"),
         ("BMM", "意图 / 规则 / 报告", "Goal · BusinessPolicy · BusinessRule · Report"),
@@ -225,14 +243,14 @@ def slide3():
     gates = ["类型在册", "属性已声明", "domain / range", "溯源可回访"]
     for i, g in enumerate(gates):
         y = 350 + i * 70
-        e += [card(710, y, 120, 50, fill=WHITE, line=AMBER, radius=9)]
-        e += [text(710, y, 120, 50, g, size=14, bold=True, color=AMBER,
+        e += [card(710, y, 135, 50, fill=WHITE, line=AMBER, radius=9)]
+        e += [text(710, y, 135, 50, g, size=13, bold=True, color=AMBER,
                    align="center", valign="middle")]
 
     # ABox
     e += [rect(850, 275, 670, 460, fill=PAPER2, line=LINE, radius=14)]
-    e += [tag(870, 290, 96, 32, "ABox 知识", CYAN, CYAN_SOFT, size=16),
-          text(976, 294, 300, 26, "一页 = 一个实例", size=17, color=MUTED)]
+    e += [tag(870, 290, 110, 32, "ABox 知识", CYAN, CYAN_SOFT, size=16),
+          text(990, 294, 300, 26, "一页 = 一个实例", size=17, color=MUTED)]
     e += [rect(870, 335, 630, 42, fill=INK, line=INK, radius=8)]
     e += [text(884, 335, 400, 42, "slug = 模块 / 类 / 名称", size=16, color=WHITE, font=MONO,
                valign="middle"),
@@ -243,7 +261,7 @@ def slide3():
           text(884, 426, 280, 84, "ruleHash = sha1:…\nknowledgeNeed = kn/text-logic-v1\nruleImplementation = LLM 软规则", size=14, color=INK, font=MONO, spacing=2)]
     e += [card(1195, 388, 305, 130, fill=WHITE, line=LINE, radius=8)]
     e += [text(1209, 396, 280, 26, "对象关系（图边）", size=16, bold=True, color=CYAN),
-          text(1209, 426, 290, 84, "isDerivedFrom → bmm:BusinessPolicy\nguides → bmm:BusinessProcess\nsourceSession → bmm:KnowledgeSession", size=13.5, color=INK, font=MONO, spacing=2)]
+          text(1209, 426, 290, 84, "isDerivedFrom → bmm:BusinessPolicy\nguides → bmm:BusinessProcess\nsourceSession → bmm:KnowledgeSession", size=12.5, color=INK, font=MONO, spacing=2)]
     e += [card(870, 530, 630, 82, fill=WHITE, line=LINE, radius=8)]
     e += [text(884, 538, 280, 26, "正文", size=16, bold=True, color=CYAN),
           text(884, 566, 280, 36, "## 规则契约\n## 原文依据（逐字 + 定位）", size=14, color=INK, font=MONO, spacing=2)]
@@ -282,7 +300,7 @@ def slide4():
     )
 
     cols = [("领域", 150), ("管控对象", 220), ("核心目标", 220), ("驱动来源", 230), ("典型机制", 620)]
-    x0, y0, head_h = 80, 180, 32
+    x0, y0, head_h = 80, 190, 32
     e += [rect(x0, y0, 1440, head_h, fill=INK, line=INK, radius=0)]
     x = x0
     for name, w in cols:
@@ -335,8 +353,8 @@ def slide4():
         for j, obj in enumerate(objs):
             y = 472 + j * 54
             e += [rect(x + 6, y, 123, 46, fill=WHITE, line=color, radius=6)]
-            e += [text(x + 6, y + 3, 123, 20, "资金可管可控", size=10.5, color=INK, align="center")]
-            e += [text(x + 6, y + 22, 123, 20, obj, size=10.5, color=MUTED, align="center")]
+            e += [text(x + 6, y + 3, 123, 20, "资金可管可控", size=11, color=INK, align="center")]
+            e += [text(x + 6, y + 22, 123, 20, obj, size=11, color=MUTED, align="center")]
     e += [text(96, 646, 430, 36, "同名 3×3；上层企业概念给标准名", size=12, color=MUTED)]
 
     # ② 规范性约束：管控对象必填，某领域缺失
@@ -487,8 +505,10 @@ def slide6():
             e += tag(x + 120, y + 16, 58, 22, "核心", AMBER, AMBER_SOFT, size=12)
         for j, t in enumerate(tools):
             col, row = j % 2, j // 2
-            e += [text(x + 18 + col * 212, y + 58 + row * 25, 206, 24, t,
-                       size=13.5, color=ROSE if gap_from is not None and j >= gap_from else INK,
+            w = 220 if col == 0 else 192
+            e += [text(x + 18 + col * 232, y + 58 + row * 25, w, 24, t,
+                       size=12.5 if len(t) > 20 else 13.5,
+                       color=ROSE if gap_from is not None and j >= gap_from else INK,
                        font=MONO)]
         e += [text(x + 18, y + 214, 424, 26, note, size=13.5, color=MUTED)]
 
@@ -558,13 +578,13 @@ def slide8():
     e = []
     e += header(
         "02 / 对策",
-        [{"s": "Bodhi 的", "color": INK}, {"s": "补位与缺口", "color": VIOLET}],
-        "结构完整性用本体 + SHACL；语义完整性用业务规则 + 建模智能体；执行控制仍需运行时。",
+        [{"s": "本体库 MCP 工具包（Bodhi）", "color": INK}],
+        "结构完整性用本体 + SHACL；语义完整性用业务规则 + 建模智能体；运行时按规范控制流程/工具/数据。",
     )
 
     # 左：知识规范性与完整性
     e += [card(80, 200, 700, 520, fill=WHITE, line=VIOLET, radius=16)]
-    e += [tag(100, 216, 240, 32, "本体库 MCP 工具包（Bodhi）核心补位", VIOLET, VIOLET_SOFT, size=13),
+    e += [tag(100, 216, 380, 32, "本体库 MCP 工具包（Bodhi）核心补位", VIOLET, VIOLET_SOFT, size=13),
           text(100, 258, 660, 34, "知识规范性与完整性", size=24, bold=True, color=VIOLET)]
 
     e += [rect(100, 310, 660, 120, fill=VIOLET_SOFT, line=VIOLET, radius=12)]
@@ -581,17 +601,17 @@ def slide8():
 
     # 翅膀图片：规范性 / 完整性的“提升”
     e += [image(HERE / "assets" / "wing.png", 590, 210, 160, 112)]
-    e += [text(650, 326, 70, 20, "提升", size=12, color=VIOLET, bold=True)]
+    e += [text(650, 326, 70, 20, "提升", size=13, color=VIOLET, bold=True)]
 
     # 右侧：企业智能体 = 领域智能体 + 运行时控制
     e += [rect(820, 200, 700, 520, fill=PAPER2, line=EMERALD, radius=18)]
     e += [text(840, 210, 300, 32, "企业智能体", size=20, bold=True, color=EMERALD),
-          text(1040, 214, 460, 26, "领域智能体 + 运行时控制", size=13, color=MUTED)]
+          text(1040, 214, 460, 26, "领域智能体 + 运行时控制", size=14, color=MUTED)]
 
     # 执行边界
     e += [card(840, 250, 660, 215, fill=WHITE, line=AMBER, radius=14)]
     e += [tag(860, 260, 150, 30, "执行边界", AMBER, AMBER_SOFT, size=14),
-          text(860, 298, 520, 32, "领域智能体：已有", size=21, bold=True, color=AMBER)]
+          text(860, 298, 520, 32, "领域智能体", size=21, bold=True, color=AMBER)]
     e += [text(860, 334, 520, 24, "业务流程建模 → 精准意图识别", size=14.5, color=INK),
           text(860, 360, 520, 24, "任务页 / 规则 / I-O 契约", size=14.5, color=INK),
           text(860, 386, 520, 24, "工具 dry_run / ticket / 幂等", size=14.5, color=INK),
@@ -601,7 +621,7 @@ def slide8():
     # 运行时控制
     e += [card(840, 475, 660, 225, fill=WHITE, line=ROSE, radius=14)]
     e += [tag(860, 485, 150, 30, "还需补齐", ROSE, ROSE_SOFT, size=14),
-          text(860, 523, 520, 32, "运行时控制：缺口", size=21, bold=True, color=ROSE)]
+          text(860, 523, 520, 32, "运行时控制", size=21, bold=True, color=ROSE)]
     e += [text(860, 563, 520, 24, "智能体角色认证 + 任务级权限", size=15, color=INK),
           text(860, 595, 520, 24, "运行时网关：allow / deny / 审批", size=15, color=INK),
           text(860, 627, 520, 24, "信息流控制 + 执行隔离", size=15, color=INK),
@@ -609,7 +629,7 @@ def slide8():
 
     # 紧箍咒图片：运行时约束
     e += [image(HERE / "assets" / "headband.png", 1380, 480, 110, 77)]
-    e += [text(1390, 560, 90, 20, "紧箍咒", size=11, color=AMBER, bold=True, align="center")]
+    e += [text(1390, 560, 90, 20, "紧箍咒", size=12, color=AMBER, bold=True, align="center")]
 
     e += [rect(80, 720, 1440, 60, fill=INK, line=INK, radius=12)]
     e += [text(100, 720, 1440, 60,

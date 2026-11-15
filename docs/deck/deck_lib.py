@@ -36,6 +36,7 @@ GRAY_SOFT = "F1EFE8"
 
 SANS = "sans"
 MONO = "mono"
+FONT_SCALE = 1.2
 
 # ---------- spec helpers ----------
 
@@ -172,7 +173,8 @@ def _arrow_head(draw, x1, y1, x2, y2, color, size=12):
 
 def _draw_text(draw, el):
     align, valign = el.get("align", "left"), el.get("valign", "top")
-    size = el.get("size", 20)
+    base_size = el.get("size", 20)
+    size = base_size * FONT_SCALE
     color = "#" + el.get("color", INK)
     spacing = el.get("spacing", 4)
 
@@ -183,7 +185,8 @@ def _draw_text(draw, el):
             fn = run.get("font", el.get("font", SANS))
             if fn == MONO and CJK.search(run["s"]):
                 fn = SANS
-            f = _font(fn, run.get("size", size), run.get("bold", el.get("bold", False)))
+            f = _font(fn, run.get("size", base_size) * FONT_SCALE,
+                      run.get("bold", el.get("bold", False)))
             w = draw.textlength(run["s"], font=f)
             measured.append((run, f, w))
             total_w += w
@@ -311,7 +314,7 @@ def render_pptx(slides: list[dict], path: str | pathlib.Path) -> None:
                     for run in el["runs"]:
                         r = p.add_run()
                         r.text = run["s"]
-                        r.font.size = Pt(run.get("size", el.get("size", 20)) * 0.6)
+                        r.font.size = Pt(run.get("size", el.get("size", 20)) * 0.6 * FONT_SCALE)
                         r.font.bold = run.get("bold", el.get("bold", False))
                         r.font.name = _pptx_font_name(run.get("font", el.get("font", SANS)), run["s"])
                         r.font.color.rgb = rgb(run.get("color", el.get("color", INK)))
@@ -325,7 +328,7 @@ def render_pptx(slides: list[dict], path: str | pathlib.Path) -> None:
                         p.line_spacing = 1.0 + el.get("spacing", 4) / 100.0
                         r = p.add_run()
                         r.text = ln
-                        r.font.size = Pt(el.get("size", 20) * 0.6)
+                        r.font.size = Pt(el.get("size", 20) * 0.6 * FONT_SCALE)
                         r.font.bold = el.get("bold", False)
                         r.font.name = _pptx_font_name(el.get("font", SANS), ln)
                         r.font.color.rgb = rgb(el.get("color", INK))

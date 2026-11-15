@@ -35,9 +35,9 @@ def main() -> int:
     if not args.preview:
         candidates = [
             PPTX,
-            PPTX.with_name("bodhi2-architecture-v2.pptx"),
             PPTX.with_name("bodhi2-architecture-v3.pptx"),
             PPTX.with_name("bodhi2-architecture-v4.pptx"),
+            PPTX.with_name("bodhi2-architecture-v2.pptx"),
         ]
         target = None
         for cand in candidates:
