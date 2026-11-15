@@ -431,3 +431,49 @@ bpmn:dataObjectBindingTool rdf:type owl:ObjectProperty ;
 
 
 
+
+
+# ============================================================
+# 因果模式（2026-11-14）：领域库中的可复用因果判定模式
+# ============================================================
+
+:CausalPattern rdf:type owl:Class ;
+    rdfs:label "因果模式"@zh ;
+    rdfs:comment "领域库中可复用的正向/错误因果模式：以前提、机制、论证链和逻辑反例表达；不要求观测阈值，不替代评审逻辑。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+:patternKind rdf:type owl:DatatypeProperty ;
+    rdfs:label "模式类别"@zh ;
+    rdfs:domain :CausalPattern ;
+    rdfs:range xsd:string ;
+    rdfs:comment "受控取值（逐字取用）：valid｜invalid。"@zh .
+
+:patternDefinition rdf:type owl:DatatypeProperty ;
+    rdfs:label "模式定义"@zh ;
+    rdfs:domain :CausalPattern ;
+    rdfs:range xsd:string ;
+    rdfs:comment "JSON：premises / mechanism / chain / limits / counterexample；不写具体实例数据。"@zh .
+
+:patternStatus rdf:type owl:DatatypeProperty ;
+    rdfs:label "模式状态"@zh ;
+    rdfs:domain :CausalPattern ;
+    rdfs:range xsd:string ;
+    rdfs:comment "受控取值（逐字取用）：candidate｜active｜retired。"@zh .
+
+:patternSource rdf:type owl:DatatypeProperty ;
+    rdfs:label "模式来源"@zh ;
+    rdfs:domain :CausalPattern ;
+    rdfs:range xsd:string ;
+    rdfs:comment "来源 URL / 会话 / 文档定位，用于人工确认与追溯。"@zh .
+
+:patternVersion rdf:type owl:DatatypeProperty ;
+    rdfs:label "模式版本"@zh ;
+    rdfs:domain :CausalPattern ;
+    rdfs:range xsd:string .
+
+:patternUsedByRule rdf:type owl:ObjectProperty ;
+    rdfs:label "模式被规则使用"@zh ;
+    rdfs:domain :CausalPattern ;
+    rdfs:range bmm:TextLogicOperationalRule ;
+    rdfs:comment "可选：该因果模式由哪条规则消费。"@zh .
+
