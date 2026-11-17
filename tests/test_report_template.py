@@ -55,7 +55,8 @@ def test_template_page_written_by_report_stage(mcp, test_kb, session_no):
     page = r.get("report_page") or {}
     assert page.get("page_type") == "schema:DocumentTemplate", page
 
-    got = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": "回归模板"})
+    got = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": "回归模板",
+                                        "session_no": session_no})
     hits = {h.get("slug") for h in (got.get("hits") or [])}
     assert TPL_SLUG in hits, "模板页未落库 ✗：%s" % json.dumps(got, ensure_ascii=False)[:300]
 
@@ -170,7 +171,7 @@ def test_audit_template_from_domain_kb_and_ambiguity(mcp, test_kb, session_no):
         t0 = time.time()
         while True:
             probe = mcp.call("knowledge_lookup", {"kb_id": tpl_kb.kb_id, "mode": "keyword",
-                                                  "query": "_t"})
+                                                  "query": "_t", "session_no": session_no})
             if not (probe.get("kb_unresolved") or probe.get("need_kb_selection")
                     or "知识库不存在" in str(probe.get("error") or "")):
                 break

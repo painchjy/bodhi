@@ -27,12 +27,9 @@ for p in (str(HERE), str(REPO / "tools" / "ke-core")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-# 2026-10-25（用户口径）：**自检不要写进真实会话**。
-# 此前跑 `ab_runner` / `test_lookup_ab` 用的是"库里最新会话 id" ⇒ 自检的 hint/plain 调用
-# 混进用户的真实会话（实测把 c62bdfb4 搅成 hint29+plain21）⇒ 报告无法区分人跑的还是机器跑的 ✗
-# `knowledge_lookup` 的 `session_no` **只进遥测、不校验**（只有 `save_knowledge` 要求真实会话），
-# 所以自检统一用它 ⇒ 报告侧按前缀排除（`--include-selftest` 可放开）。
-SELFTEST_SESSION = "selftest"
+# 2026-11-17（用户口径）：`knowledge_lookup.session_no` 已是必填且会解析 scope，
+# 自检也必须使用真实会话（专用 pytest agent/session 由测试 fixture 建）；不再使用假 id。
+SELFTEST_SESSION = ""
 
 
 def load_questions() -> list:
@@ -165,11 +162,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--kb", default="技术方案评审领域模型")
     ap.add_argument("--session-no", default="",
-                    help="默认 %r（自检专用；报告侧默认排除，不污染真实会话 ✓）" % SELFTEST_SESSION)
+                    help="真实 WeKnora 会话 uuid（必填；需绑定带【库范围】的智能体）")
     args = ap.parse_args()
     from mcp_client import MCP  # noqa: PLC0415
     import ke_db  # noqa: PLC0415
-    sno = args.session_no or SELFTEST_SESSION
+    sno = str(args.session_no or "").strip()
+    if not sno:
+        print(json.dumps({"ok": False, "error": "need_session_no",
+                          "hint": "请传 --session-no <真实会话 uuid>"}, ensure_ascii=False))
+        return 2
     kb = ke_db.resolve_kb_id(args.kb)[0]
     rep = run_paired(MCP(), kb, sno)
     print(json.dumps(rep["summary"], ensure_ascii=False, indent=1))

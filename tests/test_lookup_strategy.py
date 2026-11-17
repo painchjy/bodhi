@@ -61,9 +61,10 @@ def _check(expect: dict, resp: dict) -> list:
 
 
 @pytest.mark.parametrize("case", _DATA["cases"], ids=[c["id"] for c in _DATA["cases"]])
-def test_lookup_strategy_cases(mcp, kbs, case):
+def test_lookup_strategy_cases(mcp, kbs, session_no, case):
     args = dict(case["args"])
     args.setdefault("kb_id", kbs["domain"])
+    args.setdefault("session_no", session_no)
     # 2026-10-25（P2）：`.env` 生产口径已切 `abtest`（随机分臂）⇒ 本用例断言的是**提示面内容**，
     # 必须显式要提示，否则会随分臂间歇性红（不是回归 ✗）。
     args.setdefault("ontology_hint", True)

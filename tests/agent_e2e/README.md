@@ -29,7 +29,6 @@ pytest -q tests/agent_e2e
 export BODHI_RUN_AGENT_E2E=1
 export BODHI_WEKNORA_BASE_URL=http://localhost:8080
 export BODHI_REVIEW_AGENT_ID=<review-agent-uuid>
-export BODHI_REVIEW_KB_IDS=<domain-kb>,<work-kb>  # 可选；不填则从智能体提示词【库范围】解析
 pytest -q -m agent_e2e tests/agent_e2e
 ```
 

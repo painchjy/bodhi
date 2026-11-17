@@ -33,7 +33,7 @@ def test_knowledge_lookup_keyword_returns_definition(mcp, kbs, session_no):
 
 def test_knowledge_lookup_rules_has_rule_hash(mcp, kbs, session_no):
     r = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "rules",
-                                      "spec": "policy:技术方案逐项评审策略",
+                                      "spec": "policy:技术方案评审策略",
                                       "session_no": session_no})
     assert r.get("ok") is True, r
     rules = r.get("rules") or []

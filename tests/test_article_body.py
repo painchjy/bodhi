@@ -48,7 +48,8 @@ def test_snippet_comes_from_graph_article_body(mcp, test_kb, session_no):
                    "content_md": "# 正文片段用例\n\n## ① 范围与依据\n- %s\n" % mark}})
     assert r.get("applied") is True, json.dumps(r, ensure_ascii=False)[:400]
 
-    got = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": mark})
+    got = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": mark,
+                                        "session_no": session_no})
     hit = next((h for h in (got.get("hits") or []) if h.get("slug") == "review/_ab-snippet"), None)
     assert hit, "按正文标记检索不到（说明正文没进图 / 没走 articleBody）✗：%s" % \
         json.dumps(got, ensure_ascii=False)[:300]

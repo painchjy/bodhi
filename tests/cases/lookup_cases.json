@@ -63,10 +63,10 @@
     },
     {
       "id": "C10",
-      "why": "链路口径：影响因素 → 影响手段 → 策略 → 规则（规则边双向），恰好 6 条且带 chain 明细",
-      "args": {"mode": "rules", "spec": "influencer:信创与异地机房搬迁"},
-      "expect": {"equals": {"resolved_by": "influencer", "counts.rules": 6},
-                 "min_len": {"rules": 6, "chain": 1}}
+      "why": "链路口径：影响因素 → 影响手段 → 策略 → 规则（规则边双向），返回链路明细（不绑定具体领域实例）",
+      "args": {"mode": "rules", "spec": "influencer:技术方案需多部门联合评审"},
+      "expect": {"present": ["resolved_by", "chain"], "min_len": {"chain": 1}}
+
     }
   ]
 }

@@ -84,13 +84,14 @@ def _sample(limit: int = 20):
 
 @pytest.mark.parametrize("case", _sample(), ids=lambda c: "%s-%s" % (
     c["tool"], (c.get("expect") or {}).get("shape")))
-def test_replay_single_case(mcp, test_kb_s, case):
+def test_replay_single_case(mcp, test_kb_s, session_no, case):
     """实调：**测试库替换**所有库参数 ✓（生产库零接触 ✗）"""
     args = dict(case["args"])
     for k in ("kb_id", "kb_ids", "kb", "work_kb", "domain_kb", "target_kb"):
         if k in args:
             args[k] = test_kb_s if k != "kb_ids" else [test_kb_s]
-    args.pop("session_no", None)          # 读类用例不需要真实会话（写类已单独覆盖 ✓）
+    # 2026-11-17：`knowledge_lookup` 的 session_no 已必填；专用测试 agent 的库为 all
+    args.setdefault("session_no", session_no)
     r = mcp.call(case["tool"], args)
     assert isinstance(r, dict), "回执不是对象 ✗（%s）" % case["tool"]
     txt = json.dumps(r, ensure_ascii=False)

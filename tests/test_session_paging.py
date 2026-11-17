@@ -84,7 +84,7 @@ def test_locator_has_part_no(mcp, test_kb, session_no):
     _write(mcp, test_kb, session_no, slug="review/_pg-g", title="分页用例G",
            doc_id="DOC-G", intent="任务甲")
     r = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword",
-                                      "query": "分页用例G"})
+                                      "query": "分页用例G", "session_no": session_no})
     hit = next((h for h in (r.get("hits") or []) if h.get("slug") == "review/_pg-g"), None)
     assert hit, "知识页未落库 ✗：%s" % json.dumps(r, ensure_ascii=False)[:300]
     loc = str((hit.get("attributes") or {}).get("bmm:sourceLocator") or "")

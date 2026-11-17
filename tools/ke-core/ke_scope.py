@@ -47,7 +47,8 @@ _CACHE: dict = {}          # session_no -> (ts, scope)
 _TAG_RE = re.compile(r"【库范围】\s*([^\n]*)")
 _DOMAIN_TAG = re.compile(r"(?:domain_kb)\s*[:：=]\s*([^|｜;\n]+)")
 _WORK_TAG = re.compile(r"(?:work_kb)\s*[:：=]\s*([^|｜;\n]+)")
-_MULTI = ("所有领域库", "全部领域库", "各领域库", "按目标库", "本轮目标库")
+_MULTI = ("所有领域库", "全部领域库", "各领域库", "按目标库", "本轮目标库",
+          "指定工作库", "目标工作库", "本轮工作库")
 _ROLE_WORDS = re.compile(r"[（(](?:只读|读写|可选|说明|含[^）)]*)[）)]\s*$")
 
 
@@ -57,6 +58,12 @@ def _clean(name: str) -> str:
     s = re.split(r"——|--|（含|\(含", s, maxsplit=1)[0].strip()
     s = s.replace("**", "").strip()
     return _ROLE_WORDS.sub("", s).strip()
+
+
+def _is_work_multi(name: str) -> bool:
+    """工作库是否为“多库/本轮目标库”占位符（`《指定工作库》` 也算 ✓）。"""
+    s = _clean(name).strip("《》").strip()
+    return s in _MULTI
 
 
 def parse_scope_text(text: str) -> dict:
@@ -223,7 +230,7 @@ def agent_scope(session_no: str, use_cache: bool = True) -> dict:
         return _unresolved(sid, agent_name, parsed, "没有【库范围】标记，也没有 knowledge_bases")
 
     dom = _kb_of(parsed.get("domain")) if parsed.get("domain") else {}
-    work_multi = bool(parsed.get("work") in _MULTI)
+    work_multi = _is_work_multi(parsed.get("work"))
     work = _kb_of(parsed.get("work")) if parsed.get("work") and not work_multi else {}
     if parsed.get("domain") and not dom:
         # 用户口径（2026-11-03）：**domain_kb 不存在 ⇒ 不能用用户指定的库**（fail-closed）
@@ -375,31 +382,50 @@ def work_multi(scope: dict) -> bool:
     return bool((scope or {}).get("work_multi"))
 
 
+def refresh_scope_for_kb(scope: dict, session_no: str, kb_id: str) -> tuple[dict, bool]:
+    """目标库不在缓存 allowed 时**强制重算一次** scope（新库/刚改配置 ✓）。
+
+    返回 `(scope, refreshed)`；只有拿到新的可用 scope 才算 refreshed。
+    不做权限放行：刷新后仍不在 allowed 由调用方报 `out_of_scope`。
+    """
+    if not (isinstance(scope, dict) and scope.get("ok") and str(kb_id or "").strip()):
+        return scope, False
+    allowed = {str(x).lower() for x in (scope.get("allowed") or []) if str(x)}
+    target = str(kb_id).strip().lower()
+    if not allowed or target in allowed:
+        return scope, False
+    try:
+        fresh = agent_scope(str(session_no or "").strip(), use_cache=False)
+    except Exception:  # noqa: BLE001
+        return scope, False
+    if fresh.get("ok"):
+        return fresh, True
+    return scope, False
+
+
 def check_kb(kb_id: str, session_no: str, role: str = "domain") -> tuple:
     """校验调用方给的 kb 是否落在会话范围内 → `(error|None, scope)`。
 
-    - `out_of_scope`：给了别的库 ⇒ 回执正确 id（**不照它查、也不静默换库** ✗）
-    - scope 不可用（need_session/unresolved/…）⇒ 原样返回，由调用方决定降级
+    - 权限口径统一看 `scope.allowed`（`all` / `work_multi` 时是动态全量）；
+    - 目标不在缓存 allowed ⇒ 先强制刷新一次；仍不在才 `out_of_scope`；
+    - scope 不可用（need_session/unresolved/…）⇒ 原样返回，由调用方决定降级。
+    - `role` 只用于回执的 expected/hint（domain/work），不再拿它当权限边界。
     """
     scope = agent_scope(session_no) if session_no else {
         "ok": False, "error": "need_session", "hint": "缺少 session_no"}
     if not scope.get("ok"):
         return None, scope
-    want = scope.get("domain_kb") if role == "domain" else scope.get("work_kb")
-    if role != "domain" and work_multi(scope):
-        return None, scope                            # 多工作库：写路径首次锁定（下游处理）
-    if kb_id and want and str(kb_id) != str(want.get("id")):
-        allowed = {str((scope.get("domain_kb") or {}).get("id") or ""),
-                   str((scope.get("work_kb") or {}).get("id") or "")} - {""}
-        if str(kb_id) not in allowed:
-            return ({"error": "out_of_scope", "expected": want,
-                     "scope": {"domain_kb": scope.get("domain_kb"),
-                               "work_kb": scope.get("work_kb")},
-                     "hint": "本会话的%s是「%s」；请用它（或省略 kb_id 由工具取）—— "
-                             "不要传别的库 ✗"
-                             % ("领域库" if role == "domain" else "工作库",
-                                (want or {}).get("name") or (want or {}).get("id") or "-")},
-                    scope)
+    scope, _refreshed = refresh_scope_for_kb(scope, session_no, kb_id)
+    allowed = {str(x).lower() for x in (scope.get("allowed") or []) if str(x)}
+    target = str(kb_id or "").strip().lower()
+    if target and allowed and target not in allowed:
+        want = scope.get("domain_kb") if role == "domain" else scope.get("work_kb")
+        return ({"error": "out_of_scope", "expected": want,
+                 "scope": {"domain_kb": scope.get("domain_kb"),
+                           "work_kb": scope.get("work_kb")},
+                 "hint": "目标库「%s」不在本会话的知识库范围内（kb_mode=%s）"
+                         % ((want or {}).get("name") or kb_id, scope.get("kb_mode"))},
+                scope)
     return None, scope
 
 

@@ -8,7 +8,8 @@ def test_page_copy_keeps_type_and_source_untouched(mcp, test_kb, session_no):
                        "content_md": "# 复制源页\n\n## ① 范围与依据\n- x\n"}}
     r = mcp.call("save_knowledge", args)
     assert r.get("applied") is True, json.dumps(r, ensure_ascii=False)[:300]
-    before = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": "_copy-src"})
+    before = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": "_copy-src",
+                                            "session_no": session_no})
     src = next((h for h in (before.get("hits") or []) if h.get("slug") == "review/_copy-src"), None)
     assert src, "源页未落库 ✗"
     src_ver = src.get("version")
@@ -18,7 +19,8 @@ def test_page_copy_keeps_type_and_source_untouched(mcp, test_kb, session_no):
     assert c.get("slug") == "review/_copy-src-copy", c
     assert c.get("page_type") == "bmm:TechnicalReviewReport", c
 
-    after = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": "_copy-src"})
+    after = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": "_copy-src",
+                                           "session_no": session_no})
     hits = {h.get("slug"): h for h in (after.get("hits") or [])}
     assert "review/_copy-src-copy" in hits, "副本未落库 ✗：%s" % sorted(hits)
     assert hits.get("review/_copy-src", {}).get("version") == src_ver, "源页被改动 ✗"

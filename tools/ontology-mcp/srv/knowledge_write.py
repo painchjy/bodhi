@@ -135,18 +135,13 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
             return {"ok": False, "kb_id": kb_id, "refused": "no_kb_configured",
                     "hint": _sc.get("hint") or "该智能体未配置任何知识库，不能写"}
         if _sc.get("ok"):
+            # 目标不在缓存 allowed 时**强制重算一次**（新库/刚改配置/all→selected 等）
+            # 统一由 ke_scope.refresh_scope_for_kb 处理，避免各工具各写一套规则。
+            _sc, _scope_refreshed = _scope_mod.refresh_scope_for_kb(_sc, _sid, kb_id)
             _allowed = {str(x).lower() for x in (_sc.get("allowed") or [])}
-            # kb_selection_mode=all：`agent_kbs` 是动态全量。新建库/另一个进程刚建的库
-            # 可能落在 60s 缓存之外 ⇒ 目标不在名单时**强制重算一次**再判 out_of_scope。
-            if (_allowed and str(kb_id).lower() not in _allowed
-                    and str(_sc.get("kb_mode") or "").lower() == "all"):
-                try:
-                    _sc2 = _scope_mod.agent_scope(_sid, use_cache=False)
-                    if _sc2.get("ok"):
-                        _sc = _sc2
-                        _allowed = {str(x).lower() for x in (_sc.get("allowed") or [])}
-                except Exception:  # noqa: BLE001
-                    pass
+            if _scope_refreshed:
+                _scope_warn = dict(_scope_warn or {})
+                _scope_warn["scope_refreshed"] = True
             if _allowed and str(kb_id).lower() not in _allowed:
                 return {"ok": False, "kb_id": kb_id, "refused": "out_of_scope",
                         "scope": {"kb_mode": _sc.get("kb_mode"),
@@ -161,8 +156,10 @@ def save_knowledge(kb_id: str = "", *, stage: str = "report", model: str = "bmm"
                 _kb_name = str((_scope_mod._kb_of(kb_id) or {}).get("name") or "")
             except Exception:  # noqa: BLE001
                 _kb_name = ""
-        _refuse, _scope_warn, _pending_work_lock = _work_scope_decision(
+        _refuse, _scope_warn_new, _pending_work_lock = _work_scope_decision(
             _sc, kb_id, mode, _kb_name)
+        if _scope_warn_new:
+            _scope_warn = {**(_scope_warn or {}), **_scope_warn_new}
         if _refuse:
             return _refuse
     except Exception:  # noqa: BLE001  scope 不可用 ⇒ 不改变既有行为（身份门禁仍在）

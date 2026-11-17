@@ -210,8 +210,9 @@ lookup_calls / native_retrieval_calls / agent_ms`。
 另外三条可用性改动：
 
 - **默认只看今天**：`--days N`（默认 1）；`--since/--until` 支持**精确到分钟**（`"2026-10-25 05:00"`）；
-- **自检不再污染真实会话**：`tests/ab_runner.py` / `test_lookup_ab.py` 统一用 `session_no=selftest`
-  （`knowledge_lookup` 的 `session_no` 只进遥测不校验），报告默认按前缀排除（`--include-selftest` 放开）；
+- **自检使用真实会话**：`knowledge_lookup.session_no` 已必填且会解析智能体 scope；
+  `tests/ab_runner.py` / `test_lookup_ab.py` 由 pytest fixture 创建专用测试 agent/session；
+  报告侧仍支持按历史 `selftest*` 前缀排除旧数据（`--include-selftest` 可放开）。
 - **数据质量逐来源只报计数**：可比/不可比的判定只在**全局**给一次，避免"某一天文件无交集 ⚠️"与"全局可比 ✓"打架。
 
 ### 6.7 第三轮修正（2026-10-25 早，用户二轮实测反馈）

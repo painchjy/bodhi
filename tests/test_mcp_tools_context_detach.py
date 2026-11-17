@@ -19,12 +19,13 @@ from kb_factory import TestKB as _TestKB
 SLUG = "review/_detach_%s" % uuid.uuid4().hex[:8]
 
 
-def _wait_visible(mcp, kb_id: str, timeout: float = 90.0) -> None:
+def _wait_visible(mcp, kb_id: str, session_no: str, timeout: float = 90.0) -> None:
     """服务端 `ke_db` 有 60s 清单缓存 ⇒ 新建库要轮询到**服务端可见**再用 ✓"""
     import time
     t0 = time.time()
     while True:
-        r = mcp.call("knowledge_lookup", {"kb_id": kb_id, "mode": "keyword", "query": "_t"})
+        r = mcp.call("knowledge_lookup", {"kb_id": kb_id, "mode": "keyword", "query": "_t",
+                                          "session_no": session_no})
         miss = (r.get("kb_unresolved") or r.get("need_kb_selection")
                 or "知识库不存在" in str(r.get("error") or ""))
         if not miss:
@@ -80,7 +81,7 @@ def test_detach_lifts_replica_write_guard(mcp, test_kb, session_no):
     kb_b = f_b.create()
     concept_ticket = ""
     try:
-        _wait_visible(mcp, kb_b)
+        _wait_visible(mcp, kb_b, session_no)
         # 两库各建同名页 ⇒ 构成跨库同名组
         assert _save_page(mcp, kb_a, session_no, "解绑目标页").get("applied") is True
         assert _save_page(mcp, kb_b, session_no, "解绑目标页").get("applied") is True

@@ -564,17 +564,24 @@ def _lookup_impl(kb_id: str = "", mode: str = "domain", query: str = "",
     import ke_db as _db
     import ke_review as _rv
 
-    try:                                          # page 模式可省 kb；未知库不要炸（回可读原因 ✓）
-        kb, kb_name, note = _db.resolve_kb_id(kb_id)
-    except Exception:                             # noqa: BLE001
-        kb, kb_name, note = "", "", ""
     m = (mode or "domain").strip().lower()
-
-    # 2026-11-02（内网）：**会话库范围**——权威 = 会话绑定智能体的配置（见 ke_scope）
-    #   · 有 scope：默认用**领域库**；智能体传了范围外的库 ⇒ out_of_scope（不照它查 ✗）
-    #   · 无 scope 且没给库（page 除外）⇒ 直接报 scope 错误，**不再回退到"清单第一个库"**
+    is_domain = m in ("domain", "领域知识", "domain_knowledge")
+    raw_kb = str(kb_id or "").strip()
+    kb, kb_name, note = "", "", ""
+    # domain 模式**固定使用 scope.domain_kb**，不解析调用方的 kb_id ✓
+    if not is_domain:
+        try:                                      # page 模式可省 kb；未知库不要炸（回可读原因 ✓）
+            kb, kb_name, note = _db.resolve_kb_id(kb_id)
+        except Exception:                         # noqa: BLE001
+            kb, kb_name, note = "", "", ""
+        if raw_kb and not kb:
+            return {"ok": False, "mode": m, "error": "kb_unresolved",
+                    "asked": raw_kb,
+                    "hint": "kb_id 解析不到；请用**智能体提示词里的库名/uuid**（domain 模式可省略 kb_id）"}
     sc: dict = {}
     _kb_check = None
+    _kb_ignored = None
+    _scope_refreshed = False
     if isinstance(scope, dict) and scope:
         sc = scope
     elif session_no:
@@ -583,18 +590,41 @@ def _lookup_impl(kb_id: str = "", mode: str = "domain", query: str = "",
             sc = _sm.agent_scope(session_no)
         except Exception:               # noqa: BLE001  scope 不可用 ⇒ 退回旧行为（不炸）
             sc = {}
+    if is_domain and not str(session_no or "").strip():
+        return {"ok": False, "mode": m, "error": "kb_scope_required",
+                "hint": "domain 模式必须提供 session_no（库范围由会话绑定的智能体决定）；"
+                        "kb_id 不参与 domain 检索"}
     if sc.get("ok"):
         dom, wrk = sc.get("domain_kb") or {}, sc.get("work_kb") or {}
         # 2026-11-04：**权限上界 = scope.allowed**（all/工作库多库=全量；selected=(domain∪work)∩挂载库）
         allowed = {str(x).lower() for x in (sc.get("allowed") or [])}
         _kb_check = None
-        if kb and allowed and kb.lower() not in allowed:
-            if m in ("domain", "领域知识", "domain_knowledge"):
-                # 用户口径：domain 模式传了别的库**不返回空**，只强调一致性并回退默认库
-                _kb_check = {"gave": str(kb_id or ""), "match": False,
-                             "expected": dom or {"id": next(iter(allowed)), "name": ""}}
-                kb, kb_name = "", ""
-            else:
+        # 新库/刚改配置时，缓存 allowed 可能落后 ⇒ 拒绝前强制刷新一次（2026-11-17）
+        _target = str((dom or {}).get("id") or "") if is_domain else kb
+        if _target and allowed and _target.lower() not in allowed:
+            try:
+                import ke_scope as _sm2      # noqa: PLC0415
+                sc, _scope_refreshed = _sm2.refresh_scope_for_kb(sc, session_no, _target)
+                dom, wrk = sc.get("domain_kb") or {}, sc.get("work_kb") or {}
+                allowed = {str(x).lower() for x in (sc.get("allowed") or [])}
+            except Exception:               # noqa: BLE001
+                pass
+        if is_domain:
+            # domain 模式**不看 kb_id**：只认 scope.domain_kb；没有就报配置错误，不回退。
+            if not dom.get("id"):
+                return {"ok": False, "mode": m, "error": "domain_kb_missing",
+                        "hint": "domain 模式需要会话智能体配置【库范围】domain_kb: …"}
+            if allowed and str(dom.get("id") or "").lower() not in allowed:
+                return {"ok": False, "mode": m, "error": "scope_invalid",
+                        "expected": dom,
+                        "hint": "领域库不在本智能体的知识库范围内（kb_mode=%s）"
+                                % sc.get("kb_mode")}
+            kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
+            if raw_kb and not (raw_kb.lower() == kb.lower() or raw_kb == kb_name):
+                _kb_ignored = {"given": raw_kb, "used": {"id": kb, "name": kb_name},
+                               "reason": "domain 模式固定使用 domain_kb，kb_id 已忽略"}
+        else:
+            if kb and allowed and kb.lower() not in allowed:
                 return {"ok": False, "error": "out_of_scope", "mode": m,
                         "expected": dom or {"id": next(iter(allowed)) if allowed else "", "name": ""},
                         "kb_scope": {"kb_mode": sc.get("kb_mode"), "domain_kb": dom, "work_kb": wrk,
@@ -602,14 +632,14 @@ def _lookup_impl(kb_id: str = "", mode: str = "domain", query: str = "",
                         "hint": ("这个库不在本智能体的知识库范围内（%s）；请用领域库或省略 kb_id"
                                  % ("、".join((k or {}).get("name") or (k or {}).get("id") or ""
                                               for k in (sc.get("agent_kbs") or [])[:5]) or "-"))}
-        if not kb:
-            if dom and (not allowed or str(dom.get("id") or "").lower() in allowed):
-                kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
-            elif allowed:
-                _first = next(iter(allowed))
-                kb = _first
-                kb_name = next((str(k.get("name") or "") for k in (sc.get("agent_kbs") or [])
-                                if str(k.get("id") or "").lower() == _first), "")
+            if not kb:
+                if dom and (not allowed or str(dom.get("id") or "").lower() in allowed):
+                    kb, kb_name = str(dom.get("id") or ""), str(dom.get("name") or "")
+                elif allowed:
+                    _first = next(iter(allowed))
+                    kb = _first
+                    kb_name = next((str(k.get("name") or "") for k in (sc.get("agent_kbs") or [])
+                                    if str(k.get("id") or "").lower() == _first), "")
     else:
         # 2026-11-03（用户口径）：**scope 不可用一律 fail-closed** —— 任何模式都不拿智能体
         # 自报的 kb_id 去查（本次内网事故：提示词=正式库、调用方传测试库、却静默查了测试库）
@@ -623,6 +653,10 @@ def _lookup_impl(kb_id: str = "", mode: str = "domain", query: str = "",
     base = {"ok": True, "mode": m, "kb": {"id": kb, "name": kb_name}}
     if _kb_check:
         base["kb_check"] = _kb_check
+    if _kb_ignored:
+        base["kb_ignored"] = _kb_ignored
+    if _scope_refreshed:
+        base["scope_refreshed"] = True
     if sc.get("ok"):
         base["kb_scope"] = {"domain_kb": sc.get("domain_kb"), "work_kb": sc.get("work_kb"),
                             "method_kb": sc.get("method_kb"), "kb_mode": sc.get("kb_mode"),
@@ -1157,8 +1191,14 @@ def knowledge_lookup(kb_id: str = "", mode: str = "domain", query: str = "",
     `session_no` / `question` / `turn_id` / `first_step` / `turn_first` **只进遥测**，不参与检索。
     """
     t0 = time.time()
-    # 2026-10-26：`kb_id` 归一化（b1/b2、带"库"字、带引号 ⇒ 唯一近似则纠正；否则给候选）
-    kb_id, _kb_fix = _normalize_kb_id(kb_id, kb_ids)
+    # 2026-11-17（用户口径）：**domain 模式固定使用 session → domain_kb，kb_id 完全不参与**
+    #   ⇒ 不归一化 b1/b2、不因未知 kb 提前报错/纠偏（否则会违反 domain 的确定性 ✓）
+    _m0 = (mode or "domain").strip().lower()
+    if _m0 not in ("domain", "领域知识", "domain_knowledge"):
+        # 2026-10-26：`kb_id` 归一化（b1/b2、带"库"字、带引号 ⇒ 唯一近似则纠正；否则给候选）
+        kb_id, _kb_fix = _normalize_kb_id(kb_id, kb_ids)
+    else:
+        _kb_fix = {}
     # 2026-11-02（内网实测）：**会话库范围优先** —— 智能体传 `b1`/空值不再决定查哪个库；
     #   范围可用 ⇒ 由 scope 的领域库兜底（见 _lookup_impl），这里只在**scope 也没有**时提前报错。
     sc: dict = {}

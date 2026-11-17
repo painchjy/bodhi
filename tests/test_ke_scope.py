@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""会话库范围（ke_scope）的**纯函数**回归：标记解析 / 中文兜底 / 不猜库。
+"""会话库范围（ke_scope）回归：标记解析 / allowed / 刷新 / 不猜库。
 
-不连库：只测 `parse_scope_text` 与 `check_kb` 的入参保护。
-（`agent_scope` 要读 WeKnora 库，走 MCP 实测，见 tests/test_rule_engineering 的做法）
+纯函数为主；`test_agent_scope_placeholder_is_multi` 用专用 pytest 测试 agent 验证真实 DB 解析。
 """
 import os
 import sys
@@ -48,7 +47,62 @@ def test_multi_work_kb():
     assert got["work"] in S._MULTI, got
 
 
-def test_empty_and_garbage():
+def test_placeholder_work_kb_is_multi():
+    """`本轮目标库` 与 `《指定工作库》` 都是占位符 ⇒ 同一 work_multi 语义。"""
+    for value in ("本轮目标库", "《指定工作库》", "指定工作库", "目标工作库", "本轮工作库"):
+        assert S._is_work_multi(value) is True, value
+    assert S._is_work_multi("某个真实工作库") is False
+
+
+def test_check_kb_uses_allowed_not_domain_slot(monkeypatch):
+    """all 模式下，allowed 里的非 domain 库不能被 check_kb 误判为 out_of_scope。"""
+    scope = {"ok": True, "allowed": ["d", "w", "x"],
+             "domain_kb": {"id": "d", "name": "领域库"},
+             "work_kb": {"id": "w", "name": "工作库"}, "kb_mode": "all"}
+    monkeypatch.setattr(S, "agent_scope", lambda sid: scope)
+    err, got = S.check_kb("x", "sid", role="domain")
+    assert err is None and got is scope, (err, got)
+
+
+def test_placeholder_work_kb_parses_as_multi():
+    """提示词里的 `《指定工作库》` 与 `本轮目标库` 都归为多工作库。"""
+    got = S.parse_scope_text(
+        "【库范围】domain_kb: 企业知识管理领域 | work_kb: 《指定工作库》\n")
+    assert got["work"] == "《指定工作库》", got
+    assert S._is_work_multi(got["work"]) is True
+    got2 = S.parse_scope_text(
+        "【库范围】domain_kb: 企业知识管理领域 | work_kb: 本轮目标库\n")
+    assert S._is_work_multi(got2["work"]) is True
+
+
+def test_agent_scope_placeholder_is_multi(test_scope_session):
+    """真实 agent_scope：占位符工作库 ⇒ work_multi=true，且 allowed 全量。"""
+    import ke_scope
+
+    sc = ke_scope.agent_scope(test_scope_session, use_cache=False)
+    assert sc.get("ok") is True, sc
+    assert sc.get("work_multi") is True, sc
+    assert sc.get("work_kb") == {}, sc
+    assert sc.get("allowed"), sc
+
+
+def test_refresh_scope_for_kb_refreshes_once(monkeypatch):
+    """目标不在缓存 allowed ⇒ 强制重算一次；刷新后仍不在才交给调用方拒绝。"""
+    old = {"ok": True, "allowed": ["a"], "domain_kb": {"id": "a"}, "work_kb": {}, "kb_mode": "all"}
+    fresh = {"ok": True, "allowed": ["a", "new"], "domain_kb": {"id": "a"}, "work_kb": {},
+             "kb_mode": "all"}
+    calls = []
+
+    def fake_scope(sid, use_cache=True):
+        calls.append(use_cache)
+        return old if use_cache else fresh
+
+    monkeypatch.setattr(S, "agent_scope", fake_scope)
+    got, refreshed = S.refresh_scope_for_kb(old, "sid", "new")
+    assert refreshed is True and got is fresh and calls == [False], (got, refreshed, calls)
+    got2, refreshed2 = S.refresh_scope_for_kb(got, "sid", "new")
+    assert refreshed2 is False and got2 is got
+
     assert S.parse_scope_text("")["source"] == ""
     assert S.parse_scope_text("随便一段话，没有库范围")["domain"] == ""
 
@@ -79,6 +133,7 @@ def test_check_kb_without_session():
 if __name__ == "__main__":
     for fn in (test_parse_tag_preferred, test_parse_cn_fallback_removed,
                test_keep_test_suffix_in_name, test_multi_work_kb, test_empty_and_garbage,
+               test_placeholder_work_kb_is_multi, test_placeholder_work_kb_parses_as_multi,
                test_compute_allowed_modes, test_check_kb_without_session):
         fn()
         print("✓ %s" % fn.__name__)

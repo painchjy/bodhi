@@ -62,6 +62,7 @@ def _kb_scope_guard(name: str, args: dict):
         return None
     if not sc.get("ok"):
         return None
+    sc, _refreshed = ke_scope.refresh_scope_for_kb(sc, sid, kb_id)
     allowed = {str(x).lower() for x in (sc.get("allowed") or [])}
     if not allowed:
         return None

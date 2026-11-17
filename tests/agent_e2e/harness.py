@@ -100,9 +100,6 @@ class WeKnoraClient:
             chosen = str(candidates[0].get("id") or "")
             if chosen and chosen not in kbs:
                 kbs.append(chosen)
-        override = [x.strip() for x in os.environ.get("BODHI_REVIEW_KB_IDS", "").split(",") if x.strip()]
-        if override:
-            kbs = override
         client = cls(os.environ.get("BODHI_WEKNORA_BASE_URL", "http://localhost:8080").rstrip("/"), token, agent_id, kbs)
         if not (client.token and client.agent_id and client.kb_ids):
             raise RuntimeError("need token/agent/prompt scope")

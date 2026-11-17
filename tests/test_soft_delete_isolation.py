@@ -64,7 +64,8 @@ def test_lookup_hits_live_row_only(mcp, test_kb, session_no):
     assert r.get("applied") is True, json.dumps(r, ensure_ascii=False)[:300]
     _plant_decoy(test_kb)
 
-    got = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": SLUG})
+    got = mcp.call("knowledge_lookup", {"kb_id": test_kb, "mode": "keyword", "query": SLUG,
+                                        "session_no": session_no})
     hits = [h for h in (got.get("hits") or []) if h.get("slug") == SLUG]
     assert hits, "活行检索不到 ✗：%s" % json.dumps(got, ensure_ascii=False)[:300]
     assert len(hits) == 1, "同 slug 出现多条命中（含死行）✗：%s" % json.dumps(hits, ensure_ascii=False)[:300]

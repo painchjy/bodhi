@@ -18,7 +18,7 @@
 
 【第一步（领域知识）】先看骨架：`knowledge_lookup(mode="domain", query="<关键字 空格分隔>")`
 - **不用传库名**（默认查方法层领域库）；`query` 是 **OR**；不知道关键词就**别给 query**（回流程/活动/任务/角色清单 + 关系）
-- 要查**目标库**的流程/任务：`mode="domain", kb_id="<目标库名>"`（必须在挂载范围内；传别的库只会提示不一致）
+- **domain 模式只查 `domain_kb`（企业知识管理领域），`kb_id` 会被忽略**；要查**目标库**的流程/任务：用 `mode="keyword", kb_id="<目标库名>"`（必须在挂载范围内）
 - 要正文再 `mode="page", slug=…`；要规则 `mode="rules", spec=…`；其它对象 `mode="search", query=…`
 - 查**某个类**可用关系/数据属性：`ontology_types(model, classes=["bmm:XXX"])`，同时看
   `class_relations` 的 `out`/`in`/`data` 与 `class_attributes`：

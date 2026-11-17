@@ -22,9 +22,6 @@ import ab_runner  # noqa: E402
 pytestmark = pytest.mark.slow
 
 HINT_KEYS = ("plan", "strategy", "suggestions", "next", "cross_kb_hint")
-# 2026-10-25（用户口径）：A/B 自检**不写进真实会话**（否则报告分不清人跑的还是机器跑的 ✗）；
-# `knowledge_lookup` 的 `session_no` 只进遥测、不校验 ⇒ 用专用标记，报告侧按前缀排除。
-SELFTEST = ab_runner.SELFTEST_SESSION
 
 
 def test_hint_default_from_env(monkeypatch):
@@ -42,10 +39,10 @@ def test_hint_default_from_env(monkeypatch):
     assert ke_lookup._hint_enabled(True) is True
 
 
-def test_switch_changes_receipt(mcp, kbs):
+def test_switch_changes_receipt(mcp, kbs, session_no):
     """同一查询、两种策略：**回执结构必须不同**（这是 A/B 的自变量）。"""
     args = {"kb_id": kbs["domain"], "mode": "keyword", "query": "流程",
-            "session_no": SELFTEST, "question": "流程有哪些？"}
+            "session_no": session_no, "question": "流程有哪些？"}
     on = mcp.call("knowledge_lookup", dict(args, ontology_hint=True))
     off = mcp.call("knowledge_lookup", dict(args, ontology_hint=False))
 
@@ -59,7 +56,7 @@ def test_switch_changes_receipt(mcp, kbs):
     assert (on.get("telemetry") or {}).get("variant") == "hint"
     assert (off.get("telemetry") or {}).get("variant") == "plain"
     tel = off["telemetry"]
-    assert tel.get("session_no") == SELFTEST, "遥测必须带上会话编号 ✗"
+    assert tel.get("session_no") == session_no, "遥测必须带上会话编号 ✗"
     assert tel.get("question") == "流程有哪些？", "遥测必须带原始问题 ✗"
     assert tel.get("question_key") and "？" not in tel["question_key"], \
         "问题归一化键应去掉全角问号 ✗：%r" % tel.get("question_key")
@@ -69,14 +66,14 @@ def test_switch_changes_receipt(mcp, kbs):
                                             (on.get("telemetry") or {}).get("hits"))
 
 
-def test_paired_dataset_complete(mcp, kbs):
+def test_paired_dataset_complete(mcp, kbs, session_no):
     """配对数据完整性：两组样本数相等、逐题可比、报告与侧车日志落盘 ✓
 
     只跑前 6 题（够验证口径；全量 14 题在 `python3 tests/ab_runner.py` 里人工跑）。
     """
     qs = ab_runner.load_questions()
     assert len(qs) >= 12, "问题集太少，A/B 无统计意义 ✗（当前 %d）" % len(qs)
-    rep = ab_runner.run_paired(mcp, kbs["domain"], SELFTEST, questions=qs[:6])
+    rep = ab_runner.run_paired(mcp, kbs["domain"], session_no, questions=qs[:6])
 
     hint_rows = [r for r in rep["rows"] if r["variant"] == "hint"]
     plain_rows = [r for r in rep["rows"] if r["variant"] == "plain"]
@@ -108,10 +105,10 @@ def test_paired_dataset_complete(mcp, kbs):
 # ---------------------------------------------------------------------------
 # 2026-10-24（A/B 四维）：版本 / 首步口径 / 问题类目
 # ---------------------------------------------------------------------------
-def test_telemetry_has_version_and_category(mcp, kbs):
+def test_telemetry_has_version_and_category(mcp, kbs, session_no):
     """遥测必须带**程序版本**（`v<语义>-<8位指纹>`）与**问题种类**（形态推断，不看结果 ✓）。"""
     r = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
-                                     "query": "流程 活动", "session_no": SELFTEST,
+                                     "query": "流程 活动", "session_no": session_no,
                                      "question": "流程和活动是什么关系？"})
     tel = r.get("telemetry") or {}
     ver = str(tel.get("lookup_version") or "")
@@ -120,19 +117,19 @@ def test_telemetry_has_version_and_category(mcp, kbs):
     assert tel.get("q_category") == "多词", "两个词的 keyword 查询应归为『多词』✗（实测 %r）" % tel.get("q_category")
     # 形态推断**不看结果**：同一 query 在负样例（不存在词）里类目仍按形态 ✓
     neg = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
-                                        "query": "zzz不存在词xxxx", "session_no": SELFTEST,
+                                        "query": "zzz不存在词xxxx", "session_no": session_no,
                                         "question": "zzz不存在词xxxx"})
     assert (neg.get("telemetry") or {}).get("q_category") == "单词", "负样例仍应按形态归『单词』✗"
 
 
-def test_turn_begin_and_first_step_gate(mcp, kbs):
+def test_turn_begin_and_first_step_gate(mcp, kbs, session_no):
     """`lookup_turn_begin` 只开边界；`knowledge_lookup` 带 `turn_id` 后能判首步 ✓"""
-    turn = mcp.call("lookup_turn_begin", {"session_no": SELFTEST, "question": "流程有哪些？"})
+    turn = mcp.call("lookup_turn_begin", {"session_no": session_no, "question": "流程有哪些？"})
     assert turn.get("ok") and turn.get("turn_id"), "turn 边界工具应返回 turn_id ✗：%r" % turn
     tid = turn["turn_id"]
 
     first = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
-                                          "query": "流程", "session_no": SELFTEST,
+                                          "query": "流程", "session_no": session_no,
                                           "question": "流程有哪些？", "turn_id": tid,
                                           "first_step": True})
     tel = first.get("telemetry") or {}
@@ -143,7 +140,7 @@ def test_turn_begin_and_first_step_gate(mcp, kbs):
 
     # 同一轮里再调一次：**首个动作不会被覆盖**（仍是 knowledge_lookup ✓）
     again = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
-                                         "query": "活动", "session_no": SELFTEST,
+                                         "query": "活动", "session_no": session_no,
                                          "question": "流程有哪些？", "turn_id": tid})
     assert (again.get("telemetry") or {}).get("turn_first_retrieval") == "knowledge_lookup"
 
@@ -192,10 +189,10 @@ def test_report_filters_version_and_first_step(tmp_path):
 #   ③ "hint 35 / plain 0；问题集合不一致（23 vs 0）"要能自解释；
 #   ④ 问题要能按"语义相近"归组（不同编号 = 同一问题的多轮），形态不同算不同类。
 # ---------------------------------------------------------------------------
-def test_telemetry_counts_real_db_queries(mcp, kbs):
+def test_telemetry_counts_real_db_queries(mcp, kbs, session_no):
     """**1 次 MCP 调用 ≠ 1 次查库**：遥测必须给真实往返数与空结果数 ✓"""
     hit = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
-                                        "query": "流程", "session_no": SELFTEST,
+                                        "query": "流程", "session_no": session_no,
                                         "question": "流程有哪些？"})
     tel = hit.get("telemetry") or {}
     retr, io = tel.get("retrieval") or {}, tel.get("io") or {}
@@ -208,7 +205,7 @@ def test_telemetry_counts_real_db_queries(mcp, kbs):
 
     # 负样例：往返照样发生，但**没有一次返回记录** ⇒ 空查询>0、ok=False（空=失败 ✓）
     miss = mcp.call("knowledge_lookup", {"kb_id": kbs["domain"], "mode": "keyword",
-                                         "query": "zzz不存在词xxxx", "session_no": SELFTEST,
+                                         "query": "zzz不存在词xxxx", "session_no": session_no,
                                          "question": "zzz不存在词xxxx"})
     m = (miss.get("telemetry") or {}).get("retrieval") or {}
     assert m["queries"] >= 1, "查不到也要有往返记录（否则等于没统计）✗"

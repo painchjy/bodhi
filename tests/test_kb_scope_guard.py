@@ -66,6 +66,23 @@ def test_unlisted_tool_passes(monkeypatch):
     assert H._kb_scope_guard("context_scan", {"session_no": "s", "kb_id": "b"}) is None
 
 
+def test_scope_refreshes_before_rejecting(monkeypatch):
+    """目标不在缓存 allowed ⇒ 刷新一次；刷新后允许则放行（新库/all 模式）。"""
+    old = _scope(["a"], mode="all")
+    fresh = _scope(["a", "new"], mode="all")
+    calls = []
+
+    def fake_scope(sid, use_cache=True):
+        calls.append(use_cache)
+        return old if use_cache else fresh
+
+    monkeypatch.setattr(ke_scope, "agent_scope", fake_scope)
+    monkeypatch.setattr(ke_db, "resolve_kb_id",
+                        lambda raw: (str(raw), "库-" + str(raw), ""))
+    assert H._kb_scope_guard("audit_scan", {"session_no": "s", "kb_id": "new"}) is None
+    assert calls == [True, False], calls
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-q"]))
