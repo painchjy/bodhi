@@ -1,0 +1,12 @@
+{
+  "cases": {
+    "CASE-TASK-SELECT-01": {
+      "expected_task": "规则化",
+      "expected_role": "业务专家",
+      "max_task_page_calls": 1,
+      "require_domain_first": true,
+      "forbid_task_page_all": true,
+      "forbid_applied_write": true
+    }
+  }
+}

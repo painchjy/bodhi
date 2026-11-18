@@ -1,0 +1,9 @@
+{
+  "plan_id": "EVAL-MODELING-TASK-SELECT-001",
+  "cases": [
+    {
+      "case_id": "CASE-TASK-SELECT-01",
+      "question": "当前有一份规则原文（bpmn:TextualDataObject），目标是产出策略与规则。请先看领域骨架，根据任务的 goal / entry / exit / roles 选择一个任务；当前执行角色是业务专家。选中后用 page 读取该任务步骤，并说明下一步要做什么。不要读取未选中的任务页，不要写库。"
+    }
+  ]
+}

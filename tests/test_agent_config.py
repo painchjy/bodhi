@@ -5,7 +5,7 @@
 2. `_find_by_name`：按 `config.name` / 顶层 `name` 定位（多环境 id 不同 ⇒ 必须能按名找）；
 3. `_resolve_svcs`：`mcp_service_names` → 按 **name** 解析成 id（不写死 id）；
 4. `--check` 无漂移（配置真源与库一致）；
-5. 三个智能体都在，且建模智能体的提示词含"以任务页步骤为准 / 不把技能当流程 / 自报不确定性"。
+5. 两个生产智能体都在；建模提示词含"以任务页步骤为准 / 不把技能当流程 / 自报不确定性"；测试用 _pytest_ agent。
 
 DB 不可用 ⇒ skip。
 """
@@ -22,7 +22,7 @@ for p in (HERE, os.path.join(REPO, "tools", "ke-core"),
         sys.path.insert(0, p)
 
 CONF_DIR = os.path.join(REPO, "deploy", "weknora-fork", "config")
-AGENTS = ("技术方案评审智能体", "企业知识管理建模智能体", "技术方案评审智能体（测试）")
+AGENTS = ("技术方案评审智能体", "企业知识管理建模智能体")
 
 
 def test_prompt_text_takes_first_text_block():
@@ -97,7 +97,7 @@ def test_modeling_agent_binds_all_domain_kbs(cfg):
 
 def test_test_agent_binds_test_kbs(cfg):
     """测试评审智能体：只绑**测试领域库 + 测试工作库**（不污染生产库）。"""
-    aid = cfg._find_by_name("技术方案评审智能体（测试）")
+    pytest.skip("技术方案评审智能体（测试）已退役；测试用 __pytest_scope_agent__")
     assert aid
     cur = cfg._current(aid)
     names = {str(r["name"]) for r in cfg.ke_db.psql_csv(
@@ -115,3 +115,14 @@ def test_test_agent_binds_test_kbs(cfg):
     for marker in ("任务页", "不是流程" if "不是流程" in p else "技能",
                    "关系实例", "不确定性"):
         assert marker in p, "提示词缺标记：%s" % marker
+
+
+def test_pytest_scope_agent_is_all(_test_scope_agent):
+    """生产测试智能体已退役；测试用 _pytest_ 专用 agent（all + 占位工作库）。"""
+    import ke_db
+    rows = ke_db.psql_csv(
+        "SELECT config->>'kb_selection_mode' AS mode, config->>'system_prompt' AS prompt "
+        "FROM custom_agents WHERE id = %s" % ke_db.sql_str(_test_scope_agent))
+    assert rows, "pytest scope agent 不存在"
+    assert rows[0].get("mode") == "all", rows
+    assert "《指定工作库》" in (rows[0].get("prompt") or ""), rows

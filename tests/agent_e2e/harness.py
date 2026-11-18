@@ -53,16 +53,16 @@ class WeKnoraClient:
     timeout: float = 480.0
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls, agent_name: str = "", agent_id_env: str = "BODHI_REVIEW_AGENT_ID", agent_name_env: str = "BODHI_REVIEW_AGENT_NAME"):
         token = os.environ.get("BODHI_WEKNORA_TOKEN", "").strip()
         from ke_db import sql_str
         if not token:
             rows = _psql("SELECT token FROM auth_tokens WHERE is_revoked = false AND token_type = " + sql_str("access_token") + " AND expires_at > now() ORDER BY created_at DESC LIMIT 1")
             token = str(rows[0].get("token") or "") if rows else ""
 
-        agent_id = os.environ.get("BODHI_REVIEW_AGENT_ID", "").strip()
+        agent_id = os.environ.get(agent_id_env, "").strip()
         if not agent_id:
-            agent_name = os.environ.get("BODHI_REVIEW_AGENT_NAME", "技术方案评审智能体").strip()
+            agent_name = (agent_name or os.environ.get(agent_name_env, "技术方案评审智能体")).strip()
             rows = _psql("SELECT id FROM custom_agents WHERE name = " + sql_str(agent_name)
                          + " AND name NOT LIKE " + sql_str("%停用%")
                          + " ORDER BY created_at DESC LIMIT 1")
@@ -75,7 +75,7 @@ class WeKnoraClient:
             agent_id = str(rows[0].get("id") or "") if rows else ""
         rows = _psql("SELECT config->>" + sql_str("system_prompt") + " AS prompt FROM custom_agents WHERE id = " + sql_str(agent_id))
         prompt = str(rows[0].get("prompt") or "") if rows else ""
-        names = parse_scope(prompt)
+        names = parse_scope(prompt); names = names[:1] if (len(names) > 1 and names[1] in _PLACEHOLDER_WORK) else names
 
         # Resolve each prompt scope name independently. A stale soft-deleted duplicate
         # (same display name) must never enter the session's kb_ids.
@@ -247,4 +247,29 @@ def score_case(plan_case: dict, oracle_case: dict, run: dict) -> dict:
     return {"case_id": plan_case.get("case_id"), "passed": not errors, "checks": checks, "errors": errors}
 
 
-__all__ = ["WeKnoraClient", "load_cases", "score_case"]
+__all__ = ["WeKnoraClient", "load_cases", "score_case", "run_query", "tool_calls"]
+
+_PLACEHOLDER_WORK = {"本轮目标库", "《指定工作库》", "指定工作库", "目标工作库", "本轮工作库"}
+
+
+def run_query(client, query: str, title: str = "agent-e2e") -> dict:
+    sid = client.create_session(title)
+    client.chat(sid, query)
+    msgs = client.messages(sid)
+    report = next((m["content"] for m in reversed(msgs) if m["role"] == "assistant"), "")
+    return {"session_id": sid, "report": report, "messages": msgs}
+
+
+def tool_calls(messages: list) -> list:
+    out = []
+    prefix = "mcp_bodhi_ontology_"
+    for msg in messages or []:
+        for step in (msg.get("agent_steps") or []):
+            for call in (step.get("tool_calls") or []):
+                if not isinstance(call, dict) or not call.get("name"):
+                    continue
+                name = str(call.get("name"))
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+                out.append({"name": name, "args": call.get("args") or {}})
+    return out

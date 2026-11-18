@@ -66,3 +66,10 @@ python3 ke_pages.py relations dbc2528f-611b-48da-9a71-d7c93975adb4 'bmm/business
   / 相似度）体积最大，可整体搬成 `ke-core/extract_pipeline.py`，`server.py` 只留 MCP 壳；
 - `graph_page.py` 的 HTML/JS（内嵌字符串）可拆成模板文件，便于单独改图；
 - `reason.py` 落地时把 S1–S9 / O1–O5 判定写成纯函数（无 IO，便于 CI 断言）。
+
+## 6. domain 任务选择视图（2026-11-18）
+
+`ke_domain.py`：`domain` 模式按 **流程 → 活动 → 任务** 分组，任务只带
+`goal / io.entry / io.exit / roles`（来自 `bpmn:taskGoal` / `bpmn:activityEntry` /
+`bpmn:activityExit` / `bpmn:taskHasRole`），不返回任务正文；选中任务后再用
+`knowledge_lookup(mode="page")` 读步骤。活动信息只在分组层出现一次。

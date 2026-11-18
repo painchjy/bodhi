@@ -439,8 +439,8 @@ TOOL_SCHEMAS = [
             "name": "knowledge_lookup",
             "description": ("**统一检索入口（只读）**：**默认 `mode=\"domain\"`（领域知识，第一步就用它）** —— "
                             "**必须传 `session_no`**；domain 模式固定使用会话智能体的 `domain_kb`，"
-                            "**`kb_id` 完全忽略**；`query` 空格分隔 = OR；不给 query ⇒ 返回流程/活动/任务/角色清单 + 关系；"
-                            "要正文用 `mode=\"page\"`，规则用 `mode=\"rules\"`，其它对象用 `mode=\"search\"`。"
+                            "**`kb_id` 完全忽略**；`query` 空格分隔 = OR；不给 query ⇒ 返回按活动分组的任务（goal/io/roles）；先选任务，再 page 读步骤；"
+                            "任务选定后用 `mode=\"page\"` 读步骤；规则用 `mode=\"rules\"`，其它对象用 `mode=\"search\"`。"
                             "库范围由**会话绑定的智能体配置**决定（`【库范围】` + UI 挂载库/全部库）；"
                             "非 domain 模式传了范围外的库会被 `out_of_scope` 拒绝。"
                             "`work_kb` 的 `本轮目标库` / `《指定工作库》` 等占位符视为多工作库。"
@@ -451,7 +451,7 @@ TOOL_SCHEMAS = [
                          "description": ("**domain（默认，领域知识）** | page | search | rules"
                                          "（`keyword/instances/route/path/semantic` 兼容保留，不建议）。"
                                          "domain：必须 session_no，固定用 domain_kb，kb_id 忽略；query 空格=OR；"
-                                         "无 query ⇒ 流程/活动/任务/角色清单+关系；"
+                                         "无 query ⇒ 按活动分组的任务（goal/io/roles）；"
                                          "page：按 slug/标题取整页（可用标题关键词）；search：类范围+多词；"
                                          "rules：规则契约（spec=direct:/policy:/influencer:/ask）")},
                 "query": {"type": "string",

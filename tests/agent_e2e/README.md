@@ -81,3 +81,16 @@ oracle 可以设置 `"verdict_scope": "causal"`：`score_case` 只取报告里�
 
 `WeKnoraClient.from_env()` 从智能体的 `system_prompt` 解析 `【库范围】domain_kb: … | work_kb: …`，再按库名解析成 id；不再硬编码默认知识库名。
 
+
+## 建模智能体：任务选择 E2E（2026-11-18）
+
+`test_modeling_task_select.py` 验证 domain 只返回按活动分组的任务（goal / io / roles），
+智能体选 1 个任务后才 page，不允许 page 全部任务。
+
+```bash
+BODHI_RUN_AGENT_E2E=1 \
+BODHI_MODELING_AGENT_NAME=企业知识管理建模智能体 \
+pytest -q -m agent_e2e tests/agent_e2e/test_modeling_task_select.py
+```
+
+case 输入在 `cases/modeling_task_select_plan.json`，预期任务在 oracle；两者分离。

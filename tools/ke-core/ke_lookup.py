@@ -670,60 +670,15 @@ def _lookup_impl(kb_id: str = "", mode: str = "domain", query: str = "",
             base["kb_scope"]["scope_changed"] = True
             base["next"] = sc.get("hint") or base.get("next", "")
 
-    # ── ⓪ domain：**领域知识清单/检索（默认入口）** —— 不需要库名 ─────────
-    #   2026-11-04 用户口径：query 空格分隔 = **OR**；无 query ⇒ 流程/活动/任务/角色清单 + 关系。
+    # ── ⓪ domain：**领域知识清单/任务选择（默认入口）** —— 不需要库名 ─────────
+    #   2026-11-18（用户口径）：任务按活动分组，任务只带 goal / entry / exit / roles；
+    #   不返回任务正文，智能体先选 1 个任务，再用 page 读取步骤。
     if m in ("domain", "领域知识", "domain_knowledge"):
         if not kb:
             return {**base, "ok": False, "error": "need_kb",
                     "hint": "domain 模式需要先确定领域库（由会话/智能体配置决定，不要自己编库名）"}
-        classes = ("bmm:BusinessProcess", "bpmn:Activity", "bpmn:Task", "bpmn:Role")
-        q = str(query or "").strip()
-        kws = [x for x in re.split(r"[\s,，、]+", q) if x][:10]
-        where = ["deleted_at IS NULL", "knowledge_base_id = %s" % _db.sql_str(kb),
-                 "page_type IN (%s)" % ", ".join(_db.sql_str(c) for c in classes)]
-        if kws:                                   # OR：任一词命中即可（不是 AND）
-            likes = []
-            for w in kws:
-                likes.append("(slug ILIKE %s OR title ILIKE %s OR aliases::text ILIKE %s)"
-                             % (_db.sql_str("%" + w + "%"), _db.sql_str("%" + w + "%"),
-                                _db.sql_str("%" + w + "%")))
-            where.append("(" + " OR ".join(likes) + ")")
-        rows = _db.psql_csv(
-            "SELECT slug, title, page_type, COALESCE(aliases::text,'[]') AS aliases "
-            "  FROM wiki_pages WHERE %s ORDER BY page_type, slug LIMIT %d"
-            % (" AND ".join(where), max(1, int(limit or 200))))
-
-        def _als(v):
-            try:
-                got = json.loads(v or "[]")
-                return got if isinstance(got, list) else []
-            except Exception:  # noqa: BLE001
-                return []
-
-        items = [{"type": r.get("page_type"), "slug": r.get("slug"),
-                  "title": r.get("title"), "aliases": _als(r.get("aliases"))} for r in rows]
-        relations = []
-        slugs = [i["slug"] for i in items if i.get("slug")]
-        if slugs:
-            try:
-                import ke_graph as _kg  # noqa: PLC0415
-                rel = _kg._run(
-                    "MATCH (n:BodhiInstance {kb_id:$kb})-[r]->(m:BodhiInstance {kb_id:$kb}) "
-                    "WHERE n.slug IN $slugs RETURN n.slug AS s, type(r) AS t, m.slug AS o LIMIT 200",
-                    {"kb": kb, "slugs": slugs[:200]}) or []
-                relations = [{"from": x.get("s"), "type": x.get("t"), "to": x.get("o")}
-                             for x in rel]
-            except Exception:  # noqa: BLE001  图不可用不影响清单
-                relations = []
-        return {**base, "mode": "domain", "items": items, "relations": relations,
-                "counts": {"items": len(items), "relations": len(relations)},
-                "next": ("要正文用 `mode=page, slug=…`；规则用 `mode=rules`；"
-                         "其他领域知识（策略/数据对象/子系统/工具…）用 `mode=search`"),
-                "relation_paths": [
-                    "bmm:BusinessProcess → bpmn:processHasActivity → bpmn:Activity",
-                    "bpmn:Activity → bpmn:activityContainsTask → bpmn:Task",
-                    "bpmn:Task → bpmn:taskExecutesRule / taskExecutesPolicy → 规则 / 策略",
-                    "bpmn:Task → bpmn:taskHasRole → bpmn:Role"]}
+        import ke_domain as _domain  # noqa: PLC0415
+        return {**base, **_domain.domain_view(kb, query, limit)}
 
     # ── ⓪ page：按 slug 取整页（正文 + 属性；`<库名>/` 前缀容错）────────────
     if m == "page":

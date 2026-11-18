@@ -722,7 +722,7 @@
     "type": "integer"
    },
    "mode": {
-    "description": "**domain（默认，领域知识）** | page | search | rules（`keyword/instances/route/path/semantic` 兼容保留，不建议）。domain：不用库名，query 空格=OR；无 query ⇒ 流程/活动/任务/角色清单+关系；page：按 slug/标题取整页（可用标题关键词）；search：类范围+多词；rules：规则契约（spec=direct:/policy:/influencer:/ask）",
+    "description": "**domain（默认，领域知识）** | page | search | rules（`keyword/instances/route/path/semantic` 兼容保留，不建议）。domain：必须 session_no，固定用 domain_kb，kb_id 忽略；query 空格=OR；无 query ⇒ 按活动分组的任务（goal/io/roles）；page：按 slug/标题取整页（可用标题关键词）；search：类范围+多词；rules：规则契约（spec=direct:/policy:/influencer:/ask）",
     "type": "string"
    },
    "ontology_hint": {

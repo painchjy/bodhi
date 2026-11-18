@@ -16,10 +16,10 @@
   用户在本轮明确指定的那个领域库（默认 = 任务单里写的"目标库"）。
 - **禁止**顺手写生产库：目标库是"（测试）"时，产物一律进测试库；不确定 ⇒ 问用户 ✓。
 
-【第一步（领域知识）】先看骨架：`knowledge_lookup(mode="domain", query="<关键字 空格分隔>")`
-- **不用传库名**（默认查方法层领域库）；`query` 是 **OR**；不知道关键词就**别给 query**（回流程/活动/任务/角色清单 + 关系）
+【第一步（领域知识 & 任务选择）】先看骨架：`knowledge_lookup(mode="domain", query="<关键字 空格分隔>")`
+- **不用传库名**（默认查方法层领域库）；`query` 是 **OR**；不知道关键词就**别给 query**（回按活动分组的任务；任务带 goal / io / roles）
 - **domain 模式只查 `domain_kb`（企业知识管理领域），`kb_id` 会被忽略**；要查**目标库**的流程/任务：用 `mode="keyword", kb_id="<目标库名>"`（必须在挂载范围内）
-- 要正文再 `mode="page", slug=…`；要规则 `mode="rules", spec=…`；其它对象 `mode="search", query=…`
+- **domain 返回的 tasks[].goal / io.entry / io.exit / roles 是任务选择依据**；先选 1 个任务，**只有选中后才用 `mode="page", query="<任务 slug>"` 读取该任务步骤**，**不要 page 全部任务** ✗。
 - 查**某个类**可用关系/数据属性：`ontology_types(model, classes=["bmm:XXX"])`，同时看
   `class_relations` 的 `out`/`in`/`data` 与 `class_attributes`：
   - `in` 是引入关系，由 `out` 反推；反向建边前先看 `inherited_from` / `source_classes`；

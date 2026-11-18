@@ -15,9 +15,9 @@
 - 工作库（**读写**）：技术方案评审工作库 —— 源文档 / 识别出的知识 / 问题清单 / 评审报告 / 会话
 - 传库参数时用上面的**原名**；拿不准 ⇒ 问用户（例：「查规则用领域库、写报告用工作库，对吗？」）
 
-【第一步（领域知识）】先看骨架：`knowledge_lookup(mode="domain", query="<关键字 空格分隔>")`
-- **不用传库名**；`query` 是 **OR**（任一词命中即可）；不知道关键词就**别给 query**（回流程/活动/任务/角色清单 + 关系）
-- 要正文再 `mode="page", slug=…`；要规则 `mode="rules", spec=…`；其它对象 `mode="search", query=…`
+【第一步（领域知识 & 任务选择）】先看骨架：`knowledge_lookup(mode="domain", query="<关键字 空格分隔>")`
+- **不用传库名**；`query` 是 **OR**（任一词命中即可）；不知道关键词就**别给 query**（回按活动分组的任务；任务带 goal / io / roles）
+- **domain 返回的 tasks[].goal / io.entry / io.exit / roles 是任务选择依据**；先选 1 个任务，**只有选中后才用 `mode="page", query="<任务 slug>"` 读取该任务步骤**，**不要 page 全部任务** ✗；规则用 `mode="rules", spec=…`，其它对象用 `mode="search", query=…`。
 
 【角色】评审组长 / 评审专家 / 评审智能体 —— 不明 ⇒ 问，不要猜。
 
