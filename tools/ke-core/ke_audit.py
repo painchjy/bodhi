@@ -403,7 +403,7 @@ def check_coupling(ctx: dict, rep: Report) -> None:
         start = next((i for i, ln in enumerate(lines) if ln.strip() == "## 属性（数据属性）"), -1)
         if start < 0:
             return {}
-        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].strip() in ("## 原文依据", "## 本体关系", "## 关系限定（边属性）", "## 被引用（入边）", "## 判定依据", "## 用途", "## 输入 / 输出", "## 设计规范（正常 / 异常案例 · ASSERTION）")), len(lines))
         vals, cur, buf = {}, None, []
 
         def _flush():

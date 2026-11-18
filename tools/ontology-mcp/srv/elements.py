@@ -410,8 +410,10 @@ def save_elements(kb_id: str, model: dict, checked: dict, payloads: list, doc_me
                 # 这一行 → 传了就会改正文（实测 +50 字符）。会话溯源仍由本路径既有的会话边逻辑负责。
                 # **但 `locator` 要传**：它是 L2 数据属性 `bmm:sourceLocator`（含分页序 `/pN`），
                 # 与内核自己的口径一致（实测库里就是 `session/<no>/p2`）。
-                _s = _kp.spec_from_page(
-                    _pg, _b["element"], mode="document", strip_legacy_head=True, relations=[],
+                # 2026-11-18：按本体渲染模式写正文 —— DataObject/其它 entity 走「数据属性投影」，
+                # 只有 bmm:Report 子类保留 document（正文由报告载荷提供），避免把旧正文重复拼进来。
+                _page_mode = ke_ontology.render_mode(str(_pg.get("page_type") or "")) or "document"; _s = _kp.spec_from_page(
+                    _pg, _b["element"], mode=_page_mode, strip_legacy_head=True, relations=[],
                     source={"doc_refs": _pg.get("source_refs") or [],
                             "chunk_refs": _pg.get("chunk_refs") or [],
                             "locator": _loc})

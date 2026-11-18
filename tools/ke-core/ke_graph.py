@@ -64,7 +64,7 @@ def _attrs_from_content(content: str) -> dict[str, str]:
 
     for raw in (content or "").splitlines():
         line = raw.rstrip()
-        if line.startswith("## "):
+        if line.startswith("## ") and not (sec in ("属性（数据属性）", "属性") and line.strip() not in ("## 原文依据", "## 本体关系", "## 关系限定（边属性）", "## 被引用（入边）", "## 判定依据", "## 用途", "## 输入 / 输出", "## 设计规范（正常 / 异常案例 · ASSERTION）")):
             _flush()
             sec = line[3:].strip()
             continue

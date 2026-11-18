@@ -688,7 +688,10 @@ def _summary_sync_key(props: dict) -> str:
     return "skos:definition"
 
 
+# 属性段之后的"真小节"（只认这些标题）：属性值本身可含 `## 字段表` / `## 正文取数` 等 markdown 标题，
+# 不能见 `## ` 就截断，否则旧值会留在正文、替换时再追加一份 → 重复。
 ATTR_SECTION = "## 属性（数据属性）"
+ATTR_END_SECTIONS = (EVIDENCE_SECTION, REL_SECTION, QUAL_SECTION, "## 被引用（入边）", "## 判定依据", "## 用途", "## 输入 / 输出", "## 设计规范（正常 / 异常案例 · ASSERTION）")
 # 与 PG `summary` 同步的键（**本地名**，2026-10-14 用户口径）：
 #   `skos:definition` ↔ WeKnora 原生编辑框里的「定义」（就是 `wiki_pages.summary`），
 #   所以**正文属性段不再重复渲染**它（正文里由首段承载，见 `set_page_attributes` / `render_entity_content`）。
@@ -816,7 +819,7 @@ def _keys_in_section(content: str) -> list[str]:
         if s == ATTR_SECTION:
             inside = True
             continue
-        if inside and s.startswith("## "):
+        if inside and s in ATTR_END_SECTIONS:
             break
         if not inside:
             continue
@@ -852,7 +855,7 @@ def replace_attr_section(content: str, page_type: str, attributes: dict, skip_ke
     section = render_attributes_section(page_type, ordered, skip_keys=skip_keys)
     start = next((i for i, ln in enumerate(lines) if ln.strip() == ATTR_SECTION), -1)
     if start >= 0:
-        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].strip() in ATTR_END_SECTIONS), len(lines))
         out = lines[:start] + (section + [""] if section else []) + lines[end:]
     else:
         ins = next((i for i, ln in enumerate(lines) if ln.startswith(EVIDENCE_SECTION)), -1)

@@ -129,6 +129,13 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 ### 4.4 定义不重复
 `definition_key` 指定的键**只出现在正文首段**，**属性段里跳过它**（消除"首段一份、属性段又一份"）。
 
+
+### 4.5 属性值里的 `##` 标题（2026-11-18）
+
+`## 属性（数据属性）` 段的值可能是多行 markdown（例如 `## 字段表`）。解析/替换只以已知小节标题（`## 原文依据`、`## 被引用（入边）`、`## 本体关系`、`## 关系限定（边属性）` 等）为边界，不能见 `## ` 就结束；否则旧值留在正文、重渲染再追加一遍 → 正文重复。
+
+DataObject 与其它 entity 一样由数据属性投影正文（`render_mode` 决定，报告类才保留 document）；`bodhi-ext-contract` 块只由 `ensure_contract_block` 在 DataObject/Tool 页补齐，重复保存幂等（旧块先去重再写）。
+
 ---
 
 ## 5. 溯源模型（4 层，统一 `source` 参数）
