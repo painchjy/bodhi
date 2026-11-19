@@ -136,6 +136,18 @@ ke_pages.write_knowledge_batch(kb_id, specs, *, dry_run=False) -> {applied, page
 
 DataObject 与其它 entity 一样由数据属性投影正文（`render_mode` 决定，报告类才保留 document）；`bodhi-ext-contract` 块只由 `ensure_contract_block` 在 DataObject/Tool 页补齐，重复保存幂等（旧块先去重再写）。
 
+### 4.6 DataObject 整页重建（2026-11-19）
+
+`rebuild_data_objects(kb_id, slugs?, dry_run=true)` 是**维护口**，不是新的写知识入口：
+
+- 只扫 `bpmn:DataObject`；按当前数据属性重渲染 `## 属性（数据属性）`，并清理属性段之外的孤儿 `## 字段表`；
+- 按当前图绑定边重新生成**唯一** `bodhi-ext-contract` 块；旧重复块全部删除；
+- `dry_run=true` 只回每页 `before/after`（`contract_blocks` / `field_tables`），不写库；
+- `dry_run=false` 走现有 `set_page_attributes`（图节点 + PG 原子写、版本 +1），不改任务页/模板/报告。
+
+属性编辑、绑定、字段映射也复用 `refresh_contract_block` / `strip_orphan_field_tables` 同一组原语，
+所以四条路径的正文口径一致。**不要**用 `rebuild_data_objects` 代替日常建模写入。
+
 ---
 
 ## 5. 溯源模型（4 层，统一 `source` 参数）

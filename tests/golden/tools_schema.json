@@ -914,6 +914,28 @@
   ],
   "type": "object"
  },
+ "rebuild_data_objects": {
+  "properties": {
+   "dry_run": {
+    "description": "默认 true：只回预览，不写库",
+    "type": "boolean"
+   },
+   "kb_id": {
+    "type": "string"
+   },
+   "slugs": {
+    "description": "只重建这些 DataObject slug（省略=全库）",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   }
+  },
+  "required": [
+   "kb_id"
+  ],
+  "type": "object"
+ },
  "reference_lookup": {
   "properties": {
    "allow_fetch": {

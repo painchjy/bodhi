@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import ke_ext_tools
 import ke_metrics
 import ke_page_ops
 import ke_pages
@@ -46,6 +47,15 @@ def page_attributes_set(args: dict) -> dict:
                                         args.get("patch") or {},
                                         actor=str(args.get("actor", "")),
                                         dry_run=bool(_pa_dry))
+
+
+@handle("rebuild_data_objects")
+def rebuild_data_objects(args: dict) -> dict:
+    _rb_dry = args.get("dry_run", True)
+    if isinstance(_rb_dry, str):
+        _rb_dry = _rb_dry.strip().lower() not in ("0", "false", "no", "off", "")
+    return ke_ext_tools.rebuild_data_objects(
+        str(args.get("kb_id", "")), args.get("slugs") or [], dry_run=bool(_rb_dry))
 
 
 def _compact_result(out: dict, limit: int = 8) -> dict:

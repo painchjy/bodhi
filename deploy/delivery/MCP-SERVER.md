@@ -267,17 +267,20 @@ PY
 python3 /opt/bodhi2/02-mcp-server/selfcheck.py --url http://127.0.0.1:8765/mcp
 ```
 
-`selfcheck.py` 期望输出（36 个工具）：
+`selfcheck.py` 期望输出（**2026-11-19 起 44 个工具**；新增 `rebuild_data_objects`，旧截图里的 36/37 仅作历史）：
 
 ```
 initialize  OK（session=…）
-tools/list  OK（37 个）：audit_scan, audit_plan, save_knowledge, doc_outline, extract_state, skills,
+tools/list  OK（44 个）：audit_scan, audit_plan, save_knowledge, doc_outline, extract_state, skills,
                         ontology_types, job_status, rebuild_wiki_from_graph,
-                        service_overview, audit_scan, audit_plan, save_knowledge, doc_outline, extract_state,
+                        service_overview, rebuild_data_objects,
                         link_candidates, list_link_candidates, resolve_link_candidate
 skills()    OK（3 个：document_review / domain_modeling / structured_modeling）
 ```
 
+> **2026-11-19 工具增补（43 → 44）**：新增 `rebuild_data_objects(kb_id, slugs?, dry_run=true)`：
+> 只重建 `bpmn:DataObject` 的属性段 + 唯一契约块，清掉历史重复块/孤儿字段表；默认 dry-run。
+>
 > **2026-10-10 工具增删（38 → 37）**：**删除** `list_pending_merges` / `resolve_pending_merge`
 > （「相似度合并」永久取消，待确认合并页不再产生；相似知识裁决统一走 `audit_scan` 的 S1/S2）；
 > **新增**运维工具 `rebuild_wiki_from_graph(kb_id, dry_run=true)`（按图节点 `wiki_content` 重建 PG 正文）。

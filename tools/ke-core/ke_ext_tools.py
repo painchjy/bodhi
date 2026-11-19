@@ -41,17 +41,89 @@ def _is_contract_page(page_type: str) -> bool:
         return pt in ("bpmn:DataObject", "bpmn:TextualDataObject")
 
 
+def _contract_block_for(kb_id: str, object_slug: str, page_type: str,
+                        tool: str = "") -> dict:
+    """Build the canonical contract block for one page (no writes)."""
+    import ke_ext_binding as _S  # noqa: PLC0415
+
+    # 2026-10-30（用户实测死锁）：**未绑定也要有块** —— 否则面板不出现 ⇒ 永远绑不上。
+    # 工具页（agent:Tool）同样要有块，UI 才能"刷新契约"。
+    kind = "tool" if page_type == "agent:Tool" else "contract"
+    if kind == "tool" and not tool:
+        tool = object_slug.rsplit("/", 1)[-1]
+    binds = _S.list_bindings(kb_id, object_slug)
+    binding = binds[0] if binds else {}
+    tool = tool or binding.get("tool") or ""
+    svc = ""
+    try:
+        import ke_neo4j  # noqa: PLC0415
+        got = ke_neo4j.query(
+            "MATCH (t:BodhiInstance)-[]->(s:BodhiInstance) "
+            "WHERE t.kb_id=$kb AND last(split(t.slug,'/')) = $tool "
+            "  AND s.slug STARTS WITH 'agent/mcpservice/' "
+            "RETURN last(split(s.slug,'/')) AS svc LIMIT 1",
+            {"kb": kb_id, "tool": tool}, timeout=6) or []
+        svc = str((got[0] or {}).get("svc") or "") if got else ""
+    except Exception:  # noqa: BLE001
+        svc = ""
+    fmap_items = []
+    try:
+        fmap_items = ((json.loads(binding.get("field_map") or "{}") or {}).get("items") or [])
+    except Exception:  # noqa: BLE001
+        fmap_items = []
+    block = "\n".join([BLOCK, "kind: %s" % kind, "object: %s" % object_slug,
+                       "tool: %s" % tool, "service: %s" % svc,
+                       "mapping_status: %s" % (binding.get("status") or ""),
+                       "mapped_columns: %d" % len(fmap_items),
+                       "```", ""])
+    return {"kind": kind, "tool": tool, "service": svc,
+            "mapped_columns": len(fmap_items), "block": block}
+
+
+def _with_contract_block(content: str, block: str) -> tuple[str, bool]:
+    """Replace every legacy contract block with exactly one canonical block."""
+    import re as _re  # noqa: PLC0415
+
+    blocks = list(_re.finditer(r"(?ms)^```bodhi-ext-contract\s*$.*?^```\s*$", content or ""))
+    if len(blocks) == 1 and blocks[0].group(0).strip() == block.strip():
+        return content, False
+    rest = content or ""
+    for found in reversed(blocks):
+        rest = rest[:found.start()] + rest[found.end():]
+    rest = rest.lstrip("\n")
+    return block + ("\n" + rest if rest.strip() else ""), True
+
+
+def refresh_contract_block(kb_id: str, object_slug: str, content: str,
+                           page_type: str = "", tool: str = "") -> dict:
+    """Canonicalize a page body's contract block **without writing** (dry-run safe).
+
+    This is the single body-rebuild primitive used by attribute edits, binding /
+    mapping updates, and the ``rebuild_data_objects`` maintenance tool.
+    """
+    pt = str(page_type or "")
+    if not _is_contract_page(pt):
+        return {"ok": True, "changed": False, "content": content,
+                "reason": "not_data_object_or_tool", "page_type": pt}
+    # Binding/mapping also goes through this primitive: clean orphan field
+    # tables left outside the attribute section by older writers.
+    content = ke_pages.strip_orphan_field_tables(content, pt)
+    spec = _contract_block_for(kb_id, object_slug, pt, tool=tool)
+    new_content, changed = _with_contract_block(content, spec["block"])
+    return {"ok": True, "changed": changed, "content": new_content,
+            "block": spec["block"], "tool": spec["tool"],
+            "service": spec["service"], "mapped_columns": spec["mapped_columns"]}
+
+
 def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
     """给**已绑定**的业务对象页补 ````bodhi-ext-contract```` 块（面板靠它渲染）。
 
     为什么要它（2026-10-30 用户实测）：对象页没有这个块 ⇒ 前端"绑定/映射/刷新契约"面板不出现 ⇒
     用户以为绑定没生效。绑定成功后自动补块，幂等（已有同 object 的块 ⇒ 不动）。
+    2026-11-19：改为**先规范化整段块**再一次性写页，重复块与旧字段一起清掉。
     """
     try:
-        import json  # noqa: PLC0415
-
         import ke_db  # noqa: PLC0415
-        import ke_ext_binding as _S  # noqa: PLC0415
         import ke_pages  # noqa: PLC0415
         rows = ke_db.psql_csv(
             "SELECT title, page_type, coalesce(content,'') AS c, page_metadata::text AS md "
@@ -65,56 +137,105 @@ def ensure_contract_block(kb_id: str, object_slug: str, tool: str = "") -> dict:
         if not _is_contract_page(_pt):
             return {"ok": True, "changed": False, "reason": "not_data_object_or_tool",
                     "page_type": _pt, "block": BLOCK}
-        # 2026-10-30（用户实测死锁）：**未绑定也要有块** —— 否则面板不出现 ⇒ 永远绑不上。
-        # 工具页（agent:Tool）同样要有块，UI 才能"刷新契约"。
-        _kind = "tool" if _pt == "agent:Tool" else "contract"
-        if _kind == "tool" and not tool:
-            tool = object_slug.rsplit("/", 1)[-1]
-        binds = _S.list_bindings(kb_id, object_slug)
-        b = binds[0] if binds else {}
-        tool = tool or b.get("tool") or ""
-        svc = ""
-        try:
-            import ke_neo4j  # noqa: PLC0415
-            got = ke_neo4j.query(
-                "MATCH (t:BodhiInstance)-[]->(s:BodhiInstance) "
-                "WHERE t.kb_id=$kb AND last(split(t.slug,'/')) = $tool "
-                "  AND s.slug STARTS WITH 'agent/mcpservice/' "
-                "RETURN last(split(s.slug,'/')) AS svc LIMIT 1",
-                {"kb": kb_id, "tool": tool}, timeout=6) or []
-            svc = str((got[0] or {}).get("svc") or "") if got else ""
-        except Exception:  # noqa: BLE001
-            svc = ""
-        _fmap_items = []
-        try:
-            import json as _j3  # noqa: PLC0415
-            _fmap_items = ((_j3.loads(b.get("field_map") or "{}") or {}).get("items") or [])
-        except Exception:  # noqa: BLE001
-            _fmap_items = []
-
-        block = "\n".join([BLOCK, "kind: %s" % _kind, "object: %s" % object_slug,
-                           "tool: %s" % tool, "service: %s" % svc,
-                           "mapping_status: %s" % (b.get("status") or ""),
-                           "mapped_columns: %d" % len((_fmap_items or [])),
-                           "```", ""])
-        # 已有块 ⇒ **先去重再写入**（防重复：旧实现只删第一个块，属性渲染可能又插一个）
-        import re as _re  # noqa: PLC0415
-        _blocks = list(_re.finditer(r"(?ms)^```bodhi-ext-contract\s*$.*?^```\s*$", md))
-        if _blocks and len(_blocks) == 1 and _blocks[0].group(0).strip() == block.strip():
+        refreshed = refresh_contract_block(kb_id, object_slug, md, _pt, tool=tool)
+        if not refreshed.get("changed"):
             return {"ok": True, "changed": False, "reason": "has_block",
-                    "tool": tool, "service": svc}
-        rest = md
-        for _b in reversed(_blocks):
-            rest = rest[:_b.start()] + rest[_b.end():]
-        rest = rest.lstrip("\n")
-        new_md = block + ("\n" + rest if rest.strip() else "")
+                    "tool": refreshed.get("tool"), "service": refreshed.get("service")}
         meta = json.loads(row.get("md") or "{}")
         ke_pages.upsert_page(kb_id, object_slug, row.get("title") or object_slug,
-                             row.get("page_type") or "bpmn:DataObject", new_md,
-                             metadata=meta, sync_folders=False)
-        return {"ok": True, "changed": True, "tool": tool, "service": svc}
+                             row.get("page_type") or "bpmn:DataObject",
+                             refreshed["content"], metadata=meta, sync_folders=False)
+        return {"ok": True, "changed": True, "tool": refreshed.get("tool"),
+                "service": refreshed.get("service")}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": "write_failed", "detail": repr(exc)[:200]}
+
+
+def _body_counts(content: str) -> dict:
+    """Count generated body sections (used by rebuild preview/receipt)."""
+    import re as _re  # noqa: PLC0415
+    text = str(content or "")
+    return {"contract_blocks": len(_re.findall(
+                r"(?ms)^```bodhi-ext-contract\s*$.*?^```\s*$", text)),
+            "field_tables": len(_re.findall(r"(?m)^## 字段表", text))}
+
+
+def rebuild_data_objects(kb_id: str, slugs: list | None = None,
+                         dry_run: bool = True) -> dict:
+    """Rebuild DataObject pages from their data attributes + current bindings.
+
+    The body is a generated projection: attribute section and contract block are
+    both rendered again, so old duplicate sections cannot survive. It does not
+    change task pages, templates, or domain semantics.
+    """
+    import ke_db  # noqa: PLC0415
+    import ke_pages  # noqa: PLC0415
+
+    kb_id = str(kb_id or "").strip()
+    if not kb_id:
+        return {"ok": False, "error": "need_kb_id"}
+    wanted = [str(x).strip() for x in (slugs or []) if str(x).strip()]
+    where = ("knowledge_base_id=%s AND deleted_at IS NULL AND page_type='bpmn:DataObject'"
+             % ke_db.sql_str(kb_id))
+    if wanted:
+        where += " AND slug IN (%s)" % ", ".join(ke_db.sql_str(x) for x in wanted)
+    rows = ke_db.psql_csv(
+        "SELECT slug, COALESCE(title,'') AS title, COALESCE(content,'') AS content "
+        "FROM wiki_pages WHERE " + where + " ORDER BY slug")
+    results = []
+    for row in rows:
+        slug = str(row.get("slug") or "")
+        before = _body_counts(row.get("content") or "")
+        info = ke_pages.page_attributes(kb_id, slug)
+        if not info.get("ok"):
+            results.append({"slug": slug, "ok": False, "error": info.get("error") or "page_attributes_failed"})
+            continue
+        attrs = dict(info.get("attributes") or {})
+        preview = ke_pages.replace_attr_section(row.get("content") or "", "bpmn:DataObject", attrs)
+        preview = ke_pages.strip_orphan_field_tables(preview, "bpmn:DataObject")
+        rb = refresh_contract_block(kb_id, slug, preview, "bpmn:DataObject")
+        after_content = rb.get("content") if rb.get("ok") else preview
+        after = _body_counts(after_content)
+        item = {"slug": slug, "title": row.get("title") or slug,
+                "before": before, "after": after,
+                "changed": bool(after_content != (row.get("content") or "")),
+                "attributes": len(attrs),
+                "contract_changed": bool(rb.get("changed"))}
+        if not dry_run and item["changed"]:
+            if attrs:
+                applied = ke_pages.set_page_attributes(
+                    kb_id, slug, attrs, actor="rebuild_data_objects", dry_run=False)
+                if not applied.get("ok"):
+                    item.update({"ok": False, "error": applied.get("error") or "write_failed"})
+                    results.append(item)
+                    continue
+            else:
+                applied = ensure_contract_block(kb_id, slug)
+                if not applied.get("ok"):
+                    item.update({"ok": False, "error": applied.get("error") or "write_failed"})
+                    results.append(item)
+                    continue
+            # Re-read to report what is actually persisted, not the preview.
+            check = ke_pages.page_attributes(kb_id, slug)
+            if check.get("ok"):
+                row2 = ke_db.psql_csv(
+                    "SELECT COALESCE(content,'') AS c FROM wiki_pages WHERE knowledge_base_id=%s "
+                    "AND slug=%s AND deleted_at IS NULL LIMIT 1"
+                    % (ke_db.sql_str(kb_id), ke_db.sql_str(slug)))
+                after = _body_counts((row2[0].get("c") if row2 else "") or "")
+                item["after"] = after
+        item["ok"] = True
+        results.append(item)
+    changed = sum(1 for x in results if x.get("changed"))
+    failed = sum(1 for x in results if not x.get("ok"))
+    return {"ok": failed == 0, "kb_id": kb_id, "dry_run": bool(dry_run),
+            "applied": not dry_run, "total": len(results), "changed": changed, "failed": failed,
+            "pages": results,
+            "receipt": {"total": len(results), "changed": changed, "failed": failed,
+                        "contract_blocks_after": sum(x.get("after", {}).get("contract_blocks", 0)
+                                                     for x in results if x.get("ok")),
+                        "field_tables_after": sum(x.get("after", {}).get("field_tables", 0)
+                                                 for x in results if x.get("ok"))}}
 
 
 def strip_contract_block(kb_id: str, object_slug: str, dry_run: bool = True) -> dict:

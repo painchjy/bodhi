@@ -524,7 +524,21 @@ TOOL_SCHEMAS = [
                 "dry_run": {"type": "boolean", "description": "默认 true：只回 diff，不写库"}},
                 "required": ["kb_id", "slug", "patch"]},
         },
-                {
+        {
+            "name": "rebuild_data_objects",
+            "description": ("**重建 DataObject 正文（写；默认 dry_run）**：按当前数据属性 + 图关系 + 绑定边"
+                            "重新生成属性段与 `bodhi-ext-contract` 块（旧重复块会被清掉）。"
+                            "**只处理 `bpmn:DataObject`**；不改任务页/模板/报告，不调用大模型。"
+                            "`slugs` 省略 ⇒ 本库全部 DataObject；先看 `before/after` 计数，"
+                            "确认后 `dry_run=false`。"),
+            "inputSchema": {"type": "object", "properties": {
+                "kb_id": {"type": "string"},
+                "slugs": {"type": "array", "items": {"type": "string"},
+                          "description": "只重建这些 DataObject slug（省略=全库）"},
+                "dry_run": {"type": "boolean", "description": "默认 true：只回预览，不写库"}},
+                "required": ["kb_id"]},
+        },
+        {
             "name": "reference_lookup",
             "description": ("**取参考规范（只读）**：按规则里的「参考规范」（`bmm:ruleReference`，URL 或规范名）"
                             "找**规范内容**：① 知识库文档/附件同名 → 回 `knowledge_id`（正文用 `doc_outline` 取）；"

@@ -865,6 +865,42 @@ def replace_attr_section(content: str, page_type: str, attributes: dict, skip_ke
     return re.sub(r"\n{4,}", "\n\n\n", text)          # 换段后可能多出空行，压一下
 
 
+def strip_orphan_field_tables(content: str, page_type: str) -> str:
+    """Remove `## 字段表` sections outside the canonical attribute section.
+
+    DataObject field tables belong inside an attribute value (usually
+    `skos:note`); an old generation could append a second table after
+    `## 原文依据`. Full-page rebuild must drop those orphans, while keeping the
+    one table rendered inside the attribute section.
+    """
+    pt = str(page_type or "")
+    try:
+        import ke_ontology  # noqa: PLC0415
+        is_do = "bpmn:DataObject" in ke_ontology.ancestors(pt) or pt == "agent:Tool"
+    except Exception:  # noqa: BLE001
+        is_do = pt in ("bpmn:DataObject", "bpmn:TextualDataObject")
+    if not is_do:
+        return content
+    lines = (content or "").splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == ATTR_SECTION), -1)
+    end = len(lines)
+    if start >= 0:
+        end = next((i for i in range(start + 1, len(lines))
+                    if lines[i].strip() in ATTR_END_SECTIONS), len(lines))
+    out, i = [], 0
+    while i < len(lines):
+        inside_attr = start <= i < end
+        if not inside_attr and lines[i].strip() == "## 字段表":
+            # Drop the heading and its body until the next level-2 heading.
+            i += 1
+            while i < len(lines) and not lines[i].startswith("## "):
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out).rstrip() + "\n" if out else ""
+
+
 def page_attributes(kb_id: str, slug: str) -> dict:
     """**读**一页的数据属性现值（只读；前端「数据属性」面板 + 自检用）。
 
@@ -1121,6 +1157,18 @@ def set_page_attributes(kb_id: str, slug: str, patch: dict, *, actor: str = "",
         if sval:
             new_summary = sval
     new_content = content if sync_from_summary else replace_attr_section(content, page_type, merged)
+    # Full-page rebuild semantics for generated pages: drop orphan field tables
+    # left outside the attribute section by older writers.
+    new_content = strip_orphan_field_tables(new_content, page_type)
+    # DataObject/Tool 的正文是生成物：每次属性编辑都顺便把契约块规范化（去重 + 按当前绑定重新生成）。
+    # 否则面板只改了属性段、旧契约块仍留在正文里，重复问题会从另一条路径回来。
+    try:
+        import ke_ext_tools as _XT  # noqa: PLC0415
+        _rb = _XT.refresh_contract_block(kb_id, slug, new_content, page_type)
+        if _rb.get("ok") and isinstance(_rb.get("content"), str):
+            new_content = _rb["content"]
+    except Exception:  # noqa: BLE001  图不可用时仍允许属性编辑，块由后续绑定刷新
+        pass
     content_changed = (new_content != content)
     summary_changed = (new_summary != (row["summary"] or ""))
     if not changed and not content_changed and not summary_changed:

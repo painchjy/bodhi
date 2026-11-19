@@ -46,6 +46,35 @@ def test_prompt_text_stops_at_block_end():
     assert "真源：本文件" not in txt, "md 顶部说明被写进提示词了"
 
 
+def test_modeling_prompt_uses_task_selector_contract():
+    """建模提示词与评审提示词同构：先 domain 选任务，再 page 读任务步骤。"""
+    import apply_config as A
+    p = os.path.join(CONF_DIR, "agent_modeling_prompt.md")
+    if not os.path.isfile(p):
+        pytest.skip("缺少建模提示词文件")
+    txt = A._prompt_text(p)
+    assert "第一步（领域知识与任务选择）" in txt
+    assert 'mode="domain"' in txt
+    assert "任务页的 `skos:note` 就是步骤" in txt
+    assert "不要 page 全部任务" in txt
+    assert "四个活动/7 任务" not in txt, "旧版活动枚举应移除，任务由 domain 回执给出"
+    assert "字段表" not in txt, "字段表口径应留在任务页/本体，不写进系统提示词"
+    assert "bodhi-ext-contract" not in txt, "契约块细节应留在任务页/工具，不写进系统提示词"
+
+
+def test_prompts_share_compact_final_answer_contract():
+    """两个生产提示词都必须约束最终回答长度，避免 reasoning/正文无限膨胀。"""
+    import apply_config as A
+    for name in ("agent_review_prompt.md", "agent_modeling_prompt.md"):
+        p = os.path.join(CONF_DIR, name)
+        if not os.path.isfile(p):
+            pytest.skip("缺少提示词文件：%s" % name)
+        txt = A._prompt_text(p)
+        assert "最终回答（压缩）" in txt, name
+        assert "3-5 行" in txt, name
+        assert "禁止空回答" in txt, name
+
+
 @pytest.fixture(scope="module")
 def cfg():
     try:

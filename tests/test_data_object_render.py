@@ -111,6 +111,34 @@ def test_data_object_regeneration_cleans_legacy_duplicate(mcp, test_kb, session_
     assert "OLD-02" in body and "| old | old |" not in body
 
 
+def test_rebuild_data_objects_dry_run_then_apply(mcp, test_kb, session_no):
+    """Maintenance tool: preview dirty pages, then normalize them to one block/section."""
+    slug, _ = _save(mcp, test_kb, session_no, "重建工具测试", _note("RB-01"))
+    import ke_db
+    stale = ("\n\n```bodhi-ext-contract\nkind: stale\n```\n\n"
+             "## 字段表\n\n| 字段 | 含义 |\n|---|---|\n| old | old |\n")
+    ke_db.psql("UPDATE wiki_pages SET content = content || %s WHERE knowledge_base_id = %s "
+               "AND slug = %s AND deleted_at IS NULL"
+               % (ke_db.sql_str(stale), ke_db.sql_str(test_kb), ke_db.sql_str(slug)))
+    before = _page(mcp, test_kb, session_no, slug).get("content_md") or ""
+    assert _counts(before)[0] >= 2 and _counts(before)[1] >= 2
+
+    dry = mcp.call("rebuild_data_objects", {"kb_id": test_kb, "slugs": [slug], "dry_run": True})
+    assert dry.get("ok") is True, json.dumps(dry, ensure_ascii=False)[:600]
+    item = next((x for x in (dry.get("pages") or []) if x.get("slug") == slug), None)
+    assert item and item.get("changed") is True, item
+    assert item.get("before", {}).get("contract_blocks", 0) >= 2
+    assert item.get("after", {}).get("contract_blocks") == 1
+    assert item.get("after", {}).get("field_tables") == 1
+    # dry-run must not mutate the page
+    assert _counts(_page(mcp, test_kb, session_no, slug).get("content_md") or "") == _counts(before)
+
+    applied = mcp.call("rebuild_data_objects", {"kb_id": test_kb, "slugs": [slug], "dry_run": False})
+    assert applied.get("ok") is True and applied.get("applied") is not False, json.dumps(applied, ensure_ascii=False)[:600]
+    page = _page(mcp, test_kb, session_no, slug)
+    assert _counts(page.get("content_md") or "") == (1, 1), "重建后仍重复：%r" % (_counts(page.get("content_md") or ""),)
+
+
 def test_other_entity_attribute_preview_and_apply_do_not_duplicate(mcp, test_kb, session_no):
     """非 DataObject entity 的数据属性预览/写入同样不得重复。"""
     note = _note("ENT-01")

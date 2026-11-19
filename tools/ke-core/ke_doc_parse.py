@@ -823,7 +823,7 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "",
             _out["duration_ms"] = {**((base.get("duration_ms") or {})), "vlm": 0,
                                    "total": int((time.time() - t0) * 1000)}
             _out["hint"] = "命中缓存（未消耗 VLM 额度）；引用请带 bbox/evidence + confidence"
-            return _out
+            return _compact_image_receipt(_out) if _compact else _out
         except Exception:  # noqa: BLE001
             pass
 
@@ -834,6 +834,131 @@ def _vlm_read(doc_id: str, figure_no: int = 0, question: str = "",
                 "duration_ms": {**((base.get("duration_ms") or {})), "vlm": 0,
                                 "total": int((time.time() - t0) * 1000)}}
     return _vlm_run(raw, fig, fmeta, cache_fp, q, base, t0, detail)
+
+
+def _image_clip(value, limit: int) -> str:
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _set_compact_chars(payload: dict) -> int:
+    """Set `compact_chars` to its own final serialized length (fixed point)."""
+    payload["compact_chars"] = 0
+    for _ in range(4):
+        # Measure the shape MCP actually returns (pretty JSON), not the
+        # compact internal serialization; this is what the 4K budget applies to.
+        size = len(json.dumps(payload, ensure_ascii=False, indent=2))
+        if size == payload["compact_chars"]:
+            break
+        payload["compact_chars"] = size
+    return payload["compact_chars"]
+
+
+def _compact_image_receipt(payload: dict) -> dict:
+    """Hard-cap the **compact** image receipt (default < 4K characters).
+
+    The full contract remains in the VLM cache and is returned only when
+    `detail="full"`. Compact mode keeps node/edge identities, labels (clipped),
+    counts and gate status; bulk annotations/ambiguity text is progressively
+    omitted and the omission is explicit in the receipt.
+    """
+    try:
+        limit = int(os.environ.get("BODHI_IMAGE_COMPACT_MAX_CHARS", "3200") or 3200)
+    except ValueError:
+        limit = 3200
+    contract = payload.get("contract") or {}
+    full_nodes = list(contract.get("nodes") or [])
+    full_edges = list(contract.get("edges") or [])
+    full_annotations = list(contract.get("annotations") or [])
+    full_ambiguity = list(contract.get("ambiguity") or [])
+    full_todo = list(contract.get("todo") or [])
+    base_gate = dict(contract.get("gate") or {})
+
+    def build(node_limit: int, edge_limit: int, text_limit: int, keep_ann: int) -> dict:
+        nodes = []
+        for n in full_nodes[:node_limit]:
+            if not isinstance(n, dict):
+                continue
+            item = {k: _image_clip(n.get(k), text_limit)
+                    for k in ("id", "label", "location") if n.get(k) not in (None, "")}
+            nodes.append(item)
+        edges = []
+        for e in full_edges[:edge_limit]:
+            if not isinstance(e, dict):
+                continue
+            item = {k: _image_clip(e.get(k), text_limit)
+                    for k in ("from", "to", "label") if e.get(k) not in (None, "")}
+            edges.append(item)
+        annotations = []
+        for a in full_annotations[:keep_ann]:
+            if isinstance(a, dict):
+                annotations.append({k: _image_clip(a.get(k), text_limit)
+                                    for k in ("key", "value", "evidence") if a.get(k) not in (None, "")})
+        ambiguity = [_image_clip(x, text_limit) for x in full_ambiguity[:keep_ann] if str(x or "").strip()]
+        todo = [x for x in full_todo[:3]]
+        gate = dict(base_gate)
+        gate.update({"nodes": len(full_nodes), "edges": len(full_edges),
+                     "annotations": len(full_annotations),
+                     "ambiguity": len(full_ambiguity)})
+        if len(nodes) < len(full_nodes):
+            gate["nodes_shown"] = len(nodes)
+        if len(edges) < len(full_edges):
+            gate["edges_shown"] = len(edges)
+        if len(annotations) < len(full_annotations):
+            gate["annotations_omitted"] = len(full_annotations) - len(annotations)
+        if len(ambiguity) < len(full_ambiguity):
+            gate["ambiguity_omitted"] = len(full_ambiguity) - len(ambiguity)
+        return {"nodes": nodes, "edges": edges, "annotations": annotations,
+                "ambiguity": ambiguity, "watermark": _image_clip(contract.get("watermark"), text_limit),
+                "todo": todo, "gate": gate}
+
+    # Candidate ladder: preserve as much as possible, then explicitly degrade.
+    candidates = [(len(full_nodes), len(full_edges), 72, 8),
+                  (min(len(full_nodes), 120), min(len(full_edges), 160), 56, 5),
+                  (min(len(full_nodes), 64), min(len(full_edges), 96), 44, 3),
+                  (min(len(full_nodes), 24), min(len(full_edges), 40), 32, 1),
+                  (min(len(full_nodes), 10), min(len(full_edges), 12), 20, 0),
+                  (min(len(full_nodes), 5), min(len(full_edges), 8), 16, 0),
+                  (min(len(full_nodes), 3), min(len(full_edges), 5), 16, 0),
+                  (0, 0, 24, 0)]
+    chosen = None
+    for nl, el, tl, ann in candidates:
+        trial = dict(payload)
+        trial["contract"] = build(nl, el, tl, ann)
+        trial["receipt_mode"] = "compact"
+        trial.pop("extraction", None)
+        trial["extraction_omitted"] = True
+        trial["next"] = "需要原始 texts/bbox 时用 detail=\"full\"（同图命中缓存）"
+        trial["vlm"] = {k: (trial.get("vlm") or {}).get(k) for k in
+                        ("model", "finish_reason", "content_chars", "reasoning_chars")}
+        _set_compact_chars(trial)
+        chosen = trial
+        if trial["compact_chars"] <= limit:
+            break
+    # Last-resort minimal receipt: never return an unbounded compact payload.
+    if chosen is None or chosen["compact_chars"] > limit:
+        gate = dict(base_gate)
+        gate.update({"nodes": len(full_nodes), "edges": len(full_edges),
+                     "annotations": len(full_annotations),
+                     "ambiguity": len(full_ambiguity),
+                     "receipt_truncated": True})
+        minimal_contract = build(min(len(full_nodes), 3), min(len(full_edges), 5), 16, 0)
+        minimal_contract["annotations"] = []
+        minimal_contract["ambiguity"] = []
+        minimal_contract["watermark"] = ""
+        minimal_contract["todo"] = []
+        chosen = {
+            "ok": payload.get("ok"), "action": payload.get("action"),
+            "figure": payload.get("figure"), "cache": payload.get("cache"),
+            "detail": "compact", "receipt_mode": "compact",
+            "extraction_counts": payload.get("extraction_counts"),
+            "contract": minimal_contract,
+            "extraction_omitted": True,
+            "next": "compact 超限：用 detail=\"full\" 取原图契约（同图命中缓存）",
+            "compact_truncated": True,
+        }
+        _set_compact_chars(chosen)
+    return chosen
 
 
 def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
@@ -940,6 +1065,7 @@ def _vlm_run(raw: bytes, fig: dict, fmeta: dict, cache_fp: str, q: str,
     if compact:
         out["extraction_omitted"] = True
         out["next"] = "需要原始 texts/bbox 时用 detail=\"full\"（同图命中缓存）"
+        out = _compact_image_receipt(out)
     else:
         out["extraction"] = extraction
     try:
