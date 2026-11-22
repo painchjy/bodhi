@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -128,12 +130,60 @@ def mapping_flow_errors(messages: list, expected_fact: str,
     return errors
 
 
+def multi_fact_errors(messages: list, expected_fact: str = "fact_agent_tool_context") -> list:
+    """校验：选择多事实表事实、mapping 返回两张事实表、scenario_join 仅事实表。"""
+    calls = _calls(messages)
+    mapping = [c for c in calls if c["name"] == MAPPING]
+    scenario = [c for c in calls if c["name"] == SCENARIO]
+    errors = []
+    target = None
+    for call in mapping:
+        out = _result_json(call)
+        if str(call["args"].get("mapping_object_id") or "") == expected_fact:
+            target = out
+            break
+    if target is None:
+        return ["multi_fact_not_mapped:" + expected_fact]
+    if target.get("ok") is False or target.get("status") != "mapped":
+        errors.append("multi_fact_mapping_failed:" + str(target.get("status")))
+    tables = target.get("fact_tables") or []
+    if len(tables) < 2:
+        errors.append("multi_fact_tables_lt_2")
+    table_keys = {(str(t.get("source_schema") or ""), str(t.get("source_table") or ""))
+                  for t in tables}
+    target_scenario = None
+    for call in scenario:
+        out = _result_json(call)
+        candidates = out.get("candidates") or ([out.get("scenario")] if out.get("scenario") else [])
+        for cand in candidates:
+            if str(cand.get("scenario_id") or "") == "sc_tool_context":
+                target_scenario = cand
+                break
+        if target_scenario:
+            break
+    if target_scenario is None:
+        errors.append("multi_fact_scenario_missing")
+    else:
+        joins = target_scenario.get("joins") or []
+        if not joins:
+            errors.append("multi_fact_join_missing")
+        for join in joins:
+            left = (str(join.get("left_schema") or ""), str(join.get("left_table") or ""))
+            right = (str(join.get("right_schema") or ""), str(join.get("right_table") or ""))
+            if left not in table_keys or right not in table_keys:
+                errors.append("multi_fact_join_not_fact_table")
+    return errors
+
+
 def _msg(steps: list) -> list:
     return [{"role": "assistant", "agent_steps": [{"tool_calls": steps}]}]
 
 
-def _call(name: str, args: dict, status: str = "mapped", ok: bool = True) -> dict:
-    payload = json.dumps({"ok": ok, "status": status, "bindings": []})
+def _call(name: str, args: dict, status: str = "mapped", ok: bool = True,
+          extra: dict | None = None) -> dict:
+    body = {"ok": ok, "status": status, "bindings": []}
+    body.update(extra or {})
+    payload = json.dumps(body, ensure_ascii=False)
     return {"name": name, "args": args,
             "result": {"data": {"content_items": [{"type": "text", "text": payload}]}},
             "output": payload}
@@ -173,6 +223,44 @@ def test_fact_match_extracts_all_categories_before_mapping():
                                require_fact_match=True) == []
 
 
+def test_multi_fact_flow_accepts_two_fact_tables_and_fact_join():
+    messages = _msg([
+        _call(MAPPING, {"mapping_object_type": "fact",
+                        "mapping_object_id": "fact_agent_tool_context",
+                        "mapping_service_id": "svc_postgresql"},
+              extra={"fact_tables": [
+                  {"source_schema": "diag", "source_table": "agent_tool_call_fact"},
+                  {"source_schema": "diag", "source_table": "agent_turn_fact"},
+              ]}),
+        _call(SCENARIO, {"mapping_object_id": "fact_agent_tool_context",
+                         "mapping_service_id": "svc_postgresql"},
+              extra={"candidates": [{
+                  "scenario_id": "sc_tool_context",
+                  "joins": [{"left_schema": "diag", "left_table": "agent_tool_call_fact",
+                             "right_schema": "diag", "right_table": "agent_turn_fact"}],
+              }]}),
+    ])
+    assert multi_fact_errors(messages) == []
+
+
+def test_multi_fact_flow_rejects_dimension_join():
+    messages = _msg([
+        _call(MAPPING, {"mapping_object_type": "fact",
+                        "mapping_object_id": "fact_agent_tool_context"},
+              extra={"fact_tables": [{"source_schema": "diag",
+                                      "source_table": "agent_tool_call_fact"}]}),
+        _call(SCENARIO, {"mapping_object_id": "fact_agent_tool_context"},
+              extra={"candidates": [{
+                  "scenario_id": "sc_tool_context",
+                  "joins": [{"left_schema": "diag", "left_table": "agent_tool_call_fact",
+                             "right_schema": "diag", "right_table": "tool_dimension"}],
+              }]}),
+    ])
+    errors = multi_fact_errors(messages)
+    assert "multi_fact_tables_lt_2" in errors
+    assert "multi_fact_join_not_fact_table" in errors
+
+
 def test_fact_match_rejects_missing_extraction_and_reverse_order():
     missing = _msg([
         _call(FACT_MATCH, {"intent": ""}, status="ambiguous"),
@@ -203,6 +291,32 @@ def test_mapping_flow_rejects_slug_and_reverse_order():
     assert "fact_not_mapped:fact_agent_tool_call" in errors
 
 
+def _chat_and_wait(client, session_id: str, query: str, timeout: float = 240.0) -> None:
+    """SSE 可能长时间不关闭；以 DB 中最终 assistant 消息为准，避免 e2e 卡死。"""
+    errors = []
+
+    def _run():
+        try:
+            client.chat(session_id, query)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc)[:300])
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        msgs = client.messages(session_id)
+        assistant = [m for m in msgs if m.get("role") == "assistant"
+                     and (m.get("content") or "").strip()]
+        if assistant:
+            time.sleep(3)  # 等最后一轮工具调用/消息落库稳定
+            return
+        if errors:
+            raise RuntimeError(errors[0])
+        time.sleep(3)
+    raise TimeoutError("analytics agent did not produce an assistant message")
+
+
 @pytest.mark.agent_e2e
 @pytest.mark.skipif(os.environ.get("BODHI_RUN_ANALYTICS_E2E") != "1",
                     reason="set BODHI_RUN_ANALYTICS_E2E=1 to run live analytics agent")
@@ -222,9 +336,26 @@ def test_live_analytics_mapping_order():
     failures = []
     for query, fact, dims in cases:
         sid = client.create_session("analytics-e2e")
-        client.chat(sid, query)
+        _chat_and_wait(client, sid, query)
         errors = mapping_flow_errors(client.messages(sid), fact, dims,
                                      require_fact_match=True)
         if errors:
             failures.append({"query": query, "session_id": sid, "errors": errors})
     assert not failures, failures
+
+
+@pytest.mark.agent_e2e
+@pytest.mark.skipif(os.environ.get("BODHI_RUN_ANALYTICS_E2E") != "1",
+                    reason="set BODHI_RUN_ANALYTICS_E2E=1 to run live analytics agent")
+def test_live_analytics_multi_fact_context():
+    client = WeKnoraClient.from_env(
+        agent_name="智能问数（智能体运行状态监控）",
+        agent_id_env="BODHI_ANALYTICS_AGENT_ID",
+        agent_name_env="BODHI_ANALYTICS_AGENT_NAME")
+    sid = client.create_session("analytics-multi-fact-e2e")
+    _chat_and_wait(
+        client, sid,
+        "最近3天，查看每次工具调用对应的用户输入提示词、工具名称和工具耗时，"
+        "按工具名称统计；需要同时使用工具调用事实和轮次上下文。")
+    errors = multi_fact_errors(client.messages(sid))
+    assert not errors, {"session_id": sid, "errors": errors}
