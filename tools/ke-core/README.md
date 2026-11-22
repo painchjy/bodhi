@@ -17,6 +17,7 @@
 | `ke_docs.py` | **按来源文档**统计/清理本体实例（删文档后的残留）：`source_refs` 聚合、独占页删/多源页摘引用、巡检 sweep、可选清 Neo4j `BodhiInstance` | `doc_index` / `pages_of_doc` / `purge_document` / `orphans` / `sweep` / `sweep_all` + CLI `stats\|pages\|purge\|sweep`（见 `docs/bodhi-doc-cleanup.md`）。kb_id 支持**名称或 UUID**（`ke_db.resolve_kb_id()`，未知库报错） |
 | `ke_audit.py` | **知识运维只读体检**（P1）：wiki ↔ 本体图谱 ↔ 本体模型 一致性 + 无来源/来源已删等异常数据；MCP 工具 `audit_scan` / `GET /bodhi/audit` | `audit(kb_id, scope, max_findings)` + CLI `scan`（见 `docs/bodhi-ops-audit.md`） |
 | `ke_design.py` | **设计流水线**：写设计页（概要设计 / 服务详设 / FD 报告）并做**页面级溯源**（`derived_from`）；读回 FD 页与服务详设页；**FD × 详设交叉验证**（规则 F1–F6） | `write_page` / `apply_relation` / `load_fds` / `load_services` / `check_couplings` + CLI `write\|fds\|services\|check`（见 `docs/agent-design-flow.md`） |
+| `ke_analytics.py` | **自助取数语义投影**：读 `analytics` schema 的事实/维度/指标/场景，渲染 Fact / Dimension / Scenario / active MCP 服务页；页面写 `mappingObjectType/Id` 与 `mappingServiceId`；物理映射只经 `mapping_lookup` 查 binding/field_mapping；AnalysisCase 由任务页写入正文与图关系 | `fact_spec` / `dimension_spec` / `scenario_spec` / `mapping_lookup` / `scenario_lookup` / `render_*_page` / `sync_pages`（见 `docs/analytics.md`） |
 | `reason.py` | **（下一轮）** SHACL 规则判定与推导 —— 规格见 `docs/bodhi-reasoning.md`，规则源 `artifacts/rules/rules.json` | 待实现 |
 
 `tools/ontology-mcp/server.py` 现在只负责：**MCP 传输 + 抽取合并流水线 + 只读图谱接口
@@ -26,7 +27,7 @@
 
 - **Neo4j 优先**：本体投影由 `ontology-compiler` 生成
   （`artifacts/neo4j/00_constraints.cypher` → `10_ontology.cypher`）。
-  投影规模（实测）：模块 5 / 类 47 / 对象属性 70 / 数据属性 20 / 限制 26 / 枚举值 7。
+  投影规模（实测）：模块 5 / 类 58 / 对象属性 73 / 数据属性 62 / 限制 4 / 枚举值 0。
   节点标签 `BodhiOntClass` / `BodhiOntProperty` / `BodhiModule` …，
   关系 `BODHI_SUBCLASS_OF` / `BODHI_DOMAIN` / `BODHI_RANGE` / `BODHI_INVERSE_OF`。
 - **JSON 兜底**：`artifacts/weknora/ontology_index.json`（同一份 TTL 的编译产物）。

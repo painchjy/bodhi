@@ -156,8 +156,9 @@ def domain_view(kb: str, query: str = "", limit: int = 200) -> dict:
 
     unassigned_activities = [a for s, a in activity_out.items() if s not in used_activities]
     unassigned_tasks = [t for s, t in task_objs.items() if not task_parents.get(s)]
-    shown_tasks = [t for p in process_out for a in (p.get("activities") or [])
-                   for t in (a.get("tasks") or [])] + unassigned_tasks
+    # 无流程归属的活动也要计入可选任务（任务页可能尚未挂到 process）
+    shown_tasks = [t for a in activity_out.values() for t in (a.get("tasks") or [])]
+    shown_tasks += [t for t in unassigned_tasks if t not in shown_tasks]
     shown_roles = {r.get("slug") for t in shown_tasks for r in (t.get("roles") or [])}
     task_io_chars = sum(len((t.get("goal") or "")) + len((t.get("io") or {}).get("entry") or "")
                         + len((t.get("io") or {}).get("exit") or "") for t in shown_tasks)

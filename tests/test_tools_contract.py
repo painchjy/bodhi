@@ -2,7 +2,7 @@
 """P0 契约：MCP 工具注册表快照（name + inputSchema）
 
 口径：`tests/golden/tools_schema.json` 是**契约基准** ✓
-- 首次运行自动生成（记录当前 31 个工具的 schema）；
+- 首次运行自动生成（记录当前工具 schema；当前 47 个）；
 - 之后任何**增删改**都必须显式 `--update-golden` 并说明（防止"粗废弃"重演 ✗）。
 
 跑法：`python3 tests/test_tools_contract.py [--update-golden]`

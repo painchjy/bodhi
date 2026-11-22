@@ -34,7 +34,7 @@ import ke_neo4j  # noqa: E402
 INDEX_PATH = HERE.parents[1] / "artifacts" / "weknora" / "ontology_index.json"
 
 # 模块展示顺序（与 artifacts 的 module_order 一致；Neo4j 里也能查，这里只做排序兜底）
-_MODULE_ORDER_FALLBACK = ["bmm", "ea", "ea-service", "ea-ownership", "bmm-fd"]
+_MODULE_ORDER_FALLBACK = ["bmm", "agent", "analytics", "bpmn", "schema.org"]
 
 _INDEX_CACHE: dict | None = None
 # 产物指纹 (mtime, size)：磁盘上的 ontology_index.json 变了就重读 —— 这样
@@ -72,6 +72,10 @@ MODULE_COLORS = {
     "ea-service": "#f59e0b",   # 橙：EA 服务契约扩展
     "ea-ownership": "#ef4444", # 红：EA 所有权与控制关系扩展
     "bmm-fd": "#8b5cf6",       # 紫：BMM 规则可执行化扩展
+    "agent": "#0ea5e9",        # 青：智能体开发本体
+    "analytics": "#f97316",    # 橙：自助取数分析本体
+    "bpmn": "#22c55e",         # 绿：BPMN 流程模型
+    "schema.org": "#64748b",   # 灰：标准参考模型
     "external": "#94a3b8",     # 灰：外部词汇占位
 }
 DEFAULT_MODULE_COLOR = "#64748b"

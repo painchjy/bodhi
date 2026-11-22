@@ -79,7 +79,7 @@ def _upsert_anchor(kb_id: str, slug: str, block: str) -> dict:
             "version": int(rows[0].get("version") or 1) + 1}
 
 
-@handle(TOOL_TABLE)
+@handle("ext_table")
 def ext_table(args: dict) -> dict:
     """**按业务对象映射把台账行渲染成 Markdown 表** —— 报告清单节表体的唯一来源。
 

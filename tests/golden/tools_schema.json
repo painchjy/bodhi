@@ -791,6 +791,32 @@
   ],
   "type": "object"
  },
+ "mapping_lookup": {
+  "additionalProperties": false,
+  "properties": {
+   "mapping_object_id": {
+    "description": "知识页的 mapping_object_id（内部 fact_id/dimension_id，不是 slug/标题）",
+    "type": "string"
+   },
+   "mapping_object_type": {
+    "description": "知识页的 mapping_object_type",
+    "enum": [
+     "fact",
+     "dimension"
+    ],
+    "type": "string"
+   },
+   "mapping_service_id": {
+    "description": "知识页的 mapping_service_id，如 svc_postgresql",
+    "type": "string"
+   }
+  },
+  "required": [
+   "mapping_object_type",
+   "mapping_object_id"
+  ],
+  "type": "object"
+ },
  "metric_compute": {
   "properties": {
    "kb_id": {
@@ -821,6 +847,31 @@
     "type": "string"
    }
   },
+  "type": "object"
+ },
+ "ontology_paths": {
+  "properties": {
+   "from_class": {
+    "description": "起点类（prefixed，如 analytics:Fact）",
+    "type": "string"
+   },
+   "limit": {
+    "description": "最多返回通路数（默认 50）",
+    "type": "integer"
+   },
+   "max_hops": {
+    "description": "最大跳数（默认 3）",
+    "type": "integer"
+   },
+   "to_class": {
+    "description": "终点类（prefixed，如 analytics:Dimension）",
+    "type": "string"
+   }
+  },
+  "required": [
+   "from_class",
+   "to_class"
+  ],
   "type": "object"
  },
  "ontology_types": {
@@ -1107,6 +1158,28 @@
  },
  "save_knowledge": {
   "_unparsed": "{\n                \"type\": \"object\",\n                \"properties\": {\n                    \"kb_id\": {\"type\": \"string\", \"description\": \"目标知识库 UUID 或精确库名（**写库前必须唯一确定**）\"},\n                    \"kb_ids\": {\"t"
+ },
+ "scenario_lookup": {
+  "additionalProperties": false,
+  "properties": {
+   "intent": {
+    "description": "用户意图关键词，用于候选排序",
+    "type": "string"
+   },
+   "mapping_object_id": {
+    "description": "事实的 mapping_object_id（如 fact_agent_tool_call）",
+    "type": "string"
+   },
+   "mapping_service_id": {
+    "description": "mapping_service_id，如 svc_postgresql",
+    "type": "string"
+   },
+   "scenario_id": {
+    "description": "场景 ID（可选）",
+    "type": "string"
+   }
+  },
+  "type": "object"
  },
  "skills": {
   "properties": {

@@ -1,0 +1,23 @@
+{
+  "host": "0.0.0.0",
+  "port": 8771,
+  "upstream_url": "http://dbbiuat.xxx.xxx.xxx:8080/mcp",
+  "timeout_seconds": 30,
+  "intercept_notifications": true,
+  "local_initialize": true,
+  "protocol_version": "2024-11-05",
+  "server_info": {
+    "name": "mcp-gateway",
+    "version": "1.0.0"
+  },
+  "instructions": "",
+  "normalize_sse": true,
+  "canonicalize_tools": true,
+  "fill_schema": false,
+  "inject_args": {
+    "REPLACE_ARG_NAME_1": "REPLACE_ARG_VALUE_1",
+    "REPLACE_ARG_NAME_2": "REPLACE_ARG_VALUE_2"
+  },
+  "inject_tools": ["*"],
+  "upstream_headers": {}
+}

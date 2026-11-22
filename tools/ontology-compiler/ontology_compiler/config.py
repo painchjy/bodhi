@@ -63,6 +63,8 @@ NS: dict[str, str] = {
     "easvc": "http://example.org/bodhi/ext/ea-service#",
     "eaown": "http://example.org/bodhi/ext/ea-ownership#",
     "bmmfd": "http://example.org/bodhi/ext/bmmfd#",
+    # 自助取数分析：维度/事实/标准取数场景（analytics.ttl）
+    "analytics": "http://example.org/analytics#",
     # 跨模块共享的注解命名空间：expertRole 等（见 docs/weknora-fork.md §8.5）
     "bodhi": "http://example.org/bodhi#",
     # **平台级谓词白名单的命名空间**（2026-10-15 用户口径 · 方案 2）：

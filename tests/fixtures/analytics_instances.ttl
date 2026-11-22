@@ -1,0 +1,33 @@
+@prefix data: <http://example.org/analytics/data#> .
+@prefix analytics: <http://example.org/analytics#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# 回归用 ABox：两个事实 + 维度通路，用于验证 factUsesDimension 只表达语义。
+# 工具分类只属于工具调用事实；轮次事实使用时间/Agent/模型/会话维度。
+
+data:fact_agent_turn rdf:type analytics:Fact ;
+    rdfs:label "AgentTurnFact" ;
+    analytics:grain "session_id + turn_id" ;
+    analytics:factUsesDimension data:dim_time, data:dim_agent,
+        data:dim_model, data:dim_session .
+
+data:fact_agent_tool_call rdf:type analytics:Fact ;
+    rdfs:label "AgentToolCallFact" ;
+    analytics:grain "session_id + turn_id + tool_call_id" ;
+    analytics:factUsesDimension data:dim_tool_category_2level,
+        data:dim_tool_category_1level, data:dim_time, data:dim_agent,
+        data:dim_model, data:dim_session .
+
+data:dim_tool_category_2level rdf:type analytics:Dimension ;
+    rdfs:label "工具分类（2层）" ;
+    rdfs:comment "工具大类 → 工具小类" .
+
+data:dim_tool_category_1level rdf:type analytics:Dimension ;
+    rdfs:label "工具分类（1层）" ;
+    rdfs:comment "单层工具分类" .
+
+data:dim_time rdf:type analytics:Dimension ; rdfs:label "时间" .
+data:dim_agent rdf:type analytics:Dimension ; rdfs:label "Agent" .
+data:dim_model rdf:type analytics:Dimension ; rdfs:label "模型" .
+data:dim_session rdf:type analytics:Dimension ; rdfs:label "会话" .

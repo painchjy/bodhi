@@ -40,6 +40,49 @@ TOOL_SCHEMAS = [
             }, "required": ["model"]},
         },
         {
+            "name": "ontology_paths",
+            "description": ("枚举两个本体类之间的**类级通路**（≤ max_hops 跳；含正向与反向），"
+                            "用于先确认「事实→维度」「活动→任务」等路径，再按路径查实例。"
+                            "无通路时返回近似类型建议，不直接报错。"),
+            "inputSchema": {"type": "object", "properties": {
+                "from_class": {"type": "string", "description": "起点类（prefixed，如 analytics:Fact）"},
+                "to_class": {"type": "string", "description": "终点类（prefixed，如 analytics:Dimension）"},
+                "max_hops": {"type": "integer", "description": "最大跳数（默认 3）"},
+                "limit": {"type": "integer", "description": "最多返回通路数（默认 50）"},
+            }, "required": ["from_class", "to_class"]},
+        },
+        {
+            "name": "mapping_lookup",
+            "description": ("查询事实/维度的**物理映射**：binding + field_mapping + enum_mapping。"
+                            "必须使用知识页的 mapping_object_type / mapping_object_id；"
+                            "service_id 用知识页的 mapping_service_id（不是平台 mcp_services.id）。"
+                            "status=formula_only 表示公式/直接列维度（用 levels[].formula_sql）；"
+                            "missing 表示无可用映射，禁止猜表名。"),
+            "inputSchema": {"type": "object", "properties": {
+                "mapping_object_type": {"type": "string", "enum": ["fact", "dimension"],
+                                        "description": "知识页的 mapping_object_type"},
+                "mapping_object_id": {"type": "string",
+                                      "description": "知识页的 mapping_object_id（内部 fact_id/dimension_id，不是 slug/标题）"},
+                "mapping_service_id": {"type": "string",
+                                       "description": "知识页的 mapping_service_id，如 svc_postgresql"},
+            }, "required": ["mapping_object_type", "mapping_object_id"],
+               "additionalProperties": False},
+        },
+        {
+            "name": "scenario_lookup",
+            "description": ("查询标准取数场景的语义、来源事实、关联路径（scenario_join）与固定筛选（scenario_filter）。"
+                            "必须在本轮 mapping_lookup 全部通过后调用；"
+                            "按 mapping_object_id（事实）和 mapping_service_id 返回候选；多候选或多 JOIN 路径时要求用户确认。"),
+            "inputSchema": {"type": "object", "properties": {
+                "scenario_id": {"type": "string", "description": "场景 ID（可选）"},
+                "mapping_object_id": {"type": "string",
+                                      "description": "事实的 mapping_object_id（如 fact_agent_tool_call）"},
+                "mapping_service_id": {"type": "string",
+                                       "description": "mapping_service_id，如 svc_postgresql"},
+                "intent": {"type": "string", "description": "用户意图关键词，用于候选排序"},
+            }, "additionalProperties": False},
+        },
+        {
             "name": "skills",
             "description": ("**技能目录 / 技能指令**（本服务的技能库在 `skills/<id>/SKILL.md`，单一来源）。"
                             "不传 `skill` → 返回目录（id / name / when / models / stages / tools）；"

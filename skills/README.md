@@ -13,7 +13,7 @@
 | `knowledge_extract` | 知识提取（按规则的知识需要取事实） | 由 `bmm:knowledgeNeed` 驱动，按本体类提取逐字事实并按 `bmm:sourceLocator` 落库 | `ontology_types`、`knowledge_lookup`、`doc_outline`、`image_read`、`save_knowledge` |
 | `kb_transfer` | 知识库迁移（导出/导入/比对） | 导出、导入、PG+Neo4j 六项一致性比对；作为运维技能保留 | `kb_export`、`kb_import`、`audit_scan` |
 
-> `kb_transfer` 属于跨环境运维技能，保留；但它不是业务评审高频技能，实际高频使用的是
+> `kb_transfer` 属于跨环境运维技能，保留；但它不是业务作业高频技能，实际高频使用的是
 > `kb_export` / `kb_import` 工具。
 
 > **技能只限「模型」，不限「本体类型」**：front-matter 只写 `models:`（可加 `default_model:`），

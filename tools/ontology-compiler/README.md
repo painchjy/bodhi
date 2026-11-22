@@ -12,7 +12,7 @@
 | `mapping/` | 文本 → IRI 对齐 | `label_map.json`（`terms` / `alias_index` / `conflicts`） |
 | （根） | CI / 对比 | `manifest.json`：`artifact_schema_version`、`compiler_version`、`generated_at`、`module_keys`、`modules`、`stats`、`artifacts[]`（path / sha256 / bytes / emitter） |
 
-当前规模：5 个模块 / 47 类 / 70 对象属性 / 20 数据属性 / 26 限制 / 2 枚举（7 取值）→ 32 个产物文件（weknora 已下线 5 个与上游不兼容的 `.flat.json`）。
+当前规模：5 个模块 / 58 类 / 73 对象属性 / 62 数据属性 / 4 限制 / 0 枚举 → 34 个产物文件（weknora 已下线 5 个与上游不兼容的 `.flat.json`）。
 
 ## 真源与可重建物
 
@@ -160,13 +160,14 @@ python tools/ontology-compiler/compile.py compile --diff --summary
 
 | key | 前缀 | 类型 | 本体文件 | 词表 |
 | --- | --- | --- | --- | --- |
-| `bmm` | `bmm` | base | `ontology/BMM完整版.ttl` | `ontology/lexicon/bmm.keywords.yaml` |
-| `ea` | `ea` | base | `ontology/EA完整版.ttl` | `ontology/lexicon/ea.keywords.yaml` |
-| `ea-service` | `easvc` | extension（补强 `ea`） | `ontology/extensions/ea-service-ext.ttl` | 无 |
-| `ea-ownership` | `eaown` | extension（补强 `ea`） | `ontology/extensions/ea-ownership-ext.ttl` | 无 |
-| `bmm-fd` | `bmmfd` | extension（补强 `bmm`、`ea`） | `ontology/extensions/bmm-fd-ext.ttl` | 无 |
+| `bmm` | `bmm` | base | `ontology/sources/bmm.ttl` | — |
+| `agent` | `agent` | extension | `ontology/sources/agent.ttl` | — |
+| `analytics` | `analytics` | extension（自助取数分析） | `ontology/sources/analytics.ttl` | — |
+| `bpmn` | `bpmn` | extension | `ontology/sources/bpmn.ttl` | — |
+| `schema.org` | `schema` | extension（标准参考） | `ontology/sources/schema.org.ttl` | — |
 
-`--module` 取值：`all` / `*` / 逗号分隔的模块 key（如 `bmm,ea`）。
+`--module` 取值：`all` / `*` / 逗号分隔的模块 key（如 `bmm,analytics`）。
+`--module analytics` 只编 analytics 自身；跨模块引用（`bpmn:DataObject` / `agent:MCPService`）需全量编译或在调用方按上游闭包编译。
 
 ## 体检码一览（`ontology_compiler/validate.py`）
 

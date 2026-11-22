@@ -46,7 +46,7 @@ from ontology_compiler.loader import resolved_generated_at  # noqa: E402
 from ontology_compiler.validate import SEVERITY_ERROR, count_by_severity  # noqa: E402
 
 PINNED = "2026-01-01T00:00:00Z"
-MODULE_KEYS = ["bmm", "ea", "ea-service", "ea-ownership", "bmm-fd"]
+MODULE_KEYS = ["bmm", "agent", "analytics", "bpmn", "schema.org"]
 BMM_NS = NS["bmm"]
 
 # 生成器占位符（Neo4j 的 `{{BMM_NS}}` 之类）。README.md 里是**取值示例表格**，故排除。
@@ -131,8 +131,9 @@ class LoadOntologyTests(unittest.TestCase):
                 self.assertTrue(self.bundle.sorted_classes(key), "模块 %s 没有解析到任何类" % key)
 
     def test_enum_members_are_captured(self) -> None:
+        # 当前 bmm/agent 源码没有 `owl:oneOf` 枚举类（枚举章节为空）；
+        # 若未来补回枚举，下面的结构断言仍然生效。
         enums = [cls for cls in self.bundle.sorted_classes() if cls.is_enum]
-        self.assertGreaterEqual(len(enums), 2)
         for enum in enums:
             with self.subTest(enum=enum.prefixed):
                 self.assertTrue(enum.members, "枚举类 %s 没有任何取值" % enum.prefixed)
@@ -254,14 +255,14 @@ class CompileTests(CompileFixture):
         result = self.compile(module_selection="bmm")
         self.assertEqual(result.module_keys, ["bmm"])
         self.assertTrue((self.out / "json_schema/extraction_result.bmm.schema.json").is_file())
-        self.assertFalse((self.out / "json_schema/extraction_result.ea.schema.json").exists())
-        self.assertFalse((self.out / "prompts/ea_extraction.md").exists())
+        self.assertFalse((self.out / "json_schema/extraction_result.agent.schema.json").exists())
+        self.assertFalse((self.out / "prompts/agent_extraction.md").exists())
         self.assertEqual(self.read_json("manifest.json")["module_keys"], ["bmm"])
 
     def test_prune_removes_stale_artifacts(self) -> None:
-        """先全量编译，再只编译 bmm：ea 的模块级产物应被清理。"""
+        """先全量编译，再只编译 bmm：其它模块的模块级产物应被清理。"""
         self.compile()
-        stale = self.out / "prompts/ea_extraction.md"
+        stale = self.out / "prompts/agent_extraction.md"
         self.assertTrue(stale.is_file())
         result = self.compile(module_selection="bmm")
         self.assertFalse(stale.exists())
@@ -281,6 +282,27 @@ class ArtifactContentTests(CompileFixture):
         self.assertEqual(term["labels"]["zh"], "评估")
         self.assertEqual(label_map["alias_index"]["评估"], "bmm:Assessment")
         self.assertIn("conflicts", label_map)
+
+    def test_analytics_fact_dimension_path_is_in_index(self) -> None:
+        """analytics 模块必须进 ontology_index：Fact→Dimension 一条 1 跳通路。"""
+        self.compile()
+        index = self.read_json("weknora/ontology_index.json")
+        model = next((m for m in index["models"] if m["key"] == "analytics"), None)
+        self.assertIsNotNone(model)
+        classes = {c["name"] for c in model["classes"]}
+        self.assertEqual(classes, {"analytics:Dimension", "analytics:Fact",
+                                  "analytics:StandardQueryScenario", "analytics:AnalysisCase"})
+        relations = {r["name"]: r for r in model["relations"]}
+        rel = relations["analytics:factUsesDimension"]
+        self.assertEqual(rel["domain"], ["analytics:Fact"])
+        self.assertEqual(rel["range"], ["analytics:Dimension"])
+        self.assertEqual(relations["analytics:scenarioBasedOnFact"]["range"],
+                         ["analytics:Fact"])
+        self.assertEqual(relations["analytics:caseUsesMcpService"]["range"],
+                         ["agent:MCPService"])
+        terms = self.read_json("mapping/label_map.json")["terms"]
+        self.assertEqual({"analytics:grain", "analytics:databaseType"} - set(terms), set())
+        self.assertEqual(terms["analytics:databaseType"]["type"], "datatype-property")
 
     def test_weknora_config_uses_exactly_the_upstream_keys(self) -> None:
         """上游 `ExtractConfig` 只认这 6 个键；多写的键会被 `json.Unmarshal` **静默丢弃**。"""
@@ -306,11 +328,9 @@ class ArtifactContentTests(CompileFixture):
             with self.subTest(node=node["name"]):
                 self.assertEqual(set(node), {"name", "attributes"}, "多写的键会被上游丢弃")
                 self.assertTrue(node["attributes"], "节点没有任何属性，few-shot 示例就没有信息量")
-        # 枚举取值也要作为可检索节点出现（受控词表不落库等于抽不出来）
-        self.assertTrue(
-            any("枚举取值" in attr for node in config["nodes"] for attr in node["attributes"]),
-            "枚举取值节点缺失或没被标注",
-        )
+        # 枚举取值节点：当前 bmm/agent 源码没有 `owl:oneOf` 枚举类；
+        # 若未来补回枚举，emitter 会把成员作为 `attributes=枚举取值（类）` 的节点输出。
+        # 这里不再强制 bmm 必须有枚举节点（否则测试与当前真源脱节）。
 
     def test_weknora_relations_carry_domain_range_and_type(self) -> None:
         """`GraphRelation` = {node1, node2, type}；`type` 必须落在 `tags`（关系类型白名单）里。"""

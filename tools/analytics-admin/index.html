@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>analytics 配置管理</title>
+<style>
+  body { font-family: system-ui, "Microsoft YaHei", sans-serif; margin: 20px; color: #1f2937; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  select, input, textarea, button { font: inherit; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+  textarea { width: 100%; min-height: 180px; font-family: ui-monospace, Consolas, monospace; }
+  button { cursor: pointer; background: #2563eb; color: #fff; border-color: #2563eb; }
+  button.secondary { background: #64748b; border-color: #64748b; }
+  button.danger { background: #dc2626; border-color: #dc2626; }
+  .wrap { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+  .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border: 1px solid #e2e8f0; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; position: sticky; top: 0; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #eff6ff; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 6px; overflow: auto; max-height: 280px; }
+  .muted { color: #64748b; font-size: 12px; }
+  .status { white-space: pre-wrap; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>analytics 配置管理</h1>
+<div class="bar">
+  <label>表 <select id="table"></select></label>
+  <label>行数 <input id="limit" type="number" value="200" style="width:80px"></label>
+  <button onclick="loadRows()">刷新</button>
+  <label>Token <input id="token" placeholder="可选" style="width:140px"></label>
+  <button onclick="loadInterface()">映射接口校验</button>
+  <span class="muted">映射/枚举/join/filter 只在此编辑，不生成 wiki 页。维度成员值在 diag.tool_dimension / tool_problem_dimension；物理映射用 binding + field_mapping；页面只显示 mapping_object_type / mapping_object_id / mapping_service_id。</span>
+</div>
+<div class="wrap">
+  <div class="card">
+    <div id="rows" class="muted">加载中…</div>
+  </div>
+  <div class="card">
+    <div class="bar">
+      <strong>当前行 JSON</strong>
+      <button onclick="saveRow()">保存</button>
+      <button class="secondary" onclick="newRow()">新建</button>
+      <button class="danger" onclick="deleteRow()">删除</button>
+    </div>
+    <textarea id="editor" spellcheck="false">{}</textarea>
+    <div class="bar" style="margin-top:12px">
+      <strong>同步 wiki 页面</strong>
+    </div>
+    <div class="bar">
+      <input id="kb" placeholder="知识库 ID" style="flex:1;min-width:220px">
+      <select id="kind"><option value="all">all</option><option value="fact">fact</option>
+        <option value="dimension">dimension</option><option value="scenario">scenario</option></select>
+      <label><input id="dry" type="checkbox" checked> dry_run</label>
+      <button onclick="syncPages()">同步</button>
+    </div>
+    <pre id="status" class="status"></pre>
+    <div class="bar" style="margin-top:12px"><strong>知识页 ↔ analytics 映射接口（只读）</strong></div>
+    <pre id="interface" class="status"></pre>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const COLUMN_LABELS = {object_type: "映射对象类型", object_id: "映射对象 ID", service_id: "映射服务 ID"};
+let schema = {};
+
+function authHeaders() {
+  const t = $("token").value.trim();
+  return t ? {"X-Admin-Token": t} : {};
+}
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({"Content-Type": "application/json"}, authHeaders(), opts.headers || {});
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({ok: false, error: "非 JSON 响应"}));
+  if (!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+async function loadSchema() {
+  const data = await api("/api/schema");
+  schema = data.tables || {};
+  const sel = $("table");
+  sel.innerHTML = "";
+  Object.keys(schema).forEach((t) => {
+    const o = document.createElement("option");
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  });
+  sel.onchange = loadRows;
+  await loadRows();
+}
+
+function valueText(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+async function loadRows() {
+  const t = $("table").value;
+  if (!t) return;
+  $("rows").textContent = "加载中…";
+  const data = await api(`/api/rows?table=${encodeURIComponent(t)}&limit=${$("limit").value}`);
+  const rows = data.rows || [];
+  if (!rows.length) { $("rows").textContent = "（无行）"; return; }
+  const cols = Object.keys(rows[0]);
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const tr = document.createElement("tr");
+  cols.forEach((c) => { const th = document.createElement("th"); th.textContent = COLUMN_LABELS[c] || c; tr.appendChild(th); });
+  thead.appendChild(tr); table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const r = document.createElement("tr");
+    r.onclick = () => { $("editor").value = JSON.stringify(row, null, 2); };
+    cols.forEach((c) => {
+      const td = document.createElement("td");
+      td.textContent = valueText(row[c]);
+      r.appendChild(td);
+    });
+    tbody.appendChild(r);
+  });
+  table.appendChild(tbody);
+  $("rows").innerHTML = "";
+  $("rows").appendChild(table);
+}
+
+function newRow() {
+  const meta = schema[$("table").value] || {columns: []};
+  const obj = {};
+  (meta.columns || []).forEach((c) => { obj[c.name] = c.nullable ? null : ""; });
+  $("editor").value = JSON.stringify(obj, null, 2);
+}
+
+async function saveRow() {
+  try {
+    const values = JSON.parse($("editor").value || "{}");
+    const data = await api("/api/row", {method: "POST", body: JSON.stringify({
+      table: $("table").value, values
+    })});
+    $("status").textContent = JSON.stringify(data, null, 2);
+    await loadRows();
+  } catch (e) { $("status").textContent = "保存失败：" + e.message; }
+}
+
+async function deleteRow() {
+  if (!confirm("确认删除当前主键对应的行？")) return;
+  try {
+    const values = JSON.parse($("editor").value || "{}");
+    const data = await api("/api/delete", {method: "POST", body: JSON.stringify({
+      table: $("table").value, values
+    })});
+    $("status").textContent = JSON.stringify(data, null, 2);
+    await loadRows();
+  } catch (e) { $("status").textContent = "删除失败：" + e.message; }
+}
+
+async function loadInterface() {
+  try {
+    const kb = $("kb").value.trim();
+    const data = await api("/api/mapping-interface?kb_id=" + encodeURIComponent(kb));
+    $("interface").textContent = JSON.stringify(data, null, 2);
+  } catch (e) { $("interface").textContent = "映射接口校验失败：" + e.message; }
+}
+
+async function syncPages() {
+  try {
+    const data = await api("/api/sync", {method: "POST", body: JSON.stringify({
+      kb_id: $("kb").value.trim(), kind: $("kind").value, dry_run: $("dry").checked
+    })});
+    $("status").textContent = JSON.stringify(data, null, 2);
+  } catch (e) { $("status").textContent = "同步失败：" + e.message; }
+}
+
+loadSchema().catch((e) => { $("rows").textContent = "初始化失败：" + e.message; });
+</script>
+</body>
+</html>
