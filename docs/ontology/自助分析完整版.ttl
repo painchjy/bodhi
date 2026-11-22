@@ -1,0 +1,138 @@
+@prefix analytics: <http://example.org/analytics#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix bodhi: <http://example.org/bodhi#> .
+@prefix bpmn: <http://example.org/bpmn#> .
+@prefix agent: <http://example.org/agent#> .
+@prefix bmm: <http://example.org/bmm#> .
+
+# ============================================================
+# 自助取数分析本体（analytics）
+#
+# 口径（2026-11-21 用户确认）：
+# 1) 本体只保留「类型 + 少量语义属性」，不建指标/字段/映射/物理表类；
+# 2) 维度、事实、场景的详细清单进 PG（analytics schema），wiki 页只做只读投影；
+# 3) 基础指标与派生指标分表；派生指标带计算语言 + 计算逻辑；
+# 4) 配置映射（binding / field_mapping / enum_mapping / join / filter）只供
+#    管理界面使用，不进知识库检索；
+# 5) Fact→Dimension 与对象→MCP 服务各保留一条对象属性，供 ontology_paths 做类级通路推理；
+#    实例级的可选维度/服务仍以配置表 binding + 页面语义为准。
+# ============================================================
+<http://example.org/analytics> rdf:type owl:Ontology ;
+    rdfs:label "自助取数分析本体"@zh ;
+    rdfs:comment "面向自助取数的语义层：维度/事实/标准取数场景的页面类型，以及事实→维度通路。详细指标、字段、映射、join/filter 全部在 analytics 配置表中。"@zh ;
+    owl:versionIRI <http://example.org/analytics/1.0> ;
+    bodhi:shortName "analytics" ;
+    bodhi:expertRole "数据分析架构师，精通维度建模、指标口径、SQL 方言与自助取数服务设计"@zh .
+
+# ============================================================
+# 一、页面类型
+# ============================================================
+
+analytics:Dimension rdf:type owl:Class ;
+    rdfs:label "维度"@zh ;
+    rdfs:comment "分析维度（如工具分类、Agent、模型、时间）。维度页是只读投影：层级/属性/键来自 analytics.dimension / dimension_level / dimension_attribute；维度不建物理表页，也不在页面上写物理表名。"@zh ;
+    rdfs:subClassOf bpmn:DataObject .
+
+analytics:Fact rdf:type owl:Class ;
+    rdfs:label "事实"@zh ;
+    rdfs:comment "分析事实（如 Agent 轮次、工具调用）。事实页是只读投影：粒度、维度键、基础指标、派生指标、非指标字段来自 analytics.fact / fact_dimension / base_metric / derived_metric / fact_field；基础指标与派生指标分节展示。"@zh ;
+    rdfs:subClassOf bpmn:DataObject .
+
+analytics:StandardQueryScenario rdf:type owl:Class ;
+    rdfs:label "标准取数场景"@zh ;
+    rdfs:comment "可复用的标准取数场景/建模起点：来源定位、来源事实、固定筛选、关联路径与说明。场景页是只读投影；join/filter 明细在 analytics.scenario_join / scenario_filter；来源事实在 analytics.scenario_fact。"@zh ;
+    rdfs:subClassOf owl:Thing .
+
+analytics:AnalysisCase rdf:type owl:Class ;
+    rdfs:label "分析案例"@zh ;
+    rdfs:comment "用户保存的可执行分析案例：SQL、参数、JOIN、FILTER 与口径全部在正文（articleBody），不落 analytics 表；通过 caseUsesFact / caseUsesDimension / caseUsesMcpService 关联语义对象与 MCP 服务。是 bmm:Report 子类，按 document 渲染。"@zh ;
+    rdfs:subClassOf bmm:Report .
+
+# ============================================================
+# 二、关系
+# ============================================================
+
+analytics:factUsesDimension rdf:type owl:ObjectProperty ;
+    rdfs:label "使用维度"@zh ;
+    rdfs:domain analytics:Fact ;
+    rdfs:range analytics:Dimension ;
+    rdfs:comment "事实可用的维度（事实→维度通路）。类级通路供 ontology_paths 枚举；实例级可选维度以 analytics.fact_dimension 及事实页「维度键」为准。同一个事实可连多个维度（如工具分类的 2 层与 1 层两个维度实例）。"@zh .
+
+analytics:objectUsesMcpService rdf:type owl:ObjectProperty ;
+    rdfs:label "使用 MCP 服务"@zh ;
+    rdfs:domain bpmn:DataObject ;
+    rdfs:range agent:MCPService ;
+    rdfs:comment "事实/维度对象可用的自助取数 MCP 服务（对象→服务通路）。实例级来源为 analytics.binding；只投影 active 服务。物理表/列仍只在 binding + field_mapping，不在知识页。"@zh .
+
+analytics:scenarioBasedOnFact rdf:type owl:ObjectProperty ;
+    rdfs:label "场景来源事实"@zh ;
+    rdfs:domain analytics:StandardQueryScenario ;
+    rdfs:range analytics:Fact ;
+    rdfs:comment "标准取数场景来自哪个事实对象（只表达来源，不表达使用/补充）。实例级来源为 analytics.scenario_fact；物理 join/filter 仍在 scenario_join/scenario_filter。"@zh .
+
+analytics:scenarioUsesMcpService rdf:type owl:ObjectProperty ;
+    rdfs:label "场景使用 MCP 服务"@zh ;
+    rdfs:domain analytics:StandardQueryScenario ;
+    rdfs:range agent:MCPService ;
+    rdfs:comment "场景物理执行所在的 MCP 服务；实例级来源为 analytics.scenario.service_id。场景的来源事实必须与该服务有公共 active binding，否则 join/filter 存疑。"@zh .
+
+analytics:caseUsesFact rdf:type owl:ObjectProperty ;
+    rdfs:label "案例使用事实"@zh ;
+    rdfs:domain analytics:AnalysisCase ;
+    rdfs:range analytics:Fact ;
+    rdfs:comment "分析案例使用的事实对象；保存案例时写图边，不落 analytics 表。"@zh .
+
+analytics:caseUsesDimension rdf:type owl:ObjectProperty ;
+    rdfs:label "案例使用维度"@zh ;
+    rdfs:domain analytics:AnalysisCase ;
+    rdfs:range analytics:Dimension ;
+    rdfs:comment "分析案例使用的维度对象；保存案例时写图边，不落 analytics 表。"@zh .
+
+analytics:caseUsesMcpService rdf:type owl:ObjectProperty ;
+    rdfs:label "案例使用 MCP 服务"@zh ;
+    rdfs:domain analytics:AnalysisCase ;
+    rdfs:range agent:MCPService ;
+    rdfs:comment "分析案例执行时使用的 MCP 服务；保存案例时写图边，不落 analytics 表。"@zh .
+
+# ============================================================
+# 三、数据属性
+# ============================================================
+
+analytics:grain rdf:type owl:DatatypeProperty ;
+    rdfs:label "粒度"@zh ;
+    rdfs:domain analytics:Fact ;
+    rdfs:range xsd:string ;
+    rdfs:comment "事实一行的业务粒度（如 session_id + turn_id）。页面上的值是配置表 analytics.fact.grain 的投影，不是第二份定义。"@zh .
+
+analytics:databaseType rdf:type owl:DatatypeProperty ;
+    rdfs:label "数据库类型"@zh ;
+    rdfs:domain agent:MCPService ;
+    rdfs:range xsd:string ;
+    rdfs:comment "自助取数 MCP 背后的数据库类型，供智能体选择 SQL 方言。受控取值（逐字使用）：oceanbase｜gaussdb｜hetu｜postgresql｜mysql。河图对应 hetu；配置表 analytics.mcp_service.database_type 与本属性同值。"@zh .
+
+analytics:mappingObjectType rdf:type owl:DatatypeProperty ;
+    rdfs:label "映射对象类型"@zh ;
+    rdfs:domain bpmn:DataObject ;
+    rdfs:range xsd:string ;
+    rdfs:comment "知识页用于 analytics 映射的类型判别：fact｜dimension。只用于 analytics Fact/Dimension 页；不是第二个 ID。"@zh .
+
+analytics:mappingObjectId rdf:type owl:DatatypeProperty ;
+    rdfs:label "映射对象 ID"@zh ;
+    rdfs:domain bpmn:DataObject ;
+    rdfs:range xsd:string ;
+    rdfs:comment "知识页用于 mapping_lookup 的唯一对象 ID：对应 analytics.fact.fact_id 或 analytics.dimension.dimension_id；不得填页面 slug、标题或其它 ID。"@zh .
+
+analytics:mappingServiceId rdf:type owl:DatatypeProperty ;
+    rdfs:label "映射服务 ID"@zh ;
+    rdfs:domain agent:MCPService ;
+    rdfs:range xsd:string ;
+    rdfs:comment "analytics.mcp_service.service_id（如 svc_postgresql）；mapping_lookup 使用此 ID，不是平台 mcp_services.id。"@zh .
+
+analytics:platformMcpServiceId rdf:type owl:DatatypeProperty ;
+    rdfs:label "平台 MCP 服务 ID"@zh ;
+    rdfs:domain agent:MCPService ;
+    rdfs:range xsd:string ;
+    rdfs:comment "WeKnora 平台 mcp_services.id（可选）；只用于平台挂载，不用于 mapping_lookup。"@zh .
