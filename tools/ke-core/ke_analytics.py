@@ -18,7 +18,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import sys
 from functools import lru_cache
 from typing import Any
@@ -46,6 +48,7 @@ PUBLIC_PROMPT = """## 公共使用提示
 
 - 事实/维度：`mapping_object_type`（fact｜dimension）+ `mapping_object_id`（内部对象 ID）；
 - MCP 服务：`mapping_service_id`（analytics 服务 ID）+ `platform_mcp_service_id`（平台 ID，可选）+ `database_type`；
+- 选事实：调用 `fact_match(metrics=..., fact_tables=..., filters=..., group_by=..., classification_fields=..., intent=...)`；`decision=confident` 才继续；
 - 物理映射：调用 `mapping_lookup(mapping_object_type=..., mapping_object_id=..., mapping_service_id=...)`；
 - 先确认 mapping，再调用 `scenario_lookup(mapping_object_id=..., mapping_service_id=..., intent=...)`；
 - `status=mapped` 继续；`formula_only` 用 `levels[].formula_sql` 继续（bindings 为空不等于缺映射）；`missing` 停止并检查 ID/服务；
@@ -113,6 +116,120 @@ def _json(value: Any, default):
 def _q(value: str) -> str:
     """SQL 字符串字面量（只用于内部已校验的表/ID）。"""
     return ke_db.sql_str(value)
+
+
+# ---------------------------------------------------------------------------
+# 事实选择：通用文本相似度（不写死任何业务对象名）
+# ---------------------------------------------------------------------------
+FACT_MATCH_WEIGHTS = {
+    "metrics": 0.45,
+    "fact_tables": 0.20,
+    "intent": 0.20,
+    "fields": 0.10,
+    "filters": 0.05,
+}
+FACT_MATCH_CONFIDENT_SCORE = 0.55
+FACT_MATCH_CONFIDENT_MARGIN = 0.08
+
+
+def _normalize_text(value: Any) -> str:
+    text = "" if value is None else str(value)
+    return re.sub(r"[\s\u3000·、，,。.（）()【】\[\]:：;；\-—_/]+", "", text.lower())
+
+
+def _ngrams(text: str, n: int = 3) -> dict[str, int]:
+    cleaned = re.sub(r"\s+", "", text or "")
+    if len(cleaned) < n:
+        return {cleaned: 1} if cleaned else {}
+    grams: dict[str, int] = {}
+    for i in range(len(cleaned) - n + 1):
+        gram = cleaned[i:i + n]
+        grams[gram] = grams.get(gram, 0) + 1
+    return grams
+
+
+def _lexical_similarity(text_a: str, text_b: str) -> float:
+    """字符 3-gram 余弦；中文不需要分词，且不依赖外部模型。"""
+    a, b = _ngrams(_normalize_text(text_a)), _ngrams(_normalize_text(text_b))
+    if not a or not b:
+        return 0.0
+    common = set(a) & set(b)
+    dot = sum(a[g] * b[g] for g in common)
+    na = math.sqrt(sum(v * v for v in a.values()))
+    nb = math.sqrt(sum(v * v for v in b.values()))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _term_score(term: str, text: str) -> float:
+    """精确/包含优先，否则 3-gram 余弦；返回 0..1。"""
+    t, s = _normalize_text(term), _normalize_text(text)
+    if not t or not s:
+        return 0.0
+    if t == s:
+        return 1.0
+    if t in s or s in t:
+        return 0.9
+    return min(1.0, _lexical_similarity(t, s))
+
+
+def _split_terms(value: Any) -> list[str]:
+    """把数组/逗号/顿号/换行文本统一成去重词条；保留中文短语。"""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        raw = [str(x) for x in value]
+    else:
+        raw = re.split(r"[,，、;；|\n\r]+", str(value))
+    out: list[str] = []
+    seen = set()
+    for item in raw:
+        term = str(item).strip()
+        key = _normalize_text(term)
+        if term and key and key not in seen:
+            seen.add(key)
+            out.append(term)
+    return out
+
+
+def _best_term_match(term: str, rows: list[dict], text_key: str = "match_text") -> dict:
+    best = {"score": 0.0, "row": None, "term": term}
+    for row in rows or []:
+        score = _term_score(term, str(row.get(text_key) or ""))
+        if score > best["score"]:
+            best = {"score": score, "row": row, "term": term}
+    return best
+
+
+def _group_match(terms: list[str], rows: list[dict]) -> dict:
+    """一个词条组的最佳命中；覆盖率和平均分共同决定组得分。"""
+    terms = [t for t in terms if t]
+    if not terms or not rows:
+        return {"score": 0.0, "hits": [], "coverage": 0.0, "provided": bool(terms)}
+    hits = [_best_term_match(t, rows) for t in terms]
+    matched = [h for h in hits if h["score"] > 0]
+    score = sum(h["score"] for h in hits) / len(hits)
+    coverage = len(matched) / len(hits)
+    # 未命中词条不能被平均分掩盖
+    return {"score": score * (0.5 + 0.5 * coverage),
+            "hits": [h for h in hits if h["row"]],
+            "coverage": coverage, "provided": True}
+
+
+def _score_fact_profile(profile: dict, inputs: dict) -> dict:
+    groups = {}
+    for group, weight in FACT_MATCH_WEIGHTS.items():
+        terms = inputs.get(group) or []
+        result = _group_match(terms, profile.get(group) or [])
+        if result.get("provided") and result.get("hits"):
+            groups[group] = dict(result, weight=weight)
+    supplied = [g for g in FACT_MATCH_WEIGHTS if inputs.get(g)]
+    total_weight = sum(FACT_MATCH_WEIGHTS[g] for g in supplied)
+    if not total_weight:
+        return {"score": 0.0, "groups": groups, "strong_hits": 0}
+    score = sum(groups[g]["score"] * FACT_MATCH_WEIGHTS[g] for g in groups) / total_weight
+    strong_hits = sum(1 for g in groups for h in groups[g]["hits"]
+                      if h["score"] >= 0.75)
+    return {"score": round(score, 6), "groups": groups, "strong_hits": strong_hits}
 
 
 def _cell(value: Any) -> str:
@@ -244,8 +361,225 @@ def list_ids(kind: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# 页面正文渲染（纯函数，便于单测）
+# 事实选择：从指标/事实表/场景/字段/筛选词条汇总到 Fact 排名
 # ---------------------------------------------------------------------------
+def _load_fact_match_profiles() -> list[dict]:
+    """读取 active Fact 的匹配画像；只读，不写库。"""
+    facts = ke_db.psql_csv(
+        "SELECT f.fact_id, f.code, f.name, f.description, f.grain "
+        "  FROM analytics.fact f WHERE f.status='active' ORDER BY f.fact_id")
+    tables = ke_db.psql_csv(
+        "SELECT fact_id, table_id, source_schema, source_table, is_primary "
+        "  FROM analytics.fact_table WHERE status='active' "
+        " ORDER BY fact_id, sort_order, table_id")
+    catalog = ke_db.psql_csv(
+        "SELECT b.fact_id, 'base_metric' AS kind, b.metric_id AS item_id, "
+        "       b.code, b.name, b.description, b.aggregation AS role, "
+        "       b.filter_expression AS extra FROM analytics.base_metric b "
+        " WHERE b.status='active' UNION ALL "
+        "SELECT d.fact_id, 'derived_metric', d.metric_id, d.code, d.name, "
+        "       d.description, d.expression_language, d.expression "
+        "  FROM analytics.derived_metric d WHERE d.status='active' UNION ALL "
+        "SELECT x.fact_id, 'fact_field', x.field_id, x.code, x.name, "
+        "       x.description, x.role, x.data_type FROM analytics.fact_field x "
+        " WHERE x.status='active'")
+    dimensions = ke_db.psql_csv(
+        "SELECT fact_id, dimension_id, dimension_name, dimension_code, "
+        "       coalesce(level_names::text, '[]') AS level_names "
+        "  FROM analytics.v_fact_dimension_path WHERE status='active'")
+    scenarios = ke_db.psql_csv(
+        "SELECT sf.fact_id, s.scenario_id, s.name, s.description "
+        "  FROM analytics.scenario s "
+        "  JOIN analytics.scenario_fact sf ON sf.scenario_id=s.scenario_id "
+        " WHERE s.status='active' AND sf.status='active'")
+    mappings = ke_db.psql_csv(
+        "SELECT mapping_object_id AS fact_id, mapping_service_id, "
+        "       service_name, database_type FROM analytics.v_mapping_interface "
+        " WHERE mapping_object_type='fact' AND binding_status='active' "
+        "   AND service_status='active'")
+    profiles = {}
+    for row in facts:
+        fid = str(row.get("fact_id") or "")
+        if not fid:
+            continue
+        profiles[fid] = {
+            "fact": row,
+            "metrics": [], "fact_tables": [], "intent": [],
+            "fields": [], "filters": [], "services": [],
+        }
+    for row in catalog:
+        profile = profiles.get(str(row.get("fact_id") or ""))
+        if not profile:
+            continue
+        text = " ".join(_s(row.get(k)) for k in
+                        ("kind", "code", "name", "description", "role", "extra"))
+        item = dict(row, match_text=text)
+        # 指标词可能命中 base/derived metric，也可能命中事实字段
+        # （用户用字段名表达指标）；因此 metrics 组同时收录 fact_field。
+        profile["metrics"].append(item)
+        if row.get("kind") not in ("base_metric", "derived_metric"):
+            profile["fields"].append(item)
+            if row.get("role") in ("filter", "attribute"):
+                profile["filters"].append(item)
+    for row in dimensions:
+        profile = profiles.get(str(row.get("fact_id") or ""))
+        if profile:
+            profile["fields"].append(dict(
+                row, kind="dimension", item_id=row.get("dimension_id"),
+                match_text=" ".join(_s(row.get(k)) for k in
+                                    ("dimension_name", "dimension_code", "level_names"))))
+    for row in tables:
+        profile = profiles.get(str(row.get("fact_id") or ""))
+        if not profile:
+            continue
+        qualified = "%s.%s" % (_s(row.get("source_schema")), _s(row.get("source_table")))
+        text = " ".join(x for x in (row.get("source_table"), qualified,
+                                    row.get("table_id"),
+                                    profile["fact"].get("name"),
+                                    profile["fact"].get("code")) if x)
+        profile["fact_tables"].append(dict(row, match_text=text))
+    for row in scenarios:
+        profile = profiles.get(str(row.get("fact_id") or ""))
+        if profile:
+            profile["intent"].append(dict(
+                row, match_text=" ".join(_s(row.get(k)) for k in ("name", "description"))))
+    for row in mappings:
+        profile = profiles.get(str(row.get("fact_id") or ""))
+        if profile:
+            profile["services"].append(dict(row))
+    return list(profiles.values())
+
+
+def _fact_match_inputs(metrics: Any, fact_tables: Any, intent: Any,
+                       filters: Any, group_by: Any,
+                       classification_fields: Any) -> dict:
+    intent_terms = _split_terms(intent)
+    if isinstance(intent, str):
+        intent_terms += [x for x in re.split(r"\s+", intent.strip()) if x]
+    return {
+        "metrics": _split_terms(metrics),
+        "fact_tables": _split_terms(fact_tables),
+        "intent": list(dict.fromkeys(intent_terms)),
+        "filters": _split_terms(filters),
+        "fields": list(dict.fromkeys(
+            _split_terms(group_by) + _split_terms(classification_fields))),
+    }
+
+
+def _fact_evidence(groups: dict) -> dict:
+    out = {}
+    for group, data in (groups or {}).items():
+        hits = []
+        for hit in data.get("hits") or []:
+            row = hit.get("row") or {}
+            hits.append({
+                "input": hit.get("term"),
+                "matched_id": row.get("item_id") or row.get("scenario_id")
+                              or row.get("dimension_id") or row.get("table_id"),
+                "matched_name": row.get("name") or row.get("scenario_name")
+                                or row.get("dimension_name") or row.get("source_table"),
+                "score": round(float(hit.get("score") or 0), 3),
+            })
+        out[group] = {"score": round(float(data.get("score") or 0), 3),
+                      "coverage": round(float(data.get("coverage") or 0), 3),
+                      "hits": hits}
+    return out
+
+
+def _fact_match_decision(candidates: list[dict]) -> dict:
+    top = candidates[0] if candidates else None
+    second = candidates[1] if len(candidates) > 1 else None
+    margin = ((float(top.get("score") or 0) - float(second.get("score") or 0))
+              if top and second else (float(top.get("score") or 0) if top else 0.0))
+    if top and top.get("score", 0) >= FACT_MATCH_CONFIDENT_SCORE \
+            and margin >= FACT_MATCH_CONFIDENT_MARGIN and top.get("strong_hits", 0) > 0:
+        decision = "confident"
+    elif top and top.get("score", 0) >= 0.30:
+        decision = "ambiguous"
+    else:
+        decision = "no_match"
+    return {"decision": decision, "margin": round(margin, 3),
+            "requires_user_confirmation": decision != "confident"}
+
+
+def fact_match(metrics: Any = None, fact_tables: Any = None, intent: Any = "",
+               filters: Any = None, group_by: Any = None,
+               classification_fields: Any = None,
+               mapping_service_id: str = "", top_k: int = 5) -> dict:
+    """按指标/事实表/目的/字段/筛选词条给 active Fact 排序（只读）。
+
+    返回 decision=confident 才可自动继续；ambiguous/no_match 必须让用户
+    选择或补充信息后重算。本函数不返回物理列，只给候选与证据。
+    """
+    inputs = _fact_match_inputs(metrics, fact_tables, intent, filters,
+                                group_by, classification_fields)
+    if not any(inputs.values()):
+        return {"ok": False, "error": "invalid_argument",
+                "decision": "no_match", "requires_user_confirmation": True,
+                "candidates": [], "excluded": [], "groups": {},
+                "hint": "至少提供 metrics / fact_tables / intent / filters / "
+                        "group_by / classification_fields 中的一组"}
+    profiles = _load_fact_match_profiles()
+    sid = (mapping_service_id or "").strip()
+    candidates, excluded = [], []
+    for profile in profiles:
+        fact = profile["fact"]
+        services = [s for s in profile.get("services") or []
+                    if not sid or s.get("mapping_service_id") == sid]
+        if not services:
+            excluded.append({
+                "fact_id": fact.get("fact_id"), "code": fact.get("code"),
+                "reason": "no_active_mapping_service" if not sid
+                          else "service_mismatch",
+            })
+            continue
+        scored = _score_fact_profile(profile, inputs)
+        candidates.append({
+            "fact_id": fact.get("fact_id"),
+            "code": fact.get("code"),
+            "name": fact.get("name"),
+            "description": fact.get("description"),
+            "grain": fact.get("grain"),
+            "mapping_object_type": "fact",
+            "mapping_object_id": fact.get("fact_id"),
+            "mapping_services": [
+                {"mapping_service_id": s.get("mapping_service_id"),
+                 "service_name": s.get("service_name"),
+                 "database_type": s.get("database_type")}
+                for s in services],
+            "fact_tables": [
+                {"table_id": t.get("table_id"),
+                 "source_schema": t.get("source_schema"),
+                 "source_table": t.get("source_table"),
+                 "is_primary": t.get("is_primary")}
+                for t in profile.get("fact_tables") or []],
+            "score": scored.get("score", 0.0),
+            "strong_hits": scored.get("strong_hits", 0),
+            "evidence": _fact_evidence(scored.get("groups") or {}),
+        })
+    candidates.sort(key=lambda c: (-float(c.get("score") or 0), str(c.get("fact_id"))))
+    try:
+        top_k = max(1, min(int(top_k or 5), 20))
+    except Exception:  # noqa: BLE001
+        top_k = 5
+    decision = _fact_match_decision(candidates)
+    hints = {
+        "confident": "已唯一匹配事实；继续 mapping_lookup。",
+        "ambiguous": "多个事实分数接近；请让用户选择，或补充指标/场景/分类字段后重算。",
+        "no_match": "没有足够匹配；请补充指标、事实表、筛选条件或场景后重算。",
+    }
+    return {
+        "ok": True, "decision": decision["decision"],
+        "requires_user_confirmation": decision["requires_user_confirmation"],
+        "candidates": candidates[:top_k],
+        "excluded": excluded,
+        "inputs": inputs,
+        "groups_used": [g for g in FACT_MATCH_WEIGHTS if inputs.get(g)],
+        "margin": decision["margin"],
+        "hint": hints[decision["decision"]],
+    }
+
+
 def render_fact_page(spec: dict) -> str:
     """事实页：基础指标/派生指标/非指标字段/维度键，四节分开。"""
     lines = ["# 事实：%s" % _s(spec.get("name") or spec.get("fact_id")),
@@ -793,6 +1127,36 @@ def mapping_lookup(mapping_object_type: str = "", mapping_object_id: str = "",
         row["mapping_object_id"] = resolved
         row["mapping_service_id"] = row.get("service_id")
         row["levels"] = levels
+    fact_tables = []
+    invalid_sources = []
+    mapping_error = ""
+    if typ == "fact":
+        fact_tables = ke_db.psql_csv(
+            "SELECT table_id, source_schema, source_table, is_primary, grain_keys::text "
+            "  FROM analytics.fact_table WHERE fact_id=%s AND status='active' "
+            " ORDER BY sort_order, table_id" % _q(resolved))
+        keys = {(str(t.get("source_schema") or ""), str(t.get("source_table") or ""))
+                for t in fact_tables}
+        for row in rows:
+            for m in row.get("field_mappings") or []:
+                if str(m.get("source_type") or "mcp_table") != "mcp_table":
+                    continue
+                schema = str(m.get("source_schema") or "")
+                table = str(m.get("source_table") or "")
+                if table and (schema, table) not in keys:
+                    invalid_sources.append({
+                        "mapping_id": m.get("mapping_id"),
+                        "semantic_kind": m.get("semantic_kind"),
+                        "semantic_id": m.get("semantic_id"),
+                        "source_schema": schema,
+                        "source_table": table,
+                    })
+        if not fact_tables:
+            mapping_error = "fact_table_missing"
+        elif invalid_sources:
+            mapping_error = "fact_source_not_fact_table"
+        for row in rows:
+            row["fact_tables"] = fact_tables
     active_rows = [r for r in rows if r.get("service_status") == "active"]
     service_missing = False
     if sid and not rows:
@@ -801,7 +1165,9 @@ def mapping_lookup(mapping_object_type: str = "", mapping_object_id: str = "",
             " WHERE service_id=%s AND status='active'" % _q(sid))
         service_missing = not service
     has_mapping = any(r.get("field_mappings") for r in active_rows)
-    if (rows and not active_rows) or service_missing:
+    if mapping_error:
+        status, ok = "missing", False
+    elif (rows and not active_rows) or service_missing:
         status, ok = "missing", False
     elif active_rows and has_mapping:
         status, ok = "mapped", True
@@ -814,7 +1180,12 @@ def mapping_lookup(mapping_object_type: str = "", mapping_object_id: str = "",
         status, ok = "missing", False
     hint = ""
     if not ok:
-        if active_rows:
+        if mapping_error == "fact_table_missing":
+            hint = "事实没有 fact_table 组成；请先登记事实表，再调用 mapping_lookup"
+        elif mapping_error == "fact_source_not_fact_table":
+            hint = ("事实字段映射到了未登记/维表来源；请只映射事实表，"
+                    "维表交给 Dimension 的 binding + field_mapping")
+        elif active_rows:
             hint = "active binding 缺少 active field_mapping；按缺映射处理"
         else:
             hint = ("MCP 服务未 active；请检查 mapping_service_id 或服务状态"
@@ -832,7 +1203,33 @@ def mapping_lookup(mapping_object_type: str = "", mapping_object_id: str = "",
             "mapping_object_type": typ, "mapping_object_id": resolved,
             "input_mapping_object_id": oid, "resolved_from": how,
             "mapping_service_id": sid or None,
-            "bindings": rows, "levels": levels, "hint": hint}
+            "bindings": rows, "levels": levels, "fact_tables": fact_tables,
+            "invalid_sources": invalid_sources,
+            "mapping_error": mapping_error, "hint": hint}
+
+
+def _scenario_join_invalid(spec: dict) -> list[dict]:
+    """scenario_join 的左右表必须属于该场景来源事实的 fact_table。"""
+    joins = spec.get("joins") or []
+    if not joins:
+        return []
+    fact_ids = [str(f.get("fact_id")) for f in (spec.get("facts") or [])
+                if f.get("fact_id")]
+    if not fact_ids:
+        return list(joins)
+    rows = ke_db.psql_csv(
+        "SELECT source_schema, source_table FROM analytics.fact_table "
+        " WHERE status='active' AND fact_id IN (%s)"
+        % ",".join(_q(x) for x in fact_ids))
+    keys = {(str(r.get("source_schema") or ""), str(r.get("source_table") or ""))
+            for r in rows}
+    invalid = []
+    for j in joins:
+        left = (str(j.get("left_schema") or ""), str(j.get("left_table") or ""))
+        right = (str(j.get("right_schema") or ""), str(j.get("right_table") or ""))
+        if left not in keys or right not in keys:
+            invalid.append(j)
+    return invalid
 
 
 def scenario_lookup(scenario_id: str = "", mapping_object_id: str = "",
@@ -843,6 +1240,13 @@ def scenario_lookup(scenario_id: str = "", mapping_object_id: str = "",
     """
     if scenario_id:
         spec = scenario_spec(scenario_id)
+        invalid = _scenario_join_invalid(spec)
+        if invalid:
+            return {"ok": False, "error": "scenario_join_not_fact_table",
+                    "scenario": None, "candidates": [spec], "count": 1,
+                    "invalid_joins": invalid,
+                    "requires_user_confirmation": False,
+                    "hint": "scenario_join 只能记录事实表↔事实表；维表路径交给 fact_dimension"}
         return {"ok": True, "scenario": spec, "candidates": [spec], "count": 1,
                 "requires_user_confirmation": len(spec.get("joins") or []) > 1}
     if mapping_object_id:
@@ -886,6 +1290,18 @@ def scenario_lookup(scenario_id: str = "", mapping_object_id: str = "",
         spec["match_score"] = score
         spec["match_reasons"] = [t for t in terms if t in hay.lower()]
         out.append(spec)
+    invalid = []
+    for spec in out:
+        bad = _scenario_join_invalid(spec)
+        if bad:
+            invalid.append({"scenario_id": spec.get("scenario_id"),
+                            "joins": bad})
+    if invalid:
+        return {"ok": False, "error": "scenario_join_not_fact_table",
+                "scenario": None, "candidates": [], "count": 0,
+                "invalid_scenario_joins": invalid,
+                "requires_user_confirmation": False,
+                "hint": "scenario_join 只能记录事实表↔事实表；请检查场景配置"}
     out.sort(key=lambda x: (-int(x.get("match_score") or 0), str(x.get("scenario_id"))))
     ambiguous = (len(out) > 1 and
                  (out[0].get("match_score") == out[1].get("match_score")

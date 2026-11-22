@@ -126,10 +126,7 @@ UPDATE analytics.field_mapping SET source_column = 'tool_call_id'
  WHERE mapping_id = 'map_tool_call_id';
 UPDATE analytics.field_mapping SET source_column = 'error_code'
  WHERE mapping_id = 'map_tool_error';
-UPDATE analytics.field_mapping SET source_table = 'tool_dimension', source_column = 'category_name'
- WHERE mapping_id = 'map_tool_category';
-UPDATE analytics.field_mapping SET source_table = 'tool_problem_dimension', source_column = 'category_l2_name'
- WHERE mapping_id = 'map_tool_subcategory';
+-- 事实字段不映射维表；工具分类/小类由 Dimension 自己映射。
 UPDATE analytics.field_mapping SET source_column = 'tool_success'
  WHERE mapping_id = 'map_tool_status';
 UPDATE analytics.field_mapping SET source_column = 'tool_call_id'

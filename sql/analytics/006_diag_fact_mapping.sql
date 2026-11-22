@@ -32,12 +32,10 @@ UPDATE analytics.field_mapping SET source_column = 'tool_call_no', data_type = '
  WHERE mapping_id = 'map_tool_call_id';
 UPDATE analytics.field_mapping SET source_column = 'tool_code'
  WHERE mapping_id IN ('map_tool_name', 'map_tool_call_count');
-UPDATE analytics.field_mapping
-   SET source_table = 'tool_dimension', source_column = 'category_name'
- WHERE mapping_id = 'map_tool_category';
-UPDATE analytics.field_mapping
-   SET source_table = 'tool_problem_dimension', source_column = 'category_l2_name'
- WHERE mapping_id = 'map_tool_subcategory';
+-- 工具分类/小类不是工具调用事实表的物理列：
+-- 它们由 Dimension 的 binding + field_mapping 表达，事实字段不得映射到维表。
+DELETE FROM analytics.field_mapping
+ WHERE mapping_id IN ('map_tool_category', 'map_tool_subcategory');
 UPDATE analytics.field_mapping SET source_column = 'tool_success', data_type = 'boolean'
  WHERE mapping_id = 'map_tool_status';
 UPDATE analytics.field_mapping

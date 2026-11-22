@@ -16,13 +16,14 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from harness import WeKnoraClient  # noqa: E402
 
+FACT_MATCH = "fact_match"
 MAPPING = "mapping_lookup"
 SCENARIO = "scenario_lookup"
 
 
 def _tool_name(name: str) -> str:
     name = str(name or "")
-    for tool in (MAPPING, SCENARIO):
+    for tool in (FACT_MATCH, MAPPING, SCENARIO):
         if name == tool or name.endswith("_" + tool):
             return tool
     return name
@@ -63,14 +64,27 @@ def _result_json(call: dict) -> dict:
 
 
 def mapping_flow_errors(messages: list, expected_fact: str,
-                        expected_dimensions: list) -> list:
+                        expected_dimensions: list,
+                        require_fact_match: bool = False) -> list:
     """返回空列表 = 符合：canonical ID、首次 mapping 即成功、mapping 全部在 scenario 前。"""
     calls = _calls(messages)
+    fact_match = [c for c in calls if c["name"] == FACT_MATCH]
     mapping = [c for c in calls if c["name"] == MAPPING]
     scenario = [c for c in calls if c["name"] == SCENARIO]
     errors = []
+    if require_fact_match and not fact_match:
+        errors.append("no_fact_match")
+    for call in fact_match:
+        args = call["args"]
+        if not any(args.get(k) for k in ("metrics", "fact_tables", "filters",
+                                         "group_by", "classification_fields", "intent")):
+            errors.append("fact_match_missing_extraction")
+        if any(k in args for k in ("object_type", "object_id", "fact_id", "dimension_id")):
+            errors.append("legacy_fact_match_arg")
+    if fact_match and mapping and fact_match[0]["idx"] > mapping[0]["idx"]:
+        errors.append("fact_match_after_mapping")
     if not mapping:
-        return ["no_mapping_lookup"]
+        return errors + ["no_mapping_lookup"]
     seen = set()
     for call in mapping:
         args = call["args"]
@@ -139,6 +153,44 @@ def test_mapping_flow_accepts_canonical_order():
     assert mapping_flow_errors(messages, "fact_agent_tool_call", ["dim_time"]) == []
 
 
+def test_fact_match_extracts_all_categories_before_mapping():
+    messages = _msg([
+        _call(FACT_MATCH, {
+            "metrics": ["工具耗时", "调用次数"],
+            "fact_tables": ["agent_tool_call_fact"],
+            "filters": ["失败", "最近3天"],
+            "group_by": ["Agent", "小时"],
+            "classification_fields": ["工具分类", "工具小类"],
+            "intent": "工具使用分析",
+        }, status="confident"),
+        _call(MAPPING, {"mapping_object_type": "fact",
+                        "mapping_object_id": "fact_agent_tool_call",
+                        "mapping_service_id": "svc_postgresql"}),
+        _call(SCENARIO, {"mapping_object_id": "fact_agent_tool_call",
+                         "mapping_service_id": "svc_postgresql", "intent": "x"}),
+    ])
+    assert mapping_flow_errors(messages, "fact_agent_tool_call", [],
+                               require_fact_match=True) == []
+
+
+def test_fact_match_rejects_missing_extraction_and_reverse_order():
+    missing = _msg([
+        _call(FACT_MATCH, {"intent": ""}, status="ambiguous"),
+        _call(MAPPING, {"mapping_object_type": "fact",
+                        "mapping_object_id": "fact_agent_tool_call"}),
+    ])
+    errors = mapping_flow_errors(missing, "fact_agent_tool_call", [])
+    assert "fact_match_missing_extraction" in errors
+
+    reverse = _msg([
+        _call(MAPPING, {"mapping_object_type": "fact",
+                        "mapping_object_id": "fact_agent_tool_call"}),
+        _call(FACT_MATCH, {"metrics": ["耗时"]}, status="confident"),
+    ])
+    errors = mapping_flow_errors(reverse, "fact_agent_tool_call", [])
+    assert "fact_match_after_mapping" in errors
+
+
 def test_mapping_flow_rejects_slug_and_reverse_order():
     messages = _msg([
         _call(SCENARIO, {"mapping_object_id": "fact_agent_tool_call"}),
@@ -171,7 +223,8 @@ def test_live_analytics_mapping_order():
     for query, fact, dims in cases:
         sid = client.create_session("analytics-e2e")
         client.chat(sid, query)
-        errors = mapping_flow_errors(client.messages(sid), fact, dims)
+        errors = mapping_flow_errors(client.messages(sid), fact, dims,
+                                     require_fact_match=True)
         if errors:
             failures.append({"query": query, "session_id": sid, "errors": errors})
     assert not failures, failures

@@ -112,6 +112,26 @@ CREATE TABLE IF NOT EXISTS analytics.fact_dimension (
 
 COMMENT ON TABLE analytics.fact_dimension IS '事实可用的维度（实例级事实→维度通路）；事实页「维度键」由本表生成。';
 
+-- 事实对象允许的物理事实表：一个 Fact 可以由一张或多张事实表 JOIN 组成。
+-- 这里只登记表级组成/主表/粒度键；列级物理映射仍只在 field_mapping。
+CREATE TABLE IF NOT EXISTS analytics.fact_table (
+    fact_id        text NOT NULL REFERENCES analytics.fact(fact_id) ON DELETE CASCADE,
+    table_id       text NOT NULL,
+    source_schema  text NOT NULL DEFAULT '',
+    source_table   text NOT NULL,
+    is_primary     boolean NOT NULL DEFAULT false,
+    grain_keys     jsonb NOT NULL DEFAULT '[]'::jsonb,
+    sort_order     integer NOT NULL DEFAULT 0,
+    status         text NOT NULL DEFAULT 'active'
+                   CHECK (status IN ('active', 'inactive')),
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (fact_id, table_id),
+    UNIQUE (fact_id, source_schema, source_table)
+);
+
+COMMENT ON TABLE analytics.fact_table IS '事实对象的物理事实表组成：一个 Fact 可由多张事实表 JOIN；只登记表/主表/粒度，列级映射仍在 field_mapping。';
+
 -- ============================================================
 -- 3. 指标：基础与派生分表
 -- ============================================================
@@ -329,6 +349,9 @@ COMMENT ON TABLE analytics.scenario_fact IS '场景来源事实：只表达 Scen
 CREATE INDEX IF NOT EXISTS ix_dimension_level_dim ON analytics.dimension_level(dimension_id);
 CREATE INDEX IF NOT EXISTS ix_dimension_attr_dim ON analytics.dimension_attribute(dimension_id);
 CREATE INDEX IF NOT EXISTS ix_fact_dimension_dim ON analytics.fact_dimension(dimension_id);
+CREATE INDEX IF NOT EXISTS ix_fact_table_fact ON analytics.fact_table(fact_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_table_primary
+    ON analytics.fact_table(fact_id) WHERE is_primary;
 CREATE INDEX IF NOT EXISTS ix_base_metric_fact ON analytics.base_metric(fact_id);
 CREATE INDEX IF NOT EXISTS ix_derived_metric_fact ON analytics.derived_metric(fact_id);
 CREATE INDEX IF NOT EXISTS ix_fact_field_fact ON analytics.fact_field(fact_id);
@@ -345,6 +368,10 @@ FOR EACH ROW EXECUTE FUNCTION analytics.touch_updated_at();
 
 DROP TRIGGER IF EXISTS trg_fact_updated ON analytics.fact;
 CREATE TRIGGER trg_fact_updated BEFORE UPDATE ON analytics.fact
+FOR EACH ROW EXECUTE FUNCTION analytics.touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_fact_table_updated ON analytics.fact_table;
+CREATE TRIGGER trg_fact_table_updated BEFORE UPDATE ON analytics.fact_table
 FOR EACH ROW EXECUTE FUNCTION analytics.touch_updated_at();
 
 DROP TRIGGER IF EXISTS trg_base_metric_updated ON analytics.base_metric;

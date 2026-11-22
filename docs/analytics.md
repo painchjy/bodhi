@@ -31,11 +31,11 @@ analytics:StandardQueryScenario  标准取数场景页（溯源/建模起点）
 
 `databaseType` 不新增 `SelfServiceMCPService` 子类；`agent:MCPService` 页 + 该属性即可。
 
-## 2. 配置表（16 张 + 8 个视图）
+## 2. 配置表（17 张 + 8 个视图）
 
 **维度**：`dimension`（`member_key`） / `dimension_level`（`formula_kind` / `formula_params` / `data_type`） / `dimension_attribute`
 
-**事实**：`fact` / `fact_dimension`（`fact_key` / `dimension_key` / `join_type`；PK=`fact_id + dimension_id`）
+**事实**：`fact` / `fact_dimension`（`fact_key` / `dimension_key` / `join_type`；PK=`fact_id + dimension_id`） / `fact_table`（事实对象的物理事实表组成；一个 Fact 可由多张事实表 JOIN 组成）
 
 **指标/字段**：`base_metric`（聚合、可加性、过滤表达式） /
 `derived_metric`（`expression_language` = pseudo/sql + `expression`） /
@@ -44,7 +44,8 @@ analytics:StandardQueryScenario  标准取数场景页（溯源/建模起点）
 **MCP 服务**：`mcp_service`（`database_type` 五类控制取值）
 
 **映射（只供管理界面，不进 wiki）**：`binding` / `field_mapping` /
-`enum_mapping`
+`enum_mapping`。`field_mapping` 只映射事实对象自己的事实表列；维度表由
+Dimension 的 binding/field_mapping 表达，事实字段不得映射到维表。
 
 **场景**：`scenario` / `scenario_join` / `scenario_filter` / `scenario_fact`（来源事实，不设 role）
 
@@ -84,6 +85,11 @@ analytics:StandardQueryScenario  标准取数场景页（溯源/建模起点）
 - 第二层：外部内容访问 / 知识结构规范 / 知识完整性 / 跨库知识治理 /
   执行边界 / 运行审计与治理 / 权限与审批；
 - 共 52 个工具成员（含新增 mapping_lookup / scenario_lookup / list_tables / describe_table / run_select）；待建成员 `is_pending=true`。
+
+`012_fact_table_join.sql` 额外登记事实表组成，并给出一个多事实表事实
+`fact_agent_tool_context`：主表 `agent_tool_call_fact` + 轮次上下文
+`agent_turn_fact`，只通过 `scenario_join` 的 `message_id` 关联；它的事实字段
+只映射这两张事实表，不映射维表。
 
 > 实际查询源是：
 > - `diag.agent_turn_fact`（来自 `public.messages` + `usage`）
@@ -182,9 +188,9 @@ scenario_filter 页。事实页：基础指标 / 派生指标 / 非指标字段 
 从 `mcp_service` + 平台 `mcp_services` 投影；同步不覆盖 binding。
 
 > 已同步到指定知识库：**bodhi运行监控分析**
->（`af70952f-aea6-4b46-89d8-6c4158cfd0aa`），共 14 页（6 维度 + 2 事实 + 5 场景 + 1 MCP 服务）。
+>（`af70952f-aea6-4b46-89d8-6c4158cfd0aa`），共 16 页（6 维度 + 3 事实 + 6 场景 + 1 MCP 服务）。
 > `dim_tool` 旧页/旧节点已硬删除；MCP 服务页按 `agent/mcpservice/<名称>` 生成；图边 10 条 `factUsesDimension`（工具调用 6 + 轮次 4）
-> 与 4 条 `objectUsesMcpService`。同步后 PG/图正文差异 = 0。
+> 与 5 条 `objectUsesMcpService`（新增多事实表事实）。同步后 PG/图正文差异 = 0。
 
 ### 5.3 页面映射接口（正文 + 图属性）
 
@@ -206,17 +212,35 @@ MCP 服务页固定生成 `mapping_service_id`、`platform_mcp_service_id`（可
 `analytics:mappingObjectId` / `analytics:mappingServiceId` /
 `analytics:platformMcpServiceId` / `analytics:databaseType`。
 
+### 5.3.1 事实选择（fact_match）
+
+智能体先提取：
+
+- `metrics`：指标/计算清单；
+- `fact_tables`：用户明确提到的事实表/事实对象；
+- `filters`：筛选条件；
+- `group_by`：分组字段；
+- `classification_fields`：分类统计字段/维度；
+- `intent`：目的/场景。
+
+调用只读 `fact_match`，它把词条与 `base_metric` / `derived_metric` /
+`fact_field` / `fact_table` / `dimension` / `scenario` 做相似度匹配并汇总到
+Fact。`decision=confident` 才继续；`ambiguous` 让用户选择或补充信息后重算；
+`no_match` 不得猜事实。算法不写死任何事实对象名称。
+
 ### 5.4 公共提示（事实页/维度页内置）
 
 页面末尾统一带：
 
 ```text
 本页只描述语义（对象、指标、字段、维度、层次）；物理映射不在知识页里。
+- 选事实：fact_match(metrics=..., fact_tables=..., filters=..., group_by=..., classification_fields=..., intent=...)；decision=confident 才继续
 - 事实/维度：mapping_object_type（fact｜dimension）+ mapping_object_id（内部对象 ID）
 - MCP 服务：mapping_service_id + platform_mcp_service_id（可选）+ database_type
 - 物理映射：mapping_lookup(mapping_object_type=..., mapping_object_id=..., mapping_service_id=...)
 - 先确认 mapping，再调用 scenario_lookup(mapping_object_id=..., mapping_service_id=..., intent=...)
 - status=mapped 继续；formula_only 用 levels[].formula_sql 继续（bindings 为空不等于缺映射）；missing 停止并检查 ID/服务
+- 事实字段若映射到维表/未登记表，返回 `missing` + `fact_source_not_fact_table`；不得把维表当事实表
 - 管理台：analytics-admin 的 binding / field_mapping / enum_mapping；v_mapping_interface 只读
 不要从本页猜物理表名或列名；不要用页面 slug、标题、fact_id、dimension_id、object_id 等旧叫法调用 mapping_lookup。
 ```
@@ -231,8 +255,9 @@ MCP 服务页固定生成 `mapping_service_id`、`platform_mcp_service_id`（可
 | 层 | 内容 | 作用 |
 |---|---|---|
 | `analytics.fact_dimension` | 事实键 / 维度键 / JOIN 类型（只语义，不存物理表列） | **事实→维度语义契约** |
+| `analytics.fact_table` | Fact 的物理事实表组成 / 主表 / 粒度 | **多事实表组成，不存列映射** |
 | `analytics.dimension_level` | `formula_kind` / `formula_params`（如 `date` / `hour` + 时区） | **派生公式只定义一次** |
-| `analytics.binding` + `field_mapping` | 对象×MCP 服务的物理表/列/枚举 | 物理映射唯一来源 |
+| `analytics.binding` + `field_mapping` | 对象×MCP 服务的物理表/列/枚举 | 物理映射唯一来源；事实字段只能落在 `fact_table` |
 | `diag.tool_dimension` / `tool_problem_dimension` | 52 个工具的实际分类值 | 工具维度 **LEFT JOIN** 的数据 |
 | `diag.agent_tool_call_fact` | 工具调用事实（展开 `agent_steps`） | 工具使用频次/未使用工具/返回体量 |
 | `diag.agent_turn_fact` | 轮次事实（`messages.usage`） | token 消耗 |
@@ -246,7 +271,9 @@ MCP 服务页固定生成 `mapping_service_id`、`platform_mcp_service_id`（可
 - Agent / 模型 / 会话：事实键直取，`join_type=none`，不建维度表；
 - 日期 / 小时：`dimension_level.formula_kind=date|hour`，公式渲染按
   `database_type` 生成 SQL，不按 MCP 服务重复写；
-- 工具使用统计用 `tool_dimension_all`，避免事实里出现但未登记的工具被漏掉。
+- 工具使用统计用 `tool_dimension_all`，避免事实里出现但未登记的工具被漏掉；
+- `scenario_join` 只记录事实表↔事实表路径；事实↔维度路径不写入，
+  由 `fact_dimension` + 维度 binding/field_mapping 生成。
 
 ### 5.6 可直接改写的 SQL
 
@@ -354,7 +381,7 @@ python tools/analytics-admin/server.py --host 127.0.0.1 --port 8781
 Windows 也可双击 `tools/analytics-admin/start-admin.cmd`（自动起服务并打开浏览器）。
 管理台是常驻进程；之前 Chrome 打不开是因为验证后进程被停掉了，不是端口/权限问题。
 
-- 左表浏览 16 张配置表；点行编辑 JSON；保存/新建/删除按主键 upsert；
+- 左表浏览 17 张配置表；点行编辑 JSON；保存/新建/删除按主键 upsert；
 - 右侧「同步 wiki 页面」填 KB ID + kind + dry_run；
 - 默认只监听 127.0.0.1；设 `BODHI_ANALYTICS_ADMIN_TOKEN` 后需
   `X-Admin-Token` 或 `?token=`；
@@ -379,17 +406,18 @@ analytics.field_mapping.source_type = 'tool_contract'
 ## 8. 验证清单
 
 ```bash
-python tests/test_analytics_ontology.py   # 3 类 + 2 对象属性 + 工具调用事实挂 2 个工具维度
-python tests/test_analytics_config.py     # 16 表 / 6 视图 / 5 类 database_type / 页面投影
-python tests/test_tools_contract.py       # mapping_lookup / scenario_lookup 已进工具契约
+python tests/test_analytics_ontology.py   # 4 类 + 7 对象属性 + 工具调用事实挂 2 个工具维度
+python tests/test_analytics_config.py     # 17 表 / 8 视图 / 5 类 database_type / 页面投影
+python tests/test_analytics_fact_match.py # 指标/事实表/场景/筛选/分组/分类字段选事实
+python tests/test_tools_contract.py       # fact_match / mapping_lookup / scenario_lookup 已进工具契约
 python tools/ontology-compiler/compile.py validate --summary
 ```
 
 图关系同步：`sync_pages` 还会重建 `analytics:factUsesDimension`、
 `analytics:objectUsesMcpService`、`analytics:scenarioBasedOnFact` 与
 `analytics:scenarioUsesMcpService`；当前 `bodhi运行监控分析` 已确认
-**10 条事实→维度**、**4 条对象→MCP 服务**、**5 条场景来源事实**、
-**5 条场景→MCP 服务**，PG 页与图 `articleBody` 正文差异 **0**。
+**10 条事实→维度**、**5 条对象→MCP 服务**、**6 条场景来源事实**、
+**6 条场景→MCP 服务**，PG 页与图 `articleBody` 正文差异 **0**。
 
 ## 9. 分析案例（AnalysisCase）
 

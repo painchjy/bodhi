@@ -56,6 +56,7 @@ TOOL_SCHEMAS = [
             "description": ("查询事实/维度的**物理映射**：binding + field_mapping + enum_mapping。"
                             "必须使用知识页的 mapping_object_type / mapping_object_id；"
                             "service_id 用知识页的 mapping_service_id（不是平台 mcp_services.id）。"
+                            "事实字段只能映射 fact_table 登记的事实表；维表交给 Dimension。"
                             "status=formula_only 表示公式/直接列维度（用 levels[].formula_sql）；"
                             "missing 表示无可用映射，禁止猜表名。"),
             "inputSchema": {"type": "object", "properties": {
@@ -69,10 +70,39 @@ TOOL_SCHEMAS = [
                "additionalProperties": False},
         },
         {
+            "name": "fact_match",
+            "description": ("按指标、事实表/事实对象、目的（场景/意图）、筛选条件、"
+                            "分组字段、分类统计字段，对 active Fact 做只读相似度排序。"
+                            "decision=confident 才自动继续；ambiguous 让用户选择或补充后重算；"
+                            "no_match 不得猜事实。工具不返回物理列。"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "metrics": {"type": "array", "items": {"type": "string"},
+                                "description": "指标/计算清单（用户问题中的度量与计算）"},
+                    "fact_tables": {"type": "array", "items": {"type": "string"},
+                                    "description": "事实表/事实对象清单；可留空"},
+                    "filters": {"type": "array", "items": {"type": "string"},
+                                "description": "筛选条件关键词"},
+                    "group_by": {"type": "array", "items": {"type": "string"},
+                                 "description": "分组字段"},
+                    "classification_fields": {"type": "array", "items": {"type": "string"},
+                                              "description": "分类统计使用的字段/维度"},
+                    "intent": {"type": "string",
+                               "description": "目的/场景/意图关键词"},
+                    "mapping_service_id": {"type": "string",
+                                           "description": "可选：只返回该 active 服务下的事实"},
+                    "top_k": {"type": "integer", "description": "候选数量，默认 5，最大 20"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "scenario_lookup",
-            "description": ("查询标准取数场景的语义、来源事实、关联路径（scenario_join）与固定筛选（scenario_filter）。"
+            "description": ("查询标准取数场景的语义、来源事实、事实表↔事实表关联路径（scenario_join）与固定筛选（scenario_filter）。"
                             "必须在本轮 mapping_lookup 全部通过后调用；"
-                            "按 mapping_object_id（事实）和 mapping_service_id 返回候选；多候选或多 JOIN 路径时要求用户确认。"),
+                            "按 mapping_object_id（事实）和 mapping_service_id 返回候选；"
+                            "scenario_join 不记录事实↔维表路径；多候选或多 JOIN 路径时要求用户确认。"),
             "inputSchema": {"type": "object", "properties": {
                 "scenario_id": {"type": "string", "description": "场景 ID（可选）"},
                 "mapping_object_id": {"type": "string",

@@ -25,7 +25,7 @@
 
 从 `tools/list` 复制完整工具名，不要自己拼接前缀。工具分为：
 
-- 知识/语义：`mcp_bodhi_ontology_knowledge_lookup`、`mcp_bodhi_ontology_mapping_lookup`、`mcp_bodhi_ontology_scenario_lookup`
+- 知识/语义：`mcp_bodhi_ontology_knowledge_lookup`、`mcp_bodhi_ontology_fact_match`、`mcp_bodhi_ontology_mapping_lookup`、`mcp_bodhi_ontology_scenario_lookup`
 - 只读 SQL：`mcp_agent_diag_list_tables`、`mcp_agent_diag_describe_table`、`mcp_agent_diag_run_select`
 
 `run_select` 只允许单条 `SELECT`/`WITH`；禁止 INSERT/UPDATE/DELETE/DDL。
@@ -33,13 +33,21 @@
 ## 问数步骤
 
 1. **解析问题**：提取指标/计算、事实对象、维度、过滤条件、分组粒度和排序。
-2. **确定事实**：查事实页，选择 `AgentTurnFact`（轮次/token）或 `AgentToolCallFact`（工具调用/耗时）；两者都可能满足时先问用户。
+2. **选事实（算法优先）**：先解析问题并提取五组信息：
+   - `metrics`：指标/计算清单（Token、平均耗时、调用次数等）；
+   - `fact_tables`：用户明确提到的事实表/事实对象（可为空）；
+   - `filters`：筛选条件关键词（失败、最近3天、某工具、某 Agent 等）；
+   - `group_by`：分组字段（Agent、模型、日期、小时等）；
+   - `classification_fields`：分类统计使用的字段/维度（工具分类、问题分类、工具小类等）；
+   - `intent`：目的/场景/意图。
+   调用 `fact_match(metrics=..., fact_tables=..., filters=..., group_by=..., classification_fields=..., intent=..., mapping_service_id=可选)`：
+   `decision=confident` 才使用返回的 `mapping_object_id` 继续；`ambiguous` 必须把候选和证据交给用户选择，或让用户补充指标/场景/分类字段后重算；`no_match` 不得猜事实。**提示词不得枚举具体事实对象名称。**
 3. **确定指标**：只使用事实页中 active 的基础/派生指标；`avg`/耗时不可 sum；token 只在轮次事实层求和，不能按工具调用行重复求和。
 4. **确定维度**：读事实页 `factUsesDimension`，再读维度页的层级、成员键、`formula_kind/formula_params`；工具名称是事实字段，不要强行造维度对象。
 5. **物理映射（前置门禁）**：读事实页/维度页，抄下 `mapping_object_type` / `mapping_object_id`；对事实和每个相关维度调用 `mapping_lookup(mapping_object_type=..., mapping_object_id=..., mapping_service_id=...)`。`status=mapped` 继续；`formula_only`（时间公式维度以及直接列维度；bindings 为空不等于缺映射）用 `levels[].formula_sql`，直接列维度同时参考事实 binding 的 `field_mapping`；`missing` 停止并检查 ID 与服务，禁止猜表名。**禁止先查场景再补映射**。
 6. **场景选择**：只有全部 mapping 通过后才调用 `scenario_lookup(mapping_object_id=<事实>, mapping_service_id=..., intent=...)`。场景的来源事实必须与场景服务有公共 active MCP 服务；有多个候选或多个 join 路径时必须向用户确认，不能自行选。`required=true` 的 `scenario_filter` 必须进入 SQL。
-7. **校验场景映射**：用 `field_mapping` 校验 scenario_join / scenario_filter；不匹配时停止并回报 `scenario_mapping_conflict`。
-8. **生成 SQL**：事实事实表为主表；direct 维度取事实列；join 维度按 `fact_key=dimension_key`；时间公式按维度公式渲染；使用显式字段别名；只生成单条 SELECT。
+7. **校验场景映射**：`scenario_join` 只能连接事实表↔事实表；维度 JOIN 由 `fact_dimension` + 维度 `binding/field_mapping` 生成，不写入 scenario_join。用 `field_mapping` 校验 join/filter，不匹配时停止并回报 `scenario_mapping_conflict`。
+8. **生成 SQL**：以 `fact_table.is_primary` 的事实表为主表；多事实表按 `scenario_join` 关联；direct 维度取事实列；join 维度按 `fact_key=dimension_key` + 维度映射；时间公式按维度公式渲染；使用显式字段别名；只生成单条 SELECT。事实字段不得映射到维表。
 9. **执行**：调用 `run_select`；失败按错误修正，最多重试 2 次，同一错误不要重复。
 10. **回答**：返回 SQL 摘要、结果、mapping 对象 ID、mapping 服务 ID、使用的场景、来源页；不编造数据。用户明确要“输入提示词”时，SQL 必须 `SELECT input_prompt`，最终结果必须保留该列或逐轮展示提示词摘要，不能只返回 token。
 

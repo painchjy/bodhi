@@ -8,7 +8,7 @@
 - `cases/plan.json`：测试方案（只给评审智能体 case/question/输入文档引用）。
 - `cases/oracle.json`：预期结果（只给评测侧，不能给评审智能体）。
 - `test_review_causal.py`：plan/oracle 分离、evaluator 单测、live E2E。
-- `test_analytics_mapping_flow.py`：analytics 取数步骤断言（canonical `mapping_object_id`、首次 mapping 成功、mapping 全部早于 scenario）；设置 `BODHI_RUN_ANALYTICS_E2E=1` 跑真实智能体。
+- `test_analytics_mapping_flow.py`：analytics 取数步骤断言（`fact_match` 先提取指标/筛选/分组/分类字段且早于 mapping、canonical `mapping_object_id`、首次 mapping 成功、mapping 全部早于 scenario）；设置 `BODHI_RUN_ANALYTICS_E2E=1` 跑真实智能体。
 
 ## 防抄答案
 

@@ -2,7 +2,7 @@
 
 边界
 ----
-* 仅管理 PostgreSQL `analytics` schema 的 16 张配置表（白名单）；
+* 仅管理 PostgreSQL `analytics` schema 的 17 张配置表（白名单）；
 * 不暴露给智能体；默认只监听 127.0.0.1；
 * 映射/枚举/join/filter 在这里可视化编辑，不生成 wiki 页；
 * 「同步页面」调用 `ke_analytics.sync_pages`，只投影 Fact / Dimension / Scenario；
@@ -38,7 +38,7 @@ import ke_db  # noqa: E402
 
 TABLES = (
     "dimension", "dimension_level", "dimension_attribute", "fact", "fact_dimension",
-    "base_metric", "derived_metric", "fact_field",
+    "fact_table", "base_metric", "derived_metric", "fact_field",
     "mcp_service", "binding", "field_mapping", "enum_mapping",
     "scenario", "scenario_join", "scenario_filter", "scenario_fact",
 )
@@ -142,6 +142,36 @@ def mapping_interface(kb_id: str = "") -> dict:
                     {"kb": kb_id})}
         except Exception as exc:  # noqa: BLE001
             graph_error = str(exc)[:300]
+    fact_tables = {}
+    for ft in ke_db.psql_csv(
+            "SELECT fact_id, table_id, source_schema, source_table, is_primary "
+            "  FROM analytics.fact_table WHERE status='active' "
+            " ORDER BY fact_id, sort_order, table_id"):
+        fact_tables.setdefault(ft["fact_id"], []).append(ft)
+    fact_source_issues = {}
+    for bad in ke_db.psql_csv(
+            "SELECT b.object_id AS fact_id, m.mapping_id, m.source_schema, "
+            "       m.source_table FROM analytics.binding b "
+            "  JOIN analytics.field_mapping m ON m.binding_id=b.binding_id "
+            " WHERE b.object_type='fact' AND b.status='active' AND m.status='active' "
+            "   AND NOT EXISTS (SELECT 1 FROM analytics.fact_table ft "
+            "                    WHERE ft.fact_id=b.object_id AND ft.status='active' "
+            "                      AND ft.source_schema=m.source_schema "
+            "                      AND ft.source_table=m.source_table)"):
+        fact_source_issues.setdefault(bad["fact_id"], []).append(bad)
+    scenario_join_issues = ke_db.psql_csv(
+        "SELECT j.scenario_id, j.seq FROM analytics.scenario_join j "
+        " WHERE NOT EXISTS (SELECT 1 FROM analytics.scenario_fact sf "
+        "                     JOIN analytics.fact_table ft ON ft.fact_id=sf.fact_id "
+        "                      AND ft.status='active' AND ft.source_schema=j.left_schema "
+        "                      AND ft.source_table=j.left_table "
+        "                    WHERE sf.scenario_id=j.scenario_id AND sf.status='active') "
+        "    OR NOT EXISTS (SELECT 1 FROM analytics.scenario_fact sf "
+        "                     JOIN analytics.fact_table ft ON ft.fact_id=sf.fact_id "
+        "                      AND ft.status='active' AND ft.source_schema=j.right_schema "
+        "                      AND ft.source_table=j.right_table "
+        "                    WHERE sf.scenario_id=j.scenario_id AND sf.status='active') "
+        " ORDER BY j.scenario_id, j.seq")
     for row in rows:
         attrs = page_attrs.get(row.get("page_slug") or "") or {}
         row["page_exists"] = (not kb_id) or bool(attrs) or (row.get("page_slug") in page_attrs)
@@ -170,6 +200,14 @@ def mapping_interface(kb_id: str = "") -> dict:
         row["edge_exists"] = edge_expected in graph_edges if kb_id and not graph_error else None
         if row.get("binding_id") and row.get("service_name") and row["edge_exists"] is False:
             issues.append("object_service_edge_missing")
+        if row.get("mapping_object_type") == "fact":
+            fid = row.get("mapping_object_id")
+            row["fact_tables"] = fact_tables.get(fid, [])
+            if not row["fact_tables"]:
+                issues.append("fact_table_missing")
+            if fact_source_issues.get(fid):
+                issues.append("fact_source_not_fact_table")
+                row["fact_source_issues"] = fact_source_issues[fid]
         row["issues"] = issues
         row["valid"] = not issues
     services = []
@@ -200,13 +238,22 @@ def mapping_interface(kb_id: str = "") -> dict:
         services.append(dict(svc, page_slug=slug, page_exists=slug in page_attrs,
                              page_attributes=attrs, issues=issues,
                              valid=not issues))
+    scenario_join_violations = [
+        {"mapping_object_type": "scenario_join", "scenario_id": x.get("scenario_id"),
+         "seq": x.get("seq"), "issues": ["scenario_join_not_fact_table"],
+         "valid": False}
+        for x in scenario_join_issues]
     return {"ok": True, "kb_id": kb_id, "rows": rows, "services": services,
             "graph_error": graph_error,
+            "scenario_join_violations": scenario_join_violations,
             "rules": ["mapping_object_type = fact|dimension",
                       "mapping_object_id = fact_id/dimension_id",
-                      "mapping_service_id = analytics.mcp_service.service_id"],
+                      "mapping_service_id = analytics.mcp_service.service_id",
+                      "fact field_mapping.source_table ∈ fact_table",
+                      "scenario_join 两端 ∈ fact_table"],
             "violations": ([r for r in rows if not r["valid"]] +
-                           [s for s in services if not s["valid"]])}
+                           [s for s in services if not s["valid"]] +
+                           scenario_join_violations)}
 
 
 def _select_one(table: str, pk: dict) -> dict:

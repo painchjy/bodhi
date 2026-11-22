@@ -2,7 +2,7 @@
 """自助取数分析 · 语义配置/页面投影回归（静态，不连库）。
 
 验证：
-1. 配置 schema 16 张表 / 8 个视图，dimension_value、dimension_mapping 已删除；
+1. 配置 schema 17 张表 / 8 个视图，dimension_value、dimension_mapping 已删除；
 2. Fact↔Dimension 只保留语义键（fact_key/dimension_key/join_type），工具分类只挂在工具调用事实；
 3. 维度成员键 + 层级公式（formula_kind/formula_params）在维度侧定义；
 4. 页面只写语义，物理映射提示走 mapping_lookup / 管理台；
@@ -23,6 +23,7 @@ SEED = os.path.join(SQL_DIR, "002_seed.sql")
 MIGRATION = os.path.join(SQL_DIR, "008_semantic_refactor.sql")
 VIEWS = os.path.join(SQL_DIR, "009_semantic_views.sql")
 MAPPING_VIEW = os.path.join(SQL_DIR, "011_mapping_interface.sql")
+FACT_TABLE = os.path.join(SQL_DIR, "012_fact_table_join.sql")
 ADMIN = os.path.join(H.REPO, "tools", "analytics-admin", "server.py")
 DIAG_SCHEMA = os.path.join(H.REPO, "sql", "diag", "001_schema.sql")
 DIAG_EXAMPLES = os.path.join(H.REPO, "sql", "diag", "003_examples.sql")
@@ -37,6 +38,7 @@ def main() -> int:
     migration = H.read(MIGRATION)
     views_text = H.read(VIEWS)
     mapping_view = H.read(MAPPING_VIEW)
+    fact_table_sql = H.read(FACT_TABLE)
     admin_code = H.read(ADMIN)
     diag_schema = H.read(DIAG_SCHEMA)
     diag_examples = H.read(DIAG_EXAMPLES)
@@ -46,7 +48,7 @@ def main() -> int:
     views = set(re.findall(r"CREATE OR REPLACE VIEW analytics\.([a-z_]+)", schema))
     expected_tables = {
         "dimension", "dimension_level", "dimension_attribute", "fact",
-        "fact_dimension", "base_metric", "derived_metric", "fact_field",
+        "fact_dimension", "fact_table", "base_metric", "derived_metric", "fact_field",
         "mcp_service", "binding", "field_mapping", "enum_mapping",
         "scenario", "scenario_join", "scenario_filter", "scenario_fact",
     }
@@ -177,7 +179,7 @@ def main() -> int:
                   and "CONVERT_TZ" in formula_mysql)
 
     checks = {
-        "表 = 16（实际 %d）" % len(tables): tables == expected_tables,
+        "表 = 17（实际 %d）" % len(tables): tables == expected_tables,
         "已删除 dimension_value/dimension_mapping":
             "CREATE TABLE IF NOT EXISTS analytics.dimension_value" not in schema
             and "CREATE TABLE IF NOT EXISTS analytics.dimension_mapping" not in schema,
@@ -218,6 +220,15 @@ def main() -> int:
                             "formula_only" in mapping_view,
         "管理台映射接口": "/api/mapping-interface" in admin_code and
                           "v_mapping_interface" in admin_code,
+        "fact_table 组成": "CREATE TABLE IF NOT EXISTS analytics.fact_table" in schema
+                           and "fact_table" in fact_table_sql,
+        "事实字段不映射维表": "DELETE FROM analytics.field_mapping" in fact_table_sql
+                              and "fact_source_not_fact_table" in code,
+        "scenario_join 只事实表": "scenario_join_not_fact_table" in code
+                                  and "scenario_join" in fact_table_sql,
+        "多事实表示例": "fact_agent_tool_context" in fact_table_sql
+                        and "'agent_turn_fact'" in fact_table_sql
+                        and "'agent_tool_call_fact'" in fact_table_sql,
     }
     return H.report(checks, "analytics 配置/投影")
 

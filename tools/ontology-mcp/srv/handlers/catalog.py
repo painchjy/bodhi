@@ -46,6 +46,15 @@ def mapping_lookup_tool(args: dict) -> dict:
         str(args.get("mapping_service_id", "")))
 
 
+@handle("fact_match")
+def fact_match_tool(args: dict) -> dict:
+    return ke_analytics.fact_match(
+        args.get("metrics"), args.get("fact_tables"), args.get("intent", ""),
+        args.get("filters"), args.get("group_by"),
+        args.get("classification_fields"), str(args.get("mapping_service_id", "")),
+        int(args.get("top_k", 5) or 5))
+
+
 @handle("scenario_lookup")
 def scenario_lookup_tool(args: dict) -> dict:
     bad = _legacy_args(args)

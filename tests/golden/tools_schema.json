@@ -465,6 +465,59 @@
   ],
   "type": "object"
  },
+ "fact_match": {
+  "additionalProperties": false,
+  "properties": {
+   "classification_fields": {
+    "description": "分类统计使用的字段/维度",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "fact_tables": {
+    "description": "事实表/事实对象清单；可留空",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "filters": {
+    "description": "筛选条件关键词",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "group_by": {
+    "description": "分组字段",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "intent": {
+    "description": "目的/场景/意图关键词",
+    "type": "string"
+   },
+   "mapping_service_id": {
+    "description": "可选：只返回该 active 服务下的事实",
+    "type": "string"
+   },
+   "metrics": {
+    "description": "指标/计算清单（用户问题中的度量与计算）",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "top_k": {
+    "description": "候选数量，默认 5，最大 20",
+    "type": "integer"
+   }
+  },
+  "type": "object"
+ },
  "image_extract": {
   "properties": {
    "figure_no": {

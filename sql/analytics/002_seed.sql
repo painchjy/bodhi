@@ -2,7 +2,8 @@
 -- 自助取数分析 · 种子（示例口径，可按环境覆盖）
 --
 -- 覆盖用户 2026-11-21 的确认：
---   * 两个事实：AgentTurnFact / AgentToolCallFact
+--   * 两个基础事实：AgentTurnFact / AgentToolCallFact
+--     012 再增加一个多事实表事实 AgentToolContextFact
 --   * 两个工具分类维度实例：2 层工具分类 / 1 层工具分类
 --     两个事实都挂这两个维度，因此「工具分类」有 2 个可选维度
 --   * 基础指标与派生指标分表；派生指标带 pseudo/SQL 计算逻辑
@@ -65,6 +66,18 @@ INSERT INTO analytics.fact (fact_id, code, name, description, grain, status) VAL
 ON CONFLICT (fact_id) DO UPDATE
 SET code = EXCLUDED.code, name = EXCLUDED.name, description = EXCLUDED.description,
     grain = EXCLUDED.grain, status = EXCLUDED.status;
+
+-- 事实对象的物理事实表组成（列级映射仍在 field_mapping）
+INSERT INTO analytics.fact_table
+(fact_id, table_id, source_schema, source_table, is_primary, grain_keys, sort_order, status) VALUES
+('fact_agent_turn', 'turn_fact', 'diag', 'agent_turn_fact', true,
+ '["session_id", "message_id"]'::jsonb, 10, 'active'),
+('fact_agent_tool_call', 'tool_call_fact', 'diag', 'agent_tool_call_fact', true,
+ '["session_id", "message_id", "tool_call_id"]'::jsonb, 10, 'active')
+ON CONFLICT (fact_id, table_id) DO UPDATE
+SET source_schema = EXCLUDED.source_schema, source_table = EXCLUDED.source_table,
+    is_primary = EXCLUDED.is_primary, grain_keys = EXCLUDED.grain_keys,
+    sort_order = EXCLUDED.sort_order, status = EXCLUDED.status;
 
 -- ---------- 5. 事实 → 维度（语义键；物理映射不在本表）----------
 -- 工具分类只属于工具调用事实；轮次事实不挂工具分类。
@@ -149,8 +162,6 @@ INSERT INTO analytics.fact_field
 ('ff_tool_turn_id', 'fact_agent_tool_call', 'turn_id', '轮次标识', '调用所属轮次。', 'text', 'key', false, 20, 'active'),
 ('ff_tool_call_id', 'fact_agent_tool_call', 'tool_call_id', '工具调用标识', '一次工具调用唯一标识。', 'text', 'key', false, 30, 'active'),
 ('ff_tool_name', 'fact_agent_tool_call', 'tool_name', '工具名称', '被调用的工具。', 'text', 'display', false, 40, 'active'),
-('ff_tool_category', 'fact_agent_tool_call', 'tool_category', '工具大类', '工具分类第一层。', 'text', 'display', false, 50, 'active'),
-('ff_tool_subcategory', 'fact_agent_tool_call', 'tool_subcategory', '工具小类', '工具分类第二层。', 'text', 'display', false, 60, 'active'),
 ('ff_tool_status', 'fact_agent_tool_call', 'status', '调用状态', '成功/失败等。', 'text', 'filter', true, 70, 'active'),
 ('ff_tool_error_code', 'fact_agent_tool_call', 'error_code', '错误码', '失败时的错误码。', 'text', 'attribute', true, 80, 'active')
 ON CONFLICT (field_id) DO UPDATE
@@ -300,17 +311,7 @@ SET name = EXCLUDED.name, description = EXCLUDED.description,
     service_id = EXCLUDED.service_id, source_locator = EXCLUDED.source_locator,
     source_sql = EXCLUDED.source_sql, status = EXCLUDED.status;
 
-INSERT INTO analytics.scenario_join
-(scenario_id, seq, left_schema, left_table, left_column,
- right_schema, right_table, right_column, join_type, condition, note) VALUES
-('sc_tool_usage', 1, 'diag', 'agent_tool_call', 'turn_id',
- 'diag', 'agent_turn', 'turn_id', 'left', 'turn_id', '工具调用挂回轮次')
-ON CONFLICT (scenario_id, seq) DO UPDATE
-SET left_schema = EXCLUDED.left_schema, left_table = EXCLUDED.left_table,
-    left_column = EXCLUDED.left_column, right_schema = EXCLUDED.right_schema,
-    right_table = EXCLUDED.right_table, right_column = EXCLUDED.right_column,
-    join_type = EXCLUDED.join_type, condition = EXCLUDED.condition, note = EXCLUDED.note;
-
+-- 场景 join 只记录事实表↔事实表；维度路径由 fact_dimension + 维度 mapping 生成。
 INSERT INTO analytics.scenario_filter
 (scenario_id, seq, schema_name, table_name, column_name, expression, meaning, required) VALUES
 ('sc_tool_usage', 1, 'diag', 'agent_tool_call', 'status', '<> ''deleted''',

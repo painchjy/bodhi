@@ -64,24 +64,8 @@ SET name = EXCLUDED.name, description = EXCLUDED.description,
     service_id = EXCLUDED.service_id, source_locator = EXCLUDED.source_locator,
     source_sql = EXCLUDED.source_sql, status = EXCLUDED.status;
 
--- 场景关联路径（工具维度 LEFT JOIN；审计页可读）
-INSERT INTO analytics.scenario_join
-(scenario_id, seq, left_schema, left_table, left_column,
- right_schema, right_table, right_column, join_type, condition, note) VALUES
-('sc_tool_usage', 1, 'diag', 'agent_tool_call_fact', 'tool_code',
- 'diag', 'tool_dimension_all', 'tool_code', 'left', 'tool_code', '工具维度 LEFT JOIN'),
-('sc_tool_unused', 1, 'diag', 'tool_dimension', 'tool_code',
- 'diag', 'agent_tool_call_fact', 'tool_code', 'left', 'tool_code', '未使用工具'),
-('sc_tool_problem_usage', 1, 'diag', 'tool_problem_dimension_all', 'tool_code',
- 'diag', 'agent_tool_call_fact', 'tool_code', 'left', 'tool_code', '2 层工具分类 LEFT JOIN'),
-('sc_tool_return_chars', 1, 'diag', 'agent_tool_call_fact', 'tool_code',
- 'diag', 'tool_dimension_all', 'tool_code', 'left', 'tool_code', '工具维度 LEFT JOIN')
-ON CONFLICT (scenario_id, seq) DO UPDATE
-SET left_schema = EXCLUDED.left_schema, left_table = EXCLUDED.left_table,
-    left_column = EXCLUDED.left_column, right_schema = EXCLUDED.right_schema,
-    right_table = EXCLUDED.right_table, right_column = EXCLUDED.right_column,
-    join_type = EXCLUDED.join_type, condition = EXCLUDED.condition, note = EXCLUDED.note;
-
+-- 这里只写事实↔维度的数据来源/示例 SQL；
+-- scenario_join 不记录维度路径，维度 JOIN 由 fact_dimension + 维度 binding/field_mapping 生成。
 INSERT INTO analytics.scenario_fact
 (scenario_id, fact_id, sort_order, note, status) VALUES
 ('sc_tool_usage', 'fact_agent_tool_call', 10, '工具使用场景来源事实', 'active'),
