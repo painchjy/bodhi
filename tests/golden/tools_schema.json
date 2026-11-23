@@ -1234,6 +1234,96 @@
   },
   "type": "object"
  },
+ "scenario_semantic_apply": {
+  "additionalProperties": false,
+  "properties": {
+   "answers": {
+    "description": "与 plan 相同的用户回答（中文名/枚举/事实名与粒度）",
+    "type": "object"
+   },
+   "confirm": {
+    "description": "必须为 true：用户已确认 diff",
+    "type": "boolean"
+   },
+   "dry_run": {
+    "description": "默认 true：只回待写动作，不写库",
+    "type": "boolean"
+   },
+   "fact_id": {
+    "description": "可选：目标事实 ID",
+    "type": "string"
+   },
+   "kb_id": {
+    "description": "同步知识页的目标库 UUID",
+    "type": "string"
+   },
+   "mapping_service_id": {
+    "description": "可选：必须与场景绑定服务一致",
+    "type": "string"
+   },
+   "plan_id": {
+    "description": "scenario_semantic_plan 返回的 plan_id（配置或答案变化会失效）",
+    "type": "string"
+   },
+   "scenario_id": {
+    "description": "标准取数场景 ID",
+    "type": "string"
+   },
+   "session_no": {
+    "description": "可选：会话编号（库范围校验用）",
+    "type": "string"
+   }
+  },
+  "required": [
+   "scenario_id",
+   "kb_id",
+   "plan_id",
+   "confirm"
+  ],
+  "type": "object"
+ },
+ "scenario_semantic_plan": {
+  "additionalProperties": false,
+  "properties": {
+   "answers": {
+    "description": "用户确认后的回答：labels{code:中文名}、enums{code:{true/false:标签}}、fact{name,grain,code}、fields{col:{data_type,role}}、metrics{code:{unit,data_type}}",
+    "type": "object"
+   },
+   "fact_id": {
+    "description": "可选：目标事实 ID；不传则按来源事实/事实表自动判定",
+    "type": "string"
+   },
+   "mapping_service_id": {
+    "description": "可选：必须与场景绑定服务一致",
+    "type": "string"
+   },
+   "scenario_id": {
+    "description": "标准取数场景 ID",
+    "type": "string"
+   }
+  },
+  "required": [
+   "scenario_id"
+  ],
+  "type": "object"
+ },
+ "scenario_semantic_validate": {
+  "additionalProperties": false,
+  "properties": {
+   "mapping_service_id": {
+    "description": "可选：必须与场景绑定服务一致",
+    "type": "string"
+   },
+   "scenario_id": {
+    "description": "标准取数场景 ID",
+    "type": "string"
+   }
+  },
+  "required": [
+   "scenario_id"
+  ],
+  "type": "object"
+ },
  "skills": {
   "properties": {
    "model": {

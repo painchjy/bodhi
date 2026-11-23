@@ -113,6 +113,64 @@ TOOL_SCHEMAS = [
             }, "additionalProperties": False},
         },
         {
+            "name": "scenario_semantic_validate",
+            "description": ("标准取数场景 → 语义层的**只读前置校验**：场景 active、绑定的 MCP 服务 active、"
+                            "来源事实有 active binding、SQL 可解析。**不执行 SQL**；"
+                            "SQL 执行必须由绑定的只读 MCP 服务完成（service_id 用场景绑定值）。"
+                            "blocking 非空时不得继续提取语义层。"),
+            "inputSchema": {"type": "object", "properties": {
+                "scenario_id": {"type": "string", "description": "标准取数场景 ID"},
+                "mapping_service_id": {"type": "string",
+                                       "description": "可选：必须与场景绑定服务一致"},
+            }, "required": ["scenario_id"], "additionalProperties": False},
+        },
+        {
+            "name": "scenario_semantic_plan",
+            "description": ("标准取数场景 → 语义层的**只读差异计划**：扫描场景 SQL 的表/列/聚合/过滤/分组，"
+                            "和现有 Fact 的基础指标、派生指标、非指标字段、维度链接、物理映射比对，"
+                            "列出 missing 与需要用户确认的**中文含义/枚举值/事实选择**问题。"
+                            "`ready_to_apply=false` 时必须先向用户确认，不得猜字段名或枚举标签。"
+                            "本工具不写库、不执行 SQL。"),
+            "inputSchema": {"type": "object", "properties": {
+                "scenario_id": {"type": "string", "description": "标准取数场景 ID"},
+                "fact_id": {"type": "string",
+                            "description": "可选：目标事实 ID；不传则按来源事实/事实表自动判定"},
+                "answers": {"type": "object",
+                            "description": ("用户确认后的回答：labels{code:中文名}、"
+                                            "enums{code:{true/false:标签}}、"
+                                            "fact{name,grain,code}、fields{col:{data_type,role}}、"
+                                            "metrics{code:{unit,data_type}}")},
+                "mapping_service_id": {"type": "string",
+                                       "description": "可选：必须与场景绑定服务一致"},
+            }, "required": ["scenario_id"], "additionalProperties": False},
+        },
+        {
+            "name": "scenario_semantic_apply",
+            "description": ("标准取数场景 → 语义层的**唯一写入口**：把 plan 的差异写入 analytics 配置表，"
+                            "再同步事实/维度/场景页与语义关系。必须同时满足 `confirm=true`、"
+                            "`plan_id` 与当前 plan 一致、`dry_run=false`；缺少中文含义/枚举回答时拒绝写入。"
+                            "事实字段只映射 fact_table 登记的事实表；维表交给 Dimension；"
+                            "写入后返回 mapping_lookup 与 scenario_lookup 的复核结果。"),
+            "inputSchema": {"type": "object", "properties": {
+                "scenario_id": {"type": "string", "description": "标准取数场景 ID"},
+                "kb_id": {"type": "string", "description": "同步知识页的目标库 UUID"},
+                "fact_id": {"type": "string", "description": "可选：目标事实 ID"},
+                "answers": {"type": "object",
+                            "description": "与 plan 相同的用户回答（中文名/枚举/事实名与粒度）"},
+                "plan_id": {"type": "string",
+                            "description": "scenario_semantic_plan 返回的 plan_id（配置或答案变化会失效）"},
+                "confirm": {"type": "boolean",
+                            "description": "必须为 true：用户已确认 diff"},
+                "dry_run": {"type": "boolean",
+                            "description": "默认 true：只回待写动作，不写库"},
+                "mapping_service_id": {"type": "string",
+                                       "description": "可选：必须与场景绑定服务一致"},
+                "session_no": {"type": "string",
+                               "description": "可选：会话编号（库范围校验用）"},
+            }, "required": ["scenario_id", "kb_id", "plan_id", "confirm"],
+               "additionalProperties": False},
+        },
+        {
             "name": "skills",
             "description": ("**技能目录 / 技能指令**（本服务的技能库在 `skills/<id>/SKILL.md`，单一来源）。"
                             "不传 `skill` → 返回目录（id / name / when / models / stages / tools）；"

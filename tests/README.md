@@ -19,8 +19,9 @@ python3 tests/test_no_business_semantics.py --update-golden   # 命中下降后�
 | `test_no_business_semantics.py` | 铁律①：`tools/**`、`skills/**` 域词命中 **只降不升** ✓ | 静态 |
 | `test_ontology_no_instance.py` | 铁律②：`ontology/*.ttl` 不得出现**实例名** ✓ | 静态 |
 | `test_analytics_ontology.py` | analytics：4 类 + 7 对象属性；Scenario 来源 Fact、AnalysisCase 使用 Fact/Dimension/MCP 服务 | 静态 |
-| `test_analytics_config.py` | analytics：17 表 / 8 视图 / 5 类 database_type / fact_table / scenario_fact / 映射接口 / 语义页面投影 / 公式渲染 | 静态 |
+| `test_analytics_config.py` | analytics：18 表 / 8 视图 / 5 类 database_type / fact_table / dimension_table / scenario_fact / 映射接口 / 语义页面投影 / 公式渲染 | 静态 |
 | `test_analytics_fact_match.py` | analytics：指标/事实表/场景/筛选/分组/分类字段选事实；confident/ambiguous/no_match | 静态 |
+| `test_analytics_semantic.py` | analytics：场景 SQL 扫描（表/列/聚合/FILTER/GROUP BY）、表角色、口径匹配、中文列别名/枚举一次性语义 | 静态 |
 | `test_export_integrity.py` | 导出包完整性（manifest 计数 == 行数；zip 含图数据 ✓） | 静态 |
 | `test_report_structure.py` | 报告 5 节 / ② 7 列 / ③ 末列=规则指纹（P4 改模板驱动时同步改写 ✓） | DB |
 | `test_lookup_strategies.py` | **P5 待实现**：组合关键字检索（4.1） | 跳过 |

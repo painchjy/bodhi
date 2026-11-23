@@ -9,6 +9,17 @@
 - `cases/oracle.json`：预期结果（只给评测侧，不能给评审智能体）。
 - `test_review_causal.py`：plan/oracle 分离、evaluator 单测、live E2E。
 - `test_analytics_mapping_flow.py`：analytics 取数步骤断言（`fact_match` 先提取指标/筛选/分组/分类字段且早于 mapping、canonical `mapping_object_id`、首次 mapping 成功、mapping 全部早于 scenario）；设置 `BODHI_RUN_ANALYTICS_E2E=1` 跑真实智能体。
+- `test_analytics_semantic_extract.py`：标准取数场景 → 语义层 E2E：任务页/提示词注册、SQL 中文列别名一次性语义、真实智能体会话只读计划、删除指标/字段后补全、清空事实后按场景重建、6 个标准场景只读计划回归；测试结束恢复快照并重新同步页面。
+
+  ```bash
+  BODHI_RUN_ANALYTICS_E2E=1 \
+  pytest -q tests/agent_e2e/test_analytics_semantic_extract.py
+  ```
+
+  真实会话用例 `test_agent_session_semantic_extract_readonly_plan` 会创建一个标题为
+  `semantic-extract-e2e` 的 WeKnora 会话（可在 UI 会话列表看到），只做 `validate → run_select →
+  plan`，不 apply；断言智能体读了任务页、没调用 `fact_match`/`scenario_semantic_apply`。
+  写库用例会先快照 `fact/fact_table/base_metric/derived_metric/fact_field/binding/field_mapping/enum_mapping/fact_dimension/scenario_fact`，在 `finally` 中恢复并调用 `sync_pages`；中途被强杀时需按 `sql/analytics/002…013` 重新播种。
 
 ## 防抄答案
 

@@ -17,6 +17,7 @@
 可用任务：
 
 - `bpmn/task/智能问数运行状态取数`
+- `bpmn/task/从标准取数场景提取语义层`
 - `bpmn/task/保存分析案例`
 - `bpmn/task/执行分析案例`
 - `bpmn/task/分享分析案例`（待后续实现）
@@ -26,6 +27,7 @@
 从 `tools/list` 复制完整工具名，不要自己拼接前缀。工具分为：
 
 - 知识/语义：`mcp_bodhi_ontology_knowledge_lookup`、`mcp_bodhi_ontology_fact_match`、`mcp_bodhi_ontology_mapping_lookup`、`mcp_bodhi_ontology_scenario_lookup`
+- 语义层提取：`mcp_bodhi_ontology_scenario_semantic_validate`、`mcp_bodhi_ontology_scenario_semantic_plan`、`mcp_bodhi_ontology_scenario_semantic_apply`
 - 只读 SQL：`mcp_agent_diag_list_tables`、`mcp_agent_diag_describe_table`、`mcp_agent_diag_run_select`
 
 `run_select` 只允许单条 `SELECT`/`WITH`；禁止 INSERT/UPDATE/DELETE/DDL。
@@ -50,6 +52,16 @@
 8. **生成 SQL**：以 `fact_table.is_primary` 的事实表为主表；多事实表按 `scenario_join` 关联；direct 维度取事实列；join 维度按 `fact_key=dimension_key` + 维度映射；时间公式按维度公式渲染；使用显式字段别名；只生成单条 SELECT。事实字段不得映射到维表。
 9. **执行**：调用 `run_select`；失败按错误修正，最多重试 2 次，同一错误不要重复。
 10. **回答**：返回 SQL 摘要、结果、mapping 对象 ID、mapping 服务 ID、使用的场景、来源页；不编造数据。用户明确要“输入提示词”时，SQL 必须 `SELECT input_prompt`，最终结果必须保留该列或逐轮展示提示词摘要，不能只返回 token。
+
+## 任务分流：语义层提取
+
+- 选中 `bpmn/task/从标准取数场景提取语义层` 时，**不要走上面的问数步骤**：不调用 `fact_match`，不按用户问题生成 SQL；工具参数、步骤、`answers` 形状和一次性语义输入规则**全部以该任务页 `skos:note` 为准**。
+- 语义提取优先一次给全，不要多轮追问：
+  - 场景 SQL 用中文列别名直接给语义（PostgreSQL 用 `AS "调用次数"` 或 `AS 调用次数`；MySQL/Trino 可用 `AS '调用次数'`），工具把别名当名称，不再追问 label；
+  - 布尔枚举写进列别名，如 `AS "执行结果（true=成功，false=失败）"`；
+  - 用户首条消息已给出名称/粒度/枚举/单位时，第一次 `scenario_semantic_plan` 就带 `answers` 一次算完；
+  - 只有 SQL 与用户输入都没有、且现有语义层未覆盖时，才一次性列出全部问题，不得猜。
+- 严格按任务页执行 `scenario_semantic_validate` → `scenario_semantic_plan` → `scenario_semantic_apply`；`apply` 必须带 `confirm=true` 和同一次 `plan` 的 `plan_id`，写前先用 `dry_run=true` 展示 diff。
 
 ## 分析案例
 

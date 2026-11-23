@@ -31,9 +31,9 @@ analytics:StandardQueryScenario  标准取数场景页（溯源/建模起点）
 
 `databaseType` 不新增 `SelfServiceMCPService` 子类；`agent:MCPService` 页 + 该属性即可。
 
-## 2. 配置表（17 张 + 8 个视图）
+## 2. 配置表（18 张 + 8 个视图）
 
-**维度**：`dimension`（`member_key`） / `dimension_level`（`formula_kind` / `formula_params` / `data_type`） / `dimension_attribute`
+**维度**：`dimension`（`member_key`） / `dimension_level`（`formula_kind` / `formula_params` / `data_type`） / `dimension_attribute` / `dimension_table`（维度物理表/视图来源）
 
 **事实**：`fact` / `fact_dimension`（`fact_key` / `dimension_key` / `join_type`；PK=`fact_id + dimension_id`） / `fact_table`（事实对象的物理事实表组成；一个 Fact 可由多张事实表 JOIN 组成）
 
@@ -407,9 +407,10 @@ analytics.field_mapping.source_type = 'tool_contract'
 
 ```bash
 python tests/test_analytics_ontology.py   # 4 类 + 7 对象属性 + 工具调用事实挂 2 个工具维度
-python tests/test_analytics_config.py     # 17 表 / 8 视图 / 5 类 database_type / 页面投影
+python tests/test_analytics_config.py     # 18 表 / 8 视图 / 5 类 database_type / 页面投影
 python tests/test_analytics_fact_match.py # 指标/事实表/场景/筛选/分组/分类字段选事实
-python tests/test_tools_contract.py       # fact_match / mapping_lookup / scenario_lookup 已进工具契约
+python tests/test_analytics_semantic.py   # 场景 SQL 扫描 / 表角色 / 口径匹配
+python tests/test_tools_contract.py       # fact_match / mapping_lookup / scenario_lookup / scenario_semantic_* 已进工具契约
 python tools/ontology-compiler/compile.py validate --summary
 ```
 
@@ -439,6 +440,47 @@ python tools/ontology-compiler/compile.py validate --summary
 - `list_tables`
 - `describe_table`
 - `run_select`
+
+
+
+## 11. 标准取数场景 → 语义层提取
+
+任务页：`bpmn/task/从标准取数场景提取语义层`（步骤与 `answers` 形状以该页 **`skos:note`** 为准）；
+智能体提示词只负责任务分流（选到该任务时不走问数流程），不重复任务步骤。工具在 **bodhi MCP**（不新增 MCP 服务）：
+
+- `scenario_semantic_validate`：只读前置校验（场景/服务/来源事实 binding/SQL 可解析），**不执行 SQL**；
+- `scenario_semantic_plan`：只读差异计划，扫描场景 SQL 的表/列/聚合/FILTER/GROUP BY，
+  和现有 Fact 的 `base_metric` / `derived_metric` / `fact_field` / `fact_dimension` /
+  `field_mapping` 比对，输出 `missing` 与 `questions`（中文含义/枚举值/事实选择）；
+- `scenario_semantic_apply`：唯一写入口，必须 `confirm=true` + 匹配的 `plan_id` + `dry_run=false`；
+  只写 analytics 配置表，写后调用 `sync_pages` 并复核 `mapping_lookup` / `scenario_lookup`。
+
+一次性语义（优先，避免多轮追问）：
+
+1. 场景 SQL 用中文列别名直接给语义：`count(*) AS "调用次数"`、`sum(tokens) AS "总Token"`；
+   PostgreSQL 用双引号或裸中文（`AS "调用次数"` / `AS 调用次数`），单引号别名在 PG 不合法；
+   MySQL/Trino 可用 `AS '调用次数'`。扫描器三种都识别，别名作为名称，不再追问 label。
+2. 布尔枚举写进列别名：`tool_success AS "执行结果（true=成功，false=失败）"`，
+   或在**同一次** plan 的 `answers.enums` 给全 `{"true":"成功","false":"失败"}`。
+3. 用户首条消息已给出事实名称/粒度/枚举/单位时，第一次 `scenario_semantic_plan` 就带 `answers`
+   一次算完；只有 SQL 与用户输入都没有、且现有语义层未覆盖时，才一次性列出全部问题。
+4. 已有事实默认不修改名称/描述/粒度（防止把智能体臆造的名称写回）；确需修改时传
+   `answers.fact.update=true`，并在提问中明确说明。
+
+约束：
+
+1. 场景 SQL 必须由**场景绑定的 MCP 服务**执行（`run_select(service_id=scenario.service_id)`），
+   失败就停止，不进入语义分析；
+2. 字段名、中文含义、枚举标签一律来自配置、SQL 列别名/枚举提示或用户回答，**不猜**；
+3. 事实字段只映射 `fact_table` 登记的事实表；维表由 Dimension 的
+   `dimension_table + binding + field_mapping` 表达；
+4. `scenario_join` 只记录事实表↔事实表路径；
+5. 写操作默认开启，可用 `BODHI_ANALYTICS_WRITE=0` 关闭（kill switch）。
+
+E2E：`tests/agent_e2e/test_analytics_semantic_extract.py`（`BODHI_RUN_ANALYTICS_E2E=1`）：
+任务页/提示词注册、SQL 中文别名一次性语义、案例 1 删除部分指标/字段后按场景补全、
+案例 2 清空一个可由场景重建的事实再重建、6 个标准场景只读计划回归；
+测试结束恢复快照并重新同步页面。
 
 `run_select` 只允许单条 SELECT/WITH，拒绝 DML/DDL，行数上限默认 200、最大 1000。
 服务通过 `analytics.mcp_service` 选择目标；当前 `agent_diag` 使用 PostgreSQL。

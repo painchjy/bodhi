@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ke_analytics
 import ke_ontology
+import ke_semantic
 
 from srv.handlers import handle
 from srv.jobs import job_status
@@ -64,6 +65,30 @@ def scenario_lookup_tool(args: dict) -> dict:
         str(args.get("scenario_id", "")),
         str(args.get("mapping_object_id", "")),
         str(args.get("mapping_service_id", "")), str(args.get("intent", "")))
+
+
+@handle("scenario_semantic_validate")
+def scenario_semantic_validate_tool(args: dict) -> dict:
+    return ke_semantic.scenario_semantic_validate(
+        str(args.get("scenario_id", "")),
+        str(args.get("mapping_service_id", "")))
+
+
+@handle("scenario_semantic_plan")
+def scenario_semantic_plan_tool(args: dict) -> dict:
+    return ke_semantic.scenario_semantic_plan(
+        str(args.get("scenario_id", "")), str(args.get("fact_id", "")),
+        args.get("answers") or {}, str(args.get("mapping_service_id", "")))
+
+
+@handle("scenario_semantic_apply")
+def scenario_semantic_apply_tool(args: dict) -> dict:
+    return ke_semantic.scenario_semantic_apply(
+        str(args.get("scenario_id", "")), str(args.get("kb_id", "")),
+        str(args.get("fact_id", "")), args.get("answers") or {},
+        str(args.get("plan_id", "")), bool(args.get("confirm", False)),
+        bool(args.get("dry_run", True)), str(args.get("mapping_service_id", "")),
+        str(args.get("session_no", "")))
 
 
 @handle("ontology_types")

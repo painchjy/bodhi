@@ -10,7 +10,7 @@ python tools/analytics-admin/server.py --host 127.0.0.1 --port 8781
 Windows 可直接双击 `start-admin.cmd`（自动起服务并打开浏览器）。管理台是常驻进程；
 关掉命令窗口/进程后浏览器会打不开（先确认 8781 有监听）。
 
-- 17 张 `analytics` 配置表的浏览/编辑/新建/删除（含 `fact_table` / `scenario_fact`，按 `information_schema` 自动取列与主键）；
+- 18 张 `analytics` 配置表的浏览/编辑/新建/删除（含 `fact_table` / `dimension_table` / `scenario_fact`，按 `information_schema` 自动取列与主键）；
 - 「同步 wiki 页面」调用 `ke_analytics.sync_pages`：Fact / Dimension / Scenario + active MCP 服务页；
 - 「映射接口校验」：`GET /api/mapping-interface?kb_id=...` 读取只读视图 `analytics.v_mapping_interface`，并校验页面属性、binding、服务状态、`objectUsesMcpService` 图边、事实字段来源和 `scenario_join` 端点；返回 `page_missing / attr_missing / mapping_object_type_mismatch / mapping_object_id_mismatch / service_id_mismatch / binding_missing / service_inactive / object_service_edge_missing / fact_table_missing / fact_source_not_fact_table / scenario_join_not_fact_table` 等问题；
 - UI 将内部 `binding.object_type / object_id / service_id` 显示为「映射对象类型 / 映射对象 ID / 映射服务 ID」；

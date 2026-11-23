@@ -18,6 +18,8 @@
 | `ke_audit.py` | **知识运维只读体检**（P1）：wiki ↔ 本体图谱 ↔ 本体模型 一致性 + 无来源/来源已删等异常数据；MCP 工具 `audit_scan` / `GET /bodhi/audit` | `audit(kb_id, scope, max_findings)` + CLI `scan`（见 `docs/bodhi-ops-audit.md`） |
 | `ke_design.py` | **设计流水线**：写设计页（概要设计 / 服务详设 / FD 报告）并做**页面级溯源**（`derived_from`）；读回 FD 页与服务详设页；**FD × 详设交叉验证**（规则 F1–F6） | `write_page` / `apply_relation` / `load_fds` / `load_services` / `check_couplings` + CLI `write\|fds\|services\|check`（见 `docs/agent-design-flow.md`） |
 | `ke_analytics.py` | **自助取数语义投影**：读 `analytics` schema 的事实/维度/指标/场景，渲染 Fact / Dimension / Scenario / active MCP 服务页；页面写 `mappingObjectType/Id` 与 `mappingServiceId`；物理映射只经 `mapping_lookup` 查 binding/field_mapping；`fact_match` 按指标/事实表/场景/筛选/分组/分类字段选事实；AnalysisCase 由任务页写入正文与图关系 | `fact_spec` / `dimension_spec` / `scenario_spec` / `fact_match` / `mapping_lookup` / `scenario_lookup` / `render_*_page` / `sync_pages`（见 `docs/analytics.md`） |
+| `ke_semantic_sql.py` | **受控 SQL 扫描器**：单条 SELECT 的表/别名/JOIN/输出列/聚合/FILTER/GROUP BY/WHERE；UNION/CTE 等返回 `unsupported`，不猜 | `parse_sql` / `match_tables` / `normalize_expression` |
+| `ke_semantic.py` | **标准取数场景 → 语义层**：只读 plan（差异/问题/动作）+ 确认后 apply（写 analytics 配置并同步页面/图） | `scenario_semantic_validate` / `scenario_semantic_plan` / `scenario_semantic_apply`（见 `docs/analytics.md` §11） |
 | `reason.py` | **（下一轮）** SHACL 规则判定与推导 —— 规格见 `docs/bodhi-reasoning.md`，规则源 `artifacts/rules/rules.json` | 待实现 |
 
 `tools/ontology-mcp/server.py` 现在只负责：**MCP 传输 + 抽取合并流水线 + 只读图谱接口

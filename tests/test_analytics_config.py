@@ -24,6 +24,7 @@ MIGRATION = os.path.join(SQL_DIR, "008_semantic_refactor.sql")
 VIEWS = os.path.join(SQL_DIR, "009_semantic_views.sql")
 MAPPING_VIEW = os.path.join(SQL_DIR, "011_mapping_interface.sql")
 FACT_TABLE = os.path.join(SQL_DIR, "012_fact_table_join.sql")
+DIM_TABLE = os.path.join(SQL_DIR, "013_dimension_table.sql")
 ADMIN = os.path.join(H.REPO, "tools", "analytics-admin", "server.py")
 DIAG_SCHEMA = os.path.join(H.REPO, "sql", "diag", "001_schema.sql")
 DIAG_EXAMPLES = os.path.join(H.REPO, "sql", "diag", "003_examples.sql")
@@ -39,6 +40,9 @@ def main() -> int:
     views_text = H.read(VIEWS)
     mapping_view = H.read(MAPPING_VIEW)
     fact_table_sql = H.read(FACT_TABLE)
+    dim_table_sql = H.read(DIM_TABLE)
+    semantic_code = H.read(os.path.join(KE_CORE, "ke_semantic.py"))
+    semantic_sql_code = H.read(os.path.join(KE_CORE, "ke_semantic_sql.py"))
     admin_code = H.read(ADMIN)
     diag_schema = H.read(DIAG_SCHEMA)
     diag_examples = H.read(DIAG_EXAMPLES)
@@ -47,9 +51,9 @@ def main() -> int:
     tables = set(re.findall(r"CREATE TABLE IF NOT EXISTS analytics\.([a-z_]+)", schema))
     views = set(re.findall(r"CREATE OR REPLACE VIEW analytics\.([a-z_]+)", schema))
     expected_tables = {
-        "dimension", "dimension_level", "dimension_attribute", "fact",
-        "fact_dimension", "fact_table", "base_metric", "derived_metric", "fact_field",
-        "mcp_service", "binding", "field_mapping", "enum_mapping",
+        "dimension", "dimension_level", "dimension_attribute", "dimension_table",
+        "fact", "fact_dimension", "fact_table", "base_metric", "derived_metric",
+        "fact_field", "mcp_service", "binding", "field_mapping", "enum_mapping",
         "scenario", "scenario_join", "scenario_filter", "scenario_fact",
     }
     expected_views = {
@@ -179,7 +183,7 @@ def main() -> int:
                   and "CONVERT_TZ" in formula_mysql)
 
     checks = {
-        "表 = 17（实际 %d）" % len(tables): tables == expected_tables,
+        "表 = 18（实际 %d）" % len(tables): tables == expected_tables,
         "已删除 dimension_value/dimension_mapping":
             "CREATE TABLE IF NOT EXISTS analytics.dimension_value" not in schema
             and "CREATE TABLE IF NOT EXISTS analytics.dimension_mapping" not in schema,
@@ -229,6 +233,18 @@ def main() -> int:
         "多事实表示例": "fact_agent_tool_context" in fact_table_sql
                         and "'agent_turn_fact'" in fact_table_sql
                         and "'agent_tool_call_fact'" in fact_table_sql,
+        "维度视图登记": "CREATE TABLE IF NOT EXISTS analytics.dimension_table" in schema
+                        and "'tool_dimension_all'" in dim_table_sql
+                        and "'tool_problem_dimension_all'" in dim_table_sql,
+        "语义提取工具边界": all(x in semantic_code for x in
+                                ("scenario_semantic_plan", "scenario_semantic_apply",
+                                 "scenario_semantic_validate", "confirm",
+                                 "plan_stale", "needs_confirmation"))
+                            and "ke_semantic_sql" in semantic_code,
+        "SQL 扫描器拒绝不支持语法": all(
+            x in semantic_sql_code for x in
+            ("unsupported_cte", "unsupported_%s", "split_top_level",
+             "normalize_expression", '"union"')),
     }
     return H.report(checks, "analytics 配置/投影")
 

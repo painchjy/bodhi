@@ -73,6 +73,25 @@ CREATE TABLE IF NOT EXISTS analytics.dimension_attribute (
 
 COMMENT ON TABLE analytics.dimension_attribute IS '维度属性：层级引用 attribute_code；枚举值映射在 enum_mapping。';
 
+-- 维度对象的物理表/视图来源：把场景 SQL 里的维表稳定识别成 Dimension。
+CREATE TABLE IF NOT EXISTS analytics.dimension_table (
+    dimension_id   text NOT NULL REFERENCES analytics.dimension(dimension_id) ON DELETE CASCADE,
+    table_id       text NOT NULL,
+    source_schema  text NOT NULL DEFAULT '',
+    source_table   text NOT NULL,
+    table_role     text NOT NULL DEFAULT 'base'
+                   CHECK (table_role IN ('base', 'view')),
+    sort_order     integer NOT NULL DEFAULT 0,
+    status         text NOT NULL DEFAULT 'active'
+                   CHECK (status IN ('active', 'inactive')),
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dimension_id, table_id),
+    UNIQUE (dimension_id, source_schema, source_table)
+);
+
+COMMENT ON TABLE analytics.dimension_table IS '维度对象物理表/视图来源：用于语义提取识别维表；列级映射仍在 field_mapping。';
+
 -- 2026-11-22：dimension_value / dimension_mapping 已删除。
 -- 维度成员值在 diag.tool_dimension / diag.tool_problem_dimension；
 -- 物理映射只在 binding + field_mapping；派生公式只在 dimension_level.formula_*。
@@ -348,6 +367,7 @@ COMMENT ON TABLE analytics.scenario_fact IS '场景来源事实：只表达 Scen
 -- ---------- 索引 ----------
 CREATE INDEX IF NOT EXISTS ix_dimension_level_dim ON analytics.dimension_level(dimension_id);
 CREATE INDEX IF NOT EXISTS ix_dimension_attr_dim ON analytics.dimension_attribute(dimension_id);
+CREATE INDEX IF NOT EXISTS ix_dimension_table_dim ON analytics.dimension_table(dimension_id);
 CREATE INDEX IF NOT EXISTS ix_fact_dimension_dim ON analytics.fact_dimension(dimension_id);
 CREATE INDEX IF NOT EXISTS ix_fact_table_fact ON analytics.fact_table(fact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_table_primary
@@ -362,6 +382,10 @@ CREATE INDEX IF NOT EXISTS ix_scenario_service ON analytics.scenario(service_id)
 CREATE INDEX IF NOT EXISTS ix_scenario_fact_fact ON analytics.scenario_fact(fact_id);
 
 -- ---------- updated_at 触发器 ----------
+DROP TRIGGER IF EXISTS trg_dimension_table_updated ON analytics.dimension_table;
+CREATE TRIGGER trg_dimension_table_updated BEFORE UPDATE ON analytics.dimension_table
+FOR EACH ROW EXECUTE FUNCTION analytics.touch_updated_at();
+
 DROP TRIGGER IF EXISTS trg_dimension_updated ON analytics.dimension;
 CREATE TRIGGER trg_dimension_updated BEFORE UPDATE ON analytics.dimension
 FOR EACH ROW EXECUTE FUNCTION analytics.touch_updated_at();

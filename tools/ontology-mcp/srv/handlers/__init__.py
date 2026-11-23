@@ -37,6 +37,7 @@ KB_SCOPED_WRITE = {
     "audit_plan", "audit_purge", "kb_import", "retag_preview", "retag_apply",
     "retag_rollback", "import_probe", "import_plan", "import_apply", "import_state",
     "import_refresh", "page_attributes_set", "clean_alias_noise", "ext_doc_push",
+    "scenario_semantic_apply",
 }
 KB_SCOPED_TOOLS = KB_SCOPED_READ | KB_SCOPED_WRITE
 
