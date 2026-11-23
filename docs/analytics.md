@@ -139,30 +139,30 @@ ke_analytics.fact_dimension_paths("fact_agent_tool_call")
 ### 5.1 应用 schema / 种子
 
 ```bash
-# 在仓库根目录；用 ke_db 的 psql 通道（与本项目其它 SQL 一致）
-python - <<'PY'
-import sys; sys.path.insert(0, "tools/ke-core")
-import ke_db
-for path in (
-    "sql/analytics/001_schema.sql",
-    "sql/analytics/002_seed.sql",
-    "sql/analytics/005_scenario_diag_seed.sql",
-    "sql/analytics/006_diag_fact_mapping.sql",
-    "sql/analytics/007_diag_metric_seed.sql",
-    "sql/analytics/008_semantic_refactor.sql",
-    "sql/analytics/009_semantic_views.sql",
-    "sql/analytics/010_scenario_fact.sql",
-    "sql/analytics/011_mapping_interface.sql",
-    "sql/diag/001_schema.sql",
-    "sql/diag/002_tool_dimension_seed.sql",
-):
-    ke_db.psql(open(path, encoding="utf-8").read(), stdin=True)
-    print("applied", path)
-PY
+# 在 02 包根目录；推荐用 init-db.sh（psql，幂等）
+cd 02-mcp-server
+./init-db.sh all
 ```
 
-> 已在本机开发库执行过一次；重复执行是幂等的（`CREATE ... IF NOT EXISTS` /
-> `ON CONFLICT`）。
+对应顺序：
+
+```text
+sql/diag/001_schema.sql
+sql/diag/002_tool_dimension_seed.sql
+sql/analytics/001_schema.sql
+sql/analytics/002_seed.sql
+sql/analytics/005_scenario_diag_seed.sql
+sql/analytics/006_diag_fact_mapping.sql
+sql/analytics/007_diag_metric_seed.sql
+sql/analytics/008_semantic_refactor.sql
+sql/analytics/009_semantic_views.sql
+sql/analytics/010_scenario_fact.sql
+sql/analytics/011_mapping_interface.sql
+sql/analytics/012_fact_table_join.sql
+sql/analytics/013_dimension_table.sql
+```
+
+> 012/013 不能漏；`013` 负责 `dimension_table`（维度视图登记）。
 
 ### 5.2 同步 wiki 页
 
@@ -373,18 +373,19 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA diag
 
 ## 6. 管理端（可视化配置）
 
+在 **02 包**根目录：
+
 ```bash
-python tools/analytics-admin/server.py --host 127.0.0.1 --port 8781
-# 打开 http://127.0.0.1:8781/
+./start.sh admin
+# 打开 http://<host>:8781/
 ```
 
-Windows 也可双击 `tools/analytics-admin/start-admin.cmd`（自动起服务并打开浏览器）。
-管理台是常驻进程；之前 Chrome 打不开是因为验证后进程被停掉了，不是端口/权限问题。
+服务固定监听 `0.0.0.0:8781`（配置 `config/analytics-admin.env`）；当前不启用 token，
+必须用 nginx/VPN/ACL 限制来源。Windows 开发机可直接
+`python tools/analytics-admin/server.py --host 127.0.0.1 --port 8781`。
 
-- 左表浏览 17 张配置表；点行编辑 JSON；保存/新建/删除按主键 upsert；
+- 左表浏览 18 张配置表；点行编辑 JSON；保存/新建/删除按主键 upsert；
 - 右侧「同步 wiki 页面」填 KB ID + kind + dry_run；
-- 默认只监听 127.0.0.1；设 `BODHI_ANALYTICS_ADMIN_TOKEN` 后需
-  `X-Admin-Token` 或 `?token=`；
 - 映射、枚举、join、filter 只在此配置，不进知识库检索。
 
 ## 7. 旧固定工具映射统一
@@ -433,13 +434,18 @@ python tools/ontology-compiler/compile.py validate --summary
 `analytics-sql` 的 `run_select` 验证。执行案例时读正文 `## SQL` 下的 ```sql
 代码块，校验对象/服务 active 后再执行。
 
-## 10. 只读 analytics-sql MCP
+## 10. 只读 analytics-sql MCP（agent_diag，8771）
 
-服务：`tools/domain-mcp/analytics_sql/server.py`，工具固定为：
+服务：`tools/domain-mcp/analytics_sql/server.py`，在 **02 包**，端口 **8771**；
+容器名 `bodhi-agent-diag`（URL `http://bodhi-agent-diag:8771/mcp`）。工具固定为：
 
 - `list_tables`
 - `describe_table`
 - `run_select`
+
+启动：`./start.sh diag`；配置：`config/common.env` + `config/agent-diag.env`。
+WeKnora `mcp_services.name=agent_diag`；`analytics.mcp_service` 里的 `svc_postgresql`
+是内部数据服务配置，两者不是同一张表。
 
 
 

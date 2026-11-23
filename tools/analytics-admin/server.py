@@ -2,7 +2,7 @@
 
 边界
 ----
-* 仅管理 PostgreSQL `analytics` schema 的 17 张配置表（白名单）；
+* 仅管理 PostgreSQL `analytics` schema 的 18 张配置表（白名单）；
 * 不暴露给智能体；默认只监听 127.0.0.1；
 * 映射/枚举/join/filter 在这里可视化编辑，不生成 wiki 页；
 * 「同步页面」调用 `ke_analytics.sync_pages`，只投影 Fact / Dimension / Scenario；
@@ -37,7 +37,8 @@ import ke_analytics  # noqa: E402
 import ke_db  # noqa: E402
 
 TABLES = (
-    "dimension", "dimension_level", "dimension_attribute", "fact", "fact_dimension",
+    "dimension", "dimension_level", "dimension_attribute", "dimension_table",
+    "fact", "fact_dimension",
     "fact_table", "base_metric", "derived_metric", "fact_field",
     "mcp_service", "binding", "field_mapping", "enum_mapping",
     "scenario", "scenario_join", "scenario_filter", "scenario_fact",

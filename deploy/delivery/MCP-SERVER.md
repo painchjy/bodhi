@@ -2,12 +2,34 @@
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
 > 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
-> 作用：给 WeKnora 提供 **36 个 MCP 工具**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** / **数据属性写口（`page_attributes_set`，方案 D）** / **多模态识别（`image_extract` 取文档内嵌图）** / **运维·图→正文重建（`rebuild_wiki_from_graph`）** / **运维·清别名噪音（`clean_alias_noise`）** / **运维·知识库导出/导入（`kb_export` + `kb_import`，含 PG+Neo4j 六项一致性比对）** …）
+> 作用：给 WeKnora 提供 **51 个 MCP 工具（2026-11-23）**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** / **数据属性写口（`page_attributes_set`，方案 D）** / **多模态识别（`image_extract` 取文档内嵌图）** / **运维·图→正文重建（`rebuild_wiki_from_graph`）** / **运维·清别名噪音（`clean_alias_noise`）** / **运维·知识库导出/导入（`kb_export` + `kb_import`，含 PG+Neo4j 六项一致性比对）** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
 > 的零依赖子集解析（我们逐键比对过，5 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list **36 个** / skills() **6 个**）。
+> `selfcheck.py` 全绿（initialize / tools/list **51 个** / skills() **6 个**）。
+
+## 0. 02 包组件矩阵（2026-11-23）
+
+`bodhi2-02-mcp-server.tar.gz` 是 **bodhi 运行时完整包**，一个安装器、三个常驻服务 + 一个初始化组件：
+
+| 组件 | 端口 | 作用 | 配置 | 选择性启动 |
+|---|---:|---|---|---|
+| `bodhi-mcp` | 8765 | 本体/知识/语义提取工具 | `config/common.env` + `config/mcp.env` | `./start.sh mcp` |
+| `agent_diag` | 8771 | 只读 SQL MCP（`analytics_sql`） | `config/common.env` + `config/agent-diag.env` | `./start.sh diag` |
+| `analytics-admin` | 8781 | 业务对象映射/语义层管理台 | `config/common.env` + `config/analytics-admin.env` | `./start.sh admin` |
+| `diag-init` | — | diag/analytics 建表、视图、种子（一次性） | `config/common.env`（可选 `diag-init.env`） | `./init-db.sh all` |
+
+安装/初始化/启动：
+
+```bash
+sudo bash install.sh --components mcp,diag,admin --init-db
+./start.sh all          # 或 mcp / diag / admin
+./status.sh
+```
+
+对外部服务：`it_platform` 8770 在 04 包；`dbbi_data` gateway 8772 在独立 gateway 包；02 不含它们。
+详见 `DIAG-CONFIG.md` / `ANALYTICS-CONFIG.md` / `ANALYTICS-ADMIN.md`。
 
 **结构化数据批量建模（2026-09-29/30 新增，5 个工具）**：技能负责「理解」（从用户对表结构的中文描述得出
 有哪些类/关系/键列/列→属性映射），工具负责「确定性执行」，**一次只处理一个类（含数据属性）或一条关系**：

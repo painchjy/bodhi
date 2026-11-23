@@ -21,9 +21,11 @@ COPY tools/ /app/tools/
 COPY skills/ /app/skills/
 COPY artifacts/ /app/artifacts/
 COPY ontology/ /app/ontology/
+COPY sql/ /app/sql/
+COPY init-db.sh /app/init-db.sh
 # 用模板作为容器内默认配置（BODHI_DB_* 由 compose 的 env_file/环境变量覆盖）
 COPY .env.example /app/.env
-RUN mkdir -p /app/logs
+RUN mkdir -p /app/logs && chmod +x /app/init-db.sh
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8765

@@ -212,14 +212,14 @@ def test_load_config_and_env_override(tmp_path, monkeypatch):
     cfg = tmp_path / "gateway.json"
     cfg.write_text(json.dumps({
         "upstream_url": "http://127.0.0.1:8770/mcp",
-        "port": 8771,
+        "port": 8772,
         "inject_args": {"_tenant": "10000"},
         "inject_tools": ["*"],
         "fill_schema": False,
     }), encoding="utf-8")
 
     config = G.load_config(cfg)
-    assert config["port"] == 8771
+    assert config["port"] == 8772
     assert config["inject_args"]["_tenant"] == "10000"
     assert config["fill_schema"] is False
     assert config["intercept_notifications"] is True

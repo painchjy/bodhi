@@ -2,7 +2,7 @@
 """自助取数分析 · 语义配置/页面投影回归（静态，不连库）。
 
 验证：
-1. 配置 schema 17 张表 / 8 个视图，dimension_value、dimension_mapping 已删除；
+1. 配置 schema 18 张表 / 8 个视图，dimension_value、dimension_mapping 已删除；
 2. Fact↔Dimension 只保留语义键（fact_key/dimension_key/join_type），工具分类只挂在工具调用事实；
 3. 维度成员键 + 层级公式（formula_kind/formula_params）在维度侧定义；
 4. 页面只写语义，物理映射提示走 mapping_lookup / 管理台；
@@ -224,6 +224,7 @@ def main() -> int:
                             "formula_only" in mapping_view,
         "管理台映射接口": "/api/mapping-interface" in admin_code and
                           "v_mapping_interface" in admin_code,
+        "管理台含 dimension_table": '"dimension_table"' in admin_code,
         "fact_table 组成": "CREATE TABLE IF NOT EXISTS analytics.fact_table" in schema
                            and "fact_table" in fact_table_sql,
         "事实字段不映射维表": "DELETE FROM analytics.field_mapping" in fact_table_sql

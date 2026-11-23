@@ -21,6 +21,7 @@ REPO = os.path.dirname(HERE)
 TOOLS = os.path.join(REPO, "tools")
 BODHI_SIDE = [os.path.join(TOOLS, "ontology-mcp"), os.path.join(TOOLS, "ke-core")]
 DOMAIN = os.path.join(TOOLS, "domain-mcp")
+ANALYTICS_SQL = os.path.join(DOMAIN, "analytics_sql")
 
 IMPORT_RE = re.compile(r"^\s*(?:import|from)\s+([A-Za-z_][\w.]*)", re.M)
 # 04 不许碰的 02 模块（含"直接读库/图"和"02 的绑定/留痕/客户端"）
@@ -62,6 +63,9 @@ def test_domain_mcp_does_not_depend_on_bodhi_side():
     """04 不许 import 02 的任何模块（含读库/图、绑定、留痕、客户端）。"""
     bad = {}
     for p in _py_files(DOMAIN):
+        # analytics_sql 是 02 的 agent_diag 伴随服务（依赖 ke_db），不属于 04 的隔离域。
+        if p.startswith(ANALYTICS_SQL + os.sep):
+            continue
         hits = _hit(_imports(p), DOMAIN_FORBID)
         if hits:
             bad[p.replace(REPO, "")] = hits
@@ -92,13 +96,15 @@ def test_bodhi_side_does_not_import_domain_impl():
 
 
 def test_pack_layout_points_to_domain_dir():
-    """打包口径 = 目录结构：04 包整目录拷 `tools/domain-mcp`，02 包排除它。"""
+    """打包口径 = 目录结构：04 包整目录拷 `tools/domain-mcp`（排除 analytics_sql）；
+    analytics_sql 归 02 的 agent_diag。"""
     sys.path.insert(0, os.path.join(TOOLS, "delivery"))
     import pack_release as P                     # noqa: PLC0415
 
     assert P.EXT_TOOL_DIR == "domain-mcp", P.EXT_TOOL_DIR
-    # 02 包会跳过 `TOOLS_MANUAL_PKG + (EXT_TOOL_DIR,)` ⇒ 目录名必须命中所跳过的项
+    # 02 包会跳过 `TOOLS_MANUAL_PKG + (EXT_TOOL_DIR, "mcp-gateway")`；analytics_sql 单独拷贝
     assert P.EXT_TOOL_DIR in (P.TOOLS_MANUAL_PKG + (P.EXT_TOOL_DIR,))
+    assert os.path.isfile(os.path.join(ANALYTICS_SQL, "server.py"))
     for name in ("it_platform/server.py", "lib/ke_domain_store.py", "lib/ke_fs.py"):
         assert os.path.isfile(os.path.join(DOMAIN, name)), name
 

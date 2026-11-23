@@ -1,10 +1,16 @@
 # analytics-admin · 自助取数配置管理端
 
+> 归属：**02 包**（`02-mcp-server/tools/analytics-admin`）；生产启动用 `./start.sh admin`（0.0.0.0:8781）。
+
 最小可视化配置端（stdlib HTTP，无第三方依赖）：
 
 ```bash
+# 02 包根目录
+./start.sh admin
+# 浏览器 http://<host>:8781/
+
+# 开发机直连：
 python tools/analytics-admin/server.py --host 127.0.0.1 --port 8781
-# http://127.0.0.1:8781/
 ```
 
 Windows 可直接双击 `start-admin.cmd`（自动起服务并打开浏览器）。管理台是常驻进程；

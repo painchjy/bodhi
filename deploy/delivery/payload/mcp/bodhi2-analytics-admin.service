@@ -1,0 +1,18 @@
+[Unit]
+Description=bodhi2 analytics admin UI (8781)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bodhi2
+EnvironmentFile=-/opt/bodhi2/config/common.env
+EnvironmentFile=-/opt/bodhi2/config/analytics-admin.env
+ExecStart=/usr/bin/python3 /opt/bodhi2/tools/analytics-admin/server.py --host 0.0.0.0 --port 8781
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,9 @@
 # 智能体与 MCP 登记 SQL（可脚本化、可回滚）
 
-> 位置：`03-manual/sql/`（由 `tools/delivery/export_db.py --agents` 生成）
-> - `mcp_service.sql` —— 登记 bodhi2 MCP 服务
-> - `agents.sql` —— 登记两个智能体：`bodhi-ea-modeler`（技能驱动：抽取 + 概要设计 + 详细设计）、`bodhi-kb-ops`（只读巡检与清理计划）
+> 位置：`02-mcp-server/sql/agent_registration/`（由 `tools/delivery/export_db.py --agents` 生成；03 包只放本说明）
+> - `mcp_service.sql` —— 登记 `bodhi_ontology`（8765）
+> - `agent_diag.sql` —— 登记 `agent_diag`（8771）；替换 `__AGENT_DIAG_URL__`
+> - `agents.sql` —— 登记智能体（`bodhi-ea-modeler` / `bodhi-kb-ops`；语义提取智能体按需导入）
 > - `ROLLBACK.sql` —— 停用智能体 + 删除 MCP 服务行
 >
 > **2026-09-22 口径（简化 + 去硬编码）**：
@@ -46,13 +47,17 @@ WHERE id = 'bodhi-ea-modeler';
 > 防止我们环境的 id 再被带进交付包。
 
 ```bash
-# 一键替换 + 落库（只有 URL 是必须填的）
-MCP_URL='http://bodhi2-mcp:8765/mcp'
+# 一键替换 + 落库（在 02 包根目录）
+MCP_URL='http://bodhi-mcp:8765/mcp'
 MCP_ID='a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'
+AGENT_DIAG_URL='http://bodhi-agent-diag:8771/mcp'
 PSQL_URL='postgresql://postgres:口令@127.0.0.1:5432/WeKnora'
 
-for f in sql/mcp_service.sql sql/agents.sql; do
-  sed -e "s|__MCP_URL__|$MCP_URL|g" -e "s|__MCP_SERVICE_ID__|$MCP_ID|g" "$f" > "/tmp/$(basename "$f")"
+cd sql/agent_registration
+for f in mcp_service.sql agent_diag.sql agents.sql; do
+  sed -e "s|__MCP_URL__|$MCP_URL|g" \
+      -e "s|__MCP_SERVICE_ID__|$MCP_ID|g" \
+      -e "s|__AGENT_DIAG_URL__|$AGENT_DIAG_URL|g" "$f" > "/tmp/$(basename "$f")"
   psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f "/tmp/$(basename "$f")"
 done
 ```

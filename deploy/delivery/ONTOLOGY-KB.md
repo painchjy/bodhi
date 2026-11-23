@@ -2,7 +2,7 @@
 
 > 交付物：**`bodhi2-03-manual.tar.gz`**（文档 + 本体真源）与 **`bodhi2-02-mcp-server.tar.gz`**（工具 + 编译产物）
 > - 03 包：`ontology/` —— TTL 单一真源：`EA完整版.ttl`、`BMM完整版.ttl`、`extensions/*.ttl`（服务详设/归属/FD 扩展）、`shapes/*`、`lexicon/*`；
->   `seed/` —— **可直接导入的种子**（无需 Python/编译器）：`ontology_kb_pages.sql`、`ontology_kb.json`、`kb_row.sql`；
+>   **不包含 `seed/` / 页面种子**（2026-10-26 用户裁定：知识库页面由用户导出/导入）；
 >   `refresh_ontology_kb.sh` —— 一键：编译 → 生成清单 → 投影 → 重启容器；
 > - 02 包：`tools/ontology-compiler/` —— 编译器（TTL → artifacts，需 `rdflib`+`PyYAML`）；
 >   `tools/ontology-extract/ontology_wiki.py` —— 把编译产物投影成「本体模型」知识库页面；
@@ -43,15 +43,12 @@ python3 tools/ontology-extract/ontology_wiki.py project --kb-id <本体模型知
 ONTOLOGY_KB_ID=<uuid> bash deploy/weknora-fork/refresh_ontology_kb.sh
 ```
 
-## 2. 方案 B：直接导入种子（部署机没有 Python / 不想编译）
+## 2. 方案 B（交付包**不提供** seed）
 
-```bash
-# ① 建一个空知识库（UI），记下它的 uuid：ONT_KB=<uuid>
-# ② 用它的 id 替换种子里的占位符，然后导入
-sed "s/__ONTOLOGY_KB_ID__/$ONT_KB/g" seed/ontology_kb_pages.sql > /tmp/ont.sql
-psql "postgresql://postgres:口令@127.0.0.1:5432/WeKnora" -v ON_ERROR_STOP=1 -f /tmp/ont.sql
-# ③ 或：直接用 JSON 清单导入（seed/ontology_kb.json，逐条 slug/title/page_type/content）
-```
+2026-10-26 起知识库页面不随包发布；03 包没有 `seed/`。如果你们确实需要 seed：
+在**源环境**用 `tools/delivery/export_db.py --ontology-kb <本体库 uuid> --out <dir>` 生成
+`seed/ontology_kb_pages.sql` / `ontology_kb.json`，再由用户自行导入；生成物不进交付包。
+推荐仍走上面的方案 A（TTL → 编译/投影），或直接在目标环境导出/导入知识库。
 
 导入的是 `wiki_pages` 行（含 `slug / title / page_type / content / page_metadata / out_links / in_links / version`），
 **不需要** `knowledges`（文档）表 —— 本体页面是"生成型"页面，`source_refs` 为空是**正常的**（巡检对 `ontology:*` 类型豁免 C1）。

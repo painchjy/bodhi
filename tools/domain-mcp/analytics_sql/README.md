@@ -9,9 +9,15 @@
 `run_select` 只允许单条 `SELECT`/`WITH`，拒绝 DML/DDL，限制 200/1000 行；目标服务由
 `analytics.mcp_service` 的 active 行决定（当前 `agent_diag` / PostgreSQL）。
 
+> 归属：**02 包**（`02-mcp-server/tools/domain-mcp/analytics_sql`），依赖 02 的 `tools/ke-core`；
+> 04/it_platform 不再带本服务。
+
 启动：
 
 ```bash
+# 02 包根目录
+./start.sh diag
+# 或直接：
 python tools/domain-mcp/analytics_sql/server.py --host 0.0.0.0 --port 8771
 ```
 

@@ -1,7 +1,7 @@
 # 04-it-platform-mcp（独立服务包）
 
 > 用户裁定（2026-10-26）：**it-platform 单独打包**（只在这个包里），`02-mcp-server` **排除**它 ——
-> 两者是不同服务、不同端口（本体 8765 / ext 8766）、不同数据根，混在一起会让"只换一个服务"变成换整包。
+> 两者是不同服务、不同端口（bodhi 运行时 8765/8771/8781 / it_platform 8770）、不同数据根，混在一起会让"只换一个服务"变成换整包。
 
 ## 1. 包内容
 
@@ -33,7 +33,7 @@ python3 deploy/delivery/04-it-platform-mcp/selfcheck.py --base /opt/bodhi-ext
 
 ## 4. 与 02 包的分工
 
-| 项 | 02（bodhi-mcp，8765） | 04（本包，8766） |
+| 项 | 02（bodhi-mcp，8765） | 04（本包，8770） |
 |---|---|---|
 | 工具 | 本体/知识/巡检/导入 38 个 | ext 台账/文档/流程（`ext_*`） |
 | 数据 | WeKnora PG + Neo4j | `BODHI_EXT_ROOT`（JSON 台账/附件） |

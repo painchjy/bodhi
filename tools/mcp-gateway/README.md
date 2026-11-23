@@ -72,14 +72,14 @@ sudo bash install.sh
 1. 复制到 `/opt/bodhi-mcp-gateway`；
 2. 首次安装生成 `/etc/bodhi-mcp-gateway.json`（权限 600）；
 3. 安装并启动 `bodhi-mcp-gateway.service`；
-4. 检查 `http://127.0.0.1:8771/health`。
+4. 检查 `http://127.0.0.1:8772/health`。
 
 编辑配置后重启：
 
 ```bash
 sudo vi /etc/bodhi-mcp-gateway.json
 sudo systemctl restart bodhi-mcp-gateway
-curl -s http://127.0.0.1:8771/health
+curl -s http://127.0.0.1:8772/health
 ```
 
 ## 5. 配置
@@ -89,7 +89,7 @@ curl -s http://127.0.0.1:8771/health
 ```json
 {
   "host": "0.0.0.0",
-  "port": 8771,
+  "port": 8772,
   "upstream_url": "http://dbbiuat.xxx.xxx.xxx:8080/mcp",
   "timeout_seconds": 30,
   "intercept_notifications": true,
@@ -135,7 +135,7 @@ curl -s http://127.0.0.1:8771/health
 
 ```sql
 UPDATE mcp_services
-SET url = 'http://host.docker.internal:8771/mcp',
+SET url = 'http://host.docker.internal:8772/mcp',
     transport_type = 'http-streamable',
     enabled = true,
     deleted_at = NULL,
@@ -153,7 +153,7 @@ WHERE name = 'dbbi_data';
 ### 7.1 网关健康
 
 ```bash
-curl -s http://127.0.0.1:8771/health | python3 -m json.tool
+curl -s http://127.0.0.1:8772/health | python3 -m json.tool
 ```
 
 应返回 `ok=true`，且 `inject_keys` 里能看到配置的固定参数名（不显示值）。
@@ -161,7 +161,7 @@ curl -s http://127.0.0.1:8771/health | python3 -m json.tool
 ### 7.2 MCP 三步
 
 ```bash
-MCP='http://127.0.0.1:8771/mcp'
+MCP='http://127.0.0.1:8772/mcp'
 
 # 1) initialize
 curl -sS -X POST "$MCP" \

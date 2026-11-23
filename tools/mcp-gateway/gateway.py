@@ -108,7 +108,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             config[key] = os.environ[env_name]
 
     config["host"] = str(config.get("host") or "0.0.0.0").strip()
-    config["port"] = _as_int(config.get("port"), 8771)
+    config["port"] = _as_int(config.get("port"), 8772)
     config["upstream_url"] = str(config.get("upstream_url") or "").strip().rstrip("/")
     config["timeout_seconds"] = _as_int(config.get("timeout_seconds"), 30)
     config["intercept_notifications"] = _as_bool(config.get("intercept_notifications"), True)

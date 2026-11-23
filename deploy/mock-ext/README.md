@@ -25,7 +25,7 @@
 2. `$BODHI_EXT_SEED/it-platform/schema.json`（现场覆盖，可选）；
 3. `$BODHI_EXT_ROOT/it-platform/schema.json`（首次 bootstrap 的旧副本，兜底）。
 
-> 判据：`curl -s localhost:8766/mcp -d '{"method":"tools/list"}'` 里 `x-ext.schemaHash` 变了 ⇒ 契约生效。
+> 判据：`curl -s localhost:8770/mcp -d '{"method":"tools/list"}'` 里 `x-ext.schemaHash` 变了 ⇒ 契约生效。
 
 ## 3. 本地联调
 

@@ -29,9 +29,9 @@ systemctl enable --now bodhi-mcp-gateway
 PORT="$(python3 - "$CONF" <<'PY'
 import json, sys
 try:
-    print(int(json.load(open(sys.argv[1], encoding="utf-8")).get("port", 8771)))
+    print(int(json.load(open(sys.argv[1], encoding="utf-8")).get("port", 8772)))
 except Exception:
-    print(8771)
+    print(8772)
 PY
 )"
 
