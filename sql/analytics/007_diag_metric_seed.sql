@@ -158,6 +158,15 @@ UPDATE analytics.field_mapping SET status = 'inactive'
  WHERE mapping_id IN ('map_turn_status', 'map_turn_error');
 
 -- 场景 filter 修正：旧表 diag.agent_tool_call 已不存在
+UPDATE analytics.fact SET grain = 'session_id + message_id'
+ WHERE fact_id = 'fact_agent_turn';
+UPDATE analytics.field_mapping SET source_column = 'model_id'
+ WHERE mapping_id = 'map_turn_model';
+UPDATE analytics.derived_metric SET expression = 'avg(prompt_tokens + completion_tokens)'
+ WHERE metric_id = 'dm_turn_avg_tokens';
+UPDATE analytics.fact_field SET status = 'inactive'
+ WHERE field_id IN ('ff_turn_status', 'ff_turn_error_code');
+
 UPDATE analytics.scenario_filter
    SET table_name = 'agent_tool_call_fact',
        column_name = 'tool_code',

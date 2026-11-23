@@ -265,7 +265,9 @@ def _is_boolean_column(parsed: dict, column: str) -> bool:
 
 def _metric_source(column: dict, fact_refs: list, role_of, catalog: dict,
                    fact_id: str = "") -> dict:
-    """聚合的来源物理列：优先聚合参数，其次 FILTER 列，最后主表粒度键。"""
+    """聚合的来源物理列：count 取主表最细粒度键；其他优先聚合参数。"""
+    if _s(column.get("aggregation")).lower() in ("count", "count_distinct"):
+        fact_refs = []
     arg = _s(column.get("arg")).strip()
     for ref in fact_refs:
         name = _s(ref[2])
@@ -285,7 +287,7 @@ def _metric_source(column: dict, fact_refs: list, role_of, catalog: dict,
         grain = primary.get("grain_keys") or []
         return {"schema": _s(primary.get("source_schema")),
                 "table": _s(primary.get("source_table")),
-                "column": _s(grain[0]) if grain else "*"}
+                "column": _s(grain[-1]) if grain else "*"}
     for table in catalog["fact_tables"]:
         if _s(table.get("source_schema")) and _s(table.get("source_table")):
             return {"schema": _s(table.get("source_schema")),
@@ -377,21 +379,8 @@ def _collect_fields(parsed: dict, role_of, resolve, mark, usage: dict) -> list[d
                 add(resolved, "select", _s(column.get("alias")),
                     _s(column.get("label")))
 
-    for ref in {resolve(r) for g in parsed.get("group_by") or []
-                for r in (g.get("refs") or [])}:
-        if role_of(ref) == "fact":
-            add(ref, "group")
-    for clause in parsed.get("filters") or []:
-        for ref in clause.get("refs") or []:
-            resolved = resolve(ref)
-            if role_of(resolved) == "fact":
-                add(resolved, "filter")
-    for column in parsed.get("columns") or []:
-        if column.get("filter"):
-            for ref in column.get("refs") or []:
-                resolved = resolve(ref)
-                if role_of(resolved) == "fact":
-                    add(resolved, "filter")
+    # GROUP BY 中仅用于粒度的列不生成事实字段；字段必须来自 SELECT/WHERE/FILTER。
+    # WHERE/FILTER 里的列只作为过滤条件，不自动生成非指标字段。
 
     for item in fields:
         key = (_s(item["table"][0]), _s(item["table"][1]), _s(item["column"]))
@@ -448,6 +437,7 @@ def _analyze(parsed: dict, catalog: dict, fact_id: str = "") -> dict:
                     if column.get("expression_language") == "derived"
                     else "base_metric",
             "index": column.get("index"), "alias": alias, "label": label,
+            "auto_count": column.get("aggregation") in ("count", "count_distinct"),
             "code": _ident(alias or ("%s_%s" % (
                 column.get("aggregation") or "metric", column.get("index") or 0))),
             "aggregation": ("count_distinct"
@@ -626,6 +616,48 @@ def _match_dimension_link(link: dict, fact_catalog: dict) -> bool:
     return False
 
 
+def _grain_keys(value):
+    return [x.strip().lower() for x in re.split(r"[+,]", _s(value)) if x.strip()]
+
+def _fact_grain_keys(catalog, fact):
+    tables = (fact or {}).get("tables") or []
+    primary = None
+    for table in tables:
+        if table.get("is_primary") in (True, "t", "true"):
+            primary = table
+            break
+    if primary is None and tables:
+        primary = tables[0]
+    keys = [_s(x).strip().lower() for x in (primary or {}).get("grain_keys") or [] if _s(x).strip()]
+    return keys or _grain_keys((fact or {}).get("grain"))
+
+def _scenario_grain_keys(analysis):
+    keys = []
+    for group in (analysis.get("parsed") or {}).get("group_by") or []:
+        for ref in group.get("refs") or []:
+            col = _s(ref.get("column")).strip().lower()
+            if col and col not in keys:
+                keys.append(col)
+    return keys
+
+def _declared_grain(sql):
+    match = re.search(r"(?im)^\s*--\s*grain\s*:\s*(.+)$", _s(sql))
+    if not match:
+        return []
+    return [x.strip().lower() for x in re.split(r"[,+]", match.group(1)) if x.strip()]
+
+
+def _grain_relation(scenario_keys, fact_keys):
+    s, f = set(scenario_keys), set(fact_keys)
+    if s == f:
+        return "exact"
+    if s and s < f:
+        return "fact_contains"
+    if f and f < s:
+        return "scenario_contains"
+    if s & f:
+        return "partial"
+    return "none"
 def _fact_identity(scenario_id: str, analysis: dict, answers: dict) -> dict:
     """从 SQL 的主事实表推导 code/id；中文名与粒度来自用户回答或分组列。"""
     primary = {}
@@ -645,13 +677,14 @@ def _fact_identity(scenario_id: str, analysis: dict, answers: dict) -> dict:
             if column and column not in grain_cols:
                 grain_cols.append(column)
     grain = _s(fact_answers.get("grain")) or " + ".join(grain_cols) or table
+    code = _s(fact_answers.get("code")) or code
+    fact_id = _s(fact_answers.get("fact_id")) or ("fact_" + code)
     return {
-        "fact_id": _s(fact_answers.get("fact_id")) or ("fact_" + code),
-        "code": _s(fact_answers.get("code")) or code,
+        "fact_id": fact_id,
+        "code": code,
         "name": _s(fact_answers.get("name")),
         "grain": grain,
-        "description": _s(fact_answers.get("description"))
-        or "从标准取数场景 %s 提取" % scenario_id,
+        "description": _s(fact_answers.get("description")),
         "primary_table": [primary.get("schema"), primary.get("table")]
         if primary else [],
     }
@@ -700,7 +733,7 @@ def _match_existing(analysis: dict, catalog: dict, fact_catalog: dict) -> dict:
                 "name": cand.get("column"), "matched_as": "dimension",
                 "score": 0.9, "input": cand.get("column"),
             })
-            continue
+            # 直接维度列仍保留事实字段（如果有），继续走 missing
         missing["fact_fields"].append(dict(cand, score=round(score, 3)))
     for link in analysis.get("dimension_links") or []:
         if _match_dimension_link(link, fact_catalog):
@@ -779,7 +812,7 @@ def _fixed_source(cand: dict, fact_tables: list, primary_key: list,
     column = _s(source.get("column"))
     if column in ("", "*"):
         grain = _table_grain(catalog, key)
-        column = _s(grain[0]) if grain else "*"
+        column = _s(grain[-1]) if grain else "*"
     return {"schema": key[0], "table": key[1], "column": column}
 
 
@@ -821,6 +854,29 @@ def _fact_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
             "name": _s(target.get("name")), "grain": _s(target.get("grain")),
             "description": _s(target.get("description")),
         })
+    declared = analysis.get("declared_grain") or []
+    scenario_grain = declared or _scenario_grain_keys(analysis)
+    fact_grain = _fact_grain_keys(catalog, target) if target else []
+    if target and not declared:
+        known_fields = {_s(f.get("code")).lower() for f in fact_catalog.get("fact_fields") or []}
+        known_fields |= {_s(m.get("source_column")).lower() for m in fact_catalog.get("mappings") or []}
+        scenario_grain = [x for x in scenario_grain
+                          if x in fact_grain or x not in known_fields]
+    grain_relation = _grain_relation(scenario_grain, fact_grain) if target else "new"
+    grain_ok = (not target) or grain_relation in ("exact", "fact_contains")
+    grain_payload = {"scenario": scenario_grain, "fact": fact_grain,
+                     "relation": grain_relation, "compatible": grain_ok}
+    fact_answers = (answers or {}).get("fact") or {}
+    if target and not grain_ok:
+        blocking.append({"kind": "scenario_grain_mismatch", "scenario_grain": scenario_grain,
+                         "fact_grain": fact_grain, "relation": grain_relation})
+        questions.append({"kind": "fact_creation_required", "target": "fact:create",
+                          "proposed_grain": scenario_grain, "blocking": True,
+                          "prompt": "场景粒度与事实粒度不兼容；是否新建事实对象？"})
+    if not target and not (fact_answers.get("create") or fact_answers.get("name")):
+        questions.append({"kind": "fact_creation", "target": "fact:create",
+                          "proposed_grain": scenario_grain, "blocking": True,
+                          "prompt": "没有匹配的事实对象；是否按场景粒度新建？"})
     if target_source == "explicit_missing":
         blocking.append({"kind": "fact_not_found", "fact_id": identity["fact_id"]})
     if target_source == "ambiguous":
@@ -893,7 +949,7 @@ def _fact_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
                               (target or {}).get("tables") or []}
         if table_id in existing_table_ids:
             table_id = "%s_%s" % (table_id, len(existing_table_ids) + 1)
-        grain = _table_grain(catalog, key) or [
+        grain = ([] if not target else _table_grain(catalog, key)) or [
             _s(x) for x in identity["grain"].split("+") if _s(x).strip()]
         item = {
             "fact_id": fact_id, "table_id": table_id,
@@ -926,7 +982,7 @@ def _fact_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
     if not plan_fact["binding"].get("binding_id"):
         blocking.append({"kind": "binding_missing", "service_id": service_id})
     return {"actions": actions, "questions": questions, "blocking": blocking,
-            "plan": plan_fact}
+            "plan": dict(plan_fact, grain_ok=grain_ok), "grain": grain_payload}
 
 
 
@@ -953,10 +1009,11 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         code = _s(cand.get("code"))
         alias = _s(cand.get("alias"))
         label = _s(cand.get("label"))
-        code = _ident(code or alias or label)
-        answer = _metric_answer(answers, code)
+        raw_code = _ident(code or alias or label)
+        answer = _metric_answer(answers, raw_code)
+        code = _ident(_s(answer.get("code")) or raw_code)
         name = _label(answers, code, alias, label) or label or alias or code
-        if not _has_cjk(name):
+        if not _has_cjk(name) and not cand.get("auto_count"):
             questions.append(_label_question("base_metric", code,
                                              label or alias or code))
         metric_id = _existing_id("analytics.base_metric", fact_id, code,
@@ -966,8 +1023,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         item = {
             "metric_id": metric_id, "fact_id": fact_id, "code": code,
             "name": name,
-            "description": _s(answer.get("description"))
-            or "来自场景 SQL 的聚合列 %s" % (label or alias or code),
+            "description": _s(answer.get("description")),
             "data_type": _s(answer.get("data_type"))
             or ("integer" if aggregation in ("count", "count_distinct")
                 else "numeric"),
@@ -1014,8 +1070,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         item = {
             "metric_id": metric_id, "fact_id": fact_id, "code": code,
             "name": name,
-            "description": _s(answer.get("description"))
-            or "来自场景 SQL 的派生列 %s" % (label or alias or code),
+            "description": _s(answer.get("description")),
             "expression_language": "pseudo", "expression": expression,
             "unit": _s(answer.get("unit")), "format": "",
             "dependencies": dependencies, "sort_order": 100 + index * 10,
@@ -1046,8 +1101,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         source = _fixed_source(cand, all_tables, primary_key, catalog)
         item = {
             "field_id": field_id, "fact_id": fact_id, "code": code, "name": name,
-            "description": _s(answer.get("description"))
-            or "来自场景 SQL 的字段 %s" % column,
+            "description": _s(answer.get("description")),
             "data_type": field_type, "role": role, "is_enum": is_enum,
             "sort_order": 100 + index * 10, "status": "active",
         }
@@ -1112,10 +1166,11 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
                         "data": item})
 
     scenario_id = _s(scenario.get("scenario_id"))
+    grain_ok = bool(plan_fact.get("grain_ok", True))
     linked = _one(
         "SELECT scenario_id FROM analytics.scenario_fact "
         " WHERE scenario_id=%s AND fact_id=%s" % (_q(scenario_id), _q(fact_id)))
-    if not linked:
+    if grain_ok and not linked:
         item = {"scenario_id": scenario_id, "fact_id": fact_id,
                 "sort_order": 10, "note": "从场景 SQL 提取语义层",
                 "status": "active"}
@@ -1196,9 +1251,12 @@ def _plan_core(scenario_id: str, fact_id: str = "", answers: dict | None = None,
     if parsed.get("ok"):
         target, target_source = _resolve_target(
             analysis, catalog, scenario_facts, fact_id)
+        if target and (answers.get("fact") or {}).get("create"):
+            target, target_source = None, "create"
         if target and not fact_id:
             # 重新分析一次：count(*) 之类没有显式列时，来源列按目标事实的主表粒度键补
             analysis = _analyze(parsed, catalog, _s(target.get("fact_id")))
+    analysis["declared_grain"] = _declared_grain(_s(scenario.get("source_sql")))
     fact_catalog = _load_fact_catalog(_s(target.get("fact_id"))) if target else {
         "base_metrics": [], "derived_metrics": [], "fact_fields": [],
         "mappings": [], "fact_dimensions": [], "by_semantic": {}}
@@ -1242,7 +1300,7 @@ def _plan_core(scenario_id: str, fact_id: str = "", answers: dict | None = None,
                          "tables": [[t.get("source_schema"), t.get("source_table")]
                                     for t in target.get("tables") or []]}
                         if target else None),
-        "target_source": target_source,
+        "target_source": target_source, "grain": facts_part.get("grain"),
         "coverage": matched["covered"], "missing": matched["missing"],
         "questions": questions, "ready_to_apply": ready,
         "plan": plan_fact, "actions": actions,

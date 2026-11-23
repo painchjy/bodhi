@@ -366,7 +366,7 @@ def parse_sql(sql: str) -> dict:
                 r"\b(?:%s)\s*\(" % "|".join(AGG_FUNCS), expr, re.I))
             plain_arg = bool(re.fullmatch(
                 r"(?:%s\.)?%s|\*" % (_IDENT, _IDENT), agg["arg"].strip()))
-            if other_aggs > 1 or bool(wrapper):
+            if other_aggs > 1 or bool(wrapper) or not plain_arg:
                 column["expression_language"] = "derived"
             else:
                 column["expression_language"] = "base"

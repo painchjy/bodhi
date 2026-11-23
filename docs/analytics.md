@@ -160,6 +160,7 @@ sql/analytics/010_scenario_fact.sql
 sql/analytics/011_mapping_interface.sql
 sql/analytics/012_fact_table_join.sql
 sql/analytics/013_dimension_table.sql
+sql/analytics/014_semantic_test_scenarios.sql
 ```
 
 > 012/013 不能漏；`013` 负责 `dimension_table`（维度视图登记）。
@@ -471,7 +472,12 @@ WeKnora `mcp_services.name=agent_diag`；`analytics.mcp_service` 里的 `svc_pos
 3. 用户首条消息已给出事实名称/粒度/枚举/单位时，第一次 `scenario_semantic_plan` 就带 `answers`
    一次算完；只有 SQL 与用户输入都没有、且现有语义层未覆盖时，才一次性列出全部问题。
 4. 已有事实默认不修改名称/描述/粒度（防止把智能体臆造的名称写回）；确需修改时传
-   `answers.fact.update=true`，并在提问中明确说明。
+   `answers.fact.update=true`，并在提问中明确说明。新建事实传 `answers.fact.create=true`，
+   可同时给 `fact_id/code/name/grain`；缺 `fact_id` 时按 code 生成。
+5. 场景粒度优先取 SQL 首行注释 `-- grain: col1, col2`；没有注释时用 GROUP BY 列，
+   并排除已登记的非指标字段。只有 `exact` / `fact_contains` 才允许挂接已有事实；
+   `scenario_contains` / `partial` 必须阻断并询问是否新建事实（`fact_creation_required`）；
+   没有匹配事实时询问 `fact_creation`。
 
 约束：
 
@@ -485,7 +491,8 @@ WeKnora `mcp_services.name=agent_diag`；`analytics.mcp_service` 里的 `svc_pos
 
 E2E：`tests/agent_e2e/test_analytics_semantic_extract.py`（`BODHI_RUN_ANALYTICS_E2E=1`）：
 任务页/提示词注册、SQL 中文别名一次性语义、案例 1 删除部分指标/字段后按场景补全、
-案例 2 清空一个可由场景重建的事实再重建、6 个标准场景只读计划回归；
+案例 2 清空一个可由场景重建的事实再重建、3 个语义样例场景
+（全量轮次 / 工具上下文 / 缺粒度键新建事实）、6 个标准场景只读计划回归；
 测试结束恢复快照并重新同步页面。
 
 `run_select` 只允许单条 SELECT/WITH，拒绝 DML/DDL，行数上限默认 200、最大 1000。

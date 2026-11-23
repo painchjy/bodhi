@@ -60,7 +60,7 @@ SET name = EXCLUDED.name, data_type = EXCLUDED.data_type, is_enum = EXCLUDED.is_
 -- ---------- 4. 事实 ----------
 INSERT INTO analytics.fact (fact_id, code, name, description, grain, status) VALUES
 ('fact_agent_turn', 'agent_turn', 'AgentTurnFact',
- 'Agent 轮次事实：一次用户请求/智能体轮次一行。', 'session_id + turn_id', 'active'),
+ 'Agent 轮次事实：一次用户请求/智能体轮次一行。', 'session_id + message_id', 'active'),
 ('fact_agent_tool_call', 'agent_tool_call', 'AgentToolCallFact',
  'Agent 工具调用事实：一次工具调用一行。', 'session_id + turn_id + tool_call_id', 'active')
 ON CONFLICT (fact_id) DO UPDATE
@@ -130,7 +130,7 @@ INSERT INTO analytics.derived_metric
  unit, format, dependencies, sort_order, status) VALUES
 ('dm_turn_avg_tokens', 'fact_agent_turn', 'avg_tokens_per_turn', '轮次平均 Token',
  '每轮输入+输出的平均值；依赖两个基础指标。', 'pseudo',
- 'avg(input_tokens + output_tokens)',
+ 'avg(prompt_tokens + completion_tokens)',
  'token', '#,##0.0',
  '["bm_turn_input_tokens", "bm_turn_output_tokens"]'::jsonb, 10, 'active'),
 ('dm_tool_success_rate', 'fact_agent_tool_call', 'tool_success_rate', '工具成功率',
@@ -212,7 +212,7 @@ INSERT INTO analytics.field_mapping
 ('map_turn_agent', 'bind_fact_agent_turn', 'non_metric_field', 'ff_turn_agent_name',
  'mcp_table', 'diag', 'agent_turn', 'agent_name', 'text', '', '', 30, 'Agent 维度', 'active'),
 ('map_turn_model', 'bind_fact_agent_turn', 'non_metric_field', 'ff_turn_model_name',
- 'mcp_table', 'diag', 'agent_turn', 'model_name', 'text', '', '', 40, '模型维度', 'active'),
+ 'mcp_table', 'diag', 'agent_turn_fact', 'model_id', 'text', '', '', 40, '模型维度', 'active'),
 ('map_turn_status', 'bind_fact_agent_turn', 'non_metric_field', 'ff_turn_status',
  'mcp_table', 'diag', 'agent_turn', 'status', 'text', '', '', 50, '轮次状态', 'active'),
 ('map_turn_error', 'bind_fact_agent_turn', 'non_metric_field', 'ff_turn_error_code',

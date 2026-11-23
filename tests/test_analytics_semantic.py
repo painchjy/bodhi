@@ -129,6 +129,24 @@ def main() -> int:
         cand_distinct, metric, []) < 0.80
     checks["FILTER 口径不命中无过滤指标"] = ke_semantic._score_base_metric(
         cand_filtered, metric, []) < 0.80
+    # 014 三个语义样例：SQL 首行声明粒度；avg(表达式) 为派生指标，不生成新基础指标。
+    sample_text = H.read(os.path.join(H.REPO, "sql", "analytics", "014_semantic_test_scenarios.sql"))
+    samples = re.findall(r"'-- grain: ([^\n]+)\n(.*?)',\s*'active'", sample_text, re.S)
+    sample_parsed = [ke_semantic_sql.parse_sql(sql) for _, sql in samples]
+    checks["014 三个样例带 grain 声明"] = [g.strip() for g, _ in samples] == [
+        "session_id, message_id",
+        "session_id, message_id, tool_call_id",
+        "session_id, message_id, agent_id"]
+    checks["014 样例均可解析"] = len(sample_parsed) == 3 and all(p["ok"] for p in sample_parsed)
+    sample_avg = [c for c in sample_parsed[0]["columns"]
+                  if c.get("alias") == "avg_tokens_per_turn"]
+    checks["avg(表达式) 归派生"] = bool(sample_avg) and sample_avg[0]["expression_language"] == "derived"
+    sample_counts = [c for c in sample_parsed[0]["columns"] if c.get("aggregation") == "count"]
+    checks["count 仍是基础指标"] = bool(sample_counts) and sample_counts[0].get("expression_language") in (None, "base")
+    checks["粒度关系"] = (
+        ke_semantic._grain_relation(["session_id", "message_id"], ["session_id", "message_id"]) == "exact"
+        and ke_semantic._grain_relation(["session_id", "message_id"], ["session_id", "message_id", "agent_id"]) == "fact_contains"
+        and ke_semantic._grain_relation(["session_id", "message_id", "agent_id"], ["session_id", "message_id"]) == "scenario_contains")
     return H.report(checks, "语义层提取（扫描/匹配）")
 
 

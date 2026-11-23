@@ -29,6 +29,7 @@ ANALYTICS_SQL=(
   sql/analytics/011_mapping_interface.sql
   sql/analytics/012_fact_table_join.sql
   sql/analytics/013_dimension_table.sql
+  sql/analytics/014_semantic_test_scenarios.sql
 )
 
 run_sql() {

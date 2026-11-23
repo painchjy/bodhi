@@ -60,6 +60,8 @@
   - 场景 SQL 用中文列别名直接给语义（PostgreSQL 用 `AS "调用次数"` 或 `AS 调用次数`；MySQL/Trino 可用 `AS '调用次数'`），工具把别名当名称，不再追问 label；
   - 布尔枚举写进列别名，如 `AS "执行结果（true=成功，false=失败）"`；
   - 用户首条消息已给出名称/粒度/枚举/单位时，第一次 `scenario_semantic_plan` 就带 `answers` 一次算完；
+  - 场景粒度看 SQL 首行 `-- grain: ...`；没有注释时看 GROUP BY。只有 exact / fact_contains
+    才复用已有事实；scenario_contains / partial 必须停下来询问是否新建事实，不能把维度字段硬塞进事实粒度；
   - 只有 SQL 与用户输入都没有、且现有语义层未覆盖时，才一次性列出全部问题，不得猜。
 - 严格按任务页执行 `scenario_semantic_validate` → `scenario_semantic_plan` → `scenario_semantic_apply`；`apply` 必须带 `confirm=true` 和同一次 `plan` 的 `plan_id`，写前先用 `dry_run=true` 展示 diff。
 

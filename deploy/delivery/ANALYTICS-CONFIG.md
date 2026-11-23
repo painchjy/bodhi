@@ -43,6 +43,7 @@ sql/analytics/010_scenario_fact.sql
 sql/analytics/011_mapping_interface.sql
 sql/analytics/012_fact_table_join.sql
 sql/analytics/013_dimension_table.sql
+sql/analytics/014_semantic_test_scenarios.sql
 ```
 
 **012/013 不要漏**：`fact_table` 和 `dimension_table` 是语义层扫描场景 SQL 的物理依据。
