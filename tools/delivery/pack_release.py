@@ -143,7 +143,7 @@ def check_no_machine_ids(stage: pathlib.Path) -> dict:
     uuid_re = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
     hits: list[str] = []
     scanned = 0
-    for f in sorted((stage / "03-manual" / "sql").glob("*.sql")):
+    for f in sorted((stage / "03-manual" / "sql").rglob("*.sql")):
         scanned += 1
         for found in set(uuid_re.findall(f.read_text(encoding="utf-8"))):
             if found not in allow:
@@ -370,6 +370,9 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
               skip_names=("uploads",), skip_files=dup_root + ("_registry.json.tmp",))
     if dup_root:
         print("   ontology/：跳过与 sources/ 内容相同的出厂副本 %s（真源只带一份）" % "、".join(dup_root))
+    # 交付 SQL：仓库 `sql/`（analytics/diag schema 与种子）必须随 03 包；再叠加
+    # export_db 生成的智能体/MCP 登记 SQL（seed_dir/sql 顶层）。
+    copy_tree(REPO / "sql", d / "sql")
     copy_tree(seed_dir / "sql", d / "sql")
     # 2026-10-26 用户裁定：**知识库里的知识不出包**（本体模型库页面手工导出/导入内网），
     # 所以不再复制 `seed/`（页面种子）。登记 SQL（sql/）仍要带：它是部署配置，不是知识内容。
@@ -391,7 +394,7 @@ def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
           "- `AGENTS-SQL.md` —— 智能体与 MCP 登记 SQL（可回滚）\n"
           "- `docs/` —— 设计与运维文档（`agent-design-flow.md` 是建模流程真源）\n"
           "- `ontology/` —— 本体真源：`*完整版.ttl`、`extensions/`、`shapes/`、`lexicon/`、`queries/`\n"
-          "- `sql/` —— 智能体/MCP 登记 SQL（部署配置，不是知识内容 ✓）\n"
+          "- `sql/` —— analytics/diag 建表与种子 SQL + 智能体/MCP 登记 SQL（部署配置，不是知识内容 ✓）\n"
           "- `deploy/weknora-fork/config/` —— **智能体配置真源**（`agent_tools.yaml` 的 `builtin_tools`\n"
           "  = 内置工具；MCP 工具由 `mcp_services` 挂载决定，**不写在这里**；`agent_review_prompt.md` = 提示词真源）\n"
           "  ⇒ 跑 `python3 tools/delivery/apply_config.py --check|--apply`（**需与 02 包解到同一父目录**：\n"
