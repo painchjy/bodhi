@@ -196,11 +196,30 @@ def _load_fact_catalog(fact_id: str) -> dict:
     }
 
 def _load_scenario(scenario_id: str) -> dict:
-    return _one(
+    row = _one(
         "SELECT s.*, m.service_name, m.database_type, m.status AS service_status "
         "  FROM analytics.scenario s "
         "  LEFT JOIN analytics.mcp_service m ON m.service_id=s.service_id "
         " WHERE s.scenario_id=%s" % _q(scenario_id))
+    if row and row.get("semantic_json"):
+        try:
+            row["semantic_json"] = (
+                row["semantic_json"] if isinstance(row["semantic_json"], (dict, list))
+                else json.loads(str(row["semantic_json"])))
+        except Exception:  # noqa: BLE001
+            row["semantic_json"] = {}
+    return row
+
+
+def _merge_answers(base: dict | None, override: dict | None) -> dict:
+    """场景自带 semantic_json.answers + 用户 answers；用户值优先，dict 浅合并。"""
+    out = json.loads(json.dumps(base or {}, ensure_ascii=False))
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key].update(value)
+        else:
+            out[key] = value
+    return out
 
 
 def _scenario_facts(scenario_id: str) -> list[dict]:
@@ -1061,11 +1080,16 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
             "data_type": _s(answer.get("data_type"))
             or ("integer" if aggregation in ("count", "count_distinct")
                 else "numeric"),
-            "unit": _s(answer.get("unit")), "aggregation": aggregation,
-            "additivity": "non_additive" if aggregation in ("avg", "min", "max")
-            else "additive",
-            "filter_expression": _s(cand.get("filter")), "format": "",
-            "sort_order": 100 + index * 10, "status": "active",
+            "unit": _s(answer.get("unit")),
+            "aggregation": _s(answer.get("aggregation")) or aggregation,
+            "additivity": _s(answer.get("additivity"))
+            or ("non_additive" if aggregation in ("avg", "min", "max")
+                else "additive"),
+            "filter_expression": _s(answer.get("filter_expression"))
+            or _s(cand.get("filter")),
+            "format": _s(answer.get("format")),
+            "sort_order": int(answer.get("sort_order") or 100 + index * 10),
+            "status": "active",
         }
         plan_fact["base_metrics"].append(item)
         actions.append({"kind": "base_metric", "id": metric_id, "data": item})
@@ -1093,20 +1117,24 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
             questions.append(_label_question("derived_metric", code,
                                              label or alias or code))
         metric_id = derived_ids.get(code, "") or "dm_%s_%s" % (fact_code, code)
-        expression = _s(cand.get("expression"))
-        dependencies = [
-            _s(m.get("metric_id"))
-            for m in plan_fact["base_metrics"]
-            if _norm(m.get("code")) and re.search(
-                r"(?<![a-z0-9_])%s(?![a-z0-9_])" % re.escape(_norm(m.get("code"))),
-                expression)]
+        expression = _s(answer.get("expression")) or _s(cand.get("expression"))
+        dependencies = list(answer.get("dependencies") or [])
+        if not dependencies:
+            dependencies = [
+                _s(m.get("metric_id"))
+                for m in plan_fact["base_metrics"]
+                if _norm(m.get("code")) and re.search(
+                    r"(?<![a-z0-9_])%s(?![a-z0-9_])" % re.escape(_norm(m.get("code"))),
+                    expression)]
         item = {
             "metric_id": metric_id, "fact_id": fact_id, "code": code,
             "name": name,
             "description": _s(answer.get("description")),
-            "expression_language": "pseudo", "expression": expression,
-            "unit": _s(answer.get("unit")), "format": "",
-            "dependencies": dependencies, "sort_order": 100 + index * 10,
+            "expression_language": _s(answer.get("expression_language")) or "pseudo",
+            "expression": expression,
+            "unit": _s(answer.get("unit")), "format": _s(answer.get("format")),
+            "dependencies": dependencies,
+            "sort_order": int(answer.get("sort_order") or 100 + index * 10),
             "status": "active",
         }
         plan_fact["derived_metrics"].append(item)
@@ -1125,7 +1153,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         is_bool = bool(cand.get("boolean"))
         enums = (_enum_answer(answers, code, column)
                  or _enum_hint(label) or _enum_hint(alias))
-        is_enum = is_bool or bool(enums)
+        is_enum = bool(answer.get("is_enum", is_bool or bool(enums)))
         field_type = _s(answer.get("data_type")) or ("boolean" if is_bool
                                                      else "text")
         role = _s(answer.get("role")) or _s(cand.get("role")) or "display"
@@ -1135,7 +1163,8 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
             "field_id": field_id, "fact_id": fact_id, "code": code, "name": name,
             "description": _s(answer.get("description")),
             "data_type": field_type, "role": role, "is_enum": is_enum,
-            "sort_order": 100 + index * 10, "status": "active",
+            "sort_order": int(answer.get("sort_order") or 100 + index * 10),
+            "status": "active",
         }
         plan_fact["fact_fields"].append(item)
         actions.append({"kind": "fact_field", "id": field_id, "data": item})
@@ -1270,6 +1299,10 @@ def _plan_core(scenario_id: str, fact_id: str = "", answers: dict | None = None,
         return {"ok": False, "error": "scenario_not_found",
                 "scenario_id": scenario_id,
                 "hint": "先调用 scenario_lookup(scenario_id=...) 确认场景存在"}
+    scenario_semantics = scenario.get("semantic_json") or {}
+    answers = _merge_answers(
+        (scenario_semantics.get("answers") or {})
+        if isinstance(scenario_semantics, dict) else {}, answers)
     scenario_facts = _scenario_facts(scenario_id)
     checks, blocking = _preflight(scenario, scenario_facts, mapping_service_id)
     parsed = ke_semantic_sql.parse_sql(_s(scenario.get("source_sql")))

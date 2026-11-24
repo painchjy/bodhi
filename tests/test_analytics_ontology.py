@@ -97,9 +97,10 @@ def main() -> int:
             "factUsesDimension", "objectUsesMcpService", "scenarioBasedOnFact",
             "scenarioUsesMcpService", "caseUsesFact", "caseUsesDimension",
             "caseUsesMcpService"},
-        "数据属性 = grain/databaseType/mapping*（实际 %s）" % sorted(data_props):
-            data_props == {"grain", "databaseType", "mappingObjectType",
-                           "mappingObjectId", "mappingServiceId", "platformMcpServiceId"},
+        "数据属性 = grain/sql/semantic/databaseType/mapping*（实际 %s）" % sorted(data_props):
+            data_props == {"grain", "sqlStatement", "semanticJson", "databaseType",
+                           "mappingObjectType", "mappingObjectId", "mappingServiceId",
+                           "platformMcpServiceId"},
         "工具调用事实挂 2 个工具分类维度；轮次事实不挂（实际 %s）" % by_fact: path_ok,
         "factUsesDimension domain=Fact": domain_ok,
         "factUsesDimension range=Dimension": range_ok,

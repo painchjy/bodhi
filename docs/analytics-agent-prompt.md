@@ -56,6 +56,7 @@
 ## 任务分流：语义层提取
 
 - 选中 `bpmn/task/从标准取数场景提取语义层` 时，**不要走上面的问数步骤**：不调用 `fact_match`，不按用户问题生成 SQL；工具参数、步骤、`answers` 形状和一次性语义输入规则**全部以该任务页 `skos:note` 为准**。
+- 场景页是 entity：SQL 在 `analytics:sqlStatement`，完整语义在 `analytics:semanticJson`（含 `answers` / `definitions`）。如果场景已带 `semantic_json.answers`，plan 会自动合并，不要重复传 answers，也不要另造名称/单位。
 - 语义提取优先一次给全，不要多轮追问：
   - 场景 SQL 用中文列别名直接给语义（PostgreSQL 用 `AS "调用次数"` 或 `AS 调用次数`；MySQL/Trino 可用 `AS '调用次数'`），工具把别名当名称，不再追问 label；
   - 布尔枚举写进列别名，如 `AS "执行结果（true=成功，false=失败）"`；

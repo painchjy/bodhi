@@ -8,6 +8,7 @@
 4. 指标匹配对 DISTINCT、FILTER 差异有惩罚，不会把不同口径当同一指标；
 5. UNION / CTE 等不支持的 SQL 明确返回 unsupported，不猜。
 """
+import json
 import os
 import re
 import sys
@@ -147,6 +148,23 @@ def main() -> int:
         ke_semantic._grain_relation(["session_id", "message_id"], ["session_id", "message_id"]) == "exact"
         and ke_semantic._grain_relation(["session_id", "message_id"], ["session_id", "message_id", "agent_id"]) == "fact_contains"
         and ke_semantic._grain_relation(["session_id", "message_id", "agent_id"], ["session_id", "message_id"]) == "scenario_contains")
+
+    # 015 两个 golden 场景：semantic_json.answers 自包含，plan 不依赖调用方补答案。
+    golden_text = H.read(os.path.join(H.REPO, "sql", "analytics",
+                                      "015_golden_semantic_definitions.sql"))
+    payloads = [json.loads(raw) for raw in
+                re.findall(r"\$json\$(.*?)\$json\$", golden_text, re.S)]
+    checks["015 两个 golden 场景 JSON"] = len(payloads) == 2
+    checks["golden JSON 结构"] = all(
+        p.get("version") == 1 and (p.get("answers") or {}).get("labels")
+        and (p.get("definitions") or {}).get("columns") for p in payloads)
+    column_counts = sorted(len((p.get("definitions") or {}).get("columns") or [])
+                           for p in payloads)
+    checks["golden 定义覆盖全部输出列"] = column_counts == [4, 15]
+    checks["golden answers 带单位/字段类型"] = all(
+        all("unit" in m for m in (p["answers"].get("metrics") or {}).values())
+        and all("data_type" in f for f in (p["answers"].get("fields") or {}).values())
+        for p in payloads)
     return H.report(checks, "语义层提取（扫描/匹配）")
 
 

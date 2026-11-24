@@ -30,6 +30,7 @@ ANALYTICS_SQL=(
   sql/analytics/012_fact_table_join.sql
   sql/analytics/013_dimension_table.sql
   sql/analytics/014_semantic_test_scenarios.sql
+  sql/analytics/015_golden_semantic_definitions.sql
 )
 
 run_sql() {

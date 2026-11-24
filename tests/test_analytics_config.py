@@ -165,15 +165,19 @@ def main() -> int:
                   and service["attributes"].get("analytics:mappingServiceId") == "svc_x"
                   and ke_analytics.PUBLIC_PROMPT in service["wiki_content"])
 
-    scenario = ke_analytics.render_scenario_page({
+    scenario_spec = {
         "scenario_id": "s", "name": "S", "description": "d", "database_type": "hetu",
         "source_locator": "page:x", "source_sql": "select 1",
+        "semantic_json": {"version": 1, "answers": {"labels": {"a": "甲"}},
+                          "definitions": {"fact": {"code": "x"}}},
         "filters": [{"seq": 1, "schema_name": "x", "table_name": "t", "column_name": "c",
                      "expression": "= 1", "meaning": "m", "required": True}],
         "joins": [{"seq": 1, "left_schema": "x", "left_table": "a", "left_column": "k",
                    "right_schema": "x", "right_table": "b", "right_column": "k",
                    "join_type": "left", "condition": "k", "note": ""}],
-    })
+    }
+    scenario = ke_analytics.render_scenario_page(scenario_spec)
+    scenario_page = ke_analytics._page_of("scenario", scenario_spec)
 
     formula = ke_analytics.render_formula(
         "hour", "postgresql", "event_time", '{"timezone":"Asia/Shanghai"}')
@@ -207,7 +211,17 @@ def main() -> int:
         "维度页语义化": dim_ok,
         "MCP 服务页只写 active 服务": service_ok,
         "场景页含数据库类型/筛选/关联": ("河图" in scenario and "## 固定筛选" in scenario
-                                        and "## 关联路径" in scenario),
+                                        and "## 关联路径" in scenario
+                                        and "来源 SQL" not in scenario),
+        "场景页 entity + 数据属性/note":
+            scenario_page["mode"] == "entity"
+            and scenario_page["attributes"].get("analytics:sqlStatement") == "select 1"
+            and '"version": 1' in scenario_page["attributes"].get("analytics:semanticJson", "")
+            and "## 固定筛选" in scenario_page["attributes"].get("skos:note", "")
+            and "## 关联路径" in scenario_page["attributes"].get("skos:note", "")
+            and "来源 SQL" not in scenario_page["attributes"].get("skos:note", ""),
+        "scenario 表有 semantic_json": "semantic_json  jsonb" in schema
+            and "ADD COLUMN IF NOT EXISTS semantic_json" in schema,
         "公式渲染按 database_type 分支": formula_ok,
         "统一走 write_knowledge（不再 PG-only）":
             "write_knowledge" in code and "_update_existing_page" not in code,

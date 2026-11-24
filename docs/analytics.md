@@ -3,12 +3,12 @@
 2026-11-21 用户确认口径。本文是落地说明；真源分别是：
 
 - 本体：`ontology/sources/analytics.ttl`
-- analytics 配置：`sql/analytics/001_schema.sql` + `002` + `005`…`011`
+- analytics 配置：`sql/analytics/001_schema.sql` + `002` + `005`…`015`
 - diag 事实/维度：`sql/diag/001_schema.sql` + `002_tool_dimension_seed.sql` + `003_examples.sql`
 - 页面投影：`tools/ke-core/ke_analytics.py`
 - 管理端：`tools/analytics-admin/`
 
-## 1. 本体（4 个类 + 7 个对象属性 + 6 个数据属性）
+## 1. 本体（4 个类 + 7 个对象属性 + 8 个数据属性）
 
 ```text
 bpmn:DataObject
@@ -23,6 +23,8 @@ analytics:StandardQueryScenario  标准取数场景页（溯源/建模起点）
 | `analytics:factUsesDimension` | ObjectProperty | `Fact → Dimension` | 事实→维度**类级通路**，供 `ontology_paths` 枚举 |
 | `analytics:objectUsesMcpService` | ObjectProperty | `DataObject → MCPService` | 对象→active MCP 服务（实例来自 `analytics.binding`） |
 | `analytics:grain` | DatatypeProperty | `Fact → xsd:string` | 事实粒度（写在事实正文） |
+| `analytics:sqlStatement` | DatatypeProperty | `StandardQueryScenario → xsd:string` | 场景可执行 SQL；场景 entity 页数据属性 |
+| `analytics:semanticJson` | DatatypeProperty | `StandardQueryScenario → xsd:string` | 场景完整语义 JSON（answers + definitions）；plan 直接复用 answers |
 | `analytics:mappingObjectType` | DatatypeProperty | `bpmn:DataObject → xsd:string` | `fact｜dimension`，mapping 类型判别 |
 | `analytics:mappingObjectId` | DatatypeProperty | `bpmn:DataObject → xsd:string` | **唯一** mapping 对象 ID（内部 fact_id/dimension_id） |
 | `analytics:mappingServiceId` | DatatypeProperty | `agent:MCPService → xsd:string` | analytics 服务 ID（`svc_*`），mapping 使用 |
@@ -47,7 +49,12 @@ analytics:StandardQueryScenario  标准取数场景页（溯源/建模起点）
 `enum_mapping`。`field_mapping` 只映射事实对象自己的事实表列；维度表由
 Dimension 的 binding/field_mapping 表达，事实字段不得映射到维表。
 
-**场景**：`scenario` / `scenario_join` / `scenario_filter` / `scenario_fact`（来源事实，不设 role）
+**场景**：`scenario`（`source_sql` + `semantic_json`）/ `scenario_join` / `scenario_filter` / `scenario_fact`（来源事实，不设 role）
+
+`scenario.semantic_json` 固定为 `{version, answers, definitions}`：`answers` 是
+plan/apply 可直接消费的自包含语义（labels/metrics/fields/fact/enums），
+`definitions` 保留完整列定义/维度/映射，供页面展示和审计；两个 golden 场景见
+`015_golden_semantic_definitions.sql`。
 
 **视图**：
 
@@ -161,6 +168,7 @@ sql/analytics/011_mapping_interface.sql
 sql/analytics/012_fact_table_join.sql
 sql/analytics/013_dimension_table.sql
 sql/analytics/014_semantic_test_scenarios.sql
+sql/analytics/015_golden_semantic_definitions.sql
 ```
 
 > 012/013 不能漏；`013` 负责 `dimension_table`（维度视图登记）。
@@ -183,8 +191,12 @@ ke_analytics.sync_pages("<kb_id>", kind="all", dry_run=False)
 **不生成** binding / field_mapping / enum_mapping / scenario_join /
 scenario_filter 页。事实页：基础指标 / 派生指标 / 非指标字段 / 维度键（语义） /
 公共提示；维度页：成员键 / 层级公式 / 属性 / 使用它的事实 / 公共提示。
-所有同步统一走 `ke_pages.write_knowledge`（PG 正文与图 `articleBody` 同源），
-不再使用只改 PG 的 `_update_existing_page`。Fact/Dimension 的 `mapping_object_type/id`
+场景页用 **entity** 模式：`analytics:sqlStatement` + `analytics:semanticJson`
+是数据属性，固定筛选/关联路径/来源说明等展示内容进 `skos:note`，不再渲染整篇
+document（来源事实/服务由图关系面板表达）。
+所有同步统一走 `ke_pages.write_knowledge_batch`（与 `knowledge_save` 同一写入内核；
+PG 正文与图 `articleBody` 同源）；管理台 `/api/sync` 与语义 `apply` 都走
+`sync_pages_affected`，不再使用只改 PG 的 `_update_existing_page`。Fact/Dimension 的 `mapping_object_type/id`
 从只读视图 `analytics.v_mapping_interface` 投影，服务页的 `mappingServiceId/platformMcpServiceId/databaseType`
 从 `mcp_service` + 平台 `mcp_services` 投影；同步不覆盖 binding。
 
@@ -460,7 +472,7 @@ WeKnora `mcp_services.name=agent_diag`；`analytics.mcp_service` 里的 `svc_pos
   和现有 Fact 的 `base_metric` / `derived_metric` / `fact_field` / `fact_dimension` /
   `field_mapping` 比对，输出 `missing` 与 `questions`（中文含义/枚举值/事实选择）；
 - `scenario_semantic_apply`：唯一写入口，必须 `confirm=true` + 匹配的 `plan_id` + `dry_run=false`；
-  只写 analytics 配置表，写后调用 `sync_pages` 并复核 `mapping_lookup` / `scenario_lookup`。
+  只写 analytics 配置表，写后调用 `sync_pages_affected` 并复核 `mapping_lookup` / `scenario_lookup`。
 
 一次性语义（优先，避免多轮追问）：
 
@@ -474,6 +486,8 @@ WeKnora `mcp_services.name=agent_diag`；`analytics.mcp_service` 里的 `svc_pos
 4. 已有事实默认不修改名称/描述/粒度（防止把智能体臆造的名称写回）；确需修改时传
    `answers.fact.update=true`，并在提问中明确说明。新建事实传 `answers.fact.create=true`，
    可同时给 `fact_id/code/name/grain`；缺 `fact_id` 时按 code 生成。
+   场景已有的 `semantic_json.answers` 会先合并，调用方同名 key 优先；golden 场景
+   因此不需要调用方再传 labels/metrics/fields。
 5. 场景粒度优先取 SQL 首行注释 `-- grain: col1, col2`；没有注释时用 GROUP BY 列，
    并排除已登记的非指标字段。只有 `exact` / `fact_contains` 才允许挂接已有事实；
    `scenario_contains` / `partial` 必须阻断并询问是否新建事实（`fact_creation_required`）；
@@ -493,7 +507,9 @@ E2E：`tests/agent_e2e/test_analytics_semantic_extract.py`（`BODHI_RUN_ANALYTIC
 任务页/提示词注册、SQL 中文别名一次性语义、案例 1 删除部分指标/字段后按场景补全、
 案例 2 清空一个可由场景重建的事实再重建、3 个语义样例场景
 （全量轮次 / 工具上下文 / 缺粒度键新建事实）、6 个标准场景只读计划回归；
-测试结束恢复快照并重新同步页面。
+golden 无 answers 重建见 `test_analytics_semantic_roundtrip.py`；
+真实智能体 apply 见 `test_analytics_semantic_agent_apply.py`（validate→plan→apply
+`confirm=true,dry_run=false`，并校验场景页 entity 属性）。测试结束恢复快照并重新同步页面。
 
 `run_select` 只允许单条 SELECT/WITH，拒绝 DML/DDL，行数上限默认 200、最大 1000。
 服务通过 `analytics.mcp_service` 选择目标；当前 `agent_diag` 使用 PostgreSQL。

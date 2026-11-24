@@ -44,9 +44,12 @@ sql/analytics/011_mapping_interface.sql
 sql/analytics/012_fact_table_join.sql
 sql/analytics/013_dimension_table.sql
 sql/analytics/014_semantic_test_scenarios.sql
+sql/analytics/015_golden_semantic_definitions.sql
 ```
 
-**012/013 不要漏**：`fact_table` 和 `dimension_table` 是语义层扫描场景 SQL 的物理依据。
+**012/013/015 不要漏**：`fact_table` 和 `dimension_table` 是语义层扫描场景 SQL 的物理依据；
+`015` 给两个 golden 场景写入 `scenario.semantic_json`（answers + definitions），
+plan/apply 可在调用方不传 answers 时直接复用。
 初始化后应有：18 张配置表 + 8 个视图；`dimension_table` 至少 4 行（两个工具分类维度 × base/view）。
 
 ## 3. 服务启动
@@ -68,6 +71,8 @@ sql/analytics/014_semantic_test_scenarios.sql
 - 业务对象映射与枚举在 `analytics-admin`（8781）维护；
 - `bodhi-mcp`（8765）的 `scenario_semantic_validate/plan/apply` 负责从标准取数场景提取语义层；
 - 管理台“同步 wiki 页面”调用 `ke_analytics.sync_pages`，投影 Fact / Dimension / Scenario / active MCP 服务页；
+  场景页用 entity：`analytics:sqlStatement` + `analytics:semanticJson` 为数据属性，固定筛选/关联路径进 `skos:note`；
+- 管理台同步与语义 apply 都走 `sync_pages_affected` → `ke_pages.write_knowledge_batch`（与 `knowledge_save` 同一写入内核）；
 - `v_mapping_interface` 是只读校验视图，不是第二套映射真源。
 
 ## 5. 本体 / 知识库

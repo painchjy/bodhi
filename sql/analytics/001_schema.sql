@@ -312,13 +312,19 @@ CREATE TABLE IF NOT EXISTS analytics.scenario (
     service_id     text REFERENCES analytics.mcp_service(service_id) ON DELETE SET NULL,
     source_locator text NOT NULL DEFAULT '',
     source_sql     text NOT NULL DEFAULT '',
+    semantic_json  jsonb NOT NULL DEFAULT '{}'::jsonb,
     status         text NOT NULL DEFAULT 'active'
                    CHECK (status IN ('active', 'inactive')),
     created_at     timestamptz NOT NULL DEFAULT now(),
     updated_at     timestamptz NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE analytics.scenario IS '标准取数场景/建模起点：来源定位、原始 SQL、说明；明细 join/filter 见子表。';
+-- 兼容已存在的旧库：001 必须能在 semantic_json 加入前升级，不能只靠 CREATE TABLE。
+ALTER TABLE analytics.scenario
+    ADD COLUMN IF NOT EXISTS semantic_json jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+COMMENT ON TABLE analytics.scenario IS '标准取数场景/建模起点：来源定位、原始 SQL、完整语义 JSON、说明；明细 join/filter 见子表。';
+COMMENT ON COLUMN analytics.scenario.semantic_json IS '完整 SQL 语义定义：{version, answers, definitions}；answers 供 scenario_semantic_plan/apply 直接复用。';
 
 CREATE TABLE IF NOT EXISTS analytics.scenario_join (
     scenario_id    text NOT NULL REFERENCES analytics.scenario(scenario_id) ON DELETE CASCADE,
@@ -519,7 +525,7 @@ SELECT sf.scenario_id, sc.name AS scenario_name,
 -- 场景明细：语义来源 + 公共 MCP 服务 + 关联路径 + 固定筛选
 CREATE OR REPLACE VIEW analytics.v_scenario_detail AS
 SELECT s.scenario_id, s.name, s.description, s.service_id, sc.service_name,
-       sc.database_type, s.source_locator, s.source_sql, s.status,
+       sc.database_type, s.source_locator, s.source_sql, s.semantic_json, s.status,
        (SELECT coalesce(jsonb_agg(to_jsonb(j) ORDER BY j.seq), '[]'::jsonb)
           FROM analytics.scenario_join j
          WHERE j.scenario_id = s.scenario_id) AS joins,

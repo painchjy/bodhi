@@ -343,6 +343,7 @@ def scenario_spec(scenario_id: str) -> dict:
     spec = dict(rows[0])
     for key in ("joins", "filters", "facts", "common_services"):
         spec[key] = _json(spec.get(key), [])
+    spec["semantic_json"] = _json(spec.get("semantic_json"), {})
     return spec
 
 
@@ -710,10 +711,13 @@ def render_dimension_page(spec: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_scenario_page(spec: dict) -> str:
-    """场景页：来源 + 固定筛选 + 关联路径；映射明细不进页面。"""
+def render_scenario_note(spec: dict) -> str:
+    """场景页 skos:note：固定筛选、关联路径等非数据属性展示内容。
+
+    SQL 与语义 JSON 是数据属性，不在 note 里重复；来源事实/服务由图关系面板表达。
+    """
     db_type = _s(spec.get("database_type"))
-    lines = ["# 标准取数场景：%s" % _s(spec.get("name") or spec.get("scenario_id")), ""]
+    lines = []
     if spec.get("description"):
         lines += ["- 说明：%s" % _s(spec["description"])]
     if db_type:
@@ -732,9 +736,7 @@ def render_scenario_page(spec: dict) -> str:
             "通过" if spec.get("has_common_service") in (True, "t", "true", 1) else "未通过（join/filter 存疑）")]
         if spec.get("common_services"):
             lines += ["- 公共服务候选：`%s`" % "`, `".join(_s(x) for x in spec["common_services"])]
-    if spec.get("source_sql"):
-        lines += ["", "## 来源 SQL", "", _code_block(spec["source_sql"])]
-    lines += ["", "## 固定筛选", ""]
+    lines += ["## 固定筛选", ""]
     filters = spec.get("filters") or []
     if filters:
         lines += _table(["序号", "表", "字段", "条件", "含义", "必带"], [
@@ -759,6 +761,11 @@ def render_scenario_page(spec: dict) -> str:
     else:
         lines.append("（无）")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_scenario_page(spec: dict) -> str:
+    """兼容旧调用：场景不再使用 document；返回 note 展示内容。"""
+    return render_scenario_note(spec)
 
 
 # ---------------------------------------------------------------------------
@@ -909,30 +916,69 @@ def _page_of(kind: str, spec: dict) -> dict:
         slug = "analytics/scenario/%s" % code
         title = "标准取数场景：%s" % _s(spec.get("name") or code)
         page_type = "analytics:StandardQueryScenario"
-        content = render_scenario_page(spec)
-        attrs = {}
+        content = ""
+        attrs = {
+            "analytics:sqlStatement": _s(spec.get("source_sql")),
+            "analytics:semanticJson": (
+                json.dumps(spec.get("semantic_json") or {}, ensure_ascii=False, indent=2)
+                if spec.get("semantic_json") else ""),
+            "skos:note": render_scenario_note(spec),
+        }
     else:
         raise ValueError("kind 只能是 fact / dimension / scenario")
     if spec.get("description"):
         attrs["skos:definition"] = _s(spec["description"])
-    return {"slug": slug, "title": title, "page_type": page_type, "mode": "document",
+    page_mode = "entity" if kind == "scenario" else "document"
+    return {"slug": slug, "title": title, "page_type": page_type, "mode": page_mode,
             "wiki_content": content, "summary": _s(spec.get("description"))[:200],
             "attributes": attrs,
             "source": {"source_text": "analytics config projection"}}
 
 
 def sync_pages(kb_id: str, kind: str = "all", ids: list[str] | None = None,
-               dry_run: bool = True, skip_graph: bool = False) -> dict:
+               dry_run: bool = True, skip_graph: bool = False,
+               batch: bool = True) -> dict:
     """把配置表投影成 wiki 页（幂等）。返回逐页回执，不抛单页失败。
 
-    投影事实 / 维度 / 场景 / active MCP 服务四类页；binding/mapping/enum/join/
-    filter **不生成知识页**。统一走 `ke_pages.write_knowledge`（PG 正文与图
-    articleBody 同源）；`skip_graph` 仅为兼容旧调用保留。
+    默认走 `sync_pages_affected` → `ke_pages.write_knowledge_batch`，与
+    bodhi-mcp 的 knowledge_save 共用同一个写入内核；`batch=False` 仅保留旧的
+    单页兼容路径。
     """
-    import ke_pages  # noqa: PLC0415  懒导入：纯渲染测试不需要页面依赖
-
     if not kb_id:
         raise ValueError("sync_pages 需要 kb_id")
+    if batch:
+        if kind == "all":
+            objects = {k: list_ids(k) for k in ("fact", "dimension", "scenario")}
+            objects["service"] = []
+        elif kind in ("fact", "dimension", "scenario"):
+            objects = {kind: ids or list_ids(kind)}
+        elif kind == "service":
+            objects = {"service": ids or []}
+        else:
+            raise ValueError("kind 只能是 all / fact / dimension / scenario / service")
+        out = sync_pages_affected(kb_id, objects, dry_run=dry_run,
+                                  sync_folders=True)
+        if not dry_run and kind == "all":
+            # 保留旧同步的全量清理语义：删除 dim_tool 旧页和旧 mcpservice 目录页。
+            try:
+                import ke_pages  # noqa: PLC0415
+                old = ke_db.psql_csv(
+                    "SELECT slug FROM wiki_pages WHERE knowledge_base_id=%s "
+                    "AND deleted_at IS NULL AND slug LIKE 'analytics/mcpservice/%%'"
+                    % _q(kb_id))
+                old_slugs = ["analytics/dimension/tool"] + [r["slug"] for r in old]
+                deleted = ke_pages.delete_pages(kb_id, old_slugs, sync_folders=False)
+                out.setdefault("results", []).append(
+                    {"kind": "cleanup", "id": "dim_tool_old_service",
+                     "ok": True, "receipt": deleted})
+                out["count"] = len(out["results"])
+            except Exception as exc:  # noqa: BLE001
+                out.setdefault("results", []).append(
+                    {"kind": "cleanup", "id": "dim_tool_old_service",
+                     "ok": False, "error": str(exc)[:400]})
+                out["count"] = len(out["results"])
+        return out
+    import ke_pages  # noqa: PLC0415  懒导入：纯渲染测试不需要页面依赖
     kinds = (["fact", "dimension", "scenario", "service"] if kind == "all"
              else [kind])
     results: list[dict] = []

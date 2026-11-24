@@ -46,7 +46,7 @@ SELECT sf.scenario_id, sc.name AS scenario_name,
 
 CREATE OR REPLACE VIEW analytics.v_scenario_detail AS
 SELECT s.scenario_id, s.name, s.description, s.service_id, sc.service_name,
-       sc.database_type, s.source_locator, s.source_sql, s.status,
+       sc.database_type, s.source_locator, s.source_sql, s.semantic_json, s.status,
        (SELECT coalesce(jsonb_agg(to_jsonb(j) ORDER BY j.seq), '[]'::jsonb)
           FROM analytics.scenario_join j
          WHERE j.scenario_id = s.scenario_id) AS joins,

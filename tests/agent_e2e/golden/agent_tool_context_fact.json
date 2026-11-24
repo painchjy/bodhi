@@ -1,0 +1,212 @@
+{
+  "fact": [
+    {
+      "code": "agent_tool_context",
+      "name": "AgentToolContextFact",
+      "grain": "session_id + message_id + tool_call_id",
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "created_at": "2026-11-24T05:08:46.575563+00:00",
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "description": "工具调用事实 + 所属轮次上下文；一次工具调用一行，轮次字段来自同一条 assistant 消息。"
+    }
+  ],
+  "fact_table": [
+    {
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "table_id": "tool_call_fact",
+      "created_at": "2026-11-24T05:08:46.575563+00:00",
+      "grain_keys": [
+        "session_id",
+        "message_id",
+        "tool_call_id"
+      ],
+      "is_primary": true,
+      "sort_order": 10,
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "source_table": "agent_tool_call_fact",
+      "source_schema": "diag"
+    },
+    {
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "table_id": "turn_context",
+      "created_at": "2026-11-24T05:08:46.575563+00:00",
+      "grain_keys": [
+        "session_id",
+        "message_id"
+      ],
+      "is_primary": false,
+      "sort_order": 20,
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "source_table": "agent_turn_fact",
+      "source_schema": "diag"
+    }
+  ],
+  "base_metric": [
+    {
+      "code": "tool_call_count",
+      "name": "工具调用次数",
+      "unit": "次",
+      "format": "#,##0",
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "data_type": "integer",
+      "metric_id": "bm_ctx_tool_call_count",
+      "additivity": "additive",
+      "created_at": "2026-11-24T12:27:22.497277+00:00",
+      "sort_order": 10,
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "aggregation": "count",
+      "description": "工具调用行计数。",
+      "filter_expression": ""
+    },
+    {
+      "code": "tool_error_count",
+      "name": "工具失败次数",
+      "unit": "次",
+      "format": "#,##0",
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "data_type": "integer",
+      "metric_id": "bm_ctx_tool_error_count",
+      "additivity": "additive",
+      "created_at": "2026-11-24T12:27:22.497277+00:00",
+      "sort_order": 20,
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "aggregation": "count",
+      "description": "只统计 tool_success=false 的调用。",
+      "filter_expression": "tool_success = false"
+    }
+  ],
+  "derived_metric": [],
+  "fact_field": [
+    {
+      "code": "tool_code",
+      "name": "工具编码",
+      "role": "key",
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "is_enum": false,
+      "field_id": "ff_ctx_tool_code",
+      "data_type": "text",
+      "created_at": "2026-11-24T12:27:22.497277+00:00",
+      "sort_order": 10,
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "description": "工具调用事实上的工具成员键。"
+    },
+    {
+      "code": "input_prompt",
+      "name": "输入提示词",
+      "role": "display",
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "is_enum": false,
+      "field_id": "ff_ctx_input_prompt",
+      "data_type": "text",
+      "created_at": "2026-11-24T12:27:22.497277+00:00",
+      "sort_order": 20,
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "description": "所属轮次（同 message_id）的最近一条用户输入。"
+    }
+  ],
+  "binding": [
+    {
+      "status": "active",
+      "object_id": "fact_agent_tool_context",
+      "tool_name": "",
+      "binding_id": "bind_fact_agent_tool_context",
+      "created_at": "2026-11-24T05:08:46.575563+00:00",
+      "service_id": "svc_postgresql",
+      "updated_at": "2026-11-24T12:27:22.497277+00:00",
+      "object_type": "fact",
+      "binding_type": "self_service",
+      "metadata_hash": {}
+    }
+  ],
+  "field_mapping": [
+    {
+      "note": "工具成员键",
+      "status": "active",
+      "data_type": "text",
+      "binding_id": "bind_fact_agent_tool_context",
+      "expression": "",
+      "mapping_id": "map_ctx_tool_code",
+      "sort_order": 10,
+      "aggregation": "",
+      "semantic_id": "ff_ctx_tool_code",
+      "source_type": "mcp_table",
+      "source_table": "agent_tool_call_fact",
+      "semantic_kind": "non_metric_field",
+      "source_column": "tool_code",
+      "source_schema": "diag"
+    },
+    {
+      "note": "轮次上下文",
+      "status": "active",
+      "data_type": "text",
+      "binding_id": "bind_fact_agent_tool_context",
+      "expression": "",
+      "mapping_id": "map_ctx_input_prompt",
+      "sort_order": 20,
+      "aggregation": "",
+      "semantic_id": "ff_ctx_input_prompt",
+      "source_type": "mcp_table",
+      "source_table": "agent_turn_fact",
+      "semantic_kind": "non_metric_field",
+      "source_column": "input_prompt",
+      "source_schema": "diag"
+    },
+    {
+      "note": "调用次数",
+      "status": "active",
+      "data_type": "text",
+      "binding_id": "bind_fact_agent_tool_context",
+      "expression": "",
+      "mapping_id": "map_ctx_tool_call_count",
+      "sort_order": 30,
+      "aggregation": "count",
+      "semantic_id": "bm_ctx_tool_call_count",
+      "source_type": "mcp_table",
+      "source_table": "agent_tool_call_fact",
+      "semantic_kind": "base_metric",
+      "source_column": "tool_call_id",
+      "source_schema": "diag"
+    },
+    {
+      "note": "失败次数",
+      "status": "active",
+      "data_type": "text",
+      "binding_id": "bind_fact_agent_tool_context",
+      "expression": "tool_success = false",
+      "mapping_id": "map_ctx_tool_error_count",
+      "sort_order": 40,
+      "aggregation": "count",
+      "semantic_id": "bm_ctx_tool_error_count",
+      "source_type": "mcp_table",
+      "source_table": "agent_tool_call_fact",
+      "semantic_kind": "base_metric",
+      "source_column": "tool_call_id",
+      "source_schema": "diag"
+    }
+  ],
+  "enum_mapping": [],
+  "fact_dimension": [],
+  "scenario_fact": [
+    {
+      "note": "工具调用 + 轮次上下文来源事实",
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "sort_order": 10,
+      "scenario_id": "sc_tool_context"
+    },
+    {
+      "note": "语义提取多事实表样例",
+      "status": "active",
+      "fact_id": "fact_agent_tool_context",
+      "sort_order": 10,
+      "scenario_id": "sc_semantic_tool_context_full"
+    }
+  ]
+}
