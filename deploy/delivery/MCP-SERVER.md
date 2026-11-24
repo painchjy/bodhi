@@ -1,13 +1,13 @@
 # MCP 服务部署（bodhi2 ontology-mcp）
 
 > 交付物：`bodhi2-02-mcp-server.tar.gz`（**包内就是「仓库根」**：`tools/ artifacts/ skills/ logs/` —— 不再套内层 tar，
-> 解包即可 `docker build .`；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
+> 解包到 `/opt/bodhi2` 后用 systemd 启动；**零第三方 Python 依赖**：只用标准库 + `psql` 客户端）
 > 作用：给 WeKnora 提供 **51 个 MCP 工具（2026-11-23）**（领域建模分批 / 设计落库 / 巡检 / 技能目录 / 总览页 / 候选关联 / 任务回执 / **类型迁移两段式** / **跨库上下文映射·渲染·概念页写路径·权威副本治理** / **结构化数据批量建模（探表·计划·执行·刷新）** / **巡检一步硬删** / **文档评审（规则清单·图检索·参考规范·结论落页）** / **数据属性写口（`page_attributes_set`，方案 D）** / **多模态识别（`image_extract` 取文档内嵌图）** / **运维·图→正文重建（`rebuild_wiki_from_graph`）** / **运维·清别名噪音（`clean_alias_noise`）** / **运维·知识库导出/导入（`kb_export` + `kb_import`，含 PG+Neo4j 六项一致性比对）** …）
 > 依赖：Python ≥ 3.10、`postgresql-client`（提供 `psql`）、可读 WeKnora 的 Postgres；Neo4j **可选**。
 >
 > **不需要 PyYAML**：技能的 front-matter 优先用 PyYAML 解析，取不到时走 `tools/ke-core/ke_yamlmini.py`
 > 的零依赖子集解析（我们逐键比对过，5 个技能结果一致）。**实测**：在只有 Python + psql 的干净镜像里
-> `selfcheck.py` 全绿（initialize / tools/list **51 个** / skills() **6 个**）。
+> `selfcheck.py` 全绿（initialize / tools/list **51 个** / skills() **3 个**）。
 
 ## 0. 02 包组件矩阵（2026-11-23）
 
@@ -23,8 +23,11 @@
 安装/初始化/启动：
 
 ```bash
+```bash
+sudo mkdir -p /opt/bodhi2
+sudo tar -xzf bodhi2-02-mcp-server.tar.gz -C /opt/bodhi2 --strip-components=1
+cd /opt/bodhi2
 sudo bash install.sh --components mcp,diag,admin --init-db
-./start.sh all          # 或 mcp / diag / admin
 ./status.sh
 ```
 
@@ -118,7 +121,7 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 `server.py` 用 `Path(__file__).parents[2]` 定位"仓库根"，所以包内结构必须原样：
 
 ```
-/app/                          ← 容器里的"仓库根"
+/opt/bodhi2/                   ← systemd 的"仓库根"
 ├── tools/ontology-mcp/        ← server.py / refresh_design.py / mdview.py / graph_page.py
 ├── tools/ke-core/             ← ke_db / ke_pages / ke_ontology / ke_audit / ke_docs / ke_admin / ke_neo4j
 ├── tools/ontology-extract/    ← ontology_wiki.py（本体知识库投影；server 会 import）
@@ -126,25 +129,25 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 ├── skills/dist/*.zip          ← 可直接安装到 WeKnora sandbox 的技能 bundle
 ├── artifacts/                 ← 编译产物（ontology_index.json / prompts / json_schema / neo4j；**运行时读**）
 ├── ontology/uploads/          ← 仅**上传暂存**目录（本体真源 TTL 在 03-manual 包的 `ontology/`）
-├── logs/                      ← 工具调用日志 mcp_calls_YYYYMMDD.log（**容器里必须可写**）
+├── logs/                      ← 工具调用日志 mcp_calls_YYYYMMDD.log（**宿主机必须可写**）
 └── .env                       ← 可选（配置见下；`engine.load_env` 会读它）
 ```
 
 > 包内**就是**上面的结构（2026-09-22 起不再套内层 `bodhi2-mcp.tar.gz`）：
-> `tar -xzf bodhi2-02-mcp-server.tar.gz` → `cd 02-mcp-server` 即「仓库根」；
+> `sudo tar -xzf bodhi2-02-mcp-server.tar.gz -C /opt/bodhi2 --strip-components=1` 即得到「仓库根」；
 > 想放到 `/opt/bodhi2` 用：`sudo mkdir -p /opt/bodhi2 && sudo tar -xzf bodhi2-02-mcp-server.tar.gz -C /opt/bodhi2 --strip-components=1`
 
 ## 2. 环境变量（唯一配置面）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `BODHI_DB_HOST` | 空 | **设了就直连 TCP**（容器/远端部署推荐）；不设则 `docker exec <容器> psql`（本机开发）|
+| `BODHI_DB_HOST` | `127.0.0.1` | **systemd 模式必填**；指向宿主机可达的 Postgres（不要写容器 DNS）|
 | `BODHI_DB_PORT` | `5432` | |
 | `BODHI_DB_USER` | `postgres` | |
-| `BODHI_DB_PASSWORD` | 空 | **必填**。可放**进程环境变量**，也可**直接写在本服务目录的 `.env` 里**（2026-10-04 起同等生效）—— 代码里**不再内置任何默认口令**：`BODHI_DB_PASSWORD` → WeKnora `.env` 的 `BODHI_DB_PASSWORD`/`DB_PASSWORD`/`POSTGRES_PASSWORD` → 都取不到则**报错**（启动日志 `ensure-marks 跳过：未设置数据库口令…`，且**所有 DB 类工具会一起失败**）|
-| `BODHI_WEKNORA_DIR` | 空 | WeKnora 部署目录（读它的 `.env` 取口令）；容器部署不需要，直接用 `BODHI_DB_PASSWORD` |
+| `BODHI_DB_PASSWORD` | 空 | **必填**。放在 `/opt/bodhi2/config/common.env`，由 systemd `EnvironmentFile` 注入；代码里不再内置默认口令，取不到则 DB 类工具全部失败 |
+| `BODHI_WEKNORA_DIR` | 空 | 可选；systemd 直接用 `BODHI_DB_PASSWORD`，通常不需要 |
 | `BODHI_DB_NAME` | `WeKnora` | |
-| `BODHI_DB_CONTAINER` | `WeKnora-postgres` | 仅 docker-exec 模式用 |
+| `BODHI_DB_CONTAINER` | `WeKnora-postgres` | 仅旧 docker-exec 兜底；systemd 不依赖 |
 | `BODHI_NEO4J_HTTP` | `http://127.0.0.1:7474` | **可选**；不部署 Neo4j 就保持默认 |
 | `NEO4J_USERNAME` / `NEO4J_PASSWORD` | `neo4j` / `password` | 同上（仅投影类巡检项用到）|
 | `BODHI_ONTOLOGY_KB_ID` | 空 | **本体模型知识库 id**（`env` 是唯一权威；不配则按 `wiki_config.bodhi_ontology_kb` → 库名 → 内容探测兜底）|
@@ -160,51 +163,51 @@ WeKnora-app ──(MCP over HTTP, POST /mcp)──► bodhi2-mcp (:8765)
 | `BODHI_DEBUG_ENGINE` | `0` | 内核路径内部调试打印（排障用）|
 
 > **落库引擎切换（2026-10-10）**：`BODHI_SAVE_ENGINE=kernel` 与 legacy **行为等价已验**（同批回执逐条一致、
-> 正文 strip 后逐字相同）；切换只需在 `.env` 改一行 + **`systemctl restart bodhi-mcp`**（改了不重启=跑旧字节码，
+> 正文 strip 后逐字相同）；切换只需在 `.env` 改一行 + **`systemctl restart bodhi2-mcp`**（改了不重启=跑旧字节码，
 > 这是本仓最容易踩的坑）。回退：改回 `legacy` 再重启。**巡检清理**（2026-11-02 起**只做单库**）：
 > `kinds=graph` = 该库在图上的孤儿节点（PG 里该库已软删/不存在）；`kinds=all` 只含
 > `pages/rows/edges/graph`，**不含 `init`**；跨库动作 `deleted_kb_residue` **已取消**
 > （清理软删库用 `kinds=init, kb_id=<该库>`）。WeKnora 删库只删 PG 记录、不删图，
 > 所以按库跑 `graph` 即可把该库的图与 PG 对齐。
 
-`.env.example` 已给出容器部署的推荐值（`BODHI_DB_HOST=postgres`）。
+`config/common.env.example` 已给出宿主机推荐值（`BODHI_DB_HOST=127.0.0.1`）。
 
-### 2.1 配置只有一处（**推荐做法**，2026-09-29 起）
+### 2.1 配置只有一组（`config/*.env`）
 
-**唯一事实源 = 一份 `.env`**（只放"业务变量"：两个治理库 id/名 + 租户；DB/Neo4j 变量按需）；
-**MCP 服务、CLI、脚本、容器都读这同一个文件**，不再两处维护：
+02 三个服务都由 systemd 的 `EnvironmentFile` 读取：
+- `/opt/bodhi2/config/common.env`：数据库连接（三服务共用）
+- `/opt/bodhi2/config/mcp.env`：本体库/概念库/租户/Neo4j
+- `/opt/bodhi2/config/agent-diag.env` / `analytics-admin.env`：端口等组件变量
 
 ```bash
-# ① 容器部署（compose 已经这么写）
-env_file: [.env]
+# CLI / 一次性脚本：与 service 同源
+cd /opt/bodhi2
+set -a; . config/common.env; . config/mcp.env; set +a
+python3 tools/ke-core/ke_context.py contexts --print 400
+```
 
-# ② systemd 裸机部署：drop-in 只写一行，别再重复变量
-sudo mkdir -p /etc/systemd/system/bodhi2-mcp.service.d
-sudo tee /etc/systemd/system/bodhi2-mcp.service.d/env.conf >/dev/null <<'EOF'
-# 配置只有一处：本服务目录下的 .env
-[Service]
-EnvironmentFile=/opt/bodhi2/.env
-EOF
-sudo systemctl daemon-reload && sudo systemctl restart bodhi2-mcp
+安装器首次运行会生成 `config/*.env` 并退出，改完数据库地址/口令后重跑 `sudo bash install.sh`。
 
-# ③ CLI / 一次性脚本：同源（ke_db.env_value 会读 .env）
-cd /opt/bodhi2 && python3 tools/ke-core/ke_context.py contexts --print 400
+更改配置后：
+
+```bash
+sudo systemctl restart bodhi2-mcp bodhi2-agent-diag bodhi2-analytics-admin
 ```
 
 **所有 `BODHI_*` 变量口径统一（2026-10-04）**：**进程环境变量优先，其次 `.env` 文件**
 （`BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`）——
-所以「`.env` 里只配三个库参数 + `BODHI_DB_PASSWORD`」也能跑起来（修复前 DB 那半张配置会被静默忽略）。
+所以「`config/common.env` 里只配三个库参数 + `BODHI_DB_PASSWORD`」也能跑起来；systemd 会原样注入。
 
 | 要连的 | 读取顺序 |
 |---|---|
-| Postgres 口令 | `.env` 或进程 env 的 `BODHI_DB_PASSWORD` → 同名 `.env` 的 `DB_PASSWORD` / `POSTGRES_PASSWORD`（WeKnora 的写法）|
-| Postgres 位置 | `BODHI_DB_HOST/PORT/USER/NAME/CONTAINER`（**env 或 `.env` 均可**）→ 未设 host 则 `docker exec <BODHI_DB_CONTAINER> psql -U postgres -d WeKnora` |
+| Postgres 口令 | `/opt/bodhi2/config/common.env` 的 `BODHI_DB_PASSWORD`（systemd 注入）|
+| Postgres 位置 | `/opt/bodhi2/config/common.env` 的 `BODHI_DB_HOST/PORT/USER/NAME`；systemd 模式必须显式设置 host |
 | Neo4j | `BODHI_NEO4J_HTTP` / `BODHI_NEO4J_DB`（默认 `http://127.0.0.1:7474` / `neo4j`）+ `NEO4J_USERNAME` / `NEO4J_PASSWORD`（**env 或 `.env` 均可**）|
 
 > **不需要**在本服务里配任何 LLM / 嵌入 / 本体编译参数：MCP **不调用大模型**，模型与向量能力都由 WeKnora 提供。
 
 **两条硬规矩**：
-1. **改 `.env` 后**：`systemctl daemon-reload && systemctl restart bodhi2-mcp`（容器：`docker compose up -d` 重建容器）；
+1. **改 `config/*.env` 后**：`systemctl restart bodhi2-mcp bodhi2-agent-diag bodhi2-analytics-admin`；
 2. **改代码后**：也要 `systemctl restart bodhi2-mcp`（否则服务仍跑旧代码——我们踩过：接口少了字段，前端看不到状态徽标）。
 
 自检一行：
@@ -215,141 +218,84 @@ print('tenant=',ke_db.caller_tenant(),'ontology=',ke_ontology.resolve_ontology_k
 # 期望类似：tenant= 10000 ontology= env concept= env db_pwd_len= 14
 ```
 
-## 3. 部署方式 A：容器（推荐；与 WeKnora 同一 compose 网络）
+## 3. 部署（systemd-only）
+
+r6 起 02 包**只用 systemd**，不再提供 Dockerfile / compose。三个常驻服务共享同一份 `/opt/bodhi2/tools/ke-core`：
 
 ```bash
-tar -xzf bodhi2-02-mcp-server.tar.gz     # → 02-mcp-server/（就是仓库根形状）
-cd 02-mcp-server
-cp .env.example .env && vi .env          # BODHI_DB_HOST=postgres / BODHI_DB_PASSWORD=…
-docker build -t bodhi2-mcp:1.0 .         # 构建上下文含 tools/ artifacts/ skills/（包内 Dockerfile）
-docker compose -f docker-compose.mcp.yml up -d
-docker logs -f bodhi2-mcp                # 应看到 0.0.0.0:8765
+sudo mkdir -p /opt/bodhi2
+sudo tar -xzf bodhi2-02-mcp-server.tar.gz -C /opt/bodhi2 --strip-components=1
+cd /opt/bodhi2
+sudo bash install.sh --components mcp,diag,admin --init-db
 ```
 
-> **构建卡在 `apt-get update`？（内网常见）** 公网 Debian 源可能不通/极慢。两个办法：
-> ① 用内网源重建：`docker build --build-arg APT_MIRROR=<你们的 debian 镜像> -t bodhi2-mcp:1.0 .`
-> ② 干脆走**裸机方式 B**（宿主机一定有 psql）：只把源码包解到 `/opt/bodhi2`，用 systemd 起（见 §4）。
+安装器会：
+- 检查 `tools/ke-core/ke_db.py`、`tools/analytics-admin/server.py`、`tools/domain-mcp/analytics_sql/server.py`、51 个工具定义；
+- 生成 `config/*.env`；改好 `config/common.env` 的 `BODHI_DB_HOST`（宿主机可达地址）后重跑；
+- 安装 `bodhi2-*.service` 到 `/etc/systemd/system` 并 `enable --now`；
+- 检查 8765/8771/8781 端口，避免旧容器/旧进程继续占用；
+- 自检 `selfcheck.py --expect-tools 51` 和 8771/8781 HTTP。
 
-`docker-compose.mcp.yml`（包内已给，要点三行）：
-
-```yaml
-services:
-  bodhi-mcp:
-    image: bodhi2-mcp:1.0
-    container_name: bodhi2-mcp
-    env_file: [.env]
-    networks: [weknora-network]      # ← 与 WeKnora-app 同一网络（名字按你们 compose 实际）
-    restart: unless-stopped
-    ports: ["8765:8765"]             # 可选，便于本机 curl 自检
-```
-
-> **MCP URL 用容器内 DNS（`http://bodhi-mcp:8765/mcp`）可天然绕开 SSRF 白名单问题**（见 §6）。
-
-## 4. 部署方式 B：裸机（systemd）
+启停：
 
 ```bash
-sudo mkdir -p /opt/bodhi2 && sudo tar -xzf bodhi2-02-mcp-server.tar.gz -C /opt/bodhi2 --strip-components=1
-sudo cp /opt/bodhi2/bodhi2-mcp.service /etc/systemd/system/
-sudo vi /etc/systemd/system/bodhi2-mcp.service     # 改 WorkingDirectory / Environment
-sudo systemctl daemon-reload && sudo systemctl enable --now bodhi2-mcp
-journalctl -u bodhi2-mcp -f
+sudo systemctl status bodhi2-mcp bodhi2-agent-diag bodhi2-analytics-admin
+sudo systemctl restart bodhi2-mcp
+/opt/bodhi2/status.sh
 ```
 
-`bodhi2-mcp.service` 要点：
+日志固定写入 `/opt/bodhi2/logs/`：
 
-```ini
-[Service]
-WorkingDirectory=/opt/bodhi2
-Environment=BODHI_DB_HOST=127.0.0.1
-Environment=BODHI_DB_PASSWORD=你的口令
-ExecStart=/usr/bin/python3 /opt/bodhi2/tools/ontology-mcp/server.py --host 0.0.0.0 --port 8765
+```text
+bodhi2-mcp.log / bodhi2-mcp.err.log
+bodhi2-agent-diag.log / bodhi2-agent-diag.err.log
+bodhi2-analytics-admin.log / bodhi2-analytics-admin.err.log
 ```
 
-> 裸机 `BODHI_DB_HOST=127.0.0.1` 需要 Postgres 允许 TCP（不是只监听容器网络）。
+`logrotate.bodhi2` 会按天轮转；`journalctl -u bodhi2-mcp -f` 仍可用。
+
+## 4. 配置与目录
+
+```text
+/opt/bodhi2/
+├── tools/              # 三服务共享（ontology-mcp / ke-core / analytics-admin / domain-mcp/analytics_sql）
+├── sql/                # diag + analytics 初始化
+├── config/             # common.env + 每服务 env（systemd EnvironmentFile）
+├── artifacts/          # 本体编译产物（运行时读）
+├── skills/             # active 技能源 + dist bundle
+├── logs/               # 服务 stdout/stderr + mcp_calls_*.log
+└── bodhi2-*.service
+```
+
+配置真源是 `/opt/bodhi2/config/common.env` + `config/<service>.env`；`.env.example` 只作 CLI/兼容参考。
+
+> 若 WeKnora Postgres 只在 Docker 内，先把 `127.0.0.1:5432` 映射到宿主机；systemd 服务不会用 Docker DNS。
 
 ## 5. 自检（三步全绿才算通）
 
 ```bash
 # 1) 进程/端口
 curl -s -o /dev/null -w 'bodhi/version %{http_code}\n' http://127.0.0.1:8765/bodhi/version
-# 2) 数据库连通（把 BODHI_DB_HOST 换成实际值）
-cd /opt/bodhi2 && BODHI_DB_HOST=127.0.0.1 python3 - <<'PY'
-import sys; sys.path.insert(0, 'tools/ke-core'); import ke_db
-print('知识库：', [r['name'] for r in ke_db.psql_csv(
-    "SELECT name FROM knowledge_bases WHERE deleted_at IS NULL ORDER BY created_at")])
-PY
-# 3) MCP 协议自检（tools/list 必须 14 个工具 + skills() 返回 3 个技能）
-#
-# 本体维护（前端「上传本体文件 / 加载本体」用的就是这个端口）：
-#   POST /bodhi/ontology/upload  {filename, content, module_id, project_wiki,
-#                                 write_source(默认 true), compile_after(默认 true),
-#                                 apply_after(默认 false)}   ← 默认落真源+编译并生效
-#   POST /bodhi/ontology/repair  {kb_id, compile(默认 true), project_wiki(默认 true)}
-#   POST /bodhi/ontology/load    {model_id, kb_id, compile, purge, project_wiki}
-python3 /opt/bodhi2/02-mcp-server/selfcheck.py --url http://127.0.0.1:8765/mcp
+# 2) MCP 协议（必须是 51 个工具）
+python3 /opt/bodhi2/selfcheck.py --url http://127.0.0.1:8765/mcp --expect-tools 51
+# 3) 管理台 / diag
+curl -fsS http://127.0.0.1:8771/
+curl -fsS http://127.0.0.1:8781/ | head
 ```
 
-`selfcheck.py` 期望输出（**2026-11-19 起 44 个工具**；新增 `rebuild_data_objects`，旧截图里的 36/37 仅作历史）：
+`selfcheck.py` 期望：
 
-```
-initialize  OK（session=…）
-tools/list  OK（44 个）：audit_scan, audit_plan, save_knowledge, doc_outline, extract_state, skills,
-                        ontology_types, job_status, rebuild_wiki_from_graph,
-                        service_overview, rebuild_data_objects,
-                        link_candidates, list_link_candidates, resolve_link_candidate
-skills()    OK（3 个：document_review / domain_modeling / structured_modeling）
+```text
+initialize  OK
+tools/list  OK（51 个）
+skills()    OK（3 个）
 ```
 
-> **2026-11-19 工具增补（43 → 44）**：新增 `rebuild_data_objects(kb_id, slugs?, dry_run=true)`：
-> 只重建 `bpmn:DataObject` 的属性段 + 唯一契约块，清掉历史重复块/孤儿字段表；默认 dry-run。
->
-> **2026-10-10 工具增删（38 → 37）**：**删除** `list_pending_merges` / `resolve_pending_merge`
-> （「相似度合并」永久取消，待确认合并页不再产生；相似知识裁决统一走 `audit_scan` 的 S1/S2）；
-> **新增**运维工具 `rebuild_wiki_from_graph(kb_id, dry_run=true)`（按图节点 `wiki_content` 重建 PG 正文）。
-> 内网智能体注册请重跑 `deploy/weknora-fork` 的 SQL（`allowed_tools` 已同步）。
-> （下文时间线里的旧条目仍会提到这两个工具，仅作历史留痕。）
->
-> **2026-10-12 运维能力增补（37 → 39）**：新增 **`kb_export` / `kb_import`**（知识库导出成 zip + 导入到另一库，
-> **导入后自动做 PG + Neo4j 六项一致性比对**，回执 `verify_ok`）；导出包经 **`GET /bodhi/kb-export?name=<zip>`** 下载。
-> 运维智能体（`bodhi-kb-ops`）已补 **`skills`**（技能目录，能看到 `skills/kb_transfer` 并按其指令执行）
-> 与这两个工具；建模/设计开发智能体也补了这两个工具。故障/坑：`docker exec psql -c` 单条 SQL 受 **ARG_MAX ~128 KB** 限制
-> （工具内已**按字节切批**）；`--keep-ids` 仅用于**跨实例**迁移（同实例会自动降级为重编 UUID）。
->
-> **内网怎么把导出包送进服务器**（前端 UI 不支持上传 zip）：① 浏览器打 **`http://<mcp主机>:8765/bodhi/kb-upload`**
-> 选 zip、填新库名/`kb_id`、勾 `keep_ids` → 上传并导入（页面直接显示回执含 `verify_ok`）；
-> ② `curl -X POST --data-binary @kb-xfer.zip ".../bodhi/kb-upload?name=kb-xfer.zip&new_kb=库名&verify=1"`；
-> ③ 直接把 zip 拷到服务器（如 `<包根>/exports/uploads/`）后调 `kb_import(source=<路径|文件名>)`。
-> 上传落点 = **`exports/uploads/<文件名>`**；`exports/` 已在 `.gitignore`。
-```
-
-> **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
-> `resolve_link_candidate` / `resolve_pending_merge` / `service_overview(apply=true)` 新增
-> `kb_ids`（会话绑定的库清单）与 `confirm_kb_match`；`save_knowledge` 另加 `context`（技能上下文）。
-> 多库会话下不指定 `kb_id` → **拒绝写**（`need_kb_selection`）；`kb_id` 模糊命中（uuid 前缀/名称包含）
-> → 需 `confirm_kb_match=true`。读工具 `audit_scan` / `list_pending_merges` 也支持 `kb_ids`（多库）。
->
-> **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
-> `resolve_link_candidate` / `resolve_pending_merge` / `service_overview(apply=true)` 新增
-> `kb_ids`（会话绑定的库清单）与 `confirm_kb_match`；`save_knowledge` 另加 `context`（技能上下文）。
-> 多库会话下不指定 `kb_id` → **拒绝写**（`need_kb_selection`）；`kb_id` 模糊命中（uuid 前缀/名称包含）
-> → 需 `confirm_kb_match=true`。读工具 `audit_scan` / `list_pending_merges` 也支持 `kb_ids`（多库）。
->
-> **2026-09-22 变更（写库目标库唯一化）**：`save_knowledge` / `link_candidates` /
-> `resolve_link_candidate` / `resolve_pending_merge` / `service_overview(apply=true)` 新增
-> `kb_ids`（会话绑定的库清单）与 `confirm_kb_match`；`save_knowledge` 另加 `context`（技能上下文）。
-> 多库会话下不指定 `kb_id` → **拒绝写**（`need_kb_selection`）；`kb_id` 模糊命中（uuid 前缀/名称包含）
-> → 需 `confirm_kb_match=true`。读工具 `audit_scan` / `list_pending_merges` 也支持 `kb_ids`（多库）。
->
-> **2026-09-22 变更**：整篇异步抽取工具（`extract_and_save` / `extract_status`）**已移除**（不是"兼容保留"）；
-> 领域建模走 `doc_outline` + `extract_state` + `save_knowledge(session=…)` + 候选关联三件套
-> （见 `03-manual/docs/agent-design-flow.md` §11.8）。
-> 原来的状态查询工具改名为 **`job_status`** —— 现在只服务 `service_overview(apply=true)` 的异步刷新回执。
-> 原文留痕：`tools/ontology-mcp/archive/async_extract_retired_2026-09-22.py.txt`。
-> 依赖也随之简化：**服务端不调 LLM → 不需要 `openai`**；`rdflib`/`PyYAML` 只有编译本体时才要。
+旧文档里的 38/44 个工具是历史口径；r6 发布以 **51** 为准。
 
 ## 6. 在 WeKnora 里注册这个 MCP 服务
 
-**UI**：平台 → MCP 服务 → 新建 → 传输 `streamable-http` → URL `http://bodhi-mcp:8765/mcp`。
+**UI**：平台 → MCP 服务 → 新建 → 传输 `streamable-http` → URL `http://<宿主机IP>:8765/mcp`。
 
 **SQL**（可脚本化；`03-manual/AGENTS-SQL.md` 里有配套的智能体注册）：
 
@@ -357,7 +303,7 @@ skills()    OK（3 个：document_review / domain_modeling / structured_modeling
 INSERT INTO mcp_services (id, tenant_id, name, description, enabled, transport_type, url, created_at, updated_at)
 SELECT 'a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001', t.tenant_id, 'bodhi_ontology',
        '本体知识保存工具（抽取/设计落库、巡检、技能）', true, 'streamable_http',
-       'http://bodhi-mcp:8765/mcp', now(), now()
+       'http://<宿主机IP>:8765/mcp', now(), now()
 FROM tenants t ORDER BY t.id LIMIT 1
 ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, enabled = true, updated_at = now();
 ```
@@ -372,17 +318,18 @@ ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, enabled = true, updated_at = 
 
 ```bash
 # 升级
-tar -xzf bodhi2-mcp-<新版>.tar.gz -C /opt/bodhi2 && cd /opt/bodhi2/02-mcp-server
-docker build -t bodhi2-mcp:<新版> . && docker compose -f docker-compose.mcp.yml up -d
-# 回滚：把 current 指向旧 tag（数据都在 Postgres，服务本身无状态）
-docker tag bodhi2-mcp:<旧版> bodhi2-mcp:current && docker compose -f docker-compose.mcp.yml up -d
+systemctl stop bodhi2-mcp bodhi2-agent-diag bodhi2-analytics-admin
+tar -xzf bodhi2-mcp-<新版>.tar.gz -C /opt/bodhi2 --strip-components=1
+cd /opt/bodhi2 && bash install.sh --no-start
+systemctl start bodhi2-mcp bodhi2-agent-diag bodhi2-analytics-admin
+# 回滚：恢复旧版源码目录后重复 stop/解包/install/start（数据都在 Postgres）
 ```
 
 ## 8. 日常观测
 
 - **工具调用日志**：`logs/mcp_calls_YYYYMMDD.log` —— 一行一次调用（时间 / 工具 / 耗时 ms / 入参摘要 / 结果摘要）。
   智能体说"我调了 X 工具"，先在这里核对是否真调了、参数对不对；
-- 容器日志：`docker logs bodhi2-mcp --tail 100`（handler 异常会有 `[mcp] … 失败`）；
+- 错误日志：`tail -n 100 /opt/bodhi2/logs/bodhi2-mcp.err.log`（handler 异常会有 `[mcp] … 失败`）；
 - 只读自检接口（同一端口）：
   `GET /bodhi/overview?kb_id=<kb>`（服务详设总览）、`GET /bodhi/crud?kb_id=&slug=`（CRUD 矩阵）、
   `GET /bodhi/audit?kb_id=`（一致性巡检）、`GET /bodhi/relations?kb_id=&slug=`（出边/入边）。

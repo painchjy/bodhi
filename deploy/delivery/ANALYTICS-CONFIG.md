@@ -1,6 +1,6 @@
 # analytics 配置手册（02 包 · diag / analytics / 语义层）
 
-> 适用：`02-mcp-server` 已解包；**不需要 03 包的 seed**。
+> 适用：02 包已解到 `/opt/bodhi2`；**不需要 03 包的 seed**。
 > 三个常驻服务 + 一个初始化组件：
 > `bodhi-mcp` 8765 · `agent_diag` 8771 · `analytics-admin` 8781 · `diag-init`（一次性脚本）。
 > dbbi gateway 是外部服务（8772，独立包）；it_platform 是外部服务（8770，04 包）。
@@ -20,7 +20,7 @@
 ## 2. 初始化 diag + analytics
 
 ```bash
-cd 02-mcp-server
+cd /opt/bodhi2
 ./init-db.sh all          # 先 diag，再 analytics
 # 或分开：
 ./init-db.sh diag
@@ -55,14 +55,12 @@ plan/apply 可在调用方不传 answers 时直接复用。
 ## 3. 服务启动
 
 ```bash
-./start.sh mcp      # bodhi-mcp 8765
-./start.sh diag     # agent_diag 8771
-./start.sh admin    # analytics-admin 8781
-./start.sh all
-./status.sh
+systemctl start bodhi2-mcp        # 8765
+systemctl start bodhi2-agent-diag # 8771
+systemctl start bodhi2-analytics-admin # 8781
 ```
 
-容器模式同一镜像；裸机可用包根 `bodhi2-*.service`（`bodhi2-mcp` / `bodhi2-agent-diag` / `bodhi2-analytics-admin`）。
+三个服务由包根 `bodhi2-*.service` 启动（`bodhi2-mcp` / `bodhi2-agent-diag` / `bodhi2-analytics-admin`），日志在 `/opt/bodhi2/logs/`。
 管理台固定在 **0.0.0.0:8781**，当前不启用 token；必须用 nginx/VPN/ACL 限制来源。
 
 ## 4. 语义层 / mapping
@@ -94,5 +92,5 @@ psql "$PSQL_URL" -c "SELECT count(*) FROM analytics.dimension_table;"   # >=4
 ```
 
 WeKnora 侧需要注册两个 MCP 服务：
-- `bodhi_ontology` → `http://bodhi-mcp:8765/mcp`
-- `agent_diag` → `http://bodhi-agent-diag:8771/mcp`
+- `bodhi_ontology` → `http://<宿主机IP>:8765/mcp`
+- `agent_diag` → `http://<宿主机IP>:8771/mcp`

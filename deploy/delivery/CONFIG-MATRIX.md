@@ -34,7 +34,7 @@
 | 任务步骤 | ✓（页属性） | 任务页 `skos:note` | `page_attributes_set(patch={"skos:note":…})` | 立即 | `knowledge_lookup(mode="page")` 复核 |
 | 模板口径节 | ✓（页正文） | 模板页正文 | 编辑模板页 | 立即 | 同上 |
 | DataObject 绑定/指纹 | ✗ | DataObject 页属性（`bpmn:dataObject*`） | `page_attributes_set` | 立即 | 同上 |
-| 巡检规则 | ✗ | `tools/ke-core/ke_audit.py` | 发新包 | 重启 bodhi-mcp | `audit_scan` |
+| 巡检规则 | ✗ | `tools/ke-core/ke_audit.py` | 发新包 | 重启 bodhi2-mcp | `audit_scan` |
 
 ## 4. 发布包边界（哪些进包、哪些不进）
 

@@ -1,6 +1,6 @@
 # 智能体与 MCP 登记 SQL（可脚本化、可回滚）
 
-> 位置：`02-mcp-server/sql/agent_registration/`（由 `tools/delivery/export_db.py --agents` 生成；03 包只放本说明）
+> 位置：`/opt/bodhi2/sql/agent_registration/`（由 `tools/delivery/export_db.py --agents` 生成；03 包只放本说明）
 > - `mcp_service.sql` —— 登记 `bodhi_ontology`（8765）
 > - `agent_diag.sql` —— 登记 `agent_diag`（8771）；替换 `__AGENT_DIAG_URL__`
 > - `agents.sql` —— 登记智能体（`bodhi-ea-modeler` / `bodhi-kb-ops`；语义提取智能体按需导入）
@@ -16,7 +16,7 @@
 
 | 占位符 | 换成 | 从哪拿 |
 |---|---|---|
-| `__MCP_URL__` | `http://bodhi2-mcp:8765/mcp`（容器 DNS，推荐）或 `http://<宿主机IP>:8765/mcp` | 你部署 MCP 时用的地址 |
+| `__MCP_URL__` | `http://<宿主机IP>:8765/mcp`（systemd 宿主机，推荐） | 你部署 MCP 时用的地址 |
 | `__MCP_SERVICE_ID__` | MCP 服务行 id（默认就是 `a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001`，两边一致，通常不用动）| 与 `mcp_service.sql` 里的 id 一致 |
 
 > **租户固定 10000**（`mcp_services.tenant_id` 与两个智能体的 `tenant_id` 都写 10000，2026-09-22 用户口径）。
@@ -48,9 +48,9 @@ WHERE id = 'bodhi-ea-modeler';
 
 ```bash
 # 一键替换 + 落库（在 02 包根目录）
-MCP_URL='http://bodhi-mcp:8765/mcp'
+MCP_URL='http://<宿主机IP>:8765/mcp'
 MCP_ID='a7c1f0d2-1b2e-4f3a-9c4d-b0d100000001'
-AGENT_DIAG_URL='http://bodhi-agent-diag:8771/mcp'
+AGENT_DIAG_URL='http://<宿主机IP>:8771/mcp'
 PSQL_URL='postgresql://postgres:口令@127.0.0.1:5432/WeKnora'
 
 cd sql/agent_registration
@@ -80,7 +80,7 @@ done
 
 active 技能（**3 个**）是跨领域能力，按沙箱 bundle 安装：`rule_judge`（规则判定）/
 `knowledge_extract`（按 `bmm:knowledgeNeed` 提取本体实例事实）/ `kb_transfer`（导出/导入/比对，运维技能）。
-源在 `02-mcp-server/skills/<id>/SKILL.md`，bundle 见 `skills/dist/`；安装用
+源在 `/opt/bodhi2/skills/<id>/SKILL.md`，bundle 见 `skills/dist/`；安装用
 `deploy/weknora-fork/register_native_skills.py --upload`。领域任务步骤负责“做什么”，技能只负责通用算法与输出契约。
 
 > **技能只限「模型」、不限「本体类型」**（用户口径 2026-09-30）：front-matter 只写 `models:`（可加

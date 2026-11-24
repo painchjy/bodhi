@@ -2,17 +2,22 @@
 Description=bodhi2 agent_diag read-only SQL MCP (8771)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/bodhi2
 EnvironmentFile=-/opt/bodhi2/config/common.env
 EnvironmentFile=-/opt/bodhi2/config/agent-diag.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/bin/mkdir -p /opt/bodhi2/logs
 ExecStart=/usr/bin/python3 /opt/bodhi2/tools/domain-mcp/analytics_sql/server.py --host 0.0.0.0 --port 8771
 Restart=always
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
+RestartSec=5
+TimeoutStopSec=30
+StandardOutput=append:/opt/bodhi2/logs/bodhi2-agent-diag.log
+StandardError=append:/opt/bodhi2/logs/bodhi2-agent-diag.err.log
 
 [Install]
 WantedBy=multi-user.target

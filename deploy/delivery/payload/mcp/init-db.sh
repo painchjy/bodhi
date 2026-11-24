@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # diag / analytics 初始化（幂等）：./init-db.sh [diag|analytics|all]
+# systemd 模式：直接使用宿主机 psql；不再通过 Docker 镜像执行。
 set -euo pipefail
 cd "$(dirname "$0")"
 COMPONENT="${1:-all}"
@@ -12,6 +13,7 @@ if [ -f config/diag-init.env ]; then set -a; . config/diag-init.env; set +a; fi
 : "${BODHI_DB_NAME:?config/common.env 缺少 BODHI_DB_NAME}"
 : "${BODHI_DB_PASSWORD:?config/common.env 缺少 BODHI_DB_PASSWORD}"
 BODHI_DB_PORT="${BODHI_DB_PORT:-5432}"
+command -v psql >/dev/null || { echo "!! 需要宿主机 psql（postgresql-client）；systemd 模式不再回退 Docker" >&2; exit 1; }
 
 DIAG_SQL=(
   sql/diag/001_schema.sql
@@ -41,20 +43,9 @@ run_sql() {
     -v ON_ERROR_STOP=1 -f "$path"
 }
 
-apply() {
-  local component="$1"
-  if [ "$component" = "diag" ] || [ "$component" = "all" ]; then
-    for f in "${DIAG_SQL[@]}"; do run_sql "$f"; done
-  fi
-  if [ "$component" = "analytics" ] || [ "$component" = "all" ]; then
-    for f in "${ANALYTICS_SQL[@]}"; do run_sql "$f"; done
-  fi
-}
-
-if command -v psql >/dev/null 2>&1; then
-  apply "$COMPONENT"
-else
-  # 没有宿主机 psql：借 02 镜像执行（镜像内已装 postgresql-client）
-  docker compose -f docker-compose.mcp.yml --profile mcp \
-    run --rm --no-deps bodhi-mcp bash /app/init-db.sh "$COMPONENT"
+if [ "$COMPONENT" = "diag" ] || [ "$COMPONENT" = "all" ]; then
+  for f in "${DIAG_SQL[@]}"; do run_sql "$f"; done
+fi
+if [ "$COMPONENT" = "analytics" ] || [ "$COMPONENT" = "all" ]; then
+  for f in "${ANALYTICS_SQL[@]}"; do run_sql "$f"; done
 fi

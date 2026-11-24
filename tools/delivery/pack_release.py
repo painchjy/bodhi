@@ -6,7 +6,7 @@
       bodhi2-01-frontend.tar.gz     UI 镜像(可选 docker save) + nginx 模板 + overlay + 打补丁脚本 + FRONTEND.md
       bodhi2-02-mcp-server.tar.gz   bodhi 运行时完整包：bodhi-mcp 8765 + agent_diag 8771 +
                                     analytics-admin 8781 + diag/analytics SQL/init + config/systemd +
-                                    Dockerfile/compose/自检/install.sh + 配置手册
+                                    systemd unit/logrotate/自检/install.sh + 配置手册
       bodhi2-03-manual.tar.gz       docs/ + ontology/(TTL 真源) + 维护工具 + 五份手册（不含 SQL/seed）
       bodhi2-04-it-platform-mcp.tar.gz  it_platform 外部服务（8770）
       # dbbi_data gateway（8772）用 tools/delivery/pack_gateway.py 单独出包
@@ -326,11 +326,11 @@ def pkg_mcp(stage: pathlib.Path, version: str, seed_dir: pathlib.Path) -> dict:
     copy_tree(REPO / "sql", d / "sql")
     copy_tree(seed_dir / "sql", d / "sql" / "agent_registration")
     # 运行时用得到的两个可写目录（占位文件带一行注释：空文件会与他包占位文件判为重复）
-    write(d / "logs" / ".gitkeep", "# 工具调用日志 mcp_calls_YYYYMMDD.log（容器/宿主都必须可写）\n")
+    write(d / "logs" / ".gitkeep", "# 工具调用日志 mcp_calls_YYYYMMDD.log（宿主机 systemd 运行，目录必须可写）\n")
     write(d / "ontology" / "uploads" / ".gitkeep",
           "# TTL 上传暂存目录（/bodhi/ontology/upload 写入这里）\n"
           "# 注意：本体**真源** TTL 在 03-manual 包的 ontology/ 里，本目录只作运行时暂存。\n")
-    for name in ("Dockerfile", "docker-compose.mcp.yml", ".env.example",
+    for name in (".env.example", "logrotate.bodhi2",
                  "bodhi2-mcp.service", "bodhi2-agent-diag.service",
                  "bodhi2-analytics-admin.service", "selfcheck.py", "install.sh",
                  "start.sh", "stop.sh", "status.sh", "init-db.sh"):
@@ -339,13 +339,15 @@ def pkg_mcp(stage: pathlib.Path, version: str, seed_dir: pathlib.Path) -> dict:
         copy_tree(PAYLOAD / "mcp" / sub, d / sub)
     for name in ("install.sh", "start.sh", "stop.sh", "status.sh", "init-db.sh"):
         (d / name).chmod(0o755)
+    for name in ("bodhi2-mcp.service", "bodhi2-agent-diag.service", "bodhi2-analytics-admin.service", "logrotate.bodhi2"):
+        (d / name).chmod(0o644)
     shutil.copy2(DELIVERY / "MCP-SERVER.md", d / "MCP-SERVER.md")
     for name in ("DIAG-CONFIG.md", "ANALYTICS-CONFIG.md", "ANALYTICS-ADMIN.md"):
         if (DELIVERY / name).is_file():
             shutil.copy2(DELIVERY / name, d / name)
     write(d / "VERSION", "%s\n" % version)   # 不带打包时间（时间在 MANIFEST.generated_at）→ 02 包可复现
     write(d / "README.txt",
-          "bodhi2 MCP 服务包（02）：bodhi 运行时完整包\n"
+          "bodhi2 MCP 服务包（02）：bodhi 运行时完整包（systemd-only）\n"
           "==========================================\n\n"
           "先读 **MCP-SERVER.md**（组件矩阵/安装/启停/自检）。\n\n"
           "包内就是「仓库根」形状，解包即得：\n"
@@ -370,6 +372,38 @@ def pkg_mcp(stage: pathlib.Path, version: str, seed_dir: pathlib.Path) -> dict:
     return {"files": sum(1 for _ in d.rglob("*") if _.is_file()),
             "layout": sorted(p.name for p in d.iterdir())}
 
+
+def check_mcp_runtime(stage: pathlib.Path) -> dict:
+    """02 包必须是 systemd-only，且三个服务共享同一份 ke-core / admin / diag 代码。"""
+    d = stage / "02-mcp-server"
+    required = (
+        "tools/ontology-mcp/server.py",
+        "tools/ontology-mcp/srv/schemas.py",
+        "tools/ke-core/ke_db.py",
+        "tools/analytics-admin/server.py",
+        "tools/domain-mcp/analytics_sql/server.py",
+        "bodhi2-mcp.service",
+        "bodhi2-agent-diag.service",
+        "bodhi2-analytics-admin.service",
+        "logrotate.bodhi2",
+    )
+    missing = [name for name in required if not (d / name).is_file()]
+    if missing:
+        raise SystemExit("!! 02 包缺少运行时文件：%s" % "、".join(missing))
+    schemas = d / "tools/ontology-mcp/srv/schemas.py"
+    count = schemas.read_text(encoding="utf-8").count('"name"')
+    if count != 51:
+        raise SystemExit("!! 02 包工具定义应为 51，实际 %d；请检查是否打进了旧代码" % count)
+    for unit in ("bodhi2-mcp.service", "bodhi2-agent-diag.service", "bodhi2-analytics-admin.service"):
+        body = (d / unit).read_text(encoding="utf-8")
+        if "WorkingDirectory=/opt/bodhi2" not in body:
+            raise SystemExit("!! %s 未指向 /opt/bodhi2" % unit)
+        if "StandardError=append:/opt/bodhi2/logs/" not in body:
+            raise SystemExit("!! %s 未配置错误日志目录" % unit)
+    for forbidden in ("Dockerfile", "docker-compose.mcp.yml"):
+        if (d / forbidden).exists():
+            raise SystemExit("!! 02 包不应再包含 %s（已改为 systemd-only）" % forbidden)
+    return {"tool_count": count, "runtime_files": len(required)}
 
 def pkg_manual(stage: pathlib.Path, seed_dir: pathlib.Path) -> dict:
     """03 手册包：文档 + **本体真源**（TTL/词表/shapes/queries）+ 页面种子 + 登记 SQL + 维护工具。"""
@@ -551,6 +585,8 @@ def main() -> int:
     stage = pathlib.Path(tempfile.mkdtemp(prefix="bodhi-stage-"))
     fe = pkg_frontend(stage, not args.no_image)
     mcp = pkg_mcp(stage, args.version, seed_dir)
+    runtime = check_mcp_runtime(stage)
+    print("   systemd 运行时断言通过：%d 个工具 / %d 个必需文件" % (runtime["tool_count"], runtime["runtime_files"]))
     man = pkg_manual(stage, seed_dir)
     ext = pkg_ext(stage)
     dup = check_no_duplicates(stage)          # 零重复断言（跨包 + 包内）
@@ -582,7 +618,7 @@ def main() -> int:
           "# bodhi2 交付包 %s\n\n先读 **MANUAL.md**（安装部署总指引）。**四个包，内容互不重复**：\n\n"
           "| 包 | 内容 | 手册 |\n|---|---|---|\n"
           "| `bodhi2-01-frontend.tar.gz` | UI 镜像 + nginx 模板 + overlay + 部署/补丁脚本 | FRONTEND.md |\n"
-          "| `bodhi2-02-mcp-server.tar.gz` | **bodhi 运行时完整包**：bodhi-mcp 8765 + agent_diag 8771 + analytics-admin 8781 + diag/analytics SQL/init + config/systemd | MCP-SERVER.md / DIAG-CONFIG.md / ANALYTICS-CONFIG.md / ANALYTICS-ADMIN.md |\n"
+          "| `bodhi2-02-mcp-server.tar.gz` | **bodhi 运行时完整包（systemd-only）**：bodhi-mcp 8765 + agent_diag 8771 + analytics-admin 8781 + diag/analytics SQL/init + config/systemd | MCP-SERVER.md / DIAG-CONFIG.md / ANALYTICS-CONFIG.md / ANALYTICS-ADMIN.md |\n"
           "| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源 TTL** + 维护工具 + 其余手册（**不含 SQL/seed**） | MANUAL.md / ONTOLOGY-KB.md / KB-CONFIG.md / TROUBLESHOOTING.md |\n"
           "| `bodhi2-04-it-platform-mcp.tar.gz` | **it_platform 外部服务**（8770）+ 文本种子 + 安装/自检 | 包内 `README.md`（04 目录）|\n\n"
           "**知识库页面不在任何包里**（2026-10-26 用户裁定）：本体模型库页面由用户导出/导入；**dbbi_data gateway（8772）**用 `pack_gateway.py` 单独出包。\n"
@@ -617,7 +653,7 @@ def main() -> int:
                                           "ANALYTICS-CONFIG.md + ANALYTICS-ADMIN.md→02；其余手册 + docs/ + ontology/(TTL 真源)→03"),
                 "split_policy": {"01": "前端材料（镜像/模板/脚本/FRONTEND.md）",
                                  "02": ("bodhi 运行时完整包：bodhi-mcp 8765 + agent_diag 8771 + analytics-admin 8781 + "
-                                        "diag/analytics SQL/初始化/启动脚本 + config/systemd + tools/ke-core"),
+                                        "diag/analytics SQL/初始化/启动脚本 + config/systemd + tools/ke-core（systemd-only，不含 Dockerfile/compose）"),
                                  "03": "文档 + 本体真源 ontology/** + tools/delivery/** + 其余手册（**知识库页面/seed 不出包**）",
                                  "04": "it_platform 外部服务（8770）：tools/domain-mcp/it_platform + lib + mock-ext 文本种子 + 安装/自检",
                                  "05": "dbbi_data gateway 外部服务（8772）：tools/mcp-gateway 独立包"},

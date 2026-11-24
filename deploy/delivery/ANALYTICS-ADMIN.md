@@ -6,9 +6,9 @@
 ## 1. 启动
 
 ```bash
-cd 02-mcp-server
+cd /opt/bodhi2
 cp config/analytics-admin.env.example config/analytics-admin.env   # 若 install 未生成
-./start.sh admin
+systemctl start bodhi2-analytics-admin
 # 浏览器：http://<host>:8781/
 ```
 
@@ -61,4 +61,4 @@ curl -fsS http://127.0.0.1:8781/ | head
 
 - `tools/analytics-admin/server.py` + `index.html`；
 - `tools/ke-core`（`ke_analytics` / `ke_db`）；
-- `psql` 客户端（容器镜像已内置）。
+- 宿主 `psql` 客户端（`postgresql-client`）；日志在 `/opt/bodhi2/logs/bodhi2-analytics-admin.err.log`。

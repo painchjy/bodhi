@@ -15,7 +15,7 @@
 | 包 | 内容 | 详细手册 |
 |---|---|---|
 | `bodhi2-01-frontend.tar.gz` | 补丁后的 UI 镜像（`weknora-ui:bodhi2`）+ nginx 模板 + compose overlay + 验收脚本 + 打补丁脚本（若你们要自己构建）| `FRONTEND.md` |
-| `bodhi2-02-mcp-server.tar.gz` | **bodhi 运行时完整包**：`bodhi-mcp` 8765 + `agent_diag` 8771 + `analytics-admin` 8781 + `diag-init`（diag/analytics 建表/视图/种子）+ 统一安装/启停 | `MCP-SERVER.md` / `DIAG-CONFIG.md` / `ANALYTICS-CONFIG.md` / `ANALYTICS-ADMIN.md` |
+| `bodhi2-02-mcp-server.tar.gz` | **bodhi 运行时完整包（systemd-only）**：`bodhi-mcp` 8765 + `agent_diag` 8771 + `analytics-admin` 8781 + `diag-init`（diag/analytics 建表/视图/种子）+ systemd 安装/启停（不含 Docker） | `MCP-SERVER.md` / `DIAG-CONFIG.md` / `ANALYTICS-CONFIG.md` / `ANALYTICS-ADMIN.md` |
 | `bodhi2-03-manual.tar.gz` | **文档 + 本体真源**：`docs/` + `ontology/`（TTL/词表/shapes）+ 维护工具；**不含 SQL/seed**（运行 SQL 在 02） | 本文件 + `ONTOLOGY-KB.md` + `KB-CONFIG.md` + `TROUBLESHOOTING.md` |
 | `bodhi2-04-it-platform-mcp.tar.gz` | **it_platform 外部服务**（8770，独立包） | `04-it-platform-mcp/README.md` |
 | `bodhi2-mcp-gateway-<ver>.tar.gz` | **dbbi_data gateway**（8772，独立包） | `tools/mcp-gateway/README.md` |
@@ -41,7 +41,7 @@
 
 | 步 | 动作 | 验收（不通过就别往下走）|
 |---|---|---|
-| **1** | 部署 02 运行时完整包（`bodhi2-02`）：`install.sh --components mcp,diag,admin --init-db` | `bodhi-mcp` 8765、`agent_diag` 8771、`analytics-admin` 8781 全部健康 |
+| **1** | 部署 02 运行时完整包（`bodhi2-02`）：解到 `/opt/bodhi2` 后 `sudo bash install.sh --components mcp,diag,admin --init-db` | `bodhi2-mcp` 8765、`bodhi2-agent-diag` 8771、`bodhi2-analytics-admin` 8781 全部 healthy；selfcheck 51 个工具 |
 | **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL）：`bodhi_ontology` → 8765；`agent_diag` → 8771 | 平台 → MCP 服务里能看到两条，工具可列出 |
 | **3** | 导入本体模型知识库（`bodhi2-03`：**TTL + 用户导出/导入**；不使用 seed）| 页数/类型符合你们的 TTL 版本 |
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
@@ -53,24 +53,23 @@
 
 ## 1.1 配置放在哪（**只有一处**，2026-09-29 起）
 
-**唯一事实源 = MCP 服务目录下的 `.env`**（02 包里就是 `02-mcp-server/.env`，由 `.env.example` 复制而来）：
+**02 systemd 服务的配置 = `/opt/bodhi2/config/*.env`**（安装器从 `config/*.env.example` 生成；不再用 `.env` 驱动服务）：
 
 ```bash
-cd 02-mcp-server
-cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id/名 + 租户；DB/Neo4j 按需
+cd /opt/bodhi2
+vi config/common.env      # BODHI_DB_HOST=127.0.0.1 / 可达 IP；数据库口令
 ```
 
-| 谁 | 怎么读这同一个 `.env` |
+| 谁 | 怎么读配置 |
 |---|---|
-| MCP 服务（容器） | `docker-compose.mcp.yml` 里 `env_file: [.env]` |
-| MCP 服务（systemd 裸机） | drop-in 只写一行 `EnvironmentFile=/opt/bodhi2/.env`（**不要**再逐条写 `Environment`） |
-| CLI / 运维脚本 | `ke_db.env_value()` 也读它 → 与服务的配置天然一致 |
+| MCP 服务（systemd） | `EnvironmentFile=/opt/bodhi2/config/common.env` + `config/<service>.env` |
+| CLI / 运维脚本 | `cd /opt/bodhi2 && set -a; . config/common.env; . config/mcp.env; set +a` |
 
-- **凭据不写进业务 `.env`**：Postgres 口令按 `BODHI_DB_PASSWORD` → `BODHI_WEKNORA_DIR/.env` → `…/WeKnora/.env` → 服务目录 `.env`
-  的顺序自动找（键名 `DB_PASSWORD`/`POSTGRES_PASSWORD`）；Neo4j 用 `BODHI_NEO4J_HTTP`/`BODHI_NEO4J_DB`（默认 `127.0.0.1:7474`/`neo4j`）。
+- **凭据**：放在 `/opt/bodhi2/config/common.env` 的 `BODHI_DB_PASSWORD`；服务由 systemd 直接注入，CLI 先 source 同一文件。
+  Neo4j 用 `config/mcp.env` 的 `BODHI_NEO4J_HTTP`/`BODHI_NEO4J_DB`（默认 `127.0.0.1:7474`/`neo4j`）。
 - **不需要**配 LLM / 嵌入 / 本体编译参数：MCP **不调用大模型**（模型与向量能力都由 WeKnora 提供）。
-- **两条硬规矩**：改 `.env` → `systemctl daemon-reload && restart`（容器则 `docker compose up -d` 重建）；
-  **改代码 → 也要 restart**（否则服务跑旧代码；我们踩过：接口少字段 → 前端看不到治理状态徽标）。
+- **两条硬规矩**：改 `config/*.env` → `systemctl restart bodhi2-mcp bodhi2-agent-diag bodhi2-analytics-admin`；
+  **改代码 → 也要 restart**（否则服务跑旧代码）。
 - 详见 `MCP-SERVER.md` §2 / §2.1（含逐项变量表与自检命令）。
 
 ## 2. 环境要求
@@ -78,10 +77,10 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 | 项 | 要求 |
 |---|---|
 | WeKnora | 你们内部网已部署可用（app + 前端 + Postgres）；app 版本与我们的 UI 补丁**尽量一致**，不一致走 `FRONTEND.md` §3 自行构建 |
-| 容器运行时 | Docker ≥ 20.10 + compose v2 |
-| MCP 服务 | Python ≥ 3.10（容器方式已内置）、`postgresql-client`；**零第三方 Python 依赖** |
+| 容器运行时 | WeKnora app / 前端 / Postgres 仍可用 Docker；**02 三个服务不用 Docker** |
+| MCP 服务 | systemd + Python ≥ 3.10（宿主 `/usr/bin/python3`）+ `postgresql-client`；**零第三方 Python 依赖** |
 | 数据库 | 能连 WeKnora 的 Postgres（同库同表，MCP 直连，不另建库）|
-| 网络 | app 能访问 MCP 的 `:8765`；MCP 能访问 Postgres `:5432`（两者用容器 DNS 最省心）|
+| 网络 | WeKnora app 容器能访问宿主机 `:8765/:8771`；宿主机能访问 Postgres `:5432`（必要时映射 127.0.0.1:5432）|
 | 可选 | Neo4j（本体投影）——**本交付不需要**，不部署也不影响主流程 |
 
 ## 3. 一次性配置清单（要改的东西全在这）
@@ -92,17 +91,17 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 | 需要重配的东西 | 配在哪 | 说明 |
 |---|---|---|
 | **LLM 模型的 API Key** | **内网 WeKnora 自己的 UI/数据库**（平台 → 模型）| 只落在你们的库里，**从不进交付包**；MCP 侧只用到 `model_id`（UUID）|
-| **数据库口令** | `02-mcp-server/.env` 的 `BODHI_DB_PASSWORD`，或把 `BODHI_WEKNORA_DIR` 指向含 `.env` 的 WeKnora 目录 | 代码里**不再内置任何默认口令**：env → WeKnora `.env` 的 `DB_PASSWORD`/`POSTGRES_PASSWORD` → 都没有则报错退出 |
-| MCP 服务 URL | WeKnora 平台 → MCP 服务（`http://bodhi-mcp:8765/mcp`）| 用容器 DNS 可免 SSRF 白名单 |
-| `SSRF_WHITELIST_EXTRA`（仅当 MCP URL 用宿主 IP/域名时）| WeKnora `.env` | 见 `TROUBLESHOOTING.md` §1 |
-| **本体模型知识库的识别**（可选但推荐）| `02-mcp-server/.env` 的 `BODHI_ONTOLOGY_KB_ID`**或**给库打标记 | 见 `ONTOLOGY-KB.md` §2 末与 `FRONTEND.md` §7：不配也能按库名/内容自动认 |
-| Neo4j 口令（可选，本交付不需要）| `.env` 的 `NEO4J_PASSWORD` | 不部署 Neo4j 就不用管 |
+| **数据库口令** | `/opt/bodhi2/config/common.env` 的 `BODHI_DB_PASSWORD` | 代码里**不再内置任何默认口令**：env → WeKnora `.env` 的 `DB_PASSWORD`/`POSTGRES_PASSWORD` → 都没有则报错退出 |
+| MCP 服务 URL | WeKnora 平台 → MCP 服务（`http://<宿主机IP>:8765/mcp`）| systemd 服务在宿主机，不能再用容器 DNS `bodhi-mcp` |
+| `SSRF_WHITELIST_EXTRA` | WeKnora `.env` | **必须**加宿主机 IP；见 `TROUBLESHOOTING.md` §1 |
+| **本体模型知识库的识别**（可选但推荐）| `/opt/bodhi2/config/mcp.env` 的 `BODHI_ONTOLOGY_KB_ID`**或**给库打标记 | 见 `ONTOLOGY-KB.md` §2 末与 `FRONTEND.md` §7：不配也能按库名/内容自动认 |
+| Neo4j 口令（可选，本交付不需要）| `config/mcp.env` 的 `NEO4J_PASSWORD` | 不部署 Neo4j 就不用管 |
 
-1. `02-mcp-server/.env`：`BODHI_DB_HOST/PORT/USER/PASSWORD/NAME`（改成你们的 Postgres）；
-2. WeKnora `.env`（仅当 MCP URL 不是容器 DNS 时）：`SSRF_WHITELIST_EXTRA` 加上 MCP 的主机名/IP；
-3. `mcp_services` 一行：URL 指向 `http://bodhi-mcp:8765/mcp`（SQL 在 `MCP-SERVER.md` §6）；
+1. `/opt/bodhi2/config/common.env`：`BODHI_DB_HOST/PORT/USER/PASSWORD/NAME`；Host 用 `127.0.0.1` 或可达 IP；
+2. WeKnora `.env`：`SSRF_WHITELIST_EXTRA` 加上宿主机 IP；
+3. `mcp_services` 一行：URL 指向 `http://<宿主机IP>:8765/mcp`（SQL 在 `MCP-SERVER.md` §6）；
 4. `custom_agents` 一行：提示词 + `knowledge_bases`（两个库）+ `mcp_services` + `allowed_tools`（modeler **27** / kb-ops **12**，见 `AGENTS-SQL.md` §2）；
-   **SQL 在 `02-mcp-server/sql/agent_registration/`**（`AGENTS-SQL.md` 是说明；可回滚）；
+   **SQL 在 `/opt/bodhi2/sql/agent_registration/`**（`AGENTS-SQL.md` 是说明；可回滚）；
 5. `knowledge_bases.wiki_config`：抽取指令按你们领域改（`KB-CONFIG.md` §3）；
 6. 前端 nginx 模板挂载 + `image: weknora-ui:bodhi2`（`FRONTEND.md`）。
 7. **ext 侧（04 包，独立服务 8770）**：`sudo bash 04-it-platform-mcp/install.sh` → `python3 04-it-platform-mcp/selfcheck.py`；
@@ -141,4 +140,4 @@ cp .env.example .env && vi .env      # 只填"业务变量"：两个治理库 id
 
 先看 `TROUBLESHOOTING.md`（都是我们真实踩过的：SSRF 白名单、nginx 上游解析、工具 EOF、`applied=false`、
 C1 无来源、A5 重复关系行、violations、沙箱等）。若还没解决，把三样东西发我们：
-① `docker logs <mcp 容器> --tail 200`；② WeKnora app 日志里 `tools_ready` 那一行；③ `logs/mcp_calls_*.log` 最后几行。
+① `tail -n 200 /opt/bodhi2/logs/bodhi2-mcp.err.log`；② WeKnora app 日志里 `tools_ready` 那一行；③ `/opt/bodhi2/logs/mcp_calls_*.log` 最后几行。

@@ -86,7 +86,7 @@ docker compose build frontend && docker compose up -d --no-build frontend
    - 交付的 `default.conf.template` 已加 `resolver 127.0.0.11 valid=10s ipv6=off;` + `set $app_backend …` + 变量式 `proxy_pass`；
    - 发生重建时仍建议 `docker restart WeKnora-frontend` 一把（`deploy_frontend.sh` / `enable_sandbox.sh` 里都自动做了）。
 2. **`/bodhi/` 的上游地址**：模板里默认 `http://host.docker.internal:8765`（MCP 跑在宿主机时）。
-   若 MCP 也进了 compose 网络，把该行改成 `proxy_pass http://bodhi-mcp:8765;`（同网络 DNS），更稳。
+   02 的 MCP 现在是宿主机 systemd：`/bodhi/` 代理用 `http://host.docker.internal:8765` 或宿主机 IP（需 `extra_hosts`/防火墙；同时把 IP 加进 WeKnora `SSRF_WHITELIST_EXTRA`）。
 
 ## 6. 外部资源依赖清单（内网部署参考；**不改代码**）
 

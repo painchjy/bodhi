@@ -155,7 +155,7 @@ Neo4j `MATCH (c:BodhiOntClass) RETURN c.module, c.prefix, count(*)` → `bmm/bmm
 2. `upload_ttl()` 返回前补齐上述全部字段；`statements_skipped=0`（新链路第⑥步 `apply_projection()`
    是**全量回放**，不跳过任何模块语句；实际执行总数见回执 `apply.statements`）。
 3. `short_label` 改为**只认 TTL 的 `bodhi:shortName`**（不再用 `模块名.upper()` 兜底）。
-4. 回执字段同样**必须落在源码里**——改完要 `systemctl restart bodhi-mcp`，
+4. 回执字段同样**必须落在源码里**——改完要 `systemctl restart bodhi2-mcp`，
    否则运行中的服务仍返回旧结构（本次即如此）。
 
 **验收**：`POST /bodhi/ontology/upload`（bmm）→ `module=bmm`、`short_label=bmm`、
@@ -202,7 +202,7 @@ INFO  stage=Agent action=tools_ready tool_count=5     # 只剩 5 个 wiki 工具
 **根因**：WeKnora 对**出站 URL** 做 SSRF 校验，`utils/security.go` 的 `restrictedHostnames` 含 `host.docker.internal`、
 `localhost`、`127.0.0.1` 等；且 `mcp/security.go ValidateServiceOutboundURLs` 会在**每次建 MCP 客户端前**再校验一次。
 **修法（二选一）**
-1. **MCP 与 app 同网络**：MCP URL 用容器 DNS（`http://bodhi-mcp:8765/mcp`）——私网 IP 字面量都不出现，天然通过；
+1. **systemd 宿主机**：MCP URL 用 `http://<宿主机IP>:8765/mcp`，并把该 IP 加入 `SSRF_WHITELIST_EXTRA`；
 2. 必须用宿主机 IP/主机名时：WeKnora 的 `.env` 加白名单后重建 app：
    ```bash
    SSRF_WHITELIST_EXTRA=<原默认值>,host.docker.internal,172.18.0.1   # 逗号分隔；**别覆盖**原默认值
@@ -227,7 +227,7 @@ connect() failed (111: Connection refused) while connecting to upstream:
 ## 3. app 报 `Post http://…/mcp: EOF`（每次调工具都 EOF，MCP 侧无日志）
 **根因**：MCP 服务端 handler 抛异常会**直接关闭连接**，客户端只看到 EOF（没有响应体）。
 我们遇到的具体原因：新加的日志函数用了 `time.time()` 但文件里**没 `import time`** → 每次 `tools/call` `NameError` → 连接被关。
-**排查**：`journalctl -u bodhi2-mcp -f`（或 `docker logs bodhi2-mcp -f`）—— 一定能看到 traceback。**不要**只看 app 侧日志。
+**排查**：`tail -f /opt/bodhi2/logs/bodhi2-mcp.err.log` 或 `journalctl -u bodhi2-mcp -f` —— 一定能看到 traceback。**不要**只看 app 侧日志。
 **修法**：修异常；并把"附属动作"（日志/统计）放进 try 里，别让它影响工具结果。
 
 ## 4. 页面写了却"改不动"（关系/正文没更新）
@@ -388,24 +388,24 @@ bash deploy/weknora-fork/deploy_frontend.sh                          # ★ 关�
 所以**功能不受影响**；要把老页统一成"本体键为主"，跑一次
 `POST /bodhi/import/refresh`（**只升级不降级**：本体键原样保留、中文列名按「账本 mapping → 本体 label」升级）。
 
-## 12. 打 MCP 镜像时卡在 `apt-get update`
-**根因**：容器里要装 `postgresql-client`（提供 `psql`），而**公网 Debian 源在内网/受限网络下常常不通**。
-**修法**：① `docker build --build-arg APT_MIRROR=<内网 debian 源> ...`；② 或改用**裸机 systemd** 方式（§MCP-SERVER 方式 B）。
+## 12. systemd 模式缺 `psql`
+**根因**：02 服务现在是宿主机 systemd，不再由 Docker 镜像内置 `postgresql-client`。
+**修法**：`apt-get install postgresql-client`（或内网源安装），再 `systemctl restart bodhi2-mcp bodhi2-agent-diag bodhi2-analytics-admin`。
 
 ## 13. 改了配置/代码但"没生效"（我们踩过，2026-09-29）
 
-**现象**：接口少字段（例如 `/bodhi/context/page` 回执里没有 `state`）→ 前端「跨库上下文」面板的**治理状态徽标不显示**；或改了 `.env` 但认库/租户行为没变。
+**现象**：接口少字段（例如 `/bodhi/context/page` 回执里没有 `state`）→ 前端「跨库上下文」面板的**治理状态徽标不显示**；或改了 `config/*.env` 但认库/租户行为没变。
 
-**根因**：`bodhi-mcp` 是**长驻进程**：
+**根因**：`bodhi2-mcp` 是**长驻进程**：
 - 改**代码**（`tools/ke-core/*.py`、`tools/ontology-mcp/server.py`）→ 进程里还是旧模块；
-- 改 **`.env`** → systemd 只在**启动时**读 `EnvironmentFile`（`daemon-reload` 只重载 unit 定义，不改已运行进程的环境）。
+- 改 **`config/*.env`** → systemd 只在**启动时**读 `EnvironmentFile`（`daemon-reload` 只重载 unit 定义，不改已运行进程的环境）。
 
 **修法**：
 ```bash
-systemctl restart bodhi-mcp && sleep 3
-systemctl show -p EnvironmentFiles --value bodhi-mcp      # 确认读的是哪个 .env
-tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value bodhi-mcp)/environ | grep '^BODHI_'
-# 容器部署：docker compose up -d --force-recreate bodhi-mcp
+systemctl restart bodhi2-mcp && sleep 3
+systemctl show -p EnvironmentFiles --value bodhi2-mcp      # 确认读的是哪个 .env
+tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value bodhi2-mcp)/environ | grep '^BODHI_'
+# 改代码后同样 restart
 ```
 **自检一行**（服务与 CLI 应看到同一份配置）：
 ```bash
@@ -529,7 +529,7 @@ docker logs WeKnora-app 2>&1 | grep -E 'mcp-services/.*/metadata'
 
 ```bash
 tail -f /var/log/bodhi-it-mcp.log     # 智能体真调用时应看到 POST /mcp -> 200 accept='...event-stream'
-tail -f /var/log/bodhi-mcp.log        # 同上（:8765）
+tail -f /opt/bodhi2/logs/bodhi2-mcp.err.log   # 同上（:8765）
 ```
 
 ## 报告页**没有**外部接口面板 / 面板数据不对（2026-10-25 实测；2026-11-01 口径更新）
@@ -578,8 +578,8 @@ curl -sG 'http://127.0.0.1:8765/bodhi/ext/list' \
 curl -sG 'http://127.0.0.1:8765/bodhi/ext/schema' --data-urlencode 'object=<DataObject slug>'
 ```
 
-**注**：`bodhi-mcp` 是 **systemd 服务**（不是容器）⇒ 改了后端代码必须
-`systemctl restart bodhi-mcp`，否则跑的还是旧字节码（这类"改了没生效"多半是这个）。
+**注**：`bodhi2-mcp` 是 **systemd 服务**（不是容器）⇒ 改了后端代码必须
+`systemctl restart bodhi2-mcp`，否则跑的还是旧字节码（这类"改了没生效"多半是这个）。
 
 ## 智能体"不会用"新工具 / 新流程（改了工具它却不用）
 
@@ -662,7 +662,7 @@ curl -s -X POST http://127.0.0.1:8765/bodhi/ext/sync-report -H 'Content-Type: ap
 
 ## 改了 `tools/ke-core/*` 但服务行为没变（drvfs 上的 `__pycache__` 坑）
 
-**现象**：`systemctl restart bodhi-mcp` 后，`knowledge_lookup` 回执仍是旧字段（例如没有
+**现象**：`systemctl restart bodhi2-mcp` 后，`knowledge_lookup` 回执仍是旧字段（例如没有
 `applies_when` / `retrieval_kind`），但直接用 `python3 tools/ke-core/xxx.py` 跑却是新行为。
 
 **根因**：仓库在 `/mnt/c`（drvfs），Python 判断 `.pyc` 是否过期依赖 mtime，drvfs 的 mtime
@@ -672,7 +672,7 @@ curl -s -X POST http://127.0.0.1:8765/bodhi/ext/sync-report -H 'Content-Type: ap
 
 ```bash
 rm -rf tools/ke-core/__pycache__ tools/ontology-mcp/srv/__pycache__
-systemctl restart bodhi-mcp
+systemctl restart bodhi2-mcp
 # 复验：knowledge_lookup(mode="page") 的 telemetry.retrieval_kind 应为 "page"
 ```
 

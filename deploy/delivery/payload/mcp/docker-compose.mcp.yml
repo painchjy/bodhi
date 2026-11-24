@@ -1,3 +1,4 @@
+# LEGACY（r6 起 02 包只发布 systemd；本文件仅供开发，不进入交付包）
 # bodhi2 02 包：bodhi-mcp(8765) / agent_diag(8771) / analytics-admin(8781)
 # 选择性启动（推荐用包内 start.sh）：
 #   docker compose -f docker-compose.mcp.yml --profile mcp up -d

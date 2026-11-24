@@ -1,0 +1,9 @@
+/opt/bodhi2/logs/*.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}
