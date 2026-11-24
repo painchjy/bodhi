@@ -5,6 +5,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 for p in (str(HERE), str(REPO / "tests"), str(REPO / "tools" / "ke-core")): sys.path.insert(0, p)
+import ke_analytics
 import ke_db
 from mcp_client import MCP
 from test_analytics_semantic_extract import snapshot_fact, restore_fact, _kb_id
@@ -39,9 +40,11 @@ CASES = [("fact_agent_turn", "sc_semantic_agent_turn_full", L1, M1), ("fact_agen
 @pytest.mark.skipif(not E2E, reason="set BODHI_RUN_ANALYTICS_E2E=1 to run live MCP tests")
 def test_semantic_roundtrip_samples():
     kb = _kb_id(); c = MCP()
-    for fact, scenario, labels, metrics in CASES:
-        snap = snapshot_fact(fact)
-        try:
+    restores = []
+    try:
+        for fact, scenario, labels, metrics in CASES:
+            snap = snapshot_fact(fact)
+            restores.append((fact, scenario, snap))
             _delete_semantics(fact)
             answers = {"labels": labels, "metrics": metrics}
             plan = c.call(PLAN, {"scenario_id": scenario, "answers": answers})
@@ -53,8 +56,11 @@ def test_semantic_roundtrip_samples():
             before, after = _sem(snap), _sem(snapshot_fact(fact))
             for i, key in enumerate(("base", "derived", "fields", "dims", "scenario_fact", "mapping")):
                 assert before[i] == after[i], (fact, key, before[i], after[i])
-        finally:
-            restore_fact(kb, fact, snap)
+    finally:
+        for fact, scenario, snap in restores:
+            restore_fact(kb, fact, snap, sync_pages=False)
+        if restores:
+            ke_analytics.sync_pages_affected(kb, {"fact": [x[0] for x in restores], "scenario": [x[1] for x in restores]}, dry_run=False)
 @pytest.mark.agent_e2e
 @pytest.mark.skipif(not E2E, reason="set BODHI_RUN_ANALYTICS_E2E=1 to run live MCP tests")
 def test_new_fact_requires_confirmation():

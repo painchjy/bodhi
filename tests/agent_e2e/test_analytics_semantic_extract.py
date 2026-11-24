@@ -60,25 +60,33 @@ def _json(sql: str) -> str:
 
 
 def snapshot_fact(fact_id: str) -> dict:
-    where = "fact_id=%s" % ke_db.sql_str(fact_id)
-    binding_where = (
-        "binding_id IN (SELECT binding_id FROM analytics.binding "
-        "WHERE object_type='fact' AND object_id=%s)" % ke_db.sql_str(fact_id))
-    return {
-        "fact": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.fact t WHERE %s" % where),
-        "fact_table": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.fact_table t WHERE %s" % where),
-        "base_metric": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.base_metric t WHERE %s" % where),
-        "derived_metric": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.derived_metric t WHERE %s" % where),
-        "fact_field": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.fact_field t WHERE %s" % where),
-        "binding": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.binding t WHERE object_type='fact' AND object_id=%s" % ke_db.sql_str(fact_id)),
-        "field_mapping": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.field_mapping t WHERE %s" % binding_where),
-        "enum_mapping": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.enum_mapping t WHERE %s" % binding_where),
-        "fact_dimension": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.fact_dimension t WHERE %s" % where),
-        "scenario_fact": _json("SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM analytics.scenario_fact t WHERE %s" % where),
-    }
+    q = ke_db.sql_str(fact_id)
+    fact = ke_db.sql_str("fact")
+    binding_where = ("binding_id IN (SELECT binding_id FROM analytics.binding "
+                    "WHERE object_type=%s AND object_id=%s)" % (fact, q))
+    specs = [
+        ("fact", "fact", "fact_id=" + q),
+        ("fact_table", "fact_table", "fact_id=" + q),
+        ("base_metric", "base_metric", "fact_id=" + q),
+        ("derived_metric", "derived_metric", "fact_id=" + q),
+        ("fact_field", "fact_field", "fact_id=" + q),
+        ("binding", "binding", "object_type=" + fact + " AND object_id=" + q),
+        ("field_mapping", "field_mapping", binding_where),
+        ("enum_mapping", "enum_mapping", binding_where),
+        ("fact_dimension", "fact_dimension", "fact_id=" + q),
+        ("scenario_fact", "scenario_fact", "fact_id=" + q),
+    ]
+    parts = []
+    params = []
+    for name, table, where in specs:
+        parts.append("%s, coalesce((SELECT jsonb_agg(to_jsonb(t)) "
+                     "FROM analytics.%s t WHERE %s), jsonb_build_array())")
+        params += [ke_db.sql_str(name), table, where]
+    sql = ("SELECT jsonb_build_object(" + ",".join(parts) + ")") % tuple(params)
+    payload = json.loads(ke_db.psql(sql).strip() or "{}")
+    return {name: json.dumps(payload.get(name) or [], ensure_ascii=False) for name, _, _ in specs}
 
-
-def restore_fact(kb_id: str, fact_id: str, snap: dict) -> None:
+def restore_fact(kb_id: str, fact_id: str, snap: dict, sync_pages: bool = True) -> None:
     fact = ke_db.sql_str(fact_id)
     statements = [
         "BEGIN;",
@@ -104,7 +112,8 @@ def restore_fact(kb_id: str, fact_id: str, snap: dict) -> None:
             % (table, table, ke_db.sql_str(snap.get(table) or "[]")))
     statements.append("COMMIT;")
     ke_db.psql("\n".join(statements), stdin=True)
-    ke_analytics.sync_pages(kb_id, kind="fact", ids=[fact_id], dry_run=False)
+    if sync_pages:
+        ke_analytics.sync_pages_affected(kb_id, {"fact": [fact_id]}, dry_run=False)
 
 
 def _assert_snapshot_restored(kb_id: str, fact_id: str, snap: dict) -> None:
@@ -186,8 +195,8 @@ COMMIT;
         assert {"result_chars", "success_calls", "failed_calls"} <= missing, missing
         assert any(c["code"] == "avg_result_chars"
                    for c in plan["missing"]["derived_metrics"]), plan["missing"]
-        assert any(q.get("kind") == "enum" and q.get("code") == "tool_success"
-                   for q in plan["questions"]), plan["questions"]
+        assert not any(q.get("kind") == "enum" and q.get("code") == "tool_success"
+                       for q in plan["questions"]), plan["questions"]
 
         answers = {
             "labels": {
@@ -228,7 +237,7 @@ COMMIT;
         fields = {r["code"] for r in ke_db.psql_csv(
             "SELECT code FROM analytics.fact_field WHERE fact_id=%s AND status='active'"
             % ke_db.sql_str(fact))}
-        assert "tool_success" in fields
+        assert "tool_code" in fields
         bad = ke_db.psql_csv(
             "SELECT m.semantic_id, m.source_table FROM analytics.field_mapping m "
             "JOIN analytics.binding b ON b.binding_id=m.binding_id "
@@ -245,7 +254,7 @@ COMMIT;
             "WHERE b.object_type='fact' AND b.object_id=%s AND m.status='active' "
             "AND m.semantic_kind='non_metric_field'"
             % ke_db.sql_str(fact))}
-        assert sources.get("tool_success") == "tool_success", sources
+        assert sources.get("tool_code") == "tool_code", sources
     finally:
         restore_fact(kb, fact, snap)
         _assert_snapshot_restored(kb, fact, snap)
@@ -351,8 +360,8 @@ COMMIT;
         assert plan.get("target_fact") is None
         assert plan.get("target_source") == "create"
         assert any(q.get("kind") == "fact_label" for q in plan["questions"])
-        assert any(q.get("kind") == "label" and q.get("code") == "turns"
-                   for q in plan["questions"])
+        assert not any(q.get("kind") == "label" and q.get("code") == "turns"
+                       for q in plan["questions"])
 
         answers = {
             "fact": {"name": "Agent轮次事实", "grain": "session_id + message_id"},
@@ -362,6 +371,9 @@ COMMIT;
                 "completion_tokens": "输出 Token",
                 "total_tokens": "总 Token",
                 "cached_tokens": "缓存 Token",
+                "session_id": "会话标识",
+                "agent_name": "Agent 名称",
+                "model_id": "模型标识",
             },
         }
         plan2 = client.call(PLAN, {"scenario_id": scenario, "answers": answers})

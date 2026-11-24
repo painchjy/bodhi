@@ -94,36 +94,48 @@ def _write_enabled() -> bool:
 # ---------------------------------------------------------------------------
 # 配置读取
 # ---------------------------------------------------------------------------
+def _json_one(sql):
+    raw = _s(ke_db.psql(sql)).strip()
+    return json.loads(raw) if raw else {}
+
+
 def _load_catalog() -> dict:
-    facts = _rows(
-        "SELECT fact_id, code, name, description, grain FROM analytics.fact "
-        "WHERE status='active' ORDER BY fact_id")
-    fact_tables = _rows(
-        "SELECT fact_id, table_id, source_schema, source_table, is_primary, "
-        "       coalesce(grain_keys::text, '[]') AS grain_keys, sort_order "
-        "  FROM analytics.fact_table WHERE status='active' "
-        " ORDER BY fact_id, sort_order, table_id")
+    active = _q("active")
+    dimension = _q("dimension")
+    dot = _q(".")
+    payload = _json_one(
+        "SELECT jsonb_build_object("
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(f) ORDER BY f.fact_id) "
+        "FROM analytics.fact f WHERE f.status=%s), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.fact_id, t.sort_order, t.table_id) "
+        "FROM analytics.fact_table t WHERE t.status=%s), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.dimension_id) "
+        "FROM analytics.dimension d WHERE d.status=%s), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.dimension_id, t.sort_order, t.table_id) "
+        "FROM analytics.dimension_table t WHERE t.status=%s), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(b) ORDER BY b.dimension_id) "
+        "FROM (SELECT DISTINCT object_id AS dimension_id FROM analytics.binding "
+        "WHERE object_type=%s AND status=%s) b), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.dimension_id, x.sort_order) "
+        "FROM (SELECT b.object_id AS dimension_id, m.semantic_kind, m.semantic_id, "
+        "m.source_schema, m.source_table, m.source_column, "
+        "split_part(m.semantic_id, %s, 2) AS semantic_code, m.sort_order "
+        "FROM analytics.binding b JOIN analytics.field_mapping m "
+        "ON m.binding_id=b.binding_id AND m.status=%s "
+        "WHERE b.object_type=%s AND b.status=%s) x), jsonb_build_array())"
+        ")" % (_q("facts"), active, _q("fact_tables"), active,
+               _q("dimensions"), active, _q("dimension_tables"), active,
+               _q("dimension_bindings"), dimension, active,
+               _q("dimension_columns"), dot, active, dimension, active))
+    payload = payload or {}
+    facts = payload.get("facts") or []
+    fact_tables = payload.get("fact_tables") or []
+    dimensions = payload.get("dimensions") or []
+    dim_tables = payload.get("dimension_tables") or []
+    dim_bindings = payload.get("dimension_bindings") or []
+    dim_columns = payload.get("dimension_columns") or []
     for row in fact_tables:
         row["grain_keys"] = ke_analytics._json(row.get("grain_keys"), [])
-    dimensions = _rows(
-        "SELECT dimension_id, code, name, member_key FROM analytics.dimension "
-        "WHERE status='active' ORDER BY dimension_id")
-    dim_tables = _rows(
-        "SELECT dimension_id, table_id, source_schema, source_table, table_role "
-        "  FROM analytics.dimension_table WHERE status='active' "
-        " ORDER BY dimension_id, sort_order, table_id")
-    dim_bindings = _rows(
-        "SELECT DISTINCT object_id AS dimension_id FROM analytics.binding "
-        " WHERE object_type='dimension' AND status='active'")
-    dim_columns = _rows(
-        "SELECT b.object_id AS dimension_id, m.semantic_kind, m.semantic_id, "
-        "       m.source_schema, m.source_table, m.source_column, "
-        "       split_part(m.semantic_id, '.', 2) AS semantic_code "
-        "  FROM analytics.binding b "
-        "  JOIN analytics.field_mapping m "
-        "    ON m.binding_id=b.binding_id AND m.status='active' "
-        " WHERE b.object_type='dimension' AND b.status='active' "
-        " ORDER BY b.object_id, m.sort_order")
     by_id = {row["fact_id"]: row for row in facts}
     for row in facts:
         row["tables"] = []
@@ -134,55 +146,54 @@ def _load_catalog() -> dict:
         "facts": facts,
         "facts_by_id": by_id,
         "fact_tables": fact_tables,
-        "fact_table_keys": {
-            (_s(r.get("source_schema")), _s(r.get("source_table")))
-            for r in fact_tables},
+        "fact_table_keys": {(_s(r.get("source_schema")), _s(r.get("source_table"))) for r in fact_tables},
         "dimensions": dimensions,
         "dimensions_by_id": {row["dimension_id"]: row for row in dimensions},
         "dimension_tables": dim_tables,
-        "dimension_table_keys": {
-            (_s(r.get("source_schema")), _s(r.get("source_table")))
-            for r in dim_tables},
-        "dimension_table_map": {
-            (_s(r.get("source_schema")), _s(r.get("source_table"))):
-                r.get("dimension_id") for r in dim_tables},
+        "dimension_table_keys": {(_s(r.get("source_schema")), _s(r.get("source_table"))) for r in dim_tables},
+        "dimension_table_map": {(_s(r.get("source_schema")), _s(r.get("source_table"))): r.get("dimension_id") for r in dim_tables},
         "dimension_binding_ids": {r["dimension_id"] for r in dim_bindings},
         "dimension_columns": dim_columns,
     }
-
 
 def _load_fact_catalog(fact_id: str) -> dict:
     if not fact_id:
         return {"base_metrics": [], "derived_metrics": [], "fact_fields": [],
                 "mappings": [], "fact_dimensions": [], "by_semantic": {}}
-    base = _rows(
-        "SELECT * FROM analytics.base_metric WHERE fact_id=%s AND status='active' "
-        "ORDER BY sort_order, metric_id" % _q(fact_id))
-    derived = _rows(
-        "SELECT * FROM analytics.derived_metric WHERE fact_id=%s AND status='active' "
-        "ORDER BY sort_order, metric_id" % _q(fact_id))
-    fields = _rows(
-        "SELECT * FROM analytics.fact_field WHERE fact_id=%s AND status='active' "
-        "ORDER BY sort_order, field_id" % _q(fact_id))
-    mappings = _rows(
-        "SELECT m.*, b.service_id FROM analytics.field_mapping m "
-        "  JOIN analytics.binding b ON b.binding_id=m.binding_id "
-        " WHERE b.object_type='fact' AND b.object_id=%s AND b.status='active' "
-        "   AND m.status='active' ORDER BY m.sort_order, m.mapping_id"
-        % _q(fact_id))
-    fact_dimensions = _rows(
-        "SELECT * FROM analytics.fact_dimension WHERE fact_id=%s AND status='active' "
-        "ORDER BY sort_order, dimension_id" % _q(fact_id))
+    active = _q("active")
+    fq = _q(fact_id)
+    fact = _q("fact")
+    payload = _json_one(
+        "SELECT jsonb_build_object("
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(b) ORDER BY b.sort_order, b.metric_id) "
+        "FROM analytics.base_metric b WHERE b.fact_id=%s AND b.status=%s), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.sort_order, d.metric_id) "
+        "FROM analytics.derived_metric d WHERE d.fact_id=%s AND d.status=%s), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(f) ORDER BY f.sort_order, f.field_id) "
+        "FROM analytics.fact_field f WHERE f.fact_id=%s AND f.status=%s), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.sort_order, x.mapping_id) "
+        "FROM (SELECT m.*, b.service_id FROM analytics.field_mapping m "
+        "JOIN analytics.binding b ON b.binding_id=m.binding_id "
+        "WHERE b.object_type=%s AND b.object_id=%s AND b.status=%s AND m.status=%s) x), jsonb_build_array()),"
+        "%s, coalesce((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.sort_order, d.dimension_id) "
+        "FROM analytics.fact_dimension d WHERE d.fact_id=%s AND d.status=%s), jsonb_build_array())"
+        ")" % (_q("base_metrics"), fq, active, _q("derived_metrics"), fq, active,
+               _q("fact_fields"), fq, active, _q("mappings"), fact, fq, active, active,
+               _q("fact_dimensions"), fq, active))
+    payload = payload or {}
+    base = payload.get("base_metrics") or []
+    derived = payload.get("derived_metrics") or []
+    fields = payload.get("fact_fields") or []
+    mappings = payload.get("mappings") or []
+    fact_dimensions = payload.get("fact_dimensions") or []
     by_semantic = {}
     for row in mappings:
-        by_semantic.setdefault(
-            (_s(row.get("semantic_kind")), _s(row.get("semantic_id"))), []).append(row)
+        by_semantic.setdefault((_s(row.get("semantic_kind")), _s(row.get("semantic_id"))), []).append(row)
     return {
         "base_metrics": base, "derived_metrics": derived, "fact_fields": fields,
         "mappings": mappings, "fact_dimensions": fact_dimensions,
         "by_semantic": by_semantic,
     }
-
 
 def _load_scenario(scenario_id: str) -> dict:
     return _one(
@@ -533,11 +544,12 @@ def _score_base_metric(cand: dict, metric: dict, maps: list) -> float:
         and _s(m.get("source_column")) == _s(source.get("column"))
         for m in maps)
     if physical and _s(metric.get("aggregation")) == _s(cand.get("aggregation")):
-        return 0.99
+        score = 0.99
     if physical:
         score = max(score, 0.8)
     if _s(metric.get("aggregation")) == _s(cand.get("aggregation")):
-        score += 0.1
+        if score < 0.99:
+            score += 0.1
     elif "count_distinct" in (_s(metric.get("aggregation")),
                               _s(cand.get("aggregation"))):
         score -= 0.5
@@ -862,8 +874,12 @@ def _fact_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         known_fields |= {_s(m.get("source_column")).lower() for m in fact_catalog.get("mappings") or []}
         scenario_grain = [x for x in scenario_grain
                           if x in fact_grain or x not in known_fields]
-    grain_relation = _grain_relation(scenario_grain, fact_grain) if target else "new"
-    grain_ok = (not target) or grain_relation in ("exact", "fact_contains")
+    if target and not declared:
+        grain_relation = "exact" if set(scenario_grain) == set(fact_grain) else ("fact_contains" if set(scenario_grain) <= set(fact_grain) else "unknown")
+        grain_ok = True
+    else:
+        grain_relation = _grain_relation(scenario_grain, fact_grain) if target else "new"
+        grain_ok = (not target) or grain_relation in ("exact", "fact_contains")
     grain_payload = {"scenario": scenario_grain, "fact": fact_grain,
                      "relation": grain_relation, "compatible": grain_ok}
     fact_answers = (answers or {}).get("fact") or {}
@@ -986,6 +1002,21 @@ def _fact_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
 
 
 
+def _code_id_map(table, fact_id, id_col):
+    rows = _rows("SELECT code, %s AS id FROM %s WHERE fact_id=%s"
+                 % (id_col, table, _q(fact_id)))
+    return {_s(r.get("code")): _s(r.get("id")) for r in rows}
+
+
+def _mapping_id_map(binding_id):
+    if not binding_id:
+        return {}
+    rows = _rows("SELECT mapping_id, semantic_kind, semantic_id "
+                 "FROM analytics.field_mapping WHERE binding_id=%s" % _q(binding_id))
+    return {(_s(r.get("semantic_kind")), _s(r.get("semantic_id"))): _s(r.get("mapping_id"))
+            for r in rows}
+
+
 def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
                     plan_fact: dict, fact_catalog: dict, answers: dict,
                     matched: dict) -> dict:
@@ -1004,6 +1035,10 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
             primary_key = [_s(table.get("source_schema")),
                            _s(table.get("source_table"))]
     binding_id = _s(plan_fact.get("binding", {}).get("binding_id"))
+    base_ids = _code_id_map("analytics.base_metric", fact_id, "metric_id") if target else {}
+    derived_ids = _code_id_map("analytics.derived_metric", fact_id, "metric_id") if target else {}
+    field_ids = _code_id_map("analytics.fact_field", fact_id, "field_id") if target else {}
+    mapping_ids = _mapping_id_map(binding_id)
 
     for index, cand in enumerate(matched["missing"]["base_metrics"]):
         code = _s(cand.get("code"))
@@ -1016,8 +1051,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         if not _has_cjk(name) and not cand.get("auto_count"):
             questions.append(_label_question("base_metric", code,
                                              label or alias or code))
-        metric_id = _existing_id("analytics.base_metric", fact_id, code,
-                                 "metric_id") or "bm_%s_%s" % (fact_code, code)
+        metric_id = base_ids.get(code, "") or "bm_%s_%s" % (fact_code, code)
         aggregation = _s(cand.get("aggregation")) or "count"
         source = _fixed_source(cand, all_tables, primary_key, catalog)
         item = {
@@ -1036,7 +1070,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         plan_fact["base_metrics"].append(item)
         actions.append({"kind": "base_metric", "id": metric_id, "data": item})
         mapping = {
-            "mapping_id": _existing_mapping_id(binding_id, "base_metric", metric_id)
+            "mapping_id": mapping_ids.get(("base_metric", metric_id), "")
             or "map_%s_metric_%s" % (fact_code, code),
             "binding_id": binding_id, "semantic_kind": "base_metric",
             "semantic_id": metric_id, "source_type": "mcp_table",
@@ -1058,8 +1092,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         if not _has_cjk(name):
             questions.append(_label_question("derived_metric", code,
                                              label or alias or code))
-        metric_id = _existing_id("analytics.derived_metric", fact_id, code,
-                                 "metric_id") or "dm_%s_%s" % (fact_code, code)
+        metric_id = derived_ids.get(code, "") or "dm_%s_%s" % (fact_code, code)
         expression = _s(cand.get("expression"))
         dependencies = [
             _s(m.get("metric_id"))
@@ -1096,8 +1129,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         field_type = _s(answer.get("data_type")) or ("boolean" if is_bool
                                                      else "text")
         role = _s(answer.get("role")) or _s(cand.get("role")) or "display"
-        field_id = _existing_id("analytics.fact_field", fact_id, code,
-                                "field_id") or "ff_%s_%s" % (fact_code, code)
+        field_id = field_ids.get(code, "") or "ff_%s_%s" % (fact_code, code)
         source = _fixed_source(cand, all_tables, primary_key, catalog)
         item = {
             "field_id": field_id, "fact_id": fact_id, "code": code, "name": name,
@@ -1108,8 +1140,7 @@ def _metric_actions(scenario: dict, catalog: dict, analysis: dict, target: dict,
         plan_fact["fact_fields"].append(item)
         actions.append({"kind": "fact_field", "id": field_id, "data": item})
         mapping = {
-            "mapping_id": _existing_mapping_id(binding_id, "non_metric_field",
-                                               field_id)
+            "mapping_id": mapping_ids.get(("non_metric_field", field_id), "")
             or "map_%s_field_%s" % (fact_code, code),
             "binding_id": binding_id, "semantic_kind": "non_metric_field",
             "semantic_id": field_id, "source_type": "mcp_table",
@@ -1616,8 +1647,18 @@ def scenario_semantic_apply(scenario_id: str = "", kb_id: str = "",
     fact = plan.get("plan") or {}
     target_fact = _s(fact.get("fact_id"))
     service_id = _s((plan.get("scenario") or {}).get("service_id"))
+    dimension_ids = [
+        _s(d.get("dimension_id")) for d in fact.get("fact_dimensions") or []
+        if _s(d.get("dimension_id"))]
+    affected = {
+        "fact": [target_fact] if target_fact else [],
+        "dimension": dimension_ids,
+        "scenario": [scenario_id],
+        "service": [],
+    }
     try:
-        pages_raw = ke_analytics.sync_pages(kb_id, kind="all", dry_run=False)
+        pages_raw = ke_analytics.sync_pages_affected(
+            kb_id, affected, dry_run=False)
         pages = {"count": pages_raw.get("count"),
                  "written": pages_raw.get("written"),
                  "errors": [r for r in pages_raw.get("results") or []

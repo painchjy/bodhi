@@ -497,3 +497,10 @@ E2E：`tests/agent_e2e/test_analytics_semantic_extract.py`（`BODHI_RUN_ANALYTIC
 
 `run_select` 只允许单条 SELECT/WITH，拒绝 DML/DDL，行数上限默认 200、最大 1000。
 服务通过 `analytics.mcp_service` 选择目标；当前 `agent_diag` 使用 PostgreSQL。
+
+### 11.1 读取/投影性能（2026-11-24）
+
+- `_load_catalog` / `_load_fact_catalog` 各自合并为一条 `jsonb_build_object` 查询，避免逐表 psql 往返；
+- `scenario_semantic_apply` 只投影受影响事实/场景/维度/服务页，页面写入复用 `ke_pages.write_knowledge_batch`（knowledge_save 批量通道）；
+- 新建事实的 ID 查询按事实一次预读，避免每个指标/字段单独查 PG；
+- E2E 的 `snapshot_fact` 合并为一条 JSON 查询，恢复后只做一次受影响页面同步。

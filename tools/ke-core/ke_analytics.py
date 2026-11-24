@@ -1017,7 +1017,7 @@ def sync_pages(kb_id: str, kind: str = "all", ids: list[str] | None = None,
                         "`analytics:scenarioBasedOnFact`",
                         "`analytics:scenarioUsesMcpService`"):
                 ke_neo4j.query(
-                    "MATCH (a:BodhiInstance {kb_id:$kb})-[r:%s]->() "
+                    "MATCH (a:BodhiInstance {kb_id:$kb})-[r:`%s`]->() "
                     "WHERE a.slug STARTS WITH 'analytics/' DELETE r" % rel,
                     {"kb": kb_id})
         except Exception as exc:  # noqa: BLE001
@@ -1034,6 +1034,95 @@ def sync_pages(kb_id: str, kind: str = "all", ids: list[str] | None = None,
             "count": len(results), "written": ok, "edges": edge_out,
             "results": results}
 
+
+
+def sync_pages_affected(kb_id: str, objects: dict | None = None,
+                        dry_run: bool = True,
+                        sync_folders: bool = True) -> dict:
+    """只投影受影响对象；页面/图节点复用 knowledge_save 批量写入。"""
+    import ke_pages
+    if not kb_id:
+        raise ValueError("sync_pages_affected 需要 kb_id")
+    objects = objects or {}
+    specs = []
+    results = []
+    loaders = {"fact": fact_spec, "dimension": dimension_spec, "scenario": scenario_spec}
+    for kind in ("fact", "dimension", "scenario"):
+        for object_id in objects.get(kind) or []:
+            try:
+                page = _page_of(kind, loaders[kind](str(object_id)))
+                specs.append((kind, str(object_id), page))
+            except Exception as exc:
+                results.append({"kind": kind, "id": str(object_id), "ok": False,
+                                "error": str(exc)[:400]})
+    if "service" in objects:
+        wanted = {str(x) for x in objects.get("service") or [] if str(x)}
+        for row in list_active_services():
+            sid = _s(row.get("service_id"))
+            if wanted and sid not in wanted:
+                continue
+            specs.append(("service", sid, _service_page(row)))
+    if dry_run:
+        for kind, object_id, page in specs:
+            results.append({"kind": kind, "id": object_id, "slug": page["slug"],
+                            "ok": True, "receipt": {"dry_run": True}})
+        return {"kb_id": kb_id, "kind": "affected", "dry_run": True,
+                "count": len(results), "written": 0, "edges": {},
+                "results": results}
+    written = 0
+    batch = {}
+    if specs:
+        try:
+            batch = ke_pages.write_knowledge_batch(
+                kb_id, [page for _, _, page in specs],
+                strict_source=True, sync_folders=False)
+        except Exception as exc:
+            results.append({"kind": "batch_write", "ok": False,
+                            "error": str(exc)[:400]})
+        receipts = {str(r.get("slug")): r for r in batch.get("pages") or []}
+        for kind, object_id, page in specs:
+            receipt = receipts.get(str(page.get("slug")))
+            if receipt:
+                results.append({"kind": kind, "id": object_id, "slug": page["slug"],
+                                "ok": True, "receipt": receipt})
+                written += 1
+            else:
+                results.append({"kind": kind, "id": object_id, "slug": page["slug"],
+                                "ok": False, "error": "knowledge_save 未返回该页"})
+        for err in batch.get("errors") or []:
+            results.append({"kind": "batch_error", "ok": False,
+                            "error": str(err)[:400]})
+    if specs and sync_folders:
+        try:
+            ke_pages.sync_folders(kb_id)
+        except Exception as exc:
+            results.append({"kind": "folders", "ok": False,
+                            "error": str(exc)[:400]})
+    edges = _semantic_edges() if specs else []
+    edge_out = {}
+    if edges:
+        try:
+            import ke_neo4j
+            for rel in ("analytics:factUsesDimension", "analytics:objectUsesMcpService",
+                        "analytics:scenarioBasedOnFact", "analytics:scenarioUsesMcpService"):
+                ke_neo4j.query(
+                    "MATCH (a:BodhiInstance {kb_id:$kb})-[r:`%s`]->() "
+                    "WHERE a.slug STARTS WITH 'analytics/' DELETE r" % rel,
+                    {"kb": kb_id})
+        except Exception as exc:
+            results.append({"kind": "edge_cleanup", "ok": False,
+                            "error": str(exc)[:400]})
+    if edges:
+        try:
+            import ke_graph
+            edge_out = ke_graph.add_edges_batch(kb_id, edges)
+            results.append({"kind": "edges", "ok": True, "edges": edge_out})
+        except Exception as exc:
+            results.append({"kind": "edges", "ok": False,
+                            "error": str(exc)[:400]})
+    return {"kb_id": kb_id, "kind": "affected", "dry_run": False,
+            "count": len(results), "written": written, "edges": edge_out,
+            "results": results}
 
 def _resolve_mapping_object(object_type: str, object_id: str) -> tuple[dict, str]:
     """解析 canonical / code / 标题 / 旧 slug 到内部对象；返回 (row, input_form)。"""
