@@ -462,7 +462,7 @@ def slide6():
     e += header(
         "08 / 工具",
         [{"s": "工具提供", "color": INK}, {"s": "确定性执行", "color": BLUE}],
-        "43 个现役 MCP 工具 + 4 个待建运行控制工具；执行边界（领域建模）是核心，运行控制仍缺权限/审批。",
+        "51 个现役 MCP 工具 + 4 个待建运行控制工具；新增自助取数语义工具，执行边界仍是核心。",
     )
 
     groups = [
@@ -470,10 +470,10 @@ def slide6():
          ["save_knowledge", "doc_outline", "extract_state", "extract_candidates",
           "image_extract", "import_probe", "import_plan", "import_apply"],
          "核心：领域建模 / 落页 / 写属性 / 结构化导入", None),
-        ("知识规范", "6", False,
+        ("知识规范", "7", False,
          ["ontology_types", "skills", "page_attributes_set", "migrate_article_body",
-          "clean_alias_noise", "page_copy"],
-         "类型 / 属性 / 别名 / 正文迁移 / 复制", None),
+          "clean_alias_noise", "page_copy", "rebuild_data_objects"],
+         "类型 / 属性 / 别名 / 正文迁移 / 对象重建", None),
         ("知识完整", "8", False,
          ["knowledge_lookup", "lookup_turn_begin", "evidence_score", "reference_lookup",
           "rules_resolve", "ke_rule_check", "ke_rule_publish", "rule_publish"],
@@ -488,9 +488,12 @@ def slide6():
           "context_concept_rollback", "context_authority", "context_authority_apply",
           "kb_export", "kb_import"],
          "同名治理 / 权威副本 / 库迁移", None),
-        ("外部工具连接", "4", False,
-         ["ext_attach_probe", "ext_doc_push", "ext_doc_parse", "ext_table"],
-         "外部系统 / 文档 / 表单，按契约取数", None),
+        ("外部工具+自助取数", "11", False,
+         ["scenario_semantic_validate", "scenario_semantic_plan", "scenario_semantic_apply",
+          "mapping_lookup", "fact_match", "ontology_paths",
+          "ext_attach_probe", "ext_doc_push", "ext_doc_parse", "ext_table",
+          "scenario_lookup"],
+         "外部工具 4 + 自助取数 7（映射 / 场景 / SQL 校验）", None),
     ]
     colors = [AMBER, VIOLET, CYAN, ROSE, BLUE, EMERALD]
     for i, (name, n, core, tools, note, gap_from) in enumerate(groups):
@@ -518,7 +521,7 @@ def slide6():
                "企业 API　·　领域 MCP（it_platform）　·　DB　｜　绑定边 bpmn:dataObjectBindingTool　｜　先预览、后执行",
                size=16, color=WHITE, valign="middle")]
 
-    e += footer("43 个现役 + 4 个待建运行控制工具；执行边界（领域建模）是核心。", "08 / 08")
+    e += footer("51 个现役 + 4 个待建运行控制工具；执行边界（领域建模）是核心。", "08 / 08")
     return {"bg": PAPER, "elements": e}
 
 # ===================== P7 三类问题 =====================
