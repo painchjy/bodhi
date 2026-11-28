@@ -18,7 +18,7 @@
 | `bodhi2-02-mcp-server.tar.gz` | **bodhi 运行时完整包（systemd-only）**：`bodhi-mcp` 8765 + `agent_diag` 8771 + `analytics-admin` 8781 + `diag-init`（diag/analytics 建表/视图/种子）+ systemd 安装/启停（不含 Docker） | `MCP-SERVER.md` / `DIAG-CONFIG.md` / `ANALYTICS-CONFIG.md` / `ANALYTICS-ADMIN.md` |
 | `bodhi2-03-manual.tar.gz` | **文档 + 本体真源**：`docs/` + `ontology/`（TTL/词表/shapes）+ 维护工具；**不含 SQL/seed**（运行 SQL 在 02） | 本文件 + `ONTOLOGY-KB.md` + `KB-CONFIG.md` + `TROUBLESHOOTING.md` |
 | `bodhi2-04-it-platform-mcp.tar.gz` | **it_platform 外部服务**（8770，独立包） | `04-it-platform-mcp/README.md` |
-| `bodhi2-mcp-gateway-<ver>.tar.gz` | **dbbi_data gateway**（8772，独立包） | `tools/mcp-gateway/README.md` |
+| `bodhi2-dsdf-mcp-<ver>.tar.gz` | **DWS JDBC 只读分析 MCP**（8772，独立服务包） | `deploy/delivery/dsdf-mcp/README.md` |
 | `MANIFEST.json` / `SHA256SUMS` | 版本、文件清单、校验和 | — |
 
 **一张图看懂彼此关系**
@@ -42,7 +42,7 @@
 | 步 | 动作 | 验收（不通过就别往下走）|
 |---|---|---|
 | **1** | 部署 02 运行时完整包（`bodhi2-02`）：解到 `/opt/bodhi2` 后 `sudo bash install.sh --components mcp,diag,admin --init-db` | `bodhi2-mcp` 8765、`bodhi2-agent-diag` 8771、`bodhi2-analytics-admin` 8781 全部 healthy；selfcheck 51 个工具 |
-| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL）：`bodhi_ontology` → 8765；`agent_diag` → 8771 | 平台 → MCP 服务里能看到两条，工具可列出 |
+| **2** | 在 WeKnora 里注册 MCP 服务（UI 或 SQL）：`bodhi_ontology` → 8765；`agent_diag` → 8771；如需 DWS 分析，注册 `dsdf_mcp` → 8772 | 平台 → MCP 服务里能看到服务，工具可列出 |
 | **3** | 导入本体模型知识库（`bodhi2-03`：**TTL + 用户导出/导入**；不使用 seed）| 页数/类型符合你们的 TTL 版本 |
 | **4** | 建业务库 + 配 `wiki_config`（`KB-CONFIG.md` §3）| 上传一篇文档能出 wiki 页 |
 | **5** | 替换前端（`bodhi2-01`）+ 挂载 nginx 模板 | `deploy_frontend.sh check` 全绿；类型下拉能看到 `easvc:*` |

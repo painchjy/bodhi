@@ -5,6 +5,7 @@
 #   bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh up       # 启动全部（默认）
 #   bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh status   # 体检
 #   bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh logs     # 跟随服务日志
+#   bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh dsdf     # 单独启动 DSDF JDBC MCP（8772）
 #   bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh fe       # 切到自建前端镜像并验收
 #   bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh fe-check # 只验收前端（含 /bodhi/ 反代）
 #   bash /mnt/c/Users/PHJY/source/bodhi2/deploy/wsl-up.sh down     # 停止（数据卷保留）
@@ -80,9 +81,15 @@ KB_BIZ="${BODHI_KB_BIZ:-}"
 KB_ONT="${BODHI_KB_ONT:-}"
 
 step() { echo; echo "== $* =="; }
-# 数据库口令：env → WeKnora `.env`（**脚本里不写死口令**）
-BODHI_DB_PASSWORD="${BODHI_DB_PASSWORD:-$(grep -hoP '^(?:DB|POSTGRES)_PASSWORD=\K.*' "/mnt/c/Users/PHJY/source/WeKnora/.env" 2>/dev/null | head -1)}"
-PG() { docker exec -e PGPASSWORD="$BODHI_DB_PASSWORD" WeKnora-postgres psql -U postgres -d WeKnora -t -A -c "$1" 2>&1; }
+# 数据库口令：仅在 PG() 真正查询时读取 env → WeKnora `.env`，其它子命令不触碰凭据。
+BODHI_DB_PASSWORD="${BODHI_DB_PASSWORD:-}"
+PG() {
+  if [ -z "$BODHI_DB_PASSWORD" ]; then
+    BODHI_DB_PASSWORD="$(grep -hoP '^(?:DB|POSTGRES)_PASSWORD=\K.*' \
+      "/mnt/c/Users/PHJY/source/WeKnora/.env" 2>/dev/null | head -1)"
+  fi
+  docker exec -e PGPASSWORD="$BODHI_DB_PASSWORD" WeKnora-postgres psql -U postgres -d WeKnora -t -A -c "$1" 2>&1
+}
 MCP() { curl -s -m 15 -X POST http://localhost:8765/mcp -H 'Content-Type: application/json' \
         -H 'Accept: application/json' -d "$1" 2>&1; }
 # 第二个 MCP 服务（内网工作台接口的参考实现；端口 8770）
@@ -91,6 +98,62 @@ MCP_IT() { curl -s -m 15 -X POST http://localhost:8770/mcp -H 'Content-Type: app
 # systemctl 包装：非 root 一律带 `-n`（免密），**绝不弹密码提示** —— 脚本是非交互的，
 # 一旦 `sudo` 需要密码就会挂住；不在白名单里的服务会立刻失败并给出提示。
 SCTL() { if [ -n "$SUDO" ]; then $SUDO -n systemctl "$@"; else systemctl "$@"; fi; }
+
+DSDF_ENV_FILE="${DSDF_ENV_FILE:-/etc/dsdf-mcp.env}"
+DSDF_UNIT="bodhi2-dsdf-mcp.service"
+DSDF_JAR="/opt/dsdf-mcp/lib/postgresql-42.5.1.jar"
+
+start_dsdf_mcp() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "  ! DSDF MCP 启动需要 root：sudo bash $0 dsdf"
+    return 1
+  fi
+  if [ ! -r "$DSDF_ENV_FILE" ]; then
+    echo "  ! DSDF MCP 未启动：缺少 $DSDF_ENV_FILE"
+    return 1
+  fi
+  if [ ! -f "$DSDF_JAR" ]; then
+    echo "  ! DSDF MCP 未启动：缺少 JDBC JAR $DSDF_JAR"
+    return 1
+  fi
+  if [ ! -x /opt/bodhi-venv/bin/python3 ] || [ ! -f "$BODHI/tools/dsdf-mcp/server.py" ]; then
+    echo "  ! DSDF MCP 未启动：Python 环境或 server.py 不存在"
+    return 1
+  fi
+  install -m 0644 "$BODHI/deploy/wsl-dsdf-mcp.service" "/etc/systemd/system/$DSDF_UNIT" \
+    || { echo "  ! 无法安装 $DSDF_UNIT"; return 1; }
+  systemctl daemon-reload || return 1
+  systemctl enable "$DSDF_UNIT" >/dev/null 2>&1 || return 1
+  systemctl restart "$DSDF_UNIT" || return 1
+  for i in $(seq 1 10); do
+    if curl -fsS -m 2 http://127.0.0.1:8772/health >/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  if ! curl -fsS -m 3 http://127.0.0.1:8772/health >/dev/null; then
+    echo "  ! DSDF MCP 未就绪；查看 journalctl -u $DSDF_UNIT"
+    return 1
+  fi
+  if curl -fsS -m 20 -X POST http://127.0.0.1:8772/mcp \
+    -H 'Content-Type: application/json' -H 'Accept: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_select","arguments":{"sql":"SELECT current_database(), current_user"}}}' \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("result") or {}; c=r.get("content") or []; sys.exit(0 if not r.get("isError") and c and json.loads(c[0].get("text","{}")).get("ok") else 1)' \
+    >/dev/null 2>&1; then
+    echo "  $DSDF_UNIT active; HTTP and read-only JDBC probe passed"
+  else
+    echo "  ! DSDF MCP HTTP is up, but JDBC probe failed; check $DSDF_ENV_FILE and journalctl -u $DSDF_UNIT"
+    return 1
+  fi
+}
+
+stop_dsdf_mcp() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "  ! DSDF MCP 停止需要 root：sudo bash $0 down"
+    return 1
+  fi
+  systemctl stop "$DSDF_UNIT" 2>/dev/null || true
+}
 
 do_up() {
   step "1/6 docker 引擎"
@@ -124,6 +187,11 @@ do_up() {
     "$(systemctl show bodhi-mcp.service -p MainPID --value)"
   printf '  bodhi-it-mcp: %s / %s\n' "$(systemctl is-active bodhi-it-mcp.service)" \
     "$(systemctl show bodhi-it-mcp.service -p MainPID --value)"
+  if [ -r "$DSDF_ENV_FILE" ]; then
+    start_dsdf_mcp || echo "  ! DSDF MCP 未能启动"
+  else
+    echo "  DSDF MCP 未启动：配置 $DSDF_ENV_FILE 后运行 bash $0 dsdf"
+  fi
 
   step "5/6 重启 frontend（nginx 缓存 app IP，必做）"
   docker restart WeKnora-frontend >/dev/null && sleep 6 && echo "  frontend restarted"
@@ -146,6 +214,8 @@ do_status() {
     "$(systemctl is-enabled bodhi-mcp.service 2>/dev/null)"
   printf '  bodhi-it-mcp: %s (enabled=%s)\n' "$(systemctl is-active bodhi-it-mcp.service)" \
     "$(systemctl is-enabled bodhi-it-mcp.service 2>/dev/null)"
+  printf '  dsdf-mcp    : %s (enabled=%s)\n' "$(systemctl is-active "$DSDF_UNIT" 2>/dev/null || echo inactive)" \
+    "$(systemctl is-enabled "$DSDF_UNIT" 2>/dev/null || echo no)"
 
   step "HTTP"
   for u in /health /api/v1/agents; do
@@ -158,6 +228,8 @@ do_status() {
   printf '  it-mcp tools/list      -> '
   MCP_IT '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(", ".join(t["name"] for t in d["result"]["tools"]))' 2>/dev/null || echo "(不可用)"
+  printf '  dsdf-mcp health        -> '
+  curl -s -o /dev/null -m 5 -w '%{http_code}\n' http://127.0.0.1:8772/health || true
 
   step "前端（自建镜像，见 docs/weknora-fork.md §11）"
   printf '  image                    : %s\n' "$(docker inspect -f '{{.Config.Image}}' WeKnora-frontend 2>/dev/null || echo '(无容器)')"
@@ -181,15 +253,17 @@ do_status() {
 case "${1:-up}" in
   up)     do_up ;;
   status) do_status ;;
-  logs)   echo "== bodhi-mcp / bodhi-it-mcp（Ctrl-C 退出） =="; \
+  logs)   echo "== MCP 服务日志（Ctrl-C 退出） =="; \
           tail -n 40 -F /var/log/bodhi-mcp.log /var/log/bodhi-it-mcp.log \
-            /var/log/bodhi-mcp.err.log /var/log/bodhi-it-mcp.err.log 2>/dev/null ;;
+            /var/log/bodhi-mcp.err.log /var/log/bodhi-it-mcp.err.log \
+            /var/log/dsdf-mcp.log /var/log/dsdf-mcp.err.log 2>/dev/null ;;
   # 前端自建镜像的切换与验收（只在改了 Vue 补丁后才需要 build_frontend.sh 重建）
   fe)     bash "$BODHI/deploy/weknora-fork/deploy_frontend.sh" deploy ;;
   fe-check) bash "$BODHI/deploy/weknora-fork/deploy_frontend.sh" check ;;
-  down)   step "停止"; SCTL stop bodhi-it-mcp.service 2>/dev/null; \
+  down)   step "停止"; stop_dsdf_mcp; SCTL stop bodhi-it-mcp.service 2>/dev/null; \
           SCTL stop bodhi-mcp.service 2>/dev/null; \
           cd "$WK" && docker compose "${COMPOSE[@]}" --profile neo4j stop 2>&1 | tail -8; \
           echo "  （数据卷保留；再次 up 即可）" ;;
-  *)      echo "用法: $0 [up|status|logs|fe|fe-check|down]"; exit 1 ;;
+  dsdf)   start_dsdf_mcp ;;
+  *)      echo "用法: $0 [up|status|logs|dsdf|fe|fe-check|down]"; exit 1 ;;
 esac

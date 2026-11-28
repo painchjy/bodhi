@@ -3,7 +3,7 @@
 > 适用：02 包已解到 `/opt/bodhi2`；**不需要 03 包的 seed**。
 > 三个常驻服务 + 一个初始化组件：
 > `bodhi-mcp` 8765 · `agent_diag` 8771 · `analytics-admin` 8781 · `diag-init`（一次性脚本）。
-> dbbi gateway 是外部服务（8772，独立包）；it_platform 是外部服务（8770，04 包）。
+> `dsdf-mcp` 是独立 JDBC 服务（8772）；it_platform 是外部服务（8770，04 包）。
 
 ## 1. 配置
 

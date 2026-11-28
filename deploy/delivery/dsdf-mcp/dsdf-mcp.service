@@ -1,0 +1,27 @@
+[Unit]
+Description=DSDF DWS read-only analytics MCP (JDBC)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dsdf-mcp
+Group=dsdf-mcp
+WorkingDirectory=/opt/dsdf-mcp
+EnvironmentFile=/etc/dsdf-mcp.env
+ExecStart=/opt/bodhi-venv/bin/python3 /opt/dsdf-mcp/tools/dsdf-mcp/server.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+StandardOutput=append:/var/log/dsdf-mcp.log
+StandardError=append:/var/log/dsdf-mcp.err.log
+
+[Install]
+WantedBy=multi-user.target

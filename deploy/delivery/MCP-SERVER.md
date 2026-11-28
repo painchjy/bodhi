@@ -31,8 +31,8 @@ sudo bash install.sh --components mcp,diag,admin --init-db
 ./status.sh
 ```
 
-对外部服务：`it_platform` 8770 在 04 包；`dbbi_data` gateway 8772 在独立 gateway 包；02 不含它们。
-详见 `DIAG-CONFIG.md` / `ANALYTICS-CONFIG.md` / `ANALYTICS-ADMIN.md`。
+对外部服务：`it_platform` 8770 在 04 包；`dsdf_mcp` JDBC 服务 8772 独立部署；02 不含它。
+详见 `DIAG-CONFIG.md` / `ANALYTICS-CONFIG.md` / `ANALYTICS-ADMIN.md` 和 dsdf-mcp 包手册。
 
 **结构化数据批量建模（2026-09-29/30 新增，5 个工具）**：技能负责「理解」（从用户对表结构的中文描述得出
 有哪些类/关系/键列/列→属性映射），工具负责「确定性执行」，**一次只处理一个类（含数据属性）或一条关系**：

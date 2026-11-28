@@ -9,17 +9,17 @@
                                     systemd unit/logrotate/自检/install.sh + 配置手册
       bodhi2-03-manual.tar.gz       docs/ + ontology/(TTL 真源) + 维护工具 + 五份手册（不含 SQL/seed）
       bodhi2-04-it-platform-mcp.tar.gz  it_platform 外部服务（8770）
-      # dbbi_data gateway（8772）用 tools/delivery/pack_gateway.py 单独出包
+      # 以上四个主包；dsdf-mcp（8772）另用独立 packer 出包
 
 分包口径（2026-11-23 更新，**每个文件只属于一个包**）
 ----------------------------------------------------
 | 内容 | 归属 | 理由 |
 |---|---|---|
 | `deploy/weknora-fork/frontend/**`、UI 镜像、`FRONTEND.md` | 01 | 只跟 UI 有关 |
-| `tools/**`（除 delivery/domain-mcp/mcp-gateway）、`sql/**`、`artifacts/**`、`skills/**` | 02 | bodhi 运行时 + diag/analytics 初始化 |
+| `tools/**`（除 delivery/domain-mcp/dsdf-mcp）、`sql/**`、`artifacts/**`、`skills/**` | 02 | bodhi 运行时 + diag/analytics 初始化 |
 | `docs/**`、`ontology/**`、`tools/delivery/**`、其余手册 | 03 | 文档 + 本体真源 + 维护工具（**不含 seed/SQL**） |
 | `tools/domain-mcp/it_platform/**` | 04 | 外部 it_platform 服务 |
-| `tools/mcp-gateway/**` | 05 | 外部 dbbi_data gateway（pack_gateway.py） |
+| `tools/dsdf-mcp/**` | 05 | 外部 DSDF JDBC MCP（pack_dsdf.py） |
 
 两处容易踩的重复（已用代码去掉，并有断言兜底）
 --------------------------------------------
@@ -79,6 +79,7 @@ PACKAGES = (("01-frontend", "bodhi2-01-frontend.tar.gz"),
 #   - 只带文本种子（allowlist/denylist/issues/flows），**不带** docs/files/images 二进制；
 #   - `ke-core` 是 02/04 共用的运行时库 ⇒ **不复制**（重复内容会被去重断言拦），由 install.sh 指向 02 的 tools/ke-core。
 EXT_TOOL_DIR = "domain-mcp"
+TOOLS_02_SKIP = TOOLS_MANUAL_PKG + (EXT_TOOL_DIR, "dsdf-mcp")
 EXT_SEED_SKIP = ("docs", "files", "images", "state")
 
 
@@ -313,9 +314,9 @@ def pkg_mcp(stage: pathlib.Path, version: str, seed_dir: pathlib.Path) -> dict:
     """
     d = stage / "02-mcp-server"
     d.mkdir(parents=True, exist_ok=True)
-    # 02 不含外部服务：tools/delivery、it_platform、dbbi gateway 分别属于 03/04/05。
+    # 02 不含外部服务：tools/delivery 属于 03；it_platform 与 dsdf-mcp 独立交付。
     copy_tree(REPO / "tools", d / "tools",
-              skip_top=TOOLS_MANUAL_PKG + (EXT_TOOL_DIR, "mcp-gateway"))
+              skip_top=TOOLS_02_SKIP)
     # agent_diag 是 bodhi 的伴随服务（依赖 tools/ke-core），只进 02，不进 04。
     copy_tree(REPO / "tools" / EXT_TOOL_DIR / "analytics_sql",
               d / "tools" / EXT_TOOL_DIR / "analytics_sql")
@@ -367,7 +368,7 @@ def pkg_mcp(stage: pathlib.Path, version: str, seed_dir: pathlib.Path) -> dict:
           "  ./start.sh all\n\n"
           "初始化：./init-db.sh all\n\n"
           "本包**不含**：docs/、ontology/ 真源 TTL、页面种子、其它手册（都在 03-manual 包）；\n"
-          "dbbi_data gateway（8772，独立包）、it_platform（8770，独立 04 包）。\n"
+          "dsdf-mcp（8772，独立 JDBC 包）、it_platform（8770，独立 04 包）。\n"
           "也不含任何 API Key / 口令（配置见 MCP-SERVER.md / DIAG-CONFIG.md / ANALYTICS-CONFIG.md）。\n")
     return {"files": sum(1 for _ in d.rglob("*") if _.is_file()),
             "layout": sorted(p.name for p in d.iterdir())}
@@ -615,13 +616,13 @@ def main() -> int:
     if (DELIVERY / "MANUAL.md").is_file():
         shutil.copy2(DELIVERY / "MANUAL.md", out / "MANUAL.md")
     write(out / "README.md",
-          "# bodhi2 交付包 %s\n\n先读 **MANUAL.md**（安装部署总指引）。**四个包，内容互不重复**：\n\n"
+          "# bodhi2 交付包 %s\n\n先读 **MANUAL.md**（安装部署总指引）。以下四个为主交付包；dsdf-mcp 和 gateway 另行独立打包：\n\n"
           "| 包 | 内容 | 手册 |\n|---|---|---|\n"
           "| `bodhi2-01-frontend.tar.gz` | UI 镜像 + nginx 模板 + overlay + 部署/补丁脚本 | FRONTEND.md |\n"
           "| `bodhi2-02-mcp-server.tar.gz` | **bodhi 运行时完整包（systemd-only）**：bodhi-mcp 8765 + agent_diag 8771 + analytics-admin 8781 + diag/analytics SQL/init + config/systemd | MCP-SERVER.md / DIAG-CONFIG.md / ANALYTICS-CONFIG.md / ANALYTICS-ADMIN.md |\n"
           "| `bodhi2-03-manual.tar.gz` | **文档 + 本体真源 TTL** + 维护工具 + 其余手册（**不含 SQL/seed**） | MANUAL.md / ONTOLOGY-KB.md / KB-CONFIG.md / TROUBLESHOOTING.md |\n"
           "| `bodhi2-04-it-platform-mcp.tar.gz` | **it_platform 外部服务**（8770）+ 文本种子 + 安装/自检 | 包内 `README.md`（04 目录）|\n\n"
-          "**知识库页面不在任何包里**（2026-10-26 用户裁定）：本体模型库页面由用户导出/导入；**dbbi_data gateway（8772）**用 `pack_gateway.py` 单独出包。\n"
+          "**知识库页面不在任何包里**（2026-10-26 用户裁定）：本体模型库页面由用户导出/导入；**dsdf-mcp（8772）**用 `pack_dsdf.py` 单独出包。\n"
           "diag/analytics 运行 SQL 与智能体/MCP 登记 SQL 在 **02 包**（`sql/`）。\n\n"
           "## 手册在哪\n\n"
           "- **根目录只放 `MANUAL.md`**（总指引，免解压即可读）；\n"
@@ -656,7 +657,7 @@ def main() -> int:
                                         "diag/analytics SQL/初始化/启动脚本 + config/systemd + tools/ke-core（systemd-only，不含 Dockerfile/compose）"),
                                  "03": "文档 + 本体真源 ontology/** + tools/delivery/** + 其余手册（**知识库页面/seed 不出包**）",
                                  "04": "it_platform 外部服务（8770）：tools/domain-mcp/it_platform + lib + mock-ext 文本种子 + 安装/自检",
-                                 "05": "dbbi_data gateway 外部服务（8772）：tools/mcp-gateway 独立包"},
+                                 "05": "dsdf-mcp DWS JDBC 服务（8772）：tools/dsdf-mcp 独立包"},
                 "runtime_deps": {"mcp_server": "零第三方 Python 依赖（标准库 + psql）",
                                  "ontology_compile": "rdflib + PyYAML（仅 tools/ontology-compiler）",
                                  "llm": "服务端不调 LLM（无 openai 依赖）"},
