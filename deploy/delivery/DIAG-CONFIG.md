@@ -1,7 +1,7 @@
 # diag 配置手册（02 包 · agent_diag 8771）
 
 > 适用：02 包已解到 `/opt/bodhi2`；本组件不是独立包，和 `bodhi-mcp` 共用一份 `/opt/bodhi2/tools/ke-core`。
-> 端口：**8771**（`agent_diag`），不是 dbbi gateway 的 8772，也不是 it_platform 的 8770。
+> 端口：**8771**（`agent_diag`），不是 dsdf-mcp 的 8772，也不是 it_platform 的 8770。
 
 ## 1. 组件
 

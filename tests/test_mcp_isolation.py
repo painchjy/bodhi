@@ -102,8 +102,9 @@ def test_pack_layout_points_to_domain_dir():
     import pack_release as P                     # noqa: PLC0415
 
     assert P.EXT_TOOL_DIR == "domain-mcp", P.EXT_TOOL_DIR
-    # 02 包会跳过 `TOOLS_MANUAL_PKG + (EXT_TOOL_DIR, "mcp-gateway")`；analytics_sql 单独拷贝
+    # 02 包会跳过领域服务和独立 dsdf-mcp；analytics_sql 单独拷贝
     assert P.EXT_TOOL_DIR in (P.TOOLS_MANUAL_PKG + (P.EXT_TOOL_DIR,))
+    assert "dsdf-mcp" in P.TOOLS_02_SKIP
     assert os.path.isfile(os.path.join(ANALYTICS_SQL, "server.py"))
     for name in ("it_platform/server.py", "lib/ke_domain_store.py", "lib/ke_fs.py"):
         assert os.path.isfile(os.path.join(DOMAIN, name)), name

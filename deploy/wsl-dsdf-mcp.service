@@ -1,0 +1,28 @@
+[Unit]
+Description=DSDF read-only MCP service (JDBC, port 8772)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/mnt/c/Users/PHJY/source/bodhi2
+EnvironmentFile=/etc/dsdf-mcp.env
+Environment=JAVA_HOME=/opt/temurin-21-jre
+Environment=DSDF_JDBC_JAR=/opt/dsdf-mcp/lib/postgresql-42.5.1.jar
+ExecStart=/opt/bodhi-venv/bin/python3 /mnt/c/Users/PHJY/source/bodhi2/tools/dsdf-mcp/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+StandardOutput=append:/var/log/dsdf-mcp.log
+StandardError=append:/var/log/dsdf-mcp.err.log
+
+[Install]
+WantedBy=multi-user.target
